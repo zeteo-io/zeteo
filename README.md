@@ -23,7 +23,7 @@ Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRI
 ```sh
 npm install
 docker compose up -d postgres redis                      # host ports 5462 / 6409
-cp packages/zeteo/.env.example packages/zeteo/.env
+cp packages/zeteo/.env.example packages/zeteo/.env     # then set ZETEO_MASTER_KEY (generator in the file)
 cd packages/zeteo
 npx prisma generate && npx prisma migrate deploy
 npm run dev                                              # http://localhost:4201/health

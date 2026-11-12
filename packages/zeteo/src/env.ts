@@ -38,6 +38,22 @@ const TEREO_CONNECTION = [
   "REQUEST_HANDLER_KEY",
 ] as const;
 
+/**
+ * The 32-byte master key as base64url: 43 characters, no padding. The issue
+ * message must not echo the value.
+ */
+const masterKey = z
+  .string()
+  .refine(
+    (v) =>
+      /^[A-Za-z0-9_-]{43}$/.test(v) &&
+      Buffer.from(v, "base64url").toString("base64url") === v,
+    {
+      message:
+        "ZETEO_MASTER_KEY must be base64url of exactly 32 bytes (43 characters)",
+    }
+  );
+
 /** An integer setting within [min, max]: a duration, a count or a port. */
 const int = (min: number, max: number, fallback: number) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
@@ -73,6 +89,9 @@ const EnvFields = z
     TEREO_URL: z.string().url().optional(),
     TEREO_CLIENT_ID: z.string().optional(),
     TEREO_CLIENT_SECRET: z.string().optional(),
+    // Wraps the per-source data keys that encrypt source settings. Required
+    // outside tests. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+    ZETEO_MASTER_KEY: masterKey.optional(),
     // Encrypts what the SDK's request handler stores; 32 or more characters.
     REQUEST_HANDLER_KEY: z.string().min(32).optional(),
     // Accepts the SDK's test tokens instead of tereo's. Refused in production.
@@ -102,6 +121,13 @@ const EnvFields = z
         code: "custom",
         path: ["DB_LOCK_TIMEOUT_MS"],
         message: "DB_LOCK_TIMEOUT_MS must be below DB_TRANSACTION_TIMEOUT_MS",
+      });
+    }
+    if (val.NODE_ENV !== "test" && !val.ZETEO_MASTER_KEY) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ZETEO_MASTER_KEY"],
+        message: "ZETEO_MASTER_KEY is required outside NODE_ENV=test",
       });
     }
     if (val.NODE_ENV === "production" && val.TEREO_TEST_MODE) {

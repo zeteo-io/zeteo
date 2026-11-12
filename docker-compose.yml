@@ -68,6 +68,9 @@ services:
       PUBLIC_URL: http://localhost:${ZETEO_PORT:-4201}
       DATABASE_URL: *database-url
       REDIS_URL: *redis-url
+      # A fixed key for this local stack only (32 bytes of 0x07); set
+      # ZETEO_MASTER_KEY to use another. Never reuse it anywhere else.
+      ZETEO_MASTER_KEY: ${ZETEO_MASTER_KEY:-BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc}
       # No tereo to reach locally: accept the SDK's test tokens.
       TEREO_TEST_MODE: "true"
     ports:

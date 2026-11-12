@@ -50,6 +50,8 @@ services:
       NODE_ENV: "test"
       LOG_LEVEL: "silent"
       TEREO_TEST_MODE: "true"
+      # Tests only: 32 bytes of 0x07.
+      ZETEO_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
       PORT: "4201"
       PUBLIC_URL: http://localhost:4201
       DATABASE_URL: postgresql://zeteo:zeteo@postgres:5432/zeteo_test

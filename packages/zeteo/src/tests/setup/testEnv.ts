@@ -3,6 +3,9 @@ import { fileURLToPath } from "url";
 import { parse } from "dotenv";
 import path from "path";
 
+/** A fixed key for tests only: 32 bytes of 0x07, base64url. */
+export const TEST_MASTER_KEY = Buffer.alloc(32, 7).toString("base64url");
+
 /** The environment of the `unit` project: unreachable database and Redis, so a unit test that reaches for either fails at once. */
 export function loadUnitTestEnv(): Record<string, string> {
   return {
@@ -18,6 +21,7 @@ export function loadUnitTestEnv(): Record<string, string> {
     REDIS_URL: "redis://127.0.0.1:1",
     PUBLIC_URL: "http://localhost:4201",
     TEREO_TEST_MODE: "true",
+    ZETEO_MASTER_KEY: TEST_MASTER_KEY,
   };
 }
 
@@ -61,5 +65,6 @@ export function loadTestEnv(): Record<string, string> {
     NODE_ENV: "test",
     LOG_LEVEL: "silent",
     TEREO_TEST_MODE: "true",
+    ZETEO_MASTER_KEY: TEST_MASTER_KEY,
   };
 }

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseEnv } from "../env.js";
 
 const base = {
+  NODE_ENV: "test",
   DATABASE_URL: "postgresql://x/y",
   REDIS_URL: "redis://x",
   TEREO_TEST_MODE: "true",
@@ -76,5 +77,38 @@ describe("env schema", () => {
         PUBLIC_URL: "https://zeteo.example.com",
       })
     ).toThrow(/TEREO_TEST_MODE/);
+  });
+
+  describe("ZETEO_MASTER_KEY", () => {
+    const key = Buffer.alloc(32, 9).toString("base64url");
+    const dev = { ...base, NODE_ENV: "development" };
+
+    it("is required outside NODE_ENV=test", () => {
+      expect(() => parseEnv({ ...dev, TEREO_TEST_MODE: "true" })).toThrow(
+        /ZETEO_MASTER_KEY/
+      );
+      expect(parseEnv({ ...dev, ZETEO_MASTER_KEY: key }).ZETEO_MASTER_KEY).toBe(
+        key
+      );
+      expect(parseEnv({ ...base, NODE_ENV: "test" }).ZETEO_MASTER_KEY).toBe(
+        undefined
+      );
+    });
+
+    it.each([
+      ["too short", Buffer.alloc(16, 9).toString("base64url")],
+      ["too long", Buffer.alloc(33, 9).toString("base64url")],
+      ["standard base64", Buffer.alloc(32, 0xfb).toString("base64")],
+      ["not base64url", "!".repeat(43)],
+    ])("refuses a key that is %s without echoing it", (_name, value) => {
+      let message = "";
+      try {
+        parseEnv({ ...dev, ZETEO_MASTER_KEY: value });
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toMatch(/ZETEO_MASTER_KEY/);
+      expect(message).not.toContain(value);
+    });
   });
 });
