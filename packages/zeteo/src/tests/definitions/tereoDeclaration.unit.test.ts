@@ -1,0 +1,73 @@
+// @module-tag unit
+// @module-tag platform
+import { describe, expect, it } from "vitest";
+import { fileURLToPath } from "url";
+import { readFileSync } from "fs";
+import {
+  AUDIT_EVENTS,
+  SERVICE_SLUG,
+  SOURCES_READ,
+  SOURCES_WRITE,
+  buildTereoDocument,
+} from "../../definitions/tereoDeclaration.js";
+
+const packageRoot = new URL("../../../", import.meta.url);
+const readJson = (name: string) =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(name, packageRoot)), "utf-8"));
+
+const document = buildTereoDocument("1.2.3");
+const service = document.service!;
+
+describe("buildTereoDocument", () => {
+  it("declares the service zeteo, with its secret read from TEREO_CLIENT_SECRET", () => {
+    expect(document.version).toBe("1.2.3");
+    expect(SERVICE_SLUG).toBe("zeteo");
+    expect(service.slug).toBe("zeteo");
+    expect(service.secretFrom).toBe("TEREO_CLIENT_SECRET");
+  });
+
+  it("asks for the core role that writes audit entries", () => {
+    expect(service.access?.roles).toEqual(["audit_writer"]);
+  });
+
+  it("declares exactly zeteo.sources.read and zeteo.sources.write", () => {
+    expect(SOURCES_READ).toBe("zeteo.sources.read");
+    expect(SOURCES_WRITE).toBe("zeteo.sources.write");
+    expect(service.permissions!.map((p) => p.name).sort()).toEqual([
+      SOURCES_READ,
+      SOURCES_WRITE,
+    ]);
+  });
+
+  it("declares a system role that holds both permissions", () => {
+    expect(service.systemRoles).toEqual([
+      expect.objectContaining({
+        name: "zeteo_admin",
+        permissions: [SOURCES_READ, SOURCES_WRITE],
+      }),
+    ]);
+  });
+
+  it("declares every audit event as an event type", () => {
+    expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
+      "zeteo.relation.declared",
+      "zeteo.relation.removed",
+      "zeteo.source.archived",
+      "zeteo.source.created",
+      "zeteo.source.refreshed",
+      "zeteo.source.updated",
+    ]);
+    expect(service.eventTypes!.map((e) => e.eventType).sort()).toEqual(
+      Object.values(AUDIT_EVENTS).sort()
+    );
+  });
+});
+
+describe("tereo-provisioning.json", () => {
+  it("is the document buildTereoDocument builds for the package version", () => {
+    const { version } = readJson("package.json");
+    expect(readJson("tereo-provisioning.json")).toEqual(
+      buildTereoDocument(version)
+    );
+  });
+});

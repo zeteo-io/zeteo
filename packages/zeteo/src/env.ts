@@ -30,6 +30,14 @@ const prepareEnv = (input: unknown): unknown => {
   );
 };
 
+/** Needed to reach tereo; test mode runs without it. */
+const TEREO_CONNECTION = [
+  "TEREO_URL",
+  "TEREO_CLIENT_ID",
+  "TEREO_CLIENT_SECRET",
+  "REQUEST_HANDLER_KEY",
+] as const;
+
 /** An integer setting within [min, max]: a duration, a count or a port. */
 const int = (min: number, max: number, fallback: number) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
@@ -60,6 +68,18 @@ const EnvFields = z
     // the request answers 503. Below DB_TRANSACTION_TIMEOUT_MS, so a lock wait
     // ends as a lock timeout rather than an expired transaction.
     DB_LOCK_TIMEOUT_MS: int(100, 600_000, 5000),
+    // The tereo core this service is an app service of, and the credentials
+    // its deploy was given.
+    TEREO_URL: z.string().url().optional(),
+    TEREO_CLIENT_ID: z.string().optional(),
+    TEREO_CLIENT_SECRET: z.string().optional(),
+    // Encrypts what the SDK's request handler stores; 32 or more characters.
+    REQUEST_HANDLER_KEY: z.string().min(32).optional(),
+    // Accepts the SDK's test tokens instead of tereo's. Refused in production.
+    TEREO_TEST_MODE: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
     // Express `trust proxy`: a hop count, a CIDR list, a named range, or
     // "true" / "false". "true" is refused in production, where it lets
     // clients choose their IP.
@@ -83,6 +103,24 @@ const EnvFields = z
         path: ["DB_LOCK_TIMEOUT_MS"],
         message: "DB_LOCK_TIMEOUT_MS must be below DB_TRANSACTION_TIMEOUT_MS",
       });
+    }
+    if (val.NODE_ENV === "production" && val.TEREO_TEST_MODE) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TEREO_TEST_MODE"],
+        message: "TEREO_TEST_MODE is refused in production",
+      });
+    }
+    if (!val.TEREO_TEST_MODE) {
+      for (const name of TEREO_CONNECTION) {
+        if (!val[name]) {
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: `${name} is required unless TEREO_TEST_MODE is set`,
+          });
+        }
+      }
     }
     if (val.NODE_ENV === "production") {
       if (!val.PUBLIC_URL) {

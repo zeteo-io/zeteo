@@ -1,3 +1,4 @@
+import { InvalidAuditEntryError, HttpError } from "@tereo-io/sdk";
 import { Response, Request, NextFunction } from "express";
 import { logger } from "./logger.js";
 import { ZodError } from "zod";
@@ -158,6 +159,23 @@ export const isDatabaseBusy = (err: unknown): boolean =>
 // (serialization failure) through the adapter, wrapped in P2010 for raw SQL.
 const CONFLICT_CODES = ["P2034", "40P01", "40001"];
 
+// The only codes a library's HTTP-shaped error answers with, each under its
+// own status: tereo's auth middleware throws these.
+const LIBRARY_ERROR_STATUS: Record<string, number> = {
+  unauthorized: 401,
+  forbidden: 403,
+  not_found: 404,
+};
+
+/**
+ * The SDK auth middleware's 401, 403 or 404 (`HttpError`), meant for the client. A tereo
+ * `RequestError` never is: it is a failed call to tereo, and its code and message are the SDK's.
+ */
+const isClientFacingLibraryError = (err: unknown): err is HttpError =>
+  err instanceof HttpError &&
+  Object.hasOwn(LIBRARY_ERROR_STATUS, err.code) &&
+  LIBRARY_ERROR_STATUS[err.code] === err.statusCode;
+
 /**
  * A body-parser (`express.json` / `express.urlencoded`) rejection: an
  * http-errors 4xx with a string `type` such as `entity.parse.failed` or
@@ -236,6 +254,15 @@ const errorResponse = (err: Error): ErrorResponse => {
       details: err.details,
       headers: err.headers,
     };
+  }
+
+  if (isClientFacingLibraryError(err)) {
+    return { status: err.statusCode, code: err.code, message: err.message };
+  }
+
+  // An audit entry the SDK refused before queueing it: the caller's input.
+  if (err instanceof InvalidAuditEntryError) {
+    return { status: 400, code: "invalid_request", message: err.message };
   }
 
   if (isDatabaseBusy(err)) {

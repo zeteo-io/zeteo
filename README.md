@@ -5,7 +5,7 @@
 zeteo (Greek zēteō, 'to seek') is a query service for apps built on tereo: admins register databases as sources and grant tables and columns to tereo users and groups; people query through a validated JSON query language over HTTP or through an AI connected over MCP.
 
 That is the plan. The repository is at its first step: a scaffold with a service that answers
-`GET /health`. Sign-in through [tereo](https://github.com/tereo-io/tereo), the data model, source
+`GET /health`, now with sign-in through [tereo](https://github.com/tereo-io/tereo). The data model, source
 credentials, the Postgres adapter and the admin API are the next steps, in the design spec and its
 plans under `docs/superpowers/` (kept out of version control).
 
@@ -38,5 +38,6 @@ npm run format && npm run sort-imports && npm run lint && npm run check
 ## Current state
 
 Works today: the service starts, connects to Postgres and Redis, and `GET /health` answers `200`
-with `{"status":"ok", ...}` when both respond (`503` otherwise). Nothing else exists yet: no
-authentication, no sources, no queries.
+with `{"status":"ok", ...}` when both respond (`503` otherwise). Requests sign in with a tereo token
+(`authenticate`, `requirePermission`; `TEREO_TEST_MODE=true` accepts the SDK's test tokens locally),
+and changes can write audit entries to tereo's outbox. Nothing else exists yet: no sources, no queries.

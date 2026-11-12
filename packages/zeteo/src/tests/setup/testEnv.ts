@@ -17,6 +17,7 @@ export function loadUnitTestEnv(): Record<string, string> {
     DATABASE_URL: "postgresql://unit:unit@127.0.0.1:1/unit",
     REDIS_URL: "redis://127.0.0.1:1",
     PUBLIC_URL: "http://localhost:4201",
+    TEREO_TEST_MODE: "true",
   };
 }
 
@@ -59,5 +60,6 @@ export function loadTestEnv(): Record<string, string> {
       process.env.TEST_REDIS_URL ?? env.TEST_REDIS_URL ?? redis.toString(),
     NODE_ENV: "test",
     LOG_LEVEL: "silent",
+    TEREO_TEST_MODE: "true",
   };
 }

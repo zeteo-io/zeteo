@@ -68,6 +68,8 @@ services:
       PUBLIC_URL: http://localhost:${ZETEO_PORT:-4201}
       DATABASE_URL: *database-url
       REDIS_URL: *redis-url
+      # No tereo to reach locally: accept the SDK's test tokens.
+      TEREO_TEST_MODE: "true"
     ports:
       - "127.0.0.1:${ZETEO_PORT:-4201}:4201"
     depends_on:

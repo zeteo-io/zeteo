@@ -6,6 +6,7 @@ import { parseEnv } from "../env.js";
 const base = {
   DATABASE_URL: "postgresql://x/y",
   REDIS_URL: "redis://x",
+  TEREO_TEST_MODE: "true",
 };
 
 describe("env schema", () => {
@@ -51,5 +52,29 @@ describe("env schema", () => {
         TRUST_PROXY: "true",
       })
     ).toThrow(/TRUST_PROXY/);
+  });
+
+  it("requires the tereo connection unless test mode is on", () => {
+    const { TEREO_TEST_MODE: _testMode, ...bare } = base;
+    expect(() => parseEnv(bare)).toThrow(/TEREO_URL/);
+    expect(
+      parseEnv({
+        ...bare,
+        TEREO_URL: "http://core.example.com",
+        TEREO_CLIENT_ID: "zeteo",
+        TEREO_CLIENT_SECRET: "secret",
+        REQUEST_HANDLER_KEY: "k".repeat(32),
+      })
+    ).toMatchObject({ TEREO_TEST_MODE: false });
+  });
+
+  it("refuses TEREO_TEST_MODE in production", () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        NODE_ENV: "production",
+        PUBLIC_URL: "https://zeteo.example.com",
+      })
+    ).toThrow(/TEREO_TEST_MODE/);
   });
 });

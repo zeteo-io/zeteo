@@ -1,0 +1,70 @@
+{
+  "version": "0.0.0",
+  "service": {
+    "slug": "zeteo",
+    "name": "Zeteo",
+    "secretFrom": "TEREO_CLIENT_SECRET",
+    "access": {
+      "roles": [
+        "audit_writer"
+      ]
+    },
+    "permissions": [
+      {
+        "name": "zeteo.sources.read",
+        "displayName": "Read sources",
+        "description": "List and read the sources zeteo knows about",
+        "orgAssignable": true
+      },
+      {
+        "name": "zeteo.sources.write",
+        "displayName": "Manage sources",
+        "description": "Register, change, archive and refresh sources, and declare relations; also grants Read sources",
+        "orgAssignable": true
+      }
+    ],
+    "systemRoles": [
+      {
+        "name": "zeteo_admin",
+        "displayName": "Zeteo administrator",
+        "description": "Manages sources",
+        "permissions": [
+          "zeteo.sources.read",
+          "zeteo.sources.write"
+        ]
+      }
+    ],
+    "eventTypes": [
+      {
+        "eventType": "zeteo.source.created",
+        "description": "zeteo.source.created",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.updated",
+        "description": "zeteo.source.updated",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.archived",
+        "description": "zeteo.source.archived",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.refreshed",
+        "description": "zeteo.source.refreshed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.relation.declared",
+        "description": "zeteo.relation.declared",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.relation.removed",
+        "description": "zeteo.relation.removed",
+        "readPermission": "zeteo.sources.read"
+      }
+    ]
+  }
+}

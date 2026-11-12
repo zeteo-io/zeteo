@@ -1,6 +1,7 @@
 import "./preload.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
+import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { createServer, type Server } from "http";
 import { logger } from "./utils/logger.js";
@@ -27,6 +28,9 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
       if (running) throw new Error("Server is already running");
       running = true;
       await initializeRedis();
+      await initializeTereo();
+      // The request handler and the outbox reaper run in this process.
+      await getTereo().start();
 
       // Imported after Redis is up, as the modules behind it may resolve the
       // client when they load.
@@ -72,6 +76,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
             logger.info("HTTP server closed");
           });
         }
+        await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);
         running = false;
