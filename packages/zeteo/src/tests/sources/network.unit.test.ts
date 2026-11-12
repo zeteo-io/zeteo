@@ -1,8 +1,10 @@
 // @module-tag unit
 // @module-tag platform
 import { HostNotAllowedError } from "../../utils/errors.js";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { logger } from "../../utils/logger.js";
 import {
+  LOOKUP_TIMEOUT_MS,
   parseAllowedHosts,
   resolveAllowed,
   type AllowRule,
@@ -273,17 +275,107 @@ describe("resolveAllowed: always refused", () => {
     }
   });
 
-  it("unwraps a mapped address before matching a CIDR rule", async () => {
+  it("checks a mapped address as IPv4 and returns it as IPv4", async () => {
     const allow = rules("10.0.0.0/8");
-    const target = await resolveAllowed("::ffff:10.1.2.3", allow);
-    expect(target).toEqual({
-      host: "::ffff:10.1.2.3",
-      address: "::ffff:10.1.2.3",
-      family: 6,
-    });
+    for (const literal of ["::ffff:10.1.2.3", "::FFFF:A01:203"]) {
+      expect(await resolveAllowed(literal, allow)).toEqual({
+        host: literal.toLowerCase(),
+        address: "10.1.2.3",
+        family: 4,
+      });
+    }
     await refused("::ffff:11.1.2.3", allow);
     const wide = rules("::ffff:0:0/96");
     expect((await resolveAllowed("1.2.3.4", wide)).address).toBe("1.2.3.4");
+  });
+
+  it("returns a mapped resolver answer as IPv4", async () => {
+    const { resolver } = fakeResolver({
+      "x.h.test": ["::ffff:10.0.0.5"],
+      "y.h.test": ["::ffff:a00:6"],
+    });
+    expect(
+      await resolveAllowed("x.h.test", rules("10.0.0.0/8"), resolver)
+    ).toEqual({ host: "x.h.test", address: "10.0.0.5", family: 4 });
+    expect(
+      await resolveAllowed("y.h.test", rules("y.h.test"), resolver)
+    ).toEqual({ host: "y.h.test", address: "10.0.0.6", family: 4 });
+  });
+
+  it("returns exactly what plain literals and mixed answers were checked as", async () => {
+    expect(await resolveAllowed("10.1.2.3", rules("10.0.0.0/8"))).toEqual({
+      host: "10.1.2.3",
+      address: "10.1.2.3",
+      family: 4,
+    });
+    expect(await resolveAllowed("2001:DB8::1", rules("2001:db8::/32"))).toEqual(
+      {
+        host: "2001:db8::1",
+        address: "2001:db8::1",
+        family: 6,
+      }
+    );
+    const { resolver } = fakeResolver({
+      "m.h.test": [
+        "169.254.169.254",
+        "::a00:5",
+        "64:ff9b::a00:5",
+        "::ffff:a9fe:a9fe",
+        "::ffff:10.0.0.7",
+      ],
+    });
+    expect(
+      await resolveAllowed("m.h.test", rules("10.0.0.0/8"), resolver)
+    ).toEqual({ host: "m.h.test", address: "10.0.0.7", family: 4 });
+  });
+
+  describe("IPv4-compatible and NAT64 forms", () => {
+    const catchAll = rules("0.0.0.0/0,::/0");
+    const forms = [
+      "::a00:5",
+      "::10.0.0.5",
+      "::2",
+      "64:ff9b::a00:5",
+      "64:ff9b::10.0.0.5",
+      "64:FF9B::8.8.8.8",
+    ];
+
+    it.each(forms)("refuses %s as a literal", async (address) => {
+      await refused(address, catchAll);
+      await refused(address, rules("10.0.0.0/8"));
+    });
+
+    it.each(forms)("skips %s as a resolver answer", async (address) => {
+      const table = { "x.h.test": [address] };
+      await refused("x.h.test", catchAll, table);
+      await refused("x.h.test", rules("x.h.test"), table);
+      const { resolver } = fakeResolver({ "x.h.test": [address, "10.0.0.5"] });
+      expect(await resolveAllowed("x.h.test", catchAll, resolver)).toEqual({
+        host: "x.h.test",
+        address: "10.0.0.5",
+        family: 4,
+      });
+    });
+
+    it("still allows ::1 and ordinary IPv6 under a catch-all", async () => {
+      expect((await resolveAllowed("::1", catchAll)).address).toBe("::1");
+      expect((await resolveAllowed("64:ff9a::1", catchAll)).address).toBe(
+        "64:ff9a::1"
+      );
+    });
+
+    it.each([
+      "::a00:0/104",
+      "::10.0.0.5",
+      "64:ff9b::/96",
+      "64:ff9b::a00:5/128",
+    ])("parseAllowedHosts refuses the rule %s", (entry) => {
+      expect(() => rules(entry)).toThrow(/SOURCE_ALLOWED_HOSTS/);
+    });
+
+    it("parseAllowedHosts keeps ::/0, ::1 and ::/128", () => {
+      expect(rules("::/0,::1,::/128")).toHaveLength(3);
+    });
   });
 
   it("keeps a loopback rule from admitting a refused neighbour", async () => {
@@ -358,9 +450,7 @@ describe("resolveAllowed: host spellings", () => {
     expect((await resolveAllowed("10.0.0.1", everything)).address).toBe(
       "10.0.0.1"
     );
-    expect(
-      await resolveAllowed("0.0.0.0", rules("1.0.0.0/8")).catch(() => "no")
-    ).toBe("no");
+    await refused("0.0.0.0", everything);
     expect((await resolveAllowed("2001:DB8::1", everything)).address).toBe(
       "2001:db8::1"
     );
@@ -456,14 +546,92 @@ describe("resolveAllowed: resolver use", () => {
     expect(calls).toEqual([]);
   });
 
-  it("lets a resolver failure through unchanged", async () => {
-    const boom = new Error("ENOTFOUND");
+  it("turns a resolver failure into the same refusal", async () => {
     const resolver: Resolver = async () => {
-      throw boom;
+      throw new Error("getaddrinfo ENOTFOUND db.internal");
     };
-    await expect(
-      resolveAllowed("db.internal", rules("db.internal"), resolver)
-    ).rejects.toBe(boom);
+    const err = await resolveAllowed(
+      "db.internal",
+      rules("db.internal"),
+      resolver
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HostNotAllowedError);
+    expect((err as Error).message).toBe("The host is not permitted");
+  });
+
+  it("refuses when the lookup does not settle within the timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const resolver: Resolver = () => new Promise(() => {});
+      const outcome = resolveAllowed(
+        "db.internal",
+        rules("db.internal"),
+        resolver
+      ).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(LOOKUP_TIMEOUT_MS - 1);
+      let settled = false;
+      void outcome.then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await outcome).toBeInstanceOf(HostNotAllowedError);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not leave a timer behind after a successful lookup", async () => {
+    vi.useFakeTimers();
+    try {
+      const { resolver } = fakeResolver({ "db.internal": ["10.0.0.5"] });
+      await resolveAllowed("db.internal", rules("db.internal"), resolver);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("logs the addresses tried and why each was not used", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const { resolver } = fakeResolver({
+        "x.h.test": ["169.254.169.254", "11.0.0.1", "::a00:5"],
+      });
+      await expect(
+        resolveAllowed("x.h.test", rules("10.0.0.0/8"), resolver)
+      ).rejects.toBeInstanceOf(HostNotAllowedError);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]![0]).toMatchObject({
+        host: "x.h.test",
+        candidates: [
+          { address: "169.254.169.254", reason: "always_refused" },
+          { address: "11.0.0.1", reason: "no_rule" },
+          { address: "::a00:5", reason: "unsupported_form" },
+        ],
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("logs a resolver failure under err", async () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+    try {
+      const cause = new Error("ENOTFOUND");
+      const resolver: Resolver = async () => {
+        throw cause;
+      };
+      await expect(
+        resolveAllowed("db.internal", rules("db.internal"), resolver)
+      ).rejects.toBeInstanceOf(HostNotAllowedError);
+      expect(warn.mock.calls.at(-1)![0]).toMatchObject({
+        host: "db.internal",
+        err: cause,
+      });
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("gives the same refusal for every cause", async () => {

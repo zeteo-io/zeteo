@@ -97,19 +97,24 @@ const inRange = (
 const NAT64_PREFIX = 0x0064_ff9b_0000_0000_0000_0000n;
 
 /**
- * The IPv4 address an IPv6 one carries, for the forms that reach it: mapped
- * (`::ffff:a.b.c.d`), compatible (`::a.b.c.d`) and NAT64 (`64:ff9b::/96`).
- * `::` and `::1` are not compatible addresses.
+ * IPv6 forms that carry an IPv4 address by translation rather than by
+ * mapping: compatible (`::a.b.c.d`, apart from `::` and `::1`) and NAT64
+ * (`64:ff9b::/96`). They are refused, not translated.
  */
-const unwrap = (ip: Ip): Ip => {
-  if (ip.family === 4) return ip;
+const isTranslatedForm = (ip: Ip): boolean => {
+  if (ip.family === 4) return false;
   const high96 = ip.value >> 32n;
-  const embedded =
-    high96 === 0xffffn ||
-    high96 === NAT64_PREFIX ||
-    (high96 === 0n && ip.value > 1n);
-  return embedded ? { family: 4, value: ip.value & 0xffff_ffffn } : ip;
+  return high96 === NAT64_PREFIX || (high96 === 0n && ip.value > 1n);
 };
+
+/** The IPv4 address of an IPv4-mapped one (`::ffff:a.b.c.d`); others as they are. */
+const unmap = (ip: Ip): Ip =>
+  ip.family === 6 && ip.value >> 32n === 0xffffn
+    ? { family: 4, value: ip.value & 0xffff_ffffn }
+    : ip;
+
+const formatV4 = (value: bigint): string =>
+  [24n, 16n, 8n, 0n].map((shift) => (value >> shift) & 0xffn).join(".");
 
 const cidr = (text: string) => {
   const [base, bits] = text.split("/") as [string, string];
@@ -164,8 +169,10 @@ const parseEntry = (entry: string): AllowRule | null => {
       bits = Number(digits);
       if (bits > WIDTH[ip.family]) return null;
     }
-    // Addresses are unwrapped before they are matched, so a rule over the
-    // mapped range is a rule over the IPv4 addresses inside it.
+    // Addresses are unmapped before they are matched, so a rule over the
+    // mapped range is a rule over the IPv4 addresses inside it. A rule over a
+    // translated form could never match.
+    if (ip.family === 6 && bits >= 96 && isTranslatedForm(ip)) return null;
     if (ip.family === 6 && bits >= 96 && ip.value >> 32n === 0xffffn) {
       return {
         kind: "cidr",
@@ -213,16 +220,52 @@ const nameMatches = (host: string, rules: AllowRule[]): boolean =>
       (rule.kind === "suffix" && host.endsWith(`.${rule.suffix}`))
   );
 
-const refuse = (host: string, reason: string): never => {
-  logger.warn({ host: host.slice(0, 256), reason }, "source host refused");
+/** How long a name's lookup may take before the host is refused. */
+export const LOOKUP_TIMEOUT_MS = 3000;
+
+type Reason = "always_refused" | "no_rule" | "unsupported_form";
+
+const refuse = (
+  host: string,
+  reason: string,
+  detail: Record<string, unknown> = {}
+): never => {
+  logger.warn(
+    { host: host.slice(0, 256), reason, ...detail },
+    "source host refused"
+  );
   throw new HostNotAllowedError();
+};
+
+const lookupWithTimeout = async (
+  resolver: Resolver,
+  name: string
+): Promise<{ address: string }[]> => {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`lookup took over ${LOOKUP_TIMEOUT_MS} ms`)),
+      LOOKUP_TIMEOUT_MS
+    );
+  });
+  try {
+    return await Promise.race([resolver(name), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 /**
  * Decides whether a connection to `host` is permitted and names the address to
- * dial. The resolver runs once, and the address returned is one it returned
- * (an IP literal is its own address): the caller connects to that address, not
- * to the name, so the name cannot resolve elsewhere between check and connect.
+ * dial. The resolver runs once and a lookup that fails or runs past
+ * `LOOKUP_TIMEOUT_MS` is refused like any other host. The caller connects to
+ * the address returned, not to the name, so the name cannot resolve elsewhere
+ * between check and connect.
+ *
+ * Invariant: the returned address is the exact address the rule and
+ * always-refused checks ran on. An IPv4-mapped IPv6 address is checked, and
+ * returned, as the IPv4 address it carries; IPv4-compatible and NAT64 forms
+ * are refused.
  *
  * Allowed when the hostname matches a `host` or `suffix` rule or the address
  * matches a `cidr` rule, and the address is not in a range that is refused
@@ -251,18 +294,37 @@ export const resolveAllowed = async (
     if (!byName && !rules.some((rule) => rule.kind === "cidr")) {
       return refuse(host, "no rule matches");
     }
-    candidates = await resolver(name);
+    try {
+      candidates = await lookupWithTimeout(resolver, name);
+    } catch (err) {
+      return refuse(host, "lookup failed", { err });
+    }
   }
 
+  const tried: { address: string; reason: Reason }[] = [];
   for (const { address } of candidates) {
-    const ip = parseIp(address);
-    if (ip === null) continue;
-    const effective = unwrap(ip);
-    if (isAlwaysRefused(effective)) continue;
+    const parsed = parseIp(address);
+    if (parsed === null || isTranslatedForm(parsed)) {
+      tried.push({ address, reason: "unsupported_form" });
+      continue;
+    }
+    const checked = unmap(parsed);
+    if (isAlwaysRefused(checked)) {
+      tried.push({ address, reason: "always_refused" });
+      continue;
+    }
     const allowed =
       byName ||
-      rules.some((rule) => rule.kind === "cidr" && inRange(effective, rule));
-    if (allowed) return { host: name, address, family: ip.family };
+      rules.some((rule) => rule.kind === "cidr" && inRange(checked, rule));
+    if (!allowed) {
+      tried.push({ address, reason: "no_rule" });
+      continue;
+    }
+    return {
+      host: name,
+      address: checked.family === 4 ? formatV4(checked.value) : address,
+      family: checked.family,
+    };
   }
-  return refuse(host, "no allowed address");
+  return refuse(host, "no allowed address", { candidates: tried });
 };
