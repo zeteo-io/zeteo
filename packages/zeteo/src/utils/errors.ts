@@ -107,6 +107,32 @@ export class HostNotAllowedError extends AppError {
   }
 }
 
+/**
+ * A source that could not be connected to, or that refused the login. The
+ * message is fixed: the driver's error goes to the log, never to the caller.
+ */
+export class SourceUnreachableError extends AppError {
+  constructor() {
+    super(
+      502,
+      "source_unreachable",
+      "The source could not be reached or refused the login"
+    );
+    this.name = "SourceUnreachableError";
+  }
+}
+
+export class SourceTypeUnavailableError extends AppError {
+  constructor(type: string) {
+    super(
+      422,
+      "source_type_unavailable",
+      `Sources of type ${type} are not available yet`
+    );
+    this.name = "SourceTypeUnavailableError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

@@ -3,6 +3,11 @@ import { execFileSync } from "child_process";
 import { fileURLToPath } from "url";
 import path from "path";
 
+const FIXTURE_SQL = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../fixtures/postgres/sales.sql"
+);
+
 let server: ServerInstance | null = null;
 
 const packageRoot = path.resolve(
@@ -32,6 +37,48 @@ async function ensureTestDatabase(databaseUrl: string) {
   }
 }
 
+const quoteIdent = (name: string) => `"${name.replace(/"/g, '""')}"`;
+const quoteLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
+
+/**
+ * Recreates the source fixture: the `zeteo_fixture` database and its roles on
+ * the test server, the way source tests find them. The test user is a
+ * superuser, so it can create both.
+ */
+async function recreateFixtureDatabase(databaseUrl: string) {
+  const { Client } = await import("pg");
+  const { readFile } = await import("fs/promises");
+  const { FIXTURE_DATABASE, FIXTURE_ROLES } =
+    await import("../support/fixtureDb.js");
+  const admin = new URL(databaseUrl);
+  admin.pathname = "/postgres";
+  const client = new Client({ connectionString: admin.toString() });
+  await client.connect();
+  try {
+    await client.query(
+      `DROP DATABASE IF EXISTS ${quoteIdent(FIXTURE_DATABASE)} WITH (FORCE)`
+    );
+    for (const { user, password } of Object.values(FIXTURE_ROLES)) {
+      await client.query(`DROP ROLE IF EXISTS ${quoteIdent(user)}`);
+      await client.query(
+        `CREATE ROLE ${quoteIdent(user)} LOGIN PASSWORD ${quoteLiteral(password)}`
+      );
+    }
+    await client.query(`CREATE DATABASE ${quoteIdent(FIXTURE_DATABASE)}`);
+  } finally {
+    await client.end();
+  }
+  const fixture = new URL(databaseUrl);
+  fixture.pathname = `/${FIXTURE_DATABASE}`;
+  const loader = new Client({ connectionString: fixture.toString() });
+  await loader.connect();
+  try {
+    await loader.query(await readFile(FIXTURE_SQL, "utf8"));
+  } finally {
+    await loader.end();
+  }
+}
+
 export async function setup() {
   // globalSetup runs in the main vitest process, where the config's `env`
   // option doesn't apply: load the same environment the workers get.
@@ -49,6 +96,8 @@ export async function setup() {
     env: process.env,
     stdio: ["ignore", "ignore", "inherit"],
   });
+
+  await recreateFixtureDatabase(process.env.DATABASE_URL!);
 
   // Earlier runs would otherwise leave state in Redis db 1.
   const { redis } = await import("../../utils/redis.js");
