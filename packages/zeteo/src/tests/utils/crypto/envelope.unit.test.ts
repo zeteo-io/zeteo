@@ -1,7 +1,7 @@
 // @module-tag unit
 // @module-tag platform
+import { createCipheriv, randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { randomBytes } from "node:crypto";
 import {
   SettingsUnreadableError,
   createEnvelope,
@@ -26,6 +26,36 @@ function flipByte(
   const bytes = Buffer.from(sealed[field], "base64url");
   bytes[0] ^= 0x01;
   return { ...sealed, [field]: bytes.toString("base64url") };
+}
+
+/** AES-256-GCM by hand, to build values the module itself would never produce. */
+function gcm(key: Buffer, plain: Buffer, aad: string) {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(aad));
+  const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
+  return { iv, tag: cipher.getAuthTag(), ciphertext };
+}
+
+/** A sealed value whose data layer is bound to `dataAad` and key wrap to `wrapAad`. */
+function sealWithAads(
+  masterKey: Buffer,
+  dataAad: string,
+  wrapAad: string
+): SealedSettings {
+  const dataKey = randomBytes(32);
+  const data = gcm(dataKey, Buffer.from(JSON.stringify(settings)), dataAad);
+  const wrap = gcm(masterKey, dataKey, wrapAad);
+  return {
+    v: 1,
+    kid: createEnvelope(masterKey).kid,
+    wrappedKey: Buffer.concat([wrap.iv, wrap.tag, wrap.ciphertext]).toString(
+      "base64url"
+    ),
+    iv: data.iv.toString("base64url"),
+    tag: data.tag.toString("base64url"),
+    ciphertext: data.ciphertext.toString("base64url"),
+  };
 }
 
 describe("envelope encryption of source settings", () => {
@@ -74,6 +104,24 @@ describe("envelope encryption of source settings", () => {
     ).toThrow(SettingsUnreadableError);
   });
 
+  it("binds the source on the data layer and on the key wrap separately", () => {
+    const key = randomBytes(32);
+    const envelope = createEnvelope(key);
+    const other = "22222222-2222-4222-8222-222222222222";
+    // Control: both layers bound to the source it is opened for.
+    expect(
+      envelope.openSettings(sealWithAads(key, SOURCE_ID, SOURCE_ID), SOURCE_ID)
+    ).toEqual(settings);
+    // Key wrap bound to another source, data layer to this one.
+    expect(() =>
+      envelope.openSettings(sealWithAads(key, SOURCE_ID, other), SOURCE_ID)
+    ).toThrow(SettingsUnreadableError);
+    // Data layer bound to another source, key wrap to this one.
+    expect(() =>
+      envelope.openSettings(sealWithAads(key, other, SOURCE_ID), SOURCE_ID)
+    ).toThrow(SettingsUnreadableError);
+  });
+
   it("refuses an unknown version and malformed fields", () => {
     const sealed = sealSettings(settings, SOURCE_ID);
     const cases: unknown[] = [
@@ -107,27 +155,41 @@ describe("envelope encryption of source settings", () => {
     expect(message).not.toContain(settings.password);
   });
 
-  it("keeps the plaintext out of the sealed JSON", () => {
-    const json = JSON.stringify(sealSettings(settings, SOURCE_ID));
+  it("keeps the plaintext out of the sealed JSON and out of the decoded bytes", () => {
+    const sealed = sealSettings(settings, SOURCE_ID);
+    const json = JSON.stringify(sealed);
     for (const secret of [settings.password, settings.user, settings.host]) {
       expect(json).not.toContain(secret);
     }
     for (let i = 0; i + 6 <= settings.password.length; i++) {
       expect(json).not.toContain(settings.password.slice(i, i + 6));
     }
+    for (const field of ["ciphertext", "wrappedKey"] as const) {
+      const bytes = Buffer.from(sealed[field], "base64url");
+      for (const secret of [
+        settings.password,
+        settings.user,
+        settings.host,
+        '{"host"',
+      ]) {
+        expect(bytes.includes(Buffer.from(secret))).toBe(false);
+      }
+    }
   });
 
   it("puts no key material or plaintext in the error for a tampered value", () => {
     const sealed = sealSettings(settings, SOURCE_ID);
+    let error: unknown;
     try {
       openSettings(flipByte(sealed, "ciphertext"), SOURCE_ID);
-      expect.unreachable();
     } catch (err) {
-      const message = (err as Error).message;
-      expect(message).not.toContain(settings.password);
-      expect(message).not.toContain(sealed.wrappedKey);
-      expect(message).not.toContain(sealed.ciphertext);
+      error = err;
     }
+    expect(error).toBeInstanceOf(SettingsUnreadableError);
+    const message = (error as Error).message;
+    expect(message).not.toContain(settings.password);
+    expect(message).not.toContain(sealed.wrappedKey);
+    expect(message).not.toContain(sealed.ciphertext);
   });
 
   it("refuses a master key that is not 32 bytes", () => {
