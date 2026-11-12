@@ -52,6 +52,8 @@ services:
       TEREO_TEST_MODE: "true"
       # Tests only: 32 bytes of 0x07.
       ZETEO_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
+      # Loopback, and this stack's Postgres by its service name.
+      SOURCE_ALLOWED_HOSTS: 127.0.0.0/8,::1/128,localhost,postgres
       PORT: "4201"
       PUBLIC_URL: http://localhost:4201
       DATABASE_URL: postgresql://zeteo:zeteo@postgres:5432/zeteo_test

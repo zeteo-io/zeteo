@@ -31,6 +31,17 @@ describe("env schema", () => {
     });
   });
 
+  it("parses SOURCE_ALLOWED_HOSTS, empty by default, and refuses a bad entry", () => {
+    expect(parseEnv(base).SOURCE_ALLOWED_HOSTS).toEqual([]);
+    expect(
+      parseEnv({ ...base, SOURCE_ALLOWED_HOSTS: "db.internal,10.0.0.0/8" })
+        .SOURCE_ALLOWED_HOSTS
+    ).toHaveLength(2);
+    expect(() =>
+      parseEnv({ ...base, SOURCE_ALLOWED_HOSTS: "http://x" })
+    ).toThrow(/SOURCE_ALLOWED_HOSTS.*http:\/\/x/);
+  });
+
   it("refuses a lock timeout not below the transaction timeout", () => {
     expect(() =>
       parseEnv({

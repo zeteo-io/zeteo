@@ -95,6 +95,18 @@ export class NotFoundError extends AppError {
   }
 }
 
+/**
+ * A source host the deploy does not permit. The message never says which rule
+ * failed or whether the address is in a range that is always refused; the log
+ * has the detail.
+ */
+export class HostNotAllowedError extends AppError {
+  constructor() {
+    super(422, "host_not_allowed", "The host is not permitted");
+    this.name = "HostNotAllowedError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

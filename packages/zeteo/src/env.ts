@@ -1,4 +1,5 @@
 import "./preload.js";
+import { parseAllowedHosts } from "./sources/network.js";
 import { z } from "zod";
 
 // The one env schema for the whole service.
@@ -54,6 +55,19 @@ const masterKey = z
     }
   );
 
+/** The comma-separated destinations sources may connect to; a bad entry stops the service with its own message. */
+const allowedHosts = z
+  .string()
+  .default("")
+  .transform((val, ctx) => {
+    try {
+      return parseAllowedHosts(val);
+    } catch (err) {
+      ctx.addIssue({ code: "custom", message: (err as Error).message });
+      return z.NEVER;
+    }
+  });
+
 /** An integer setting within [min, max]: a duration, a count or a port. */
 const int = (min: number, max: number, fallback: number) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
@@ -99,6 +113,10 @@ const EnvFields = z
       .enum(["true", "false"])
       .default("false")
       .transform((v) => v === "true"),
+    // Where sources may connect: hostnames, `*.suffix`, IPs and CIDRs, comma
+    // separated. Empty means no source can be added. Link-local, metadata,
+    // unspecified and multicast addresses are refused whatever this says.
+    SOURCE_ALLOWED_HOSTS: allowedHosts,
     // Express `trust proxy`: a hop count, a CIDR list, a named range, or
     // "true" / "false". "true" is refused in production, where it lets
     // clients choose their IP.

@@ -6,6 +6,9 @@ import path from "path";
 /** A fixed key for tests only: 32 bytes of 0x07, base64url. */
 export const TEST_MASTER_KEY = Buffer.alloc(32, 7).toString("base64url");
 
+/** Loopback only: integration tests connect to a fixture database on localhost. */
+const TEST_SOURCE_ALLOWED_HOSTS = "127.0.0.0/8,::1/128,localhost";
+
 /** The environment of the `unit` project: unreachable database and Redis, so a unit test that reaches for either fails at once. */
 export function loadUnitTestEnv(): Record<string, string> {
   return {
@@ -22,6 +25,7 @@ export function loadUnitTestEnv(): Record<string, string> {
     PUBLIC_URL: "http://localhost:4201",
     TEREO_TEST_MODE: "true",
     ZETEO_MASTER_KEY: TEST_MASTER_KEY,
+    SOURCE_ALLOWED_HOSTS: TEST_SOURCE_ALLOWED_HOSTS,
   };
 }
 
@@ -66,5 +70,6 @@ export function loadTestEnv(): Record<string, string> {
     LOG_LEVEL: "silent",
     TEREO_TEST_MODE: "true",
     ZETEO_MASTER_KEY: TEST_MASTER_KEY,
+    SOURCE_ALLOWED_HOSTS: TEST_SOURCE_ALLOWED_HOSTS,
   };
 }
