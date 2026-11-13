@@ -1,14 +1,19 @@
 // @module-tag int
 // @module-tag job
 // @module-tag platform
-import { refreshStaleSources } from "../../jobs/refreshSources.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import * as refresh from "../../catalog/refresh.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { db } from "../../utils/db/index.js";
 import { redis } from "../../utils/redis.js";
 import { randomUUID } from "crypto";
+import {
+  REFRESH_CHECK_INTERVAL_MS,
+  refreshStaleSources,
+  startRefreshJob,
+} from "../../jobs/refreshSources.js";
 import {
   removeSources,
   sourceSettings,
@@ -142,5 +147,72 @@ describe("refreshStaleSources", () => {
     expect(await prisma.sourceTable.count({ where: { sourceId: next } })).toBe(
       5
     );
+  });
+
+  it("skips a source another replica refreshed after it was listed", async () => {
+    const id = await newSource(30);
+    const listed = await prisma.source.findUniqueOrThrow({ where: { id } });
+    await prisma.source.update({
+      where: { id },
+      data: { lastRefreshedAt: new Date(NOW.getTime() - HOUR) },
+    });
+    vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([listed]);
+    const spy = vi.spyOn(refresh, "refreshSource");
+    await refreshStaleSources(NOW);
+    expect(spy).not.toHaveBeenCalled();
+    expect(await redis.get(`zeteo:refresh:${id}`)).toBeNull();
+  });
+
+  it("skips a source archived after it was listed", async () => {
+    const id = await newSource(30);
+    const listed = await prisma.source.findUniqueOrThrow({ where: { id } });
+    await prisma.source.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
+    vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([listed]);
+    const spy = vi.spyOn(refresh, "refreshSource");
+    await refreshStaleSources(NOW);
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("startRefreshJob", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const fakeJob = () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    return vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([]);
+  };
+
+  it("sweeps 30 seconds plus jitter after start, then every hour, and not after stop", async () => {
+    const sweeps = fakeJob();
+    const stop = startRefreshJob();
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(sweeps).toHaveBeenCalledTimes(0);
+    // 30 s, plus half of the 30 s jitter.
+    await vi.advanceTimersByTimeAsync(15_001);
+    expect(sweeps).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(REFRESH_CHECK_INTERVAL_MS);
+    expect(sweeps).toHaveBeenCalledTimes(2);
+    await stop();
+    await vi.advanceTimersByTimeAsync(3 * REFRESH_CHECK_INTERVAL_MS);
+    expect(sweeps).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("cancels the first sweep when stopped before it", async () => {
+    const sweeps = fakeJob();
+    const stop = startRefreshJob();
+    await stop();
+    await vi.advanceTimersByTimeAsync(REFRESH_CHECK_INTERVAL_MS);
+    expect(sweeps).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

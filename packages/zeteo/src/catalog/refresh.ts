@@ -33,6 +33,12 @@ export interface RefreshSummary {
  */
 const MAX_READ_ROUNDS = 5;
 
+/**
+ * How long the transaction that applies a snapshot may run: a source with
+ * thousands of tables writes far more rows than an ordinary change.
+ */
+export const REFRESH_TRANSACTION_TIMEOUT_MS = 120_000;
+
 /** Rows per statement; Postgres allows 32767 bind parameters in one. */
 const CHUNK = 2000;
 
@@ -73,11 +79,16 @@ const readSnapshot = async (row: Source): Promise<SchemaSnapshot> => {
       err instanceof SourceUnreachableError ||
       err instanceof HostNotAllowedError
     ) {
-      // Only the status changes; the catalogue keeps what it knew.
-      // Only while no refresh has landed since the read began: a newer success stands.
+      // Only the status changes; the catalogue keeps what it knew. Only while
+      // no refresh has landed and the settings have not changed since the read
+      // began: a newer success, or a failure of settings since replaced, stands.
       await prisma.source
         .updateMany({
-          where: { id: row.id, lastRefreshedAt: row.lastRefreshedAt },
+          where: {
+            id: row.id,
+            lastRefreshedAt: row.lastRefreshedAt,
+            updatedAt: row.updatedAt,
+          },
           data: { status: "unreachable" },
         })
         .catch((cause: unknown) => {
@@ -481,9 +492,11 @@ const applySnapshot = async (
  * held while the source answers. The write then takes an advisory lock keyed
  * on the source, which makes concurrent refreshes apply one after another. A
  * snapshot read before another refresh landed could be the older of the two,
- * so after taking the lock the write checks that `last_refreshed_at` still has
- * the value seen before the read, and reads again when it does not. The
- * catalogue therefore ends matching the newest read.
+ * and one read before the source's settings or schemas changed describes the
+ * old target, so after taking the lock the write checks that
+ * `last_refreshed_at` and `updated_at` still have the values seen before the
+ * read, and reads again when either does not. The catalogue therefore ends
+ * matching the newest read of the current settings.
  */
 export const refreshSource = async (
   sourceId: string,
@@ -496,39 +509,66 @@ export const refreshSource = async (
     const snapshot = await readSnapshot(row);
     const lastRound = round >= MAX_READ_ROUNDS;
 
-    const summary = await withAudit(async (tx, audit) => {
-      await lockSourceCatalog(tx, sourceId);
-      const current = await tx.source.findUnique({ where: { id: sourceId } });
-      if (!current) throw new NotFoundError("Source not found");
-      if (current.archivedAt) throw new SourceArchivedError();
-      if (
-        !lastRound &&
-        current.lastRefreshedAt?.getTime() !== row.lastRefreshedAt?.getTime()
-      ) {
-        return null;
-      }
-      const result = await applySnapshot(tx, sourceId, snapshot);
-      // Strictly later than the last value, so the check above notices every apply.
-      const next = new Date(
-        Math.max(Date.now(), (current.lastRefreshedAt?.getTime() ?? 0) + 1)
-      );
-      await tx.source.update({
-        where: { id: sourceId },
-        data: { status: "active", lastRefreshedAt: next },
-      });
-      audit({
-        action: AUDIT_EVENTS.sourceRefreshed,
-        resourceType: "source",
-        resourceId: sourceId,
-        actorId,
-        metadata: { slug: current.slug, type: typeOf(current), ...result },
-      });
-      return result;
-    });
+    const summary = await withAudit(
+      async (tx, audit) => {
+        await lockSourceCatalog(tx, sourceId);
+        const current = await tx.source.findUnique({ where: { id: sourceId } });
+        if (!current) throw new NotFoundError("Source not found");
+        if (current.archivedAt) throw new SourceArchivedError();
+        if (
+          !lastRound &&
+          (current.lastRefreshedAt?.getTime() !==
+            row.lastRefreshedAt?.getTime() ||
+            current.updatedAt.getTime() !== row.updatedAt.getTime())
+        ) {
+          return null;
+        }
+        const result = await applySnapshot(tx, sourceId, snapshot);
+        // Strictly later than the last value, so the check above notices every apply.
+        const next = new Date(
+          Math.max(Date.now(), (current.lastRefreshedAt?.getTime() ?? 0) + 1)
+        );
+        await tx.source.update({
+          where: { id: sourceId },
+          data: { status: "active", lastRefreshedAt: next },
+        });
+        audit({
+          action: AUDIT_EVENTS.sourceRefreshed,
+          resourceType: "source",
+          resourceId: sourceId,
+          actorId,
+          metadata: { slug: current.slug, type: typeOf(current), ...result },
+        });
+        return result;
+      },
+      { timeoutMs: REFRESH_TRANSACTION_TIMEOUT_MS }
+    );
     if (summary) return summary;
     logger.info(
       { source_id: sourceId, round },
-      "another refresh landed during the read; reading again"
+      "the source changed or another refresh landed during the read; reading again"
+    );
+  }
+};
+
+/**
+ * Refreshes a source right after it was created or its settings or schemas
+ * changed. The change stands whether or not the read works (the status says
+ * which), so a failure is logged, not thrown.
+ */
+export const refreshAfterChange = async (
+  sourceId: string,
+  actorId: string
+): Promise<void> => {
+  try {
+    await refreshSource(sourceId, actorId);
+  } catch (err) {
+    const expected =
+      err instanceof SourceUnreachableError ||
+      err instanceof HostNotAllowedError;
+    logger[expected ? "warn" : "error"](
+      { err, source_id: sourceId },
+      "catalogue refresh after a change failed"
     );
   }
 };

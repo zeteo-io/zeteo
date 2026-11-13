@@ -129,6 +129,20 @@ describe("withAudit", () => {
     expect(await probeRows(id)).toBe(0);
   });
 
+  it("gives the transaction the timeout it is asked for", async () => {
+    const id = resourceId();
+    await expect(
+      withAudit(
+        async (tx) => {
+          await tx.$executeRaw`SELECT pg_sleep(0.6)`;
+          await tx.$executeRaw`INSERT INTO "zeteo"."transaction_probe" (id) VALUES (${id})`;
+        },
+        { timeoutMs: 200 }
+      )
+    ).rejects.toMatchObject({ code: "P2028" });
+    expect(await probeRows(id)).toBe(0);
+  });
+
   it("refuses a call to tereo made inside the transaction", async () => {
     const { getTereo } = await import("../../utils/tereo.js");
     await expect(

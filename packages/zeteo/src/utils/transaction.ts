@@ -31,6 +31,11 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.relationRemoved]: "DELETE",
 };
 
+export interface WithAuditOptions {
+  /** How long the transaction may run; DB_TRANSACTION_TIMEOUT_MS when unset. */
+  timeoutMs?: number;
+}
+
 /**
  * Runs `fn` in one transaction. `audit` records an entry; when `fn` returns,
  * the entries go to `core.outbox` in that same transaction, in order, so they
@@ -39,33 +44,37 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
  * (503, `isDatabaseBusy`).
  */
 export const withAudit = async <T>(
-  fn: (tx: Prisma.TransactionClient, audit: Audit) => Promise<T>
+  fn: (tx: Prisma.TransactionClient, audit: Audit) => Promise<T>,
+  options: WithAuditOptions = {}
 ): Promise<T> => {
   const entries: AuditEntry[] = [];
-  return prisma.$transaction(async (tx) => {
-    // SET takes no parameters; the value is an integer from the env schema.
-    await tx.$executeRawUnsafe(
-      `SET LOCAL lock_timeout = ${env.DB_LOCK_TIMEOUT_MS}`
-    );
-    const result = await runInTransactionScope(() =>
-      fn(tx, (entry) => {
-        entries.push(entry);
-      })
-    );
-    if (entries.length > 0) {
-      const { outbox } = getTereo();
-      const pending = collector();
-      for (const entry of entries) {
-        await outbox.audit(pending.client, {
-          userId: entry.actorId,
-          action: VERB[entry.action],
-          entityType: entry.resourceType,
-          entityId: entry.resourceId,
-          metadata: { ...entry.metadata, event: entry.action },
-        });
+  return prisma.$transaction(
+    async (tx) => {
+      // SET takes no parameters; the value is an integer from the env schema.
+      await tx.$executeRawUnsafe(
+        `SET LOCAL lock_timeout = ${env.DB_LOCK_TIMEOUT_MS}`
+      );
+      const result = await runInTransactionScope(() =>
+        fn(tx, (entry) => {
+          entries.push(entry);
+        })
+      );
+      if (entries.length > 0) {
+        const { outbox } = getTereo();
+        const pending = collector();
+        for (const entry of entries) {
+          await outbox.audit(pending.client, {
+            userId: entry.actorId,
+            action: VERB[entry.action],
+            entityType: entry.resourceType,
+            entityId: entry.resourceId,
+            metadata: { ...entry.metadata, event: entry.action },
+          });
+        }
+        await pending.flush(tx);
       }
-      await pending.flush(tx);
-    }
-    return result;
-  });
+      return result;
+    },
+    options.timeoutMs === undefined ? undefined : { timeout: options.timeoutMs }
+  );
 };

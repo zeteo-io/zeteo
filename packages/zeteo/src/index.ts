@@ -4,7 +4,7 @@ import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
-import { closeAllSourcePools } from "./sources/pools.js";
+import { stopSourcePools } from "./sources/pools.js";
 import { createServer, type Server } from "http";
 import { logger } from "./utils/logger.js";
 import env from "./env.js";
@@ -20,7 +20,15 @@ export interface ServerInstance {
   isRunning: () => boolean;
 }
 
-export function createAppServer(port: number = env.PORT): ServerInstance {
+export interface AppServerOptions {
+  /** Runs the scheduled catalogue refresh; off for the test suite's shared server, whose sweeps would touch other tests' sources. */
+  refreshJob?: boolean;
+}
+
+export function createAppServer(
+  port: number = env.PORT,
+  { refreshJob = true }: AppServerOptions = {}
+): ServerInstance {
   let server: Server | null = null;
   let running = false;
   let stopping: Promise<void> | null = null;
@@ -50,7 +58,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
           resolve();
         });
       });
-      stopRefreshJob = startRefreshJob();
+      if (refreshJob) stopRefreshJob = startRefreshJob();
     },
 
     stop: () => {
@@ -84,7 +92,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
           await stopRefreshJob?.();
           stopRefreshJob = null;
         });
-        await step("source pools", closeAllSourcePools);
+        await step("source pools", stopSourcePools);
         await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);

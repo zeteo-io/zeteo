@@ -1,16 +1,11 @@
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { encodeCursor, parseCursor } from "../../../utils/cursor.js";
 import { createSource as create } from "../../../sources/service.js";
-import { refreshSource } from "../../../catalog/refresh.js";
+import { refreshAfterChange } from "../../../catalog/refresh.js";
 import { callerOf } from "../../../middleware/auth.js";
 import { sourceView } from "../../../views/source.js";
-import { logger } from "../../../utils/logger.js";
 import type { Request, Response } from "express";
 import { db } from "../../../utils/db/index.js";
-import {
-  HostNotAllowedError,
-  SourceUnreachableError,
-} from "../../../utils/errors.js";
 import {
   CreateSourceSchema,
   ListSourcesQuerySchema,
@@ -43,18 +38,7 @@ export const createSource = async (req: Request, res: Response) => {
   const body = validateBody(CreateSourceSchema, req);
   const actorId = callerOf(req).userId;
   const created = await create(body, actorId);
-  // The source exists whether or not its first read works; the status says which.
-  try {
-    await refreshSource(created.id, actorId);
-  } catch (err) {
-    const expected =
-      err instanceof SourceUnreachableError ||
-      err instanceof HostNotAllowedError;
-    logger[expected ? "warn" : "error"](
-      { err, source_id: created.id },
-      "first catalogue refresh failed"
-    );
-  }
+  await refreshAfterChange(created.id, actorId);
   const row = (await db.sources.findById(created.id)) ?? created;
   res.status(201).json(sourceView(row));
 };

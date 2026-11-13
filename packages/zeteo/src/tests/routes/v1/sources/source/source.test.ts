@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag platform
 import { postgresAdapter } from "../../../../../adapters/postgres/index.js";
+import { SourceUnreachableError } from "../../../../../utils/errors.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { sealSettings } from "../../../../../utils/crypto/envelope.js";
 import { startV1Routes } from "../../../../support/v1App.js";
@@ -96,7 +97,10 @@ describe("/v1/sources/:sourceId", () => {
     expect(JSON.stringify(allowed.body)).not.toContain("rw-test-password");
     const entries = await auditRows(source.id);
     expect(JSON.stringify(entries)).not.toContain("rw-test-password");
-    expect(entries.at(-1)?.payload.metadata.findings).toContain(
+    const updated = entries.filter(
+      (r) => r.payload.metadata.event === "zeteo.source.updated"
+    );
+    expect(updated.at(-1)?.payload.metadata.findings).toContain(
       "can_write_tables"
     );
   });
@@ -132,15 +136,80 @@ describe("/v1/sources/:sourceId", () => {
     expect(entries.at(-1)?.payload.metadata).not.toHaveProperty("settings");
   });
 
-  it("PATCH settings closes the source's open pool", async () => {
+  it("PATCH schemas refreshes the catalogue: tables of a schema taken off the list are missing", async () => {
+    const res = await call(
+      "POST",
+      "",
+      sourceBody(sourceSettings("ro"), { schemas: ["sales", "hr"] })
+    );
+    expect(res.status).toBe(201);
+    created.push(res.body.id);
+    const tables = await call("GET", `/${res.body.id}/tables`);
+    expect(tables.body.data).toHaveLength(5);
+
+    const patched = await call("PATCH", `/${res.body.id}`, { schemas: ["hr"] });
+    expect(patched.status).toBe(200);
+    expect(patched.body.schemas).toEqual(["hr"]);
+    expect((await call("GET", `/${res.body.id}/tables`)).body.data).toEqual([]);
+    const all = await call(
+      "GET",
+      `/${res.body.id}/tables?include_missing=true`
+    );
+    expect(all.body.data).toHaveLength(5);
+    for (const table of all.body.data) {
+      expect(table.missing_since).toEqual(expect.any(String));
+    }
+  });
+
+  it("PATCH settings refreshes the catalogue, so a source fixed by new settings is active again", async () => {
     const source = await create();
-    await withSourceConnection(source.id, (c) => c.checkLogin());
-    expect(isSourcePoolOpen(source.id)).toBe(true);
+    await prisma.source.update({
+      where: { id: source.id },
+      data: { status: "unreachable" },
+    });
     const res = await call("PATCH", `/${source.id}`, {
       settings: sourceSettings("ro"),
     });
     expect(res.status).toBe(200);
-    expect(isSourcePoolOpen(source.id)).toBe(false);
+    expect(res.body.status).toBe("active");
+  });
+
+  it("PATCH answers 200 with the change when the refresh after it fails", async () => {
+    const source = await create();
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    let calls = 0;
+    // The first connection is the login check's; the second, the refresh's.
+    const spy = vi
+      .spyOn(postgresAdapter, "connect")
+      .mockImplementation(async (...args) => {
+        calls++;
+        if (calls === 2) throw new SourceUnreachableError();
+        return connect(...args);
+      });
+    try {
+      const res = await call("PATCH", `/${source.id}`, {
+        settings: sourceSettings("ro"),
+        name: "Still saved",
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        name: "Still saved",
+        status: "unreachable",
+      });
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("PATCH settings closes the source's open pool", async () => {
+    const source = await create();
+    const old = await withSourceConnection(source.id, async (c) => c);
+    const close = vi.spyOn(old, "close");
+    const res = await call("PATCH", `/${source.id}`, {
+      settings: sourceSettings("ro"),
+    });
+    expect(res.status).toBe(200);
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("answers 400 to allow_writable_login without settings, and to slug or type", async () => {

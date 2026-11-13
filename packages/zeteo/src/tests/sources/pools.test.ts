@@ -2,6 +2,7 @@
 // @module-tag platform
 import { postgresAdapter } from "../../adapters/postgres/index.js";
 import { startV1App, startV1Routes } from "../support/v1App.js";
+import { SourceUnreachableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { fetchJson } from "../support/http.js";
@@ -11,6 +12,7 @@ import {
   closeAllSourcePools,
   closeSourcePool,
   isSourcePoolOpen,
+  POOL_IDLE_MS,
   withSourceConnection,
 } from "../../sources/pools.js";
 import {
@@ -116,16 +118,151 @@ describe("withSourceConnection", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
+  /** Spies on `connect`, and on `close` of every connection it opens, recording the order of events. */
+  const watchConnections = () => {
+    const events: string[] = [];
+    const closes: Array<ReturnType<typeof vi.fn>> = [];
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    const spy = vi
+      .spyOn(postgresAdapter, "connect")
+      .mockImplementation(async (...args) => {
+        const conn = await connect(...args);
+        const close = conn.close.bind(conn);
+        const closeSpy = vi.fn(async () => {
+          events.push("close");
+          await close();
+        });
+        conn.close = closeSpy;
+        closes.push(closeSpy);
+        return conn;
+      });
+    return { events, closes, connect: spy };
+  };
+
   it("lets a running call finish when its pool is closed, then closes it", async () => {
     const source = await newSource();
+    const { events, closes } = watchConnections();
     let closing: Promise<void> | undefined;
     const findings = await withSourceConnection(source.id, async (conn) => {
       closing = closeSourcePool(source.id);
-      return conn.checkLogin();
+      const result = await conn.checkLogin();
+      events.push("call ended");
+      return result;
     });
     await closing;
     expect(findings).toEqual([]);
     expect(isSourcePoolOpen(source.id)).toBe(false);
+    expect(closes).toHaveLength(1);
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+    expect(events).toEqual(["call ended", "close"]);
+  });
+
+  it("opens a new pool with the new settings when the row's settings changed elsewhere", async () => {
+    const source = await newSource();
+    const { closes, connect } = watchConnections();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    // Another replica changed the settings: only the row tells this one.
+    await prisma.source.update({
+      where: { id: source.id },
+      data: {
+        sealedSettings: sealSettings(sourceSettings("rw"), source.id) as object,
+      },
+    });
+    const findings = await withSourceConnection(source.id, (c) =>
+      c.checkLogin()
+    );
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect.mock.calls[1]![0]).toMatchObject({ user: "zeteo_rw" });
+    expect(findings.map((f) => f.code)).toContain("can_write_tables");
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses with source_archived, and closes the pool, when the row was archived elsewhere", async () => {
+    const source = await newSource();
+    const { closes } = watchConnections();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    await prisma.source.update({
+      where: { id: source.id },
+      data: { archivedAt: new Date() },
+    });
+    await expect(
+      withSourceConnection(source.id, (c) => c.checkLogin())
+    ).rejects.toMatchObject({ code: "source_archived" });
+    expect(isSourcePoolOpen(source.id)).toBe(false);
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+  });
+
+  it("retires the pool when the call fails with SourceUnreachableError", async () => {
+    const source = await newSource();
+    const { closes, connect } = watchConnections();
+    await expect(
+      withSourceConnection(source.id, async () => {
+        throw new SourceUnreachableError();
+      })
+    ).rejects.toBeInstanceOf(SourceUnreachableError);
+    expect(isSourcePoolOpen(source.id)).toBe(false);
+    expect(closes[0]).toHaveBeenCalledTimes(1);
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    expect(connect).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the pool when the call fails with another error", async () => {
+    const source = await newSource();
+    await expect(
+      withSourceConnection(source.id, async () => {
+        throw new Error("boom");
+      })
+    ).rejects.toThrow("boom");
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+  });
+
+  it("arms no idle timer for a pool that failed to open", async () => {
+    const source = await newSource(
+      sourceSettings("ro", { host: "192.0.2.10" })
+    );
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    await expect(
+      withSourceConnection(source.id, (c) => c.checkLogin())
+    ).rejects.toMatchObject({ code: "host_not_allowed" });
+    expect(timers.mock.calls.map(([, ms]) => ms)).not.toContain(POOL_IDLE_MS);
+  });
+
+  it("closeAllSourcePools waits for a closed pool whose call is still running", async () => {
+    const source = await newSource();
+    const { events } = watchConnections();
+    let finish!: () => void;
+    let started!: () => void;
+    const hold = new Promise<void>((resolve) => (finish = resolve));
+    const running = new Promise<void>((resolve) => (started = resolve));
+    const call = withSourceConnection(source.id, async (conn) => {
+      started();
+      await hold;
+      await conn.checkLogin();
+      events.push("call ended");
+    });
+    await running;
+    await closeSourcePool(source.id);
+    let allClosed = false;
+    const closingAll = closeAllSourcePools().then(() => {
+      allClosed = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(allClosed).toBe(false);
+    finish();
+    await call;
+    await closingAll;
+    expect(events).toEqual(["call ended", "close"]);
+  });
+
+  it("refuses to open a pool once shutdown has begun", async () => {
+    vi.resetModules();
+    const fresh = await import("../../sources/pools.js");
+    const source = await newSource();
+    await fresh.stopSourcePools();
+    await expect(
+      fresh.withSourceConnection(source.id, (c) => c.checkLogin())
+    ).rejects.toMatchObject({ code: "temporarily_unavailable" });
+    expect(fresh.isSourcePoolOpen(source.id)).toBe(false);
   });
 
   it("closes a pool idle for five minutes", async () => {

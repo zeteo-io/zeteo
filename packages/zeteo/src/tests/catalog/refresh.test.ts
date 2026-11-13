@@ -9,6 +9,7 @@ import { SourceUnreachableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { lockSourceCatalog } from "../../catalog/lock.js";
 import { refreshSource } from "../../catalog/refresh.js";
+import { updateSource } from "../../sources/service.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import {
@@ -636,6 +637,47 @@ describe("refreshSource", () => {
       await slow;
 
       expect((await columnRow("customers", "phone")).missingSince).toBeNull();
+    });
+
+    it("reads again when the source's schemas changed during the read", async () => {
+      await refreshSource(sourceId, ACTOR);
+      await closeSourcePool(sourceId);
+
+      let release!: () => void;
+      let readDone!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const read = new Promise<void>((resolve) => (readDone = resolve));
+      const connect = postgresAdapter.connect.bind(postgresAdapter);
+      let first = true;
+      vi.spyOn(postgresAdapter, "connect").mockImplementation(
+        async (...args) => {
+          const conn = await connect(...args);
+          const readSchema = conn.readSchema.bind(conn);
+          conn.readSchema = async (schemas) => {
+            const snapshot = await readSchema(schemas);
+            if (first) {
+              first = false;
+              readDone();
+              await held;
+            }
+            return snapshot;
+          };
+          return conn;
+        }
+      );
+
+      const slow = refreshSource(sourceId, ACTOR);
+      await read;
+      // The read above saw `sales`; the list no longer holds it.
+      await updateSource(sourceId, { schemas: ["hr"] }, ACTOR);
+      release();
+      await slow;
+
+      const tables = await prisma.sourceTable.findMany({ where: { sourceId } });
+      expect(tables).toHaveLength(5);
+      for (const table of tables) {
+        expect(table.missingSince).not.toBeNull();
+      }
     });
   });
 

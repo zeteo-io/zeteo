@@ -73,9 +73,13 @@ After a create is committed, Zeteo reads the source's schema into the catalogue
 ([catalog.md](catalog.md)). If that read fails the source stays, `status` is `unreachable`, and the
 answer is still `201`.
 
-A `PATCH` without `settings` never contacts the source; `allow_writable_login` is accepted only with
-`settings`, and an override has to be sent again on each settings change. A settings change closes
-the source's open pool. Any change to an archived source is `409 source_archived`.
+A `PATCH` with neither `settings` nor `schemas` never contacts the source; `allow_writable_login`
+is accepted only with `settings`, and an override has to be sent again on each settings change. A
+settings change closes the source's open pool. After a `PATCH` that carries `settings` or `schemas`
+is committed, Zeteo refreshes the catalogue, so it describes the new target at once (and a source
+fixed by new settings is `active` again). If that refresh fails the change stands, `status` is
+`unreachable`, and the answer is still `200`. Any change to an archived source is
+`409 source_archived`.
 
 `POST /v1/sources/:sourceId/test` runs steps 2 to 4 against the stored settings on a fresh
 connection and returns the findings. It changes nothing.
@@ -129,9 +133,18 @@ controls that name's DNS. Prefer address ranges where that matters.**
 
 ## Connection pools
 
-Each source has one pool (5 connections, connect timeout 5 s, query timeout 15 s), opened on first
-use and closed after 5 idle minutes, on archive, on a settings change and on shutdown. Concurrent
-first uses open one pool. A call running when its pool is closed finishes first.
+Each source has one pool per process (5 connections, connect timeout 5 s, query timeout 15 s),
+opened on first use and closed after 5 idle minutes, on archive, on a settings change and on
+shutdown. Concurrent first uses open one pool. A call running when its pool is closed finishes
+first.
+
+Every use reads the source's row (one indexed read), so a change made through another replica
+reaches this one at its next use: a pool opened with other sealed settings than the row now holds
+is closed and a new one opened, and an archived source is refused with `409 source_archived`. A
+use that fails with `source_unreachable` closes the pool, so the next use resolves the host and
+connects again (after a database failover to a new address, for example). Once shutdown begins,
+no new use is accepted (`503 temporarily_unavailable`), and shutdown waits for the calls still
+running.
 
 ## Audit
 

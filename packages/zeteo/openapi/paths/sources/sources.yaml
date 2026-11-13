@@ -36,10 +36,11 @@
       Registers a database. Before anything is stored, Zeteo validates `settings` against the
       type's schema, checks the host against the deploy's network rules, connects with the login
       and inspects its rights. A login that holds rights a read-only login would not is refused
-      with `422 writable_login` (the body lists the finding codes) unless `allow_writable_login`
+      with `422 writable_login` (the body lists the findings) unless `allow_writable_login`
       is true, in which case the source is stored with `writable_login_allowed: true` and the audit
       entry records the finding codes. Nothing is stored when any step fails. An audit entry
-      `zeteo.source.created` is written with the slug and type, never the settings.
+      `zeteo.source.created` is written with the slug, the type and the settings without
+      `password` and `ca`.
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 

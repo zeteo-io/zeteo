@@ -115,7 +115,9 @@ export async function setup() {
   await redis.quit();
 
   const { createAppServer } = await import("../../index.js");
-  server = createAppServer(Number(process.env.PORT ?? 4201));
+  server = createAppServer(Number(process.env.PORT ?? 4201), {
+    refreshJob: false,
+  });
   await server.start();
 }
 

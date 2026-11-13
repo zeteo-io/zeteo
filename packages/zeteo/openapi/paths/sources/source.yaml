@@ -27,12 +27,15 @@
     tags: [Sources]
     summary: Change a source
     description: |
-      Changes any of the create fields except `slug` and `type`. A request without `settings`
-      never contacts the source. With `settings`, the new object replaces the old one whole and
-      goes through the same checks as a create (the login check included; send
-      `allow_writable_login: true` again to keep an override); the source's open connections are
-      closed so the next use connects with the new settings. An audit entry
-      `zeteo.source.updated` lists the names of the fields changed, never their values.
+      Changes any of the create fields except `slug` and `type`. A request with neither
+      `settings` nor `schemas` never contacts the source. With `settings`, the new object replaces
+      the old one whole and goes through the same checks as a create (the login check included;
+      send `allow_writable_login: true` again to keep an override); the source's open connections
+      are closed so the next use connects with the new settings. After a change to `settings` or
+      `schemas` is committed, the catalogue is refreshed; if that refresh fails, the change stands,
+      `status` is `unreachable` and the answer is still `200`. An audit entry
+      `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
+      the new settings without `password` and `ca`.
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 

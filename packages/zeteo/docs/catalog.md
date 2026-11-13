@@ -23,12 +23,16 @@ change to an archived source is `409 source_archived`; reads still work.
 A refresh reads the source's tables, views, columns and foreign keys in its `schemas` (what the
 login can select) and writes them to the catalogue in one transaction. It runs
 
-- after `POST /v1/sources` (a failure there leaves the source with `status: unreachable`),
+- after `POST /v1/sources`, and after a `PATCH` that changes `settings` or `schemas` (a failure
+  there leaves the source with `status: unreachable`; the create or change stands),
 - on `POST /v1/sources/:sourceId/refresh`,
 - from a job that checks every hour and refreshes each unarchived source not refreshed in the last
   24 hours (including sources never refreshed and ones marked `unreachable`), one at a time, under
   a Redis lock `zeteo:refresh:<sourceId>` with a 15 minute expiry so replicas do not repeat the
-  work. A failing source is logged and the job goes on. The first check comes an hour after start.
+  work. Having taken the lock, the job reads the source again and skips it if another replica
+  refreshed it, or it was archived, since the list was read. A failing source is logged and the
+  job goes on. The first check comes 30 to 60 seconds after start (a random delay, so replicas
+  started together spread out), then one every hour.
 
 The summary is `{ tables: { added, missing, restored }, columns: { added, changed, missing,
 restored }, relations: { added, missing, restored } }`. `missing` counts things newly marked
@@ -58,10 +62,13 @@ Column types are normalised to `text`, `number`, `boolean`, `date`, `timestamp`,
 The write takes `pg_advisory_xact_lock` keyed on the source, so refreshes of one source apply one
 after another, and a second never fails with a unique violation. The snapshot is read before the
 lock (no database connection is held while the source answers). A snapshot read before another
-refresh finished could be the older of the two, so after taking the lock the write checks that the
-source's `last_refreshed_at` is still what it was before the read; if not, it reads again. The
-catalogue therefore ends matching the newest read. A wait for the lock longer than
-`DB_LOCK_TIMEOUT_MS` answers `503 temporarily_unavailable`.
+refresh finished could be the older of the two, and one read before the source's `settings` or
+`schemas` changed describes the old target, so after taking the lock the write checks that the
+source's `last_refreshed_at` and `updated_at` are still what they were before the read; if not, it
+reads again (at most five reads; the fifth is applied). The catalogue therefore ends matching the
+newest read of the current settings. A wait for the lock longer than `DB_LOCK_TIMEOUT_MS` answers
+`503 temporarily_unavailable`. The write may run for up to 120 seconds, longer than an ordinary
+change (`DB_TRANSACTION_TIMEOUT_MS`), so a source with thousands of tables can be refreshed.
 
 ## Descriptions
 
