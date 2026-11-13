@@ -5,6 +5,10 @@ import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
 import {
   AUDIT_EVENTS,
+  DATA_READ,
+  GRANTS_READ,
+  GRANTS_WRITE,
+  RUNS_READ,
   SERVICE_SLUG,
   SOURCES_READ,
   SOURCES_WRITE,
@@ -27,19 +31,29 @@ describe("buildTereoDocument", () => {
   });
 
   it("asks for the core role that writes audit entries", () => {
-    expect(service.access?.roles).toEqual(["audit_writer"]);
+    expect(service.access?.roles).toEqual(["audit_writer", "user_resolver"]);
   });
 
-  it("declares exactly zeteo.sources.read and zeteo.sources.write", () => {
+  it("declares exactly the six zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
-    expect(service.permissions!.map((p) => p.name).sort()).toEqual([
-      SOURCES_READ,
-      SOURCES_WRITE,
-    ]);
+    expect(GRANTS_READ).toBe("zeteo.grants.read");
+    expect(GRANTS_WRITE).toBe("zeteo.grants.write");
+    expect(DATA_READ).toBe("zeteo.data.read");
+    expect(RUNS_READ).toBe("zeteo.runs.read");
+    expect(service.permissions!.map((p) => p.name).sort()).toEqual(
+      [
+        SOURCES_READ,
+        SOURCES_WRITE,
+        GRANTS_READ,
+        GRANTS_WRITE,
+        DATA_READ,
+        RUNS_READ,
+      ].sort()
+    );
   });
 
-  it("makes neither permission assignable inside an organization: sources are not organization-scoped", () => {
+  it("makes no permission assignable inside an organization: sources are not organization-scoped", () => {
     for (const permission of service.permissions!) {
       expect(permission.orgAssignable).toBe(false);
     }
@@ -52,17 +66,41 @@ describe("buildTereoDocument", () => {
     }
   });
 
-  it("declares a system role that holds both permissions", () => {
-    expect(service.systemRoles).toEqual([
-      expect.objectContaining({
-        name: "zeteo_admin",
-        permissions: [SOURCES_READ, SOURCES_WRITE],
-      }),
-    ]);
+  it("declares zeteo_admin with all six permissions and zeteo_user with data read", () => {
+    const roles = Object.fromEntries(
+      service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
+    );
+    expect(Object.keys(roles).sort()).toEqual(["zeteo_admin", "zeteo_user"]);
+    expect(roles.zeteo_admin).toEqual(
+      [
+        SOURCES_READ,
+        SOURCES_WRITE,
+        GRANTS_READ,
+        GRANTS_WRITE,
+        DATA_READ,
+        RUNS_READ,
+      ].sort()
+    );
+    expect(roles.zeteo_user).toEqual([DATA_READ]);
+  });
+
+  it("gates grant events on grants read and query runs on runs read", () => {
+    const read = Object.fromEntries(
+      service.eventTypes!.map((e) => [e.eventType, e.readPermission])
+    );
+    expect(read[AUDIT_EVENTS.grantCreated]).toBe(GRANTS_READ);
+    expect(read[AUDIT_EVENTS.grantUpdated]).toBe(GRANTS_READ);
+    expect(read[AUDIT_EVENTS.grantRemoved]).toBe(GRANTS_READ);
+    expect(read[AUDIT_EVENTS.queryRun]).toBe(RUNS_READ);
+    expect(read[AUDIT_EVENTS.sourceCreated]).toBe(SOURCES_READ);
   });
 
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
+      "zeteo.grant.created",
+      "zeteo.grant.removed",
+      "zeteo.grant.updated",
+      "zeteo.query.run",
       "zeteo.relation.declared",
       "zeteo.relation.removed",
       "zeteo.source.archived",

@@ -6,7 +6,8 @@
     "secretFrom": "TEREO_CLIENT_SECRET",
     "access": {
       "roles": [
-        "audit_writer"
+        "audit_writer",
+        "user_resolver"
       ]
     },
     "permissions": [
@@ -21,16 +22,52 @@
         "displayName": "Manage sources",
         "description": "Register, change, archive and refresh sources, and declare relations; also grants Read sources",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.grants.read",
+        "displayName": "Read grants",
+        "description": "List and read who may query which tables and columns",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.grants.write",
+        "displayName": "Manage grants",
+        "description": "Create, change and remove grants; also grants Read grants",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.data.read",
+        "displayName": "Query data",
+        "description": "Run queries over the tables and columns one is granted",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.runs.read",
+        "displayName": "Read query runs",
+        "description": "List the record of queries that were run",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
       {
         "name": "zeteo_admin",
         "displayName": "Zeteo administrator",
-        "description": "Manages sources",
+        "description": "Manages sources, grants and the record of query runs",
         "permissions": [
           "zeteo.sources.read",
-          "zeteo.sources.write"
+          "zeteo.sources.write",
+          "zeteo.grants.read",
+          "zeteo.grants.write",
+          "zeteo.data.read",
+          "zeteo.runs.read"
+        ]
+      },
+      {
+        "name": "zeteo_user",
+        "displayName": "Zeteo user",
+        "description": "Queries the data they are granted",
+        "permissions": [
+          "zeteo.data.read"
         ]
       }
     ],
@@ -64,6 +101,26 @@
         "eventType": "zeteo.relation.removed",
         "description": "A declared relation was removed",
         "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.grant.created",
+        "description": "A grant to a table was created",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.grant.updated",
+        "description": "A grant's columns were changed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.grant.removed",
+        "description": "A grant was removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.query.run",
+        "description": "A query was run, refused or failed",
+        "readPermission": "zeteo.runs.read"
       }
     ]
   }

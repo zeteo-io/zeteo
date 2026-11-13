@@ -29,6 +29,10 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.sourceRefreshed]: "UPDATE",
   [AUDIT_EVENTS.relationDeclared]: "CREATE",
   [AUDIT_EVENTS.relationRemoved]: "DELETE",
+  [AUDIT_EVENTS.grantCreated]: "CREATE",
+  [AUDIT_EVENTS.grantUpdated]: "UPDATE",
+  [AUDIT_EVENTS.grantRemoved]: "DELETE",
+  [AUDIT_EVENTS.queryRun]: "CREATE",
 };
 
 export interface WithAuditOptions {

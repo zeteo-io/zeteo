@@ -113,6 +113,7 @@ model Source {
 
   tables    SourceTable[]
   relations Relation[]
+  runs      QueryRun[]
 
   @@map("sources")
   @@schema("zeteo")
@@ -132,6 +133,7 @@ model SourceTable {
   columns       SourceColumn[]
   relationsFrom Relation[]     @relation("RelationFrom")
   relationsTo   Relation[]     @relation("RelationTo")
+  grants        Grant[]
 
   @@unique([sourceId, schemaName, name])
   @@map("source_tables")
@@ -150,7 +152,8 @@ model SourceColumn {
   description  String?
   missingSince DateTime?  @map("missing_since") @db.Timestamp(3)
 
-  table SourceTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  table  SourceTable    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  grants GrantColumn[]
 
   @@unique([tableId, name])
   @@map("source_columns")
@@ -181,5 +184,95 @@ model Relation {
   @@index([sourceId])
   @@index([toTableId])
   @@map("relations")
+  @@schema("zeteo")
+}
+
+// ===========================================================================
+// zeteo: grants and query runs
+// ===========================================================================
+
+enum PrincipalType {
+  user
+  group
+
+  @@map("principal_type")
+  @@schema("zeteo")
+}
+
+enum EntryPoint {
+  api
+  mcp
+  export
+
+  @@map("entry_point")
+  @@schema("zeteo")
+}
+
+enum RunOutcome {
+  ok
+  refused
+  failed
+  timeout
+
+  @@map("run_outcome")
+  @@schema("zeteo")
+}
+
+// What a user or group may query of one table. The principal is a tereo id, so
+// it has no foreign key. A table or column with a grant cannot be deleted.
+// CHECK constraint in the migration: row_filter IS NULL (reserved).
+model Grant {
+  id            String        @id @default(uuid(7)) @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  tableId       String        @map("table_id") @db.Uuid
+  allColumns    Boolean       @map("all_columns")
+  rowFilter     Json?         @map("row_filter")
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  table   SourceTable   @relation(fields: [tableId], references: [id], onDelete: Restrict)
+  columns GrantColumn[]
+
+  @@unique([principalType, principalId, tableId])
+  @@index([tableId])
+  @@map("grants")
+  @@schema("zeteo")
+}
+
+// The service checks that the column belongs to the grant's table.
+model GrantColumn {
+  grantId  String @map("grant_id") @db.Uuid
+  columnId String @map("column_id") @db.Uuid
+
+  grant  Grant        @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  column SourceColumn @relation(fields: [columnId], references: [id], onDelete: Restrict)
+
+  @@id([grantId, columnId])
+  @@map("grant_columns")
+  @@schema("zeteo")
+}
+
+// Every query that passed the shape check. source_id is null when the source
+// did not resolve.
+model QueryRun {
+  id         String     @id @default(uuid(7)) @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  sourceId   String?    @map("source_id") @db.Uuid
+  entryPoint EntryPoint @map("entry_point")
+  query      Json
+  durationMs Int        @map("duration_ms")
+  rowCount   Int?       @map("row_count")
+  outcome    RunOutcome
+  errorCode  String?    @map("error_code")
+  truncated  Boolean    @default(false)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamp(3)
+
+  source Source? @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+
+  @@index([userId, id])
+  @@index([sourceId, id])
+  @@map("query_runs")
   @@schema("zeteo")
 }

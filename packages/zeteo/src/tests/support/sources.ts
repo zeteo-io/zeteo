@@ -36,7 +36,7 @@ export const auditRows = (id: string) =>
     WHERE payload->>'entityId' = ${id} ORDER BY created_at, id`;
 
 /**
- * Deletes the sources and every audit row about them or their relations (a
+ * Deletes the sources, their grants and runs, and every audit row about them or their relations (a
  * relation's entries name the source in `metadata.source_id`).
  */
 export const removeSources = async (ids: string[]) => {
@@ -46,6 +46,11 @@ export const removeSources = async (ids: string[]) => {
       WHERE payload->>'entityId' = ${id}
          OR payload->'metadata'->>'source_id' = ${id}`;
   }
+  // Grants and runs restrict deleting the tables and the sources they name.
+  await prisma.queryRun.deleteMany({ where: { sourceId: { in: ids } } });
+  await prisma.grant.deleteMany({
+    where: { table: { sourceId: { in: ids } } },
+  });
   await prisma.source.deleteMany({ where: { id: { in: ids } } });
 };
 
