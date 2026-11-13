@@ -20,29 +20,6 @@ export function isForeignKeyConstraintError(err: unknown): boolean {
 }
 
 /**
- * Re-throw helper for hard-delete endpoints: if `err` is a Prisma `P2003`
- * (the row is still referenced by others under a Restrict relation) it
- * becomes a `ConflictError` (HTTP 409); anything else is rethrown unchanged.
- * Lets the DB relation be the source of truth for "in use".
- *
- * @example
- * try {
- *   await prisma.sourceTable.delete({ where: { id } });
- * } catch (err) {
- *   rethrowRestrictedAsConflict(err, "The table is still referenced");
- * }
- */
-export function rethrowRestrictedAsConflict(
-  err: unknown,
-  message: string
-): never {
-  if (isForeignKeyConstraintError(err)) {
-    throw new ConflictError(message);
-  }
-  throw err;
-}
-
-/**
  * True if `err` is a unique-constraint violation: `P2002`, or SQLSTATE `23505`
  * from the driver adapter in any of the shapes above.
  */
@@ -66,48 +43,8 @@ export async function mapUniqueViolation<T>(
 }
 
 /**
- * The columns of the unique constraint `err` violated, or null when it is not
- * a unique violation. Through the pg driver adapter, Prisma's `P2002` names
- * them in `meta.driverAdapterError.cause.constraint.fields`, not `meta.target`.
- * Since Prisma 7.10 the adapter names only the index; its columns come back as
- * one name, the index's minus the table prefix and `_key` suffix
- * (`sources_slug_key` → `slug`), since
- * column names hold underscores too.
- */
-export function uniqueViolationFields(err: unknown): string[] | null {
-  if (typeof err !== "object" || err === null) return null;
-  const e = err as {
-    code?: unknown;
-    meta?: {
-      target?: unknown;
-      driverAdapterError?: { cause?: AdapterCause };
-    };
-    cause?: AdapterCause;
-  };
-  const cause = e.meta?.driverAdapterError?.cause ?? e.cause;
-  const isUnique =
-    e.code === "P2002" ||
-    cause?.kind === "UniqueConstraintViolation" ||
-    cause?.originalCode === "23505";
-  if (!isUnique) return null;
-  const fields = cause?.constraint?.fields ?? e.meta?.target;
-  if (Array.isArray(fields)) return fields.map(String);
-  const index = cause?.constraint?.index;
-  if (typeof index === "string") {
-    const prefix = typeof cause?.table === "string" ? `${cause.table}_` : "";
-    const columns = index.startsWith(prefix)
-      ? index.slice(prefix.length)
-      : index;
-    return [columns.replace(/_key$/, "")];
-  }
-  if (typeof fields === "string") return [fields];
-  return [];
-}
-
-/**
  * True if `err` is a unique violation of `table`'s constraint. The adapter names the violated index and table
- * (`cause.constraint.index`, `cause.table`); `uniqueViolationFields` drops both, and every table's primary key
- * comes out as `pkey`. A `P2002` carrying only `meta.target` is matched by `columns`.
+ * (`cause.constraint.index`, `cause.table`). A `P2002` carrying only `meta.target` is matched by `columns`.
  */
 export function isUniqueViolationOn(
   err: unknown,

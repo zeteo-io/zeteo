@@ -129,6 +129,8 @@ export const replaceGrantColumns = async (
   actorId: string
 ): Promise<GrantDetail> =>
   withAudit(async (tx, audit) => {
+    // Concurrent replaces take turns: each deletes and recreates the columns.
+    await tx.$queryRaw`SELECT "id" FROM "zeteo"."grants" WHERE "id" = ${id}::uuid FOR UPDATE`;
     const grant = await tx.grant.findUnique({
       where: { id },
       include: { table: { include: { source: true } } },

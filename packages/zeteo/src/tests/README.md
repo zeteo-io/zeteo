@@ -77,6 +77,10 @@ adapter's tests also need SQL Server: `docker compose up -d mssql` from the repo
 port 1463; `TEST_MSSQL_URL` points elsewhere). `globalSetup` recreates its `zeteo_fixture` database
 from `fixtures/mssql/sales.sql` and fails at once, saying how to start it, when it is not up.
 
+The query suites run once per engine through `describeEachEngine` (`support/engines.ts`), each
+`describe` named `<name> (postgres)` or `<name> (azure-sql)`. One engine's part:
+`npx vitest run --project int -t "(azure-sql)"`.
+
 ## Tags
 
 Declared in `setup/tags.ts`. File-level tags go at the top of the file, one per line (several on one

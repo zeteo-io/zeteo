@@ -1,5 +1,5 @@
 import { loadVisibleCatalog } from "../../../grants/visibleCatalog.js";
-import { visibleCatalogView } from "../../../views/visibleCatalog.js";
+import { visibleCatalogViews } from "../../../views/visibleCatalog.js";
 import { validateQuery } from "../../../utils/validateReq.js";
 import type { SourceType } from "../../../adapters/types.js";
 import { adapterFor } from "../../../adapters/index.js";
@@ -26,14 +26,12 @@ export const getCatalog = async (req: Request, res: Response) => {
       ? (await db.sources.listSlugs(access.sourceIds)).sort()
       : [query.source];
 
-  const sources = [];
+  const catalogs = [];
   for (const slug of slugs) {
     const catalog = await loadVisibleCatalog(slug, access);
-    if (catalog) {
-      sources.push(
-        visibleCatalogView(catalog, languageSchemaOf(catalog.source.type))
-      );
-    }
+    if (catalog) catalogs.push(catalog);
   }
-  res.status(200).json({ sources });
+  res
+    .status(200)
+    .json({ sources: visibleCatalogViews(catalogs, languageSchemaOf) });
 };

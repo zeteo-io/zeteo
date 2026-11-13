@@ -1,7 +1,9 @@
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { LIMIT_PROFILES, runLimits } from "../engine/limits.js";
+import type { SourceType } from "../adapters/types.js";
 import { queryNameOf } from "../adapters/sql/plan.js";
 import { adapterFor } from "../adapters/index.js";
+import { logger } from "../utils/logger.js";
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
@@ -15,11 +17,17 @@ export const visibleCatalogView = (
   languageSchema: unknown
 ) => {
   const { source } = catalog;
-  const tablesById = new Map(catalog.tables.map((t) => [t.id, t]));
-  const nameOf = (id: string) => {
-    const table = tablesById.get(id);
-    return table && queryNameOf(catalog.tables, table);
-  };
+  const queryNames = new Map(
+    catalog.tables.map((t) => [t.id, queryNameOf(catalog.tables, t)])
+  );
+  const relationsByTable = new Map<string, VisibleCatalog["relations"]>();
+  for (const r of [...catalog.relations].sort((a, b) =>
+    compare(a.name, b.name)
+  )) {
+    const list = relationsByTable.get(r.fromTableId) ?? [];
+    list.push(r);
+    relationsByTable.set(r.fromTableId, list);
+  }
   const tables = [...catalog.tables].sort(
     (a, b) => compare(a.schemaName, b.schemaName) || compare(a.name, b.name)
   );
@@ -37,7 +45,7 @@ export const visibleCatalogView = (
       timeout_ms: source.timeoutMs,
     },
     tables: tables.map((table) => ({
-      name: queryNameOf(catalog.tables, table),
+      name: queryNames.get(table.id),
       schema_name: table.schemaName,
       kind: table.kind,
       description: table.description,
@@ -49,14 +57,36 @@ export const visibleCatalogView = (
         description: c.description,
         missing: c.missing,
       })),
-      relations: catalog.relations
-        .filter((r) => r.fromTableId === table.id)
-        .flatMap((r) => {
-          const to = nameOf(r.toTableId);
-          return to === undefined
-            ? []
-            : [{ name: r.name, to, to_many: r.toMany, missing: r.missing }];
-        }),
+      relations: (relationsByTable.get(table.id) ?? []).flatMap((r) => {
+        const to = queryNames.get(r.toTableId);
+        return to === undefined
+          ? []
+          : [{ name: r.name, to, to_many: r.toMany, missing: r.missing }];
+      }),
     })),
   };
+};
+
+/**
+ * The views of every catalogue in the list. A source whose type has no
+ * adapter is left out and logged, so it cannot fail the whole listing.
+ */
+export const visibleCatalogViews = (
+  catalogs: VisibleCatalog[],
+  languageSchemaOf: (type: SourceType) => unknown
+) => {
+  const views = [];
+  for (const catalog of catalogs) {
+    if (!adapterFor(catalog.source.type)) {
+      logger.warn(
+        { source: catalog.source.slug, type: catalog.source.type },
+        "Skipping a source whose type has no adapter"
+      );
+      continue;
+    }
+    views.push(
+      visibleCatalogView(catalog, languageSchemaOf(catalog.source.type))
+    );
+  }
+  return views;
 };
