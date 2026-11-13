@@ -3,3 +3,8 @@ export type { ZeteoClient, ZeteoClientOptions } from "./client.js";
 export { zeteoPlugin } from "./plugin.js";
 export { ZETEO_TEMPLATE } from "./template.js";
 export type { ZeteoCredentials } from "./template.js";
+export {
+  ZeteoError,
+  QueryRefusedError,
+  ExportInterruptedError,
+} from "./errors.js";

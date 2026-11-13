@@ -1,11 +1,11 @@
 import { redisBackend } from "@dianemo/backend-redis";
 import RequestHandler from "@dianemo/core";
+import type { Transport } from "./send.js";
 import { zeteoPlugin } from "./plugin.js";
 import type { Redis } from "ioredis";
 import {
   clientNames,
   ZETEO_TEMPLATE,
-  type ClientNames,
   type ZeteoCredentials,
 } from "./template.js";
 
@@ -23,13 +23,6 @@ export type ZeteoClientOptions = {
 );
 
 type OwnHandlerOptions = Extract<ZeteoClientOptions, { redis: Redis }>;
-
-export interface Transport {
-  handler: RequestHandler;
-  names: ClientNames;
-  purgeServiceToken(): Promise<void>;
-  getRequestId: () => string | undefined;
-}
 
 export interface ZeteoClient {
   start(): Promise<void>;
