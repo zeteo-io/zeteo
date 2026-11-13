@@ -27,19 +27,27 @@ which waits out zeteo's 30 s group cache twice.
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
 
-- **Tereo's image** is `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.0`, pulled when it is not
-  present). With `TEREO_BUILD=1`, or when the image cannot be pulled, the script builds `tereo:e2e`
-  from the Tereo checkout at `TEREO_REPO` (default `../tereo`) with its `docker/Dockerfile`.
+- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.0`),
+  pulled when it is not present. If it cannot be pulled the run stops and names the image it needs.
 - **zeteo's image** is built from this checkout as `zeteo:e2e` (`ZETEO_IMAGE`; `SKIP_ZETEO_BUILD=1`
   reuses one already built).
-- **Ports**: Tereo and both zeteo replicas are published on `127.0.0.1`, on ports free when the run
-  starts; nothing else is published.
+- **Ports**: Tereo and both zeteo replicas are published on `127.0.0.1`; nothing else is. The
+  script finds three free ports, releases them, and compose binds them a moment later. Another
+  process could take one in between; that is rare, and `up` then fails loudly with the port in use
+  (run again).
 - **Secrets**: the setup token, user password, client secrets, master key, request handler key and
   the source login's password are generated for each run into `e2e/.env.run` (git-ignored); the
   databases' own passwords are fixed `*-e2e-only` constants on networks nothing outside reaches.
 - **Teardown**: at the end, pass or fail, the script removes the project's containers, networks
-  and volumes, `e2e/.env.run` and `e2e/certs/`, unless `KEEP=1`. It refuses to start while a
-  `zeteo-e2e` stack is running. It touches no other compose project.
+  and volumes, then `e2e/.env.run` and `e2e/certs/`, unless `KEEP=1`. If `down` fails, the env file
+  is kept and `e2e/run.sh down` tries again; without the env file it still uses the compose file, so
+  the named volumes are found. The script refuses to start while any container or volume of the
+  `zeteo-e2e` project exists. It touches no other compose project.
+- **Images left behind**: the run keeps the images, so the next one starts faster:
+  `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images
+  `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
+  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.0 zeteo:e2e`, adding the base images only if
+  nothing else uses them; `docker builder prune` drops the build cache of `zeteo:e2e`.
 
 Sign-in is scripted over HTTP, as Tereo's own tests do it: `GET /oauth/authorize`, the password
 step the login page posts, consent when the client asks for it, and the code exchange with PKCE

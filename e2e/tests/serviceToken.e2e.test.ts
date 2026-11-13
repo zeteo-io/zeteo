@@ -4,7 +4,7 @@ import { waitFor } from "../support/http.js";
 import { stack } from "../support/stack.js";
 import {
   serviceLogs,
-  tereoStatusesFor,
+  waitForTereoStatus,
   zeteoDbValue,
 } from "../support/compose.js";
 import {
@@ -61,7 +61,11 @@ describe("zeteo's service token", () => {
     expect(res.body.rows.map((r: unknown[]) => r[0])).toEqual(PAID_ORDER_IDS);
     // Tereo refused the revoked token on the group lookup...
     expect(
-      tereoStatusesFor(since, `/v1/admin/users/${e2e.dave.id}/groups`)
+      await waitForTereoStatus(
+        since,
+        `/v1/admin/users/${e2e.dave.id}/groups`,
+        401
+      )
     ).toContain(401);
     // ...and the SDK's own retry did not handle it: zeteo's group request did.
     const sdkRetries = serviceLogs("zeteo", since).filter(

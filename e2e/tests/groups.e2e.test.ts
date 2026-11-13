@@ -1,4 +1,4 @@
-import { serviceLogs, tereoStatusesFor } from "../support/compose.js";
+import { serviceLogs, waitForTereoStatus } from "../support/compose.js";
 import { PAID_ORDER_IDS, query } from "../support/zeteo.js";
 import { requestJson, waitFor } from "../support/http.js";
 import { describe, expect, inject, it } from "vitest";
@@ -73,9 +73,9 @@ describe("access through a Tereo group", () => {
     expect(failures).toEqual([]);
     // zeteo's service account cannot hold groups.read, so Tereo refuses to
     // describe the group (403) and the status is `unknown`, as documented.
-    expect(tereoStatusesFor(since, `/v1/admin/groups/${e2e.groupId}`)).toEqual([
-      403,
-    ]);
+    expect(
+      await waitForTereoStatus(since, `/v1/admin/groups/${e2e.groupId}`, 403)
+    ).toEqual([403]);
     expect(res.body.principal_status).toBe("unknown");
   });
 });

@@ -5,10 +5,9 @@
 #   KEEP=1 e2e/run.sh              # leave the stack running afterwards
 #   e2e/run.sh down                # tear down a stack left by KEEP=1
 #
-# Tereo comes from TEREO_IMAGE (default ghcr.io/tereo-io/tereo:0.8.0, pulled
-# when missing). TEREO_BUILD=1, or an image that cannot be pulled, builds
-# tereo:e2e from the Tereo checkout at TEREO_REPO (default ../tereo) instead.
-# zeteo's image is built from this checkout as zeteo:e2e (ZETEO_IMAGE).
+# Tereo is a released image, TEREO_IMAGE (default
+# ghcr.io/tereo-io/tereo:0.8.0), pulled when missing. zeteo's image is built
+# from this checkout as zeteo:e2e (ZETEO_IMAGE).
 #
 # Everything runs in the compose project zeteo-e2e on free host ports bound to
 # 127.0.0.1. Secrets and the source's certificates are generated for the run
@@ -25,22 +24,38 @@ COMPOSE=(docker compose -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$
 
 log() { printf '\n==> %s\n' "$*" >&2; }
 
+# Removes the project's containers, networks and volumes, then the run's
+# certificates and env file. Without the env file (deleted by hand, or a run
+# that stopped early), the compose file is still used, with placeholders for
+# the values it requires, so its named volumes are found and removed. The env
+# file is kept when `down` fails, so it can be run again.
 teardown() {
-  if [[ -f "$ENV_FILE" ]]; then
-    "${COMPOSE[@]}" down --volumes --remove-orphans --timeout 5 >&2 || true
-  else
-    docker compose -p "$PROJECT" down --volumes --remove-orphans --timeout 5 >&2 || true
+  local env_file="$ENV_FILE" placeholder=""
+  if [[ ! -f "$ENV_FILE" ]]; then
+    placeholder="$(mktemp)"
+    grep -o '\${[A-Z0-9_]*:?}' "$E2E/docker-compose.yml" | sort -u |
+      sed -E 's/^\$\{([A-Z0-9_]+):\?\}$/\1=1/' >"$placeholder"
+    env_file="$placeholder"
+  fi
+  local ok=0
+  docker compose -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$env_file" \
+    down --volumes --remove-orphans --timeout 5 >&2 || ok=$?
+  [[ -n "$placeholder" ]] && rm -f "$placeholder"
+  if [[ $ok -ne 0 ]]; then
+    echo "Tearing down $PROJECT failed; e2e/run.sh down tries again" >&2
+    return $ok
   fi
   rm -rf "$CERTS" "$ENV_FILE"
 }
 
 if [[ "${1:-}" == "down" ]]; then
   teardown
-  exit 0
+  exit $?
 fi
 
-if docker compose -p "$PROJECT" ps -q 2>/dev/null | grep -q .; then
-  echo "A $PROJECT stack is already running; tear it down with: e2e/run.sh down" >&2
+if docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" | grep -q . ||
+  docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" | grep -q .; then
+  echo "Containers or volumes of $PROJECT exist from an earlier run; remove them with: e2e/run.sh down" >&2
   exit 1
 fi
 
@@ -52,19 +67,12 @@ STARTED=$SECONDS
 
 # --- Images --------------------------------------------------------------
 TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.0}"
-TEREO_REPO="${TEREO_REPO:-$ROOT/../tereo}"
-build_tereo() {
-  log "Building tereo:e2e from $TEREO_REPO"
-  docker build -f "$TEREO_REPO/docker/Dockerfile" -t tereo:e2e "$TEREO_REPO" >&2
-  TEREO_IMAGE=tereo:e2e
-}
-if [[ "${TEREO_BUILD:-}" == "1" ]]; then
-  build_tereo
-elif ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
+if ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
   log "Pulling $TEREO_IMAGE"
   if ! docker pull "$TEREO_IMAGE" >&2; then
-    log "$TEREO_IMAGE could not be pulled"
-    build_tereo
+    echo "The run needs the Tereo image $TEREO_IMAGE, which could not be pulled." >&2
+    echo "Check the tag and your access to its registry, or set TEREO_IMAGE to a released image you have." >&2
+    exit 1
   fi
 fi
 log "Tereo image: $TEREO_IMAGE"
@@ -148,7 +156,9 @@ export E2E_TEREO_URL="http://127.0.0.1:$TEREO_PORT"
 export E2E_ZETEO_URL="http://127.0.0.1:$ZETEO_PORT"
 export E2E_ZETEO_CA_URL="http://127.0.0.1:$ZETEO_CA_PORT"
 export E2E_CA_CERT_PATH="$CERTS/ca.crt"
-export E2E_COMPOSE_ARGS="[\"-p\",\"$PROJECT\",\"-f\",\"$E2E/docker-compose.yml\",\"--env-file\",\"$ENV_FILE\"]"
+E2E_COMPOSE_ARGS="$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- \
+  -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")"
+export E2E_COMPOSE_ARGS
 
 log "Running the tests"
 status=0

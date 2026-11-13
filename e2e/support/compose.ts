@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { waitFor } from "./http.js";
 import { stack } from "./stack.js";
 
 /** `docker compose` against the run's project. */
@@ -42,6 +43,28 @@ export const tereoStatusesFor = (since: string, path: string): number[] =>
   tereoLogEntries(since)
     .filter((entry) => entry.includes(`path: "${path}"`))
     .map((entry) => Number(/status: (\d+)/.exec(entry)?.[1]));
+
+/**
+ * `tereoStatusesFor`, once it includes `status`: a log line may reach
+ * `docker compose logs` a moment after the response. Throws if it never
+ * does within `timeoutMs`.
+ */
+export const waitForTereoStatus = async (
+  since: string,
+  path: string,
+  status: number,
+  timeoutMs = 10_000
+): Promise<number[]> =>
+  (
+    await waitFor(
+      `Tereo's log of ${status} for ${path}`,
+      async () => {
+        const statuses = tereoStatusesFor(since, path);
+        return statuses.includes(status) ? statuses : undefined;
+      },
+      { timeoutMs, intervalMs: 500 }
+    )
+  ).value;
 
 /** A single value from SQL run with psql in zeteo's own database. */
 export const zeteoDbValue = (sql: string): string =>
