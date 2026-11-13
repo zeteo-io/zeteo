@@ -32,6 +32,23 @@ export function getRequestId(): string | undefined {
 }
 
 /**
+ * Runs `fn` as the request `requestId`, keeping the current request's IP
+ * address and path: for work with an id of its own inside a request, such as
+ * one MCP tool call.
+ */
+export function withRequestId<T>(requestId: string, fn: () => T): T {
+  const current = requestContextStore.getStore();
+  return requestContextStore.run(
+    {
+      ipAddress: current?.ipAddress ?? "unknown",
+      path: current?.path ?? "",
+      requestId,
+    },
+    fn
+  );
+}
+
+/**
  * Retrieve the current client IP address from async context.
  * Returns undefined if called outside a request lifecycle.
  */

@@ -6,6 +6,11 @@ import path from "path";
 /** A fixed key for tests only: 32 bytes of 0x07, base64url. */
 export const TEST_MASTER_KEY = Buffer.alloc(32, 7).toString("base64url");
 
+/** The MCP connector client the test environment allows. */
+export const TEST_MCP_CLIENT = "zeteo-test-connector";
+/** The one browser origin the test environment lets call the MCP endpoint. */
+export const TEST_MCP_ORIGIN = "https://connector.example.com";
+
 /** Loopback only: integration tests connect to a fixture database on localhost. */
 const TEST_SOURCE_ALLOWED_HOSTS = "127.0.0.0/8,::1/128,localhost";
 
@@ -76,5 +81,9 @@ export function loadTestEnv(): Record<string, string> {
     TEREO_TEST_MODE: "true",
     ZETEO_MASTER_KEY: TEST_MASTER_KEY,
     SOURCE_ALLOWED_HOSTS: TEST_SOURCE_ALLOWED_HOSTS,
+    // The shared server serves MCP; its PUBLIC_URL above is the Host the
+    // endpoint accepts.
+    MCP_ALLOWED_CLIENTS: TEST_MCP_CLIENT,
+    MCP_ALLOWED_ORIGINS: TEST_MCP_ORIGIN,
   };
 }

@@ -1,12 +1,15 @@
 import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
+import { MCP_PATH, MCP_PATHS } from "./mcp/paths.js";
+import express, { type Router } from "express";
 import routes from "./routes/index.js";
-import express from "express";
 import helmet from "helmet";
 import env from "./env.js";
 import cors from "cors";
-
-const app = express();
+import {
+  hostHeaderValidation,
+  originValidation,
+} from "@modelcontextprotocol/express";
 
 // Express's `req.ip` resolves through `X-Forwarded-For` only when this is
 // configured. Numeric strings become hop counts ("1" → one upstream proxy)
@@ -19,18 +22,40 @@ const trustProxy = /^\d+$/.test(env.TRUST_PROXY)
     : env.TRUST_PROXY === "false"
       ? false
       : env.TRUST_PROXY;
-app.set("trust proxy", trustProxy);
 
-app.use(createRequestIdMiddleware());
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors({ origin: env.CORS_ALLOWED_ORIGINS }));
-// JSON bodies are parsed per area, each with its own limit.
-app.use(routes);
+/** The app, serving MCP through `mcpRouter` unless it is null (MCP off). */
+export const createApp = (mcpRouter: Router | null) => {
+  const app = express();
+  app.set("trust proxy", trustProxy);
 
-app.use(() => {
-  throw new NotFoundError("Not found");
-});
+  app.use(createRequestIdMiddleware());
+  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(cors({ origin: env.CORS_ALLOWED_ORIGINS }));
 
-app.use(errorHandler);
+  if (mcpRouter) {
+    // Against DNS rebinding and cross-site calls; /v1 and /health are not
+    // checked, as load balancers and probes send other Host values.
+    app.use(
+      MCP_PATHS,
+      hostHeaderValidation([new URL(env.PUBLIC_URL).hostname]),
+      originValidation(
+        env.MCP_ALLOWED_ORIGINS.map((origin) => new URL(origin).hostname)
+      )
+    );
+    // The MCP handler reads a body it finds unparsed with a 4 MiB limit of
+    // its own, whatever its content type; parsing every body here holds it
+    // to 64 kb, as /v1 is.
+    app.use(MCP_PATH, express.json({ limit: "64kb", type: () => true }));
+    app.use(mcpRouter);
+  }
 
-export default app;
+  // JSON bodies are parsed per area, each with its own limit.
+  app.use(routes);
+
+  app.use(() => {
+    throw new NotFoundError("Not found");
+  });
+
+  app.use(errorHandler);
+  return app;
+};

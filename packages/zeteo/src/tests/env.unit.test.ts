@@ -73,6 +73,42 @@ describe("env schema", () => {
     ).toThrow(/SOURCE_ALLOWED_HOSTS.*http:\/\/x/);
   });
 
+  it("turns MCP off by default and reads the connector clients as a list", () => {
+    expect(parseEnv(base).MCP_ALLOWED_CLIENTS).toEqual([]);
+    expect(
+      parseEnv({ ...base, MCP_ALLOWED_CLIENTS: " claude-connector, ,chatgpt " })
+        .MCP_ALLOWED_CLIENTS
+    ).toEqual(["claude-connector", "chatgpt"]);
+  });
+
+  it("reads MCP_ALLOWED_ORIGINS as origins, empty by default, and refuses anything else", () => {
+    expect(parseEnv(base).MCP_ALLOWED_ORIGINS).toEqual([]);
+    expect(
+      parseEnv({
+        ...base,
+        MCP_ALLOWED_ORIGINS: "https://claude.ai,http://localhost:3000",
+      }).MCP_ALLOWED_ORIGINS
+    ).toEqual(["https://claude.ai", "http://localhost:3000"]);
+    for (const bad of ["claude.ai", "https://claude.ai/path", "ftp://x"]) {
+      expect(() => parseEnv({ ...base, MCP_ALLOWED_ORIGINS: bad })).toThrow(
+        /MCP_ALLOWED_ORIGINS/
+      );
+    }
+  });
+
+  it("defaults MCP_RATE_LIMIT_PER_MINUTE to 120 and takes 1 to 10000 only", () => {
+    expect(parseEnv(base).MCP_RATE_LIMIT_PER_MINUTE).toBe(120);
+    expect(
+      parseEnv({ ...base, MCP_RATE_LIMIT_PER_MINUTE: "10000" })
+        .MCP_RATE_LIMIT_PER_MINUTE
+    ).toBe(10_000);
+    for (const bad of ["0", "10001", "1.5"]) {
+      expect(() =>
+        parseEnv({ ...base, MCP_RATE_LIMIT_PER_MINUTE: bad })
+      ).toThrow(/MCP_RATE_LIMIT_PER_MINUTE/);
+    }
+  });
+
   it("refuses a lock timeout not below the transaction timeout", () => {
     expect(() =>
       parseEnv({

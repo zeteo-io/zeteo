@@ -28,11 +28,13 @@ export interface ServerInstance {
 export interface AppServerOptions {
   /** Runs the scheduled catalogue refresh and the runs housekeeping; off for the test suite's shared server, whose sweeps would touch other tests' sources. */
   refreshJob?: boolean;
+  /** Where MCP fetches tereo's authorization-server metadata, instead of TEREO_URL (tests). */
+  mcpCoreUrl?: string;
 }
 
 export function createAppServer(
   port: number = env.PORT,
-  { refreshJob = true }: AppServerOptions = {}
+  { refreshJob = true, mcpCoreUrl }: AppServerOptions = {}
 ): ServerInstance {
   let server: Server | null = null;
   let running = false;
@@ -51,8 +53,10 @@ export function createAppServer(
 
       // Imported after Redis is up, as the modules behind it may resolve the
       // client when they load.
-      const { default: app } = await import("./app.js");
-      server = createServer(app);
+      const { createMcpRouter } = await import("./mcp/index.js");
+      const { createApp } = await import("./app.js");
+      const mcpRouter = await createMcpRouter({ coreUrl: mcpCoreUrl });
+      server = createServer(createApp(mcpRouter));
       tuneServerKeepAlive(server);
 
       const listening = server;

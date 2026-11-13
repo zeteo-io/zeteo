@@ -30,6 +30,12 @@ export const DATA_EXPORT = "zeteo.data.export";
 /** Reads the record of query runs. */
 export const RUNS_READ = "zeteo.runs.read";
 
+/**
+ * Uses zeteo through an AI connected over MCP: without it a caller sees no
+ * MCP tools. Each tool also needs the permission its HTTP route needs.
+ */
+export const MCP_USE = "zeteo.mcp.use";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -152,6 +158,12 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         description: "List the record of queries that were run",
         orgAssignable: false,
       },
+      {
+        name: MCP_USE,
+        displayName: "Use over MCP",
+        description: "Use zeteo through an AI connected over MCP",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
@@ -167,6 +179,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           DATA_READ,
           DATA_EXPORT,
           RUNS_READ,
+          MCP_USE,
         ],
       },
       {
@@ -174,6 +187,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         displayName: "Zeteo user",
         description: "Queries the data they are granted",
         permissions: [DATA_READ],
+      },
+      {
+        name: "zeteo_mcp_user",
+        displayName: "Zeteo MCP user",
+        description:
+          "Queries the data they are granted, also through an AI connected over MCP",
+        permissions: [DATA_READ, MCP_USE],
       },
     ],
     eventTypes: Object.values(AUDIT_EVENTS).map((eventType) => ({

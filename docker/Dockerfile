@@ -18,6 +18,8 @@ COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
+# The tereo packages zeteo installs from tarballs (see vendor/README.md).
+COPY vendor ./vendor/
 
 RUN --mount=type=cache,target=/root/.npm,sharing=shared \
     npm ci --workspace=packages/zeteo
@@ -43,6 +45,8 @@ COPY package.json package-lock.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
+# The tereo packages zeteo installs from tarballs (see vendor/README.md).
+COPY vendor ./vendor/
 
 RUN --mount=type=cache,target=/root/.npm,sharing=shared \
     npm ci --workspace=packages/zeteo --omit=dev

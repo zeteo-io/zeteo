@@ -1,8 +1,10 @@
 // @module-tag int
 // @module-tag platform
+import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
 import { describeEachEngine } from "../../../support/engines.js";
 import { BASE_URL, fetchJson } from "../../../support/http.js";
 import { removeSources } from "../../../support/sources.js";
+import { TEST_MCP_CLIENT } from "../../../setup/testEnv.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { tokenFor } from "../../../support/tokens.js";
 import {
@@ -214,6 +216,19 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     } finally {
       await removeSources([exporting.id]);
     }
+  });
+
+  it("accepts a token issued to a client in MCP_ALLOWED_CLIENTS, as any other client's", async () => {
+    const own = await catalog(narrow.token);
+    const res = await catalog(
+      tokenFor({
+        userId: narrow.id,
+        permissions: [DATA_READ],
+        client: TEST_MCP_CLIENT,
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(own.body);
   });
 
   it("needs zeteo.data.read", async () => {

@@ -1,6 +1,7 @@
 import { hasPermission } from "../utils/permissions.js";
 import type { RequestHandler, Request } from "express";
 import { ForbiddenError } from "../utils/errors.js";
+import type { AuthContext } from "@tereo-io/sdk";
 import { getTereo } from "../utils/tereo.js";
 
 export interface Caller {
@@ -19,6 +20,14 @@ declare global {
   }
 }
 
+/** The caller a verified token stands for, over HTTP or MCP. */
+export const callerFromAuth = (auth: AuthContext): Caller => ({
+  userId: auth.userId,
+  organizationId: auth.organizationId,
+  permissions: auth.permissions,
+  isServiceAccount: auth.userType === "service_account",
+});
+
 /**
  * Verifies the bearer token with tereo (401 `unauthorized` without a valid
  * one), then sets `req.caller`.
@@ -26,14 +35,11 @@ declare global {
 export const authenticate: RequestHandler = (req, res, next) => {
   void getTereo().auth.requireAuth(req, res, (err?: unknown) => {
     if (err) return next(err);
-    const { auth } = req;
+    // @modelcontextprotocol/express also declares `req.auth`, as its own
+    // AuthInfo; on these routes it is what tereo's requireAuth set.
+    const auth = req.auth as unknown as AuthContext | undefined;
     if (!auth) return next(new Error("requireAuth set no req.auth"));
-    req.caller = {
-      userId: auth.userId,
-      organizationId: auth.organizationId,
-      permissions: auth.permissions,
-      isServiceAccount: auth.userType === "service_account",
-    };
+    req.caller = callerFromAuth(auth);
     next();
   });
 };

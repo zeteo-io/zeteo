@@ -9,6 +9,7 @@ import {
   DATA_READ,
   GRANTS_READ,
   GRANTS_WRITE,
+  MCP_USE,
   RUNS_READ,
   SERVICE_SLUG,
   SOURCES_READ,
@@ -35,7 +36,7 @@ describe("buildTereoDocument", () => {
     expect(service.access?.roles).toEqual(["audit_writer", "user_resolver"]);
   });
 
-  it("declares exactly the seven zeteo permissions", () => {
+  it("declares exactly the eight zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
     expect(GRANTS_READ).toBe("zeteo.grants.read");
@@ -43,6 +44,7 @@ describe("buildTereoDocument", () => {
     expect(DATA_READ).toBe("zeteo.data.read");
     expect(DATA_EXPORT).toBe("zeteo.data.export");
     expect(RUNS_READ).toBe("zeteo.runs.read");
+    expect(MCP_USE).toBe("zeteo.mcp.use");
     expect(service.permissions!.map((p) => p.name).sort()).toEqual(
       [
         SOURCES_READ,
@@ -52,6 +54,7 @@ describe("buildTereoDocument", () => {
         DATA_READ,
         DATA_EXPORT,
         RUNS_READ,
+        MCP_USE,
       ].sort()
     );
   });
@@ -69,11 +72,23 @@ describe("buildTereoDocument", () => {
     }
   });
 
-  it("declares zeteo_admin with all seven permissions and zeteo_user with data read only", () => {
+  it("describes zeteo.mcp.use as the use of zeteo through an AI over MCP", () => {
+    const mcp = service.permissions!.find((p) => p.name === MCP_USE);
+    expect(mcp).toMatchObject({
+      description: "Use zeteo through an AI connected over MCP",
+      orgAssignable: false,
+    });
+  });
+
+  it("declares zeteo_admin with all eight permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
     const roles = Object.fromEntries(
       service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
     );
-    expect(Object.keys(roles).sort()).toEqual(["zeteo_admin", "zeteo_user"]);
+    expect(Object.keys(roles).sort()).toEqual([
+      "zeteo_admin",
+      "zeteo_mcp_user",
+      "zeteo_user",
+    ]);
     expect(roles.zeteo_admin).toEqual(
       [
         SOURCES_READ,
@@ -83,9 +98,11 @@ describe("buildTereoDocument", () => {
         DATA_READ,
         DATA_EXPORT,
         RUNS_READ,
+        MCP_USE,
       ].sort()
     );
     expect(roles.zeteo_user).toEqual([DATA_READ]);
+    expect(roles.zeteo_mcp_user).toEqual([DATA_READ, MCP_USE].sort());
   });
 
   it("gates grant events on grants read and query and export runs on runs read", () => {
