@@ -1,0 +1,261 @@
+# Querying
+
+Users query sources through one JSON language, over only the tables and columns they are granted
+(see `docs/grants.md`). The reference for the routes is `openapi/openapi.yaml`.
+
+| Route | Permission | Result |
+|-------|------------|--------|
+| `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `GET /v1/runs` (`user_id`, `source_id`, `outcome`, `limit`, `cursor`) | `zeteo.runs.read` | `{ data, next_cursor }`, newest first |
+
+## The SQL query language
+
+Every SQL source (Postgres today, Azure SQL next) takes the same language:
+
+```json
+{
+  "source": "sales-db",
+  "from": "orders",
+  "join": ["customer", { "relation": "lines", "type": "left" }],
+  "select": [
+    "customer.region",
+    { "bucket": "month", "column": "created_at", "as": "month" },
+    { "sum": "total", "as": "revenue" }
+  ],
+  "where": { "status": { "in": ["paid", "shipped"] } },
+  "groupBy": ["customer.region", "month"],
+  "having": { "revenue": { "gt": 1000 } },
+  "orderBy": [{ "revenue": "desc" }],
+  "limit": 1000,
+  "offset": 0
+}
+```
+
+- **`source`** is the source's slug.
+- **`from`** names a table or view by its bare name when that is unique among the source's
+  schemas, otherwise `schema.table`.
+- **Columns** are paths: a bare name is a column of the `from` table; `relation.column` is a column
+  of a joined table, and `customer.account.plan` one reached through two relations.
+- **`join`** lists relations by name (see `docs/catalog.md`), `inner` by default or
+  `{ "relation": "...", "type": "left" }`. A relation reached through another is joined after it:
+  `["customer", "customer.account"]`. At most 4 joins. A relation can be used only when every key
+  column on both sides is granted.
+- **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
+  `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
+  `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year",
+  "column": path }`, truncated in UTC, weeks starting on Monday. Each takes an optional `"as"`
+  (a lowercase letter, then up to 62 of `a-z`, `0-9`, `_`). Without one an item is named by its
+  path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on.
+- **`distinct: true`** returns each row once.
+- **`where`** is a filter (below) over columns.
+- **`groupBy`** names select items, by output name or by column path. A query with an aggregate
+  groups by every other select item, and every non-aggregate item must be listed.
+- **`having`** is a filter over the output names of aggregate select items.
+- **`orderBy`** is a list of `{ "<name>": "asc" | "desc" }`, each a select item or, in a query
+  that is neither grouped nor distinct, any granted column. Nulls sort last ascending and first
+  descending, on every engine. Without `orderBy`, rows are ordered by every select item ascending
+  (json items aside), so paging with `offset` is stable.
+- **`limit`** (default 1,000) and **`offset`** (at most 1,000,000) page the result.
+
+Every object is strict: an unknown key is refused. There are no expressions, function calls,
+subqueries or raw fragments.
+
+### Filters
+
+A filter is one of:
+
+- `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`;
+- `{ "<path>": { "<operator>": value }, ... }`: each path takes exactly one operator, and several
+  paths in one object must all hold.
+
+| Operator | Value | Applies to |
+|----------|-------|------------|
+| `eq`, `ne`, `gt`, `gte`, `lt`, `lte` | a value | text, number, date, timestamp; `eq`/`ne` also boolean |
+| `between` | `[low, high]`, inclusive | text, number, date, timestamp |
+| `in`, `notIn` | 1 to 1,000 values | text, number, date, timestamp, boolean |
+| `contains`, `startsWith` | a string | text: case-insensitive, `%` and `_` match themselves |
+| `isNull` | `true` or `false` | every type, json included |
+
+Values are checked against the column: text takes a string; numbers a number or a decimal string
+(`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
+dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
+(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
+
+**Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
+names cannot be filtered on directly (select it through a view that renames it), and an `as` of
+`and`, `or` or `not` cannot be used in `having`.
+
+**`eq` on text follows the database's collation**, which differs between engines: Postgres
+compares exactly, case and accents included, unless the column has a case-insensitive collation;
+Azure SQL's default collations ignore case, so `{ "eq": "paid" }` also matches `PAID` there. Use
+`contains` or `startsWith` for a match that ignores case on every engine. Sorting text follows the
+collation too.
+
+### Json columns
+
+A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
+grouped, deduplicated (`distinct`, `countDistinct`) or sorted (`invalid_operator`). A query whose
+select items are all json has no default order on Postgres.
+
+## Worked examples
+
+Revenue per region and quarter, paid orders only:
+
+```json
+{
+  "source": "sales-db",
+  "from": "orders",
+  "join": ["customer"],
+  "select": [
+    "customer.region",
+    { "bucket": "quarter", "column": "created_at", "as": "quarter" },
+    { "sum": "total", "as": "revenue" },
+    { "count": "*", "as": "orders" }
+  ],
+  "where": { "status": { "eq": "paid" } },
+  "groupBy": ["customer.region", "quarter"]
+}
+```
+
+```json
+{
+  "columns": [
+    { "name": "customer.region", "type": "text" },
+    { "name": "quarter", "type": "timestamp" },
+    { "name": "revenue", "type": "number" },
+    { "name": "orders", "type": "number" }
+  ],
+  "rows": [
+    ["EU", "2026-01-01T00:00:00.000Z", "1535.50", "4"],
+    ["EU", "2026-04-01T00:00:00.000Z", "1409.99", "2"],
+    ["US", "2026-04-01T00:00:00.000Z", "640.10", "1"]
+  ],
+  "truncated": false,
+  "warnings": [],
+  "run_id": "0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a"
+}
+```
+
+Customers whose name mentions "organic", with no email on file:
+
+```json
+{
+  "source": "sales-db",
+  "from": "customers",
+  "select": ["id", "name"],
+  "where": {
+    "and": [{ "name": { "contains": "organic" } }, { "email": { "isNull": true } }]
+  }
+}
+```
+
+The ten most recent orders over 100, and the next ten:
+
+```json
+{
+  "source": "sales-db",
+  "from": "orders",
+  "select": ["id", "total", "created_at"],
+  "where": { "total": { "gt": 100 } },
+  "orderBy": [{ "created_at": "desc" }, { "id": "asc" }],
+  "limit": 10,
+  "offset": 0
+}
+```
+
+with `"offset": 10` for the second page. Order by something unique last so pages never overlap.
+
+## Results
+
+`columns` lists each result column's `name` and `type` in select order; `rows` holds arrays of
+values in that order. Values arrive in these wire forms on every engine:
+
+| Value | Form |
+|-------|------|
+| 16- and 32-bit integers, floats | JSON number; float `NaN`, `Infinity` and `-Infinity` as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` |
+| 64-bit integers, decimals | string (`"9007199254740993"`, `"250.50"`) |
+| `count`, `countDistinct` | string |
+| `sum` | string over integer and decimal columns, number over float columns |
+| `avg` | number |
+| boolean | `true` / `false` |
+| date | `"YYYY-MM-DD"` |
+| timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database |
+| json | the JSON value itself; an integer inside a document past 2^53 loses precision |
+| anything else (uuid, enums…) | string |
+| null | `null` |
+
+`warnings` holds `join_multiplies_rows` (with the join's `path`) when a relation that can match
+several rows per row sits under an aggregate: the query runs, but a row may be counted more than
+once.
+
+`run_id` is the run's id in the run log.
+
+## Limits
+
+| Limit | `POST /v1/query` | MCP (plan 3) |
+|-------|------------------|--------------|
+| Rows, default / maximum | 1,000 / 50,000 | 100 / 5,000 |
+| Result size (rows as JSON) | 10 MB | 1 MB |
+| Time | the source's `timeout_ms` (default 30 s) | same |
+| Queries at once | 2 per user, 5 per source | shared |
+
+- The row limit is `limit`, or the default, lowered to the maximum and to the source's `row_cap`.
+  A `limit` above the maximum is lowered, not refused.
+- When rows were left out the response has `truncated: true` and `truncated_by`: `rows` when
+  more rows existed than the limit, `bytes` when the next row would have passed the size limit.
+  A result that ends exactly at the limit is not truncated.
+- A query past its time limit is stopped on the source: `504 query_timeout`.
+- Concurrency is counted in Redis, so it holds across replicas. A third query from one user is
+  `429 too_many_queries`; a sixth on one source `429 source_busy`; both with `Retry-After` and
+  `retry_after` (seconds). A slot is held at most the time limit plus 5 s, and is released as soon
+  as the query ends, however it ends.
+- The body is at most 64 KB (`413 payload_too_large`).
+- A client that disconnects stops its query on the source; the run is recorded as `failed` with
+  `client_closed`.
+
+## Errors
+
+Every error is `{ error, error_description, ... }`. A query the language accepts but which cannot
+be run as written is `422` with `path` (keys and array indexes from the root of the query) and
+`suggestions` (up to three close names, closest first).
+
+- **Not granted and not there look the same.** A source, table, relation or column the caller is
+  not granted is refused exactly as one that does not exist: `422 not_found_or_not_accessible`,
+  message `Source|Table|Relation|Column "<name>" was not found or is not accessible`, the same path,
+  and suggestions drawn only from names the caller can see. The kind in the message comes from
+  where the name sits in the query, never from the catalogue.
+- **The source is checked first.** The body must be a JSON object with a non-empty string
+  `source` (else `400 invalid_request`). A source the caller cannot see is
+  `422 not_found_or_not_accessible` at path `["source"]` before anything else in the body is read,
+  so a malformed query against it gets the same answer as a well-formed one. Against a source the
+  caller can see, a body the language refuses is `400 invalid_request` with `issues`.
+- Other `422` codes: `missing_in_source` (the last refresh no longer found a table, column or
+  relation the caller is granted), `column_not_queryable` (a column of type `other`),
+  `invalid_operator`, `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
+  `duplicate_output_name`, `join_parent_missing`.
+- From running: `502 query_failed` (the source refused or failed to run the query),
+  `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
+  `503 temporarily_unavailable` (group membership or the source pool briefly unavailable).
+- **A database's own error text never reaches a caller.** It is logged; the response carries a
+  fixed message, and the request's id is in the log line.
+
+## The run log
+
+Every query past the first check (an object naming a source) is recorded, refused and failed ones
+included, in one transaction that writes a `query_runs` row and a `zeteo.query.run` audit entry.
+A body the source's language refuses is not recorded.
+
+- The row holds the query as sent, who ran it, the source (null when the caller could not see the
+  one named), the entry point (`api`, `mcp`, `export`), the duration, the rows returned, the
+  outcome, the error code and whether rows were left out. It never holds result data.
+- The audit entry's metadata is `{ source_id, entry_point, outcome, error_code, row_count,
+  duration_ms }`; the query itself is only in the row.
+- Outcomes: `ok`; `refused` for a 4xx answer; `timeout` for `query_timeout`; `failed` for any other
+  error, and for a client that went away (`client_closed`).
+- Rows are sent only once their run is recorded: when the record cannot be written, a successful
+  query answers `500 server_error` and no rows. When a failed query's record cannot be written, the
+  failure is logged and the query's own error is answered.
+
+`GET /v1/runs` lists runs newest first, filtered by `user_id`, `source_id` and `outcome`, as
+`{ id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code,
+truncated, created_at }`.
