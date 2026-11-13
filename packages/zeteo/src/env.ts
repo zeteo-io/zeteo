@@ -103,6 +103,13 @@ const originList = commaList.superRefine((origins, ctx) => {
         code: "custom",
         message: `${JSON.stringify(origin)} is not an origin such as "https://app.example.com"`,
       });
+    } else if (url.hostname.includes("*")) {
+      // @tereo-io/mcp's originValidation refuses a wildcard host on a web
+      // scheme at start; refuse it here as an env error instead.
+      ctx.addIssue({
+        code: "custom",
+        message: `${JSON.stringify(origin)} has a wildcard host; list each origin, such as "https://app.example.com"`,
+      });
     }
   }
 });

@@ -69,7 +69,10 @@ was read or changed.
 
 Zeteo reads a user's groups from Tereo (that is how a group's grants reach its members) under the
 core role `user_resolver`, and a group by id under `group_resolver`; its provisioning document
-requests both. Without `group_resolver` Tereo refuses every group lookup, so each group principal
+requests both. `group_resolver` is read-only access to every group, global and in every
+organization: list and search them, each one's roles, its members' names, emails and active flag,
+its SCIM skipped members' names and emails, and `auth.group.*` webhook events; zeteo only reads a
+group by id. Without `group_resolver` Tereo refuses every group lookup, so each group principal
 is `unknown`. Tereo archives groups rather than deleting them, and an archived group is `active`:
 Tereo still knows it, though it lists only a user's unarchived groups, so its grants reach no one.
 The status only reports; a group grant counts for its members whatever its status.

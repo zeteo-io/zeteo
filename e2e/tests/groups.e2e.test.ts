@@ -66,10 +66,8 @@ describe("access through a Tereo group", () => {
       { token: e2e.admin.zeteoToken }
     );
     expect(res.status).toBe(200);
-    // zeteo holds group_resolver, so Tereo describes the group.
-    expect(
-      await waitForTereoStatus(since, `/v1/admin/groups/${e2e.groupId}`, 200)
-    ).toEqual([200]);
+    // zeteo holds group_resolver, so Tereo describes the group. Tereo logs
+    // only the requests it refuses, so the status is the evidence here.
     expect(res.body.principal_status).toBe("active");
 
     // Tereo never deletes a group, so the orphaned one is an id it never had.

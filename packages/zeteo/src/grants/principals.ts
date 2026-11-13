@@ -22,13 +22,9 @@ export const TEST_ORPHANED_KEY = "zeteo:test:orphaned";
 const unavailable = () =>
   new ServiceUnavailableError("Group membership is temporarily unavailable");
 
-/** The HTTP status of a failed request to tereo (an axios error or the SDK's), if it got an answer. */
-const httpStatusOf = (err: unknown): number | undefined => {
-  if (err instanceof RequestError) return err.httpStatus;
-  const status = (err as { response?: { status?: unknown } } | null)?.response
-    ?.status;
-  return typeof status === "number" ? status : undefined;
-};
+/** The HTTP status of a failed request to tereo, if it got an answer; the SDK throws only `RequestError`. */
+const httpStatusOf = (err: unknown): number | undefined =>
+  err instanceof RequestError ? err.httpStatus : undefined;
 
 /** A user's groups from tereo; null (a 404: no such user, or a core without groups) is no groups. */
 export const fetchGroupsFromTereo = async (

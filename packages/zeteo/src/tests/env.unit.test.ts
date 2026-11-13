@@ -89,7 +89,14 @@ describe("env schema", () => {
         MCP_ALLOWED_ORIGINS: "https://claude.ai,http://localhost:3000",
       }).MCP_ALLOWED_ORIGINS
     ).toEqual(["https://claude.ai", "http://localhost:3000"]);
-    for (const bad of ["claude.ai", "https://claude.ai/path", "ftp://x"]) {
+    for (const bad of [
+      "claude.ai",
+      "https://claude.ai/path",
+      "ftp://x",
+      "http://*",
+      "https://*",
+      "https://*.example.com",
+    ]) {
       expect(() => parseEnv({ ...base, MCP_ALLOWED_ORIGINS: bad })).toThrow(
         /MCP_ALLOWED_ORIGINS/
       );
