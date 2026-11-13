@@ -39,3 +39,36 @@ export type {
 } from "./types/catalog.js";
 export type { RunOutcome, QueryRun, ListRunsOptions } from "./types/runs.js";
 export type { ExportEnd, ExportRows, ExportStream } from "./calls/export.js";
+export type {
+  PostgresSettings,
+  AzureSqlSettings,
+  LoginFindingCode,
+  LoginFinding,
+  Source,
+  CreateSourceRequest,
+  UpdateSourceRequest,
+  TestSourceResponse,
+  RefreshCounts,
+  RefreshSummary,
+  Table,
+  Column,
+  Relation,
+  TableDetail,
+  PatchTableRequest,
+  DeclareRelationRequest,
+  ListSourcesOptions,
+  ListTablesOptions,
+} from "./types/sources.js";
+export type {
+  PrincipalStatus,
+  Grant,
+  CreateGrantRequest,
+  ReplaceGrantRequest,
+  ListGrantsOptions,
+} from "./types/grants.js";
+export type {
+  PrincipalLimit,
+  CreatePrincipalLimitRequest,
+  UpdatePrincipalLimitRequest,
+  ListPrincipalLimitsOptions,
+} from "./types/principalLimits.js";
