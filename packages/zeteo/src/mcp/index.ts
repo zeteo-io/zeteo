@@ -25,7 +25,7 @@ const { version } = JSON.parse(
 ) as { version: string };
 
 export interface ZeteoMcpOptions {
-  /** Where tereo's authorization-server metadata is fetched; TEREO_URL by default. */
+  /** Where tereo's authorization-server metadata is fetched; the core client's URL by default. */
   coreUrl?: string;
   /** The rate limiter's Redis; the shared client by default. */
   redis?: RateLimitRedis;
@@ -46,7 +46,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
     maxResultBytes: MAX_RESULT_BYTES,
     rateLimit: { perMinute: env.MCP_RATE_LIMIT_PER_MINUTE },
     redis: options.redis ?? rateLimitRedis(redis),
-    coreUrl: options.coreUrl ?? env.TEREO_URL,
+    coreUrl: options.coreUrl,
     logger: logger.child({ component: "mcp" }),
   });
   defineDiscoveryTools(mcp);

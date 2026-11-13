@@ -1,3 +1,4 @@
+import { hostHeaderValidation, originValidation } from "@tereo-io/mcp";
 import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
 import { MCP_PATH, MCP_PATHS } from "./mcp/paths.js";
@@ -6,10 +7,6 @@ import routes from "./routes/index.js";
 import helmet from "helmet";
 import env from "./env.js";
 import cors from "cors";
-import {
-  hostHeaderValidation,
-  originValidation,
-} from "@modelcontextprotocol/express";
 
 // Express's `req.ip` resolves through `X-Forwarded-For` only when this is
 // configured. Numeric strings become hop counts ("1" → one upstream proxy)
@@ -38,9 +35,7 @@ export const createApp = (mcpRouter: Router | null) => {
     app.use(
       MCP_PATHS,
       hostHeaderValidation([new URL(env.PUBLIC_URL).hostname]),
-      originValidation(
-        env.MCP_ALLOWED_ORIGINS.map((origin) => new URL(origin).hostname)
-      )
+      originValidation(env.MCP_ALLOWED_ORIGINS)
     );
     // The MCP handler reads a body it finds unparsed with a 4 MiB limit of
     // its own, whatever its content type; parsing every body here holds it

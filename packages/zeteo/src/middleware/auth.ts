@@ -35,11 +35,8 @@ export const callerFromAuth = (auth: AuthContext): Caller => ({
 export const authenticate: RequestHandler = (req, res, next) => {
   void getTereo().auth.requireAuth(req, res, (err?: unknown) => {
     if (err) return next(err);
-    // @modelcontextprotocol/express also declares `req.auth`, as its own
-    // AuthInfo; on these routes it is what tereo's requireAuth set.
-    const auth = req.auth as unknown as AuthContext | undefined;
-    if (!auth) return next(new Error("requireAuth set no req.auth"));
-    req.caller = callerFromAuth(auth);
+    if (!req.auth) return next(new Error("requireAuth set no req.auth"));
+    req.caller = callerFromAuth(req.auth);
     next();
   });
 };
