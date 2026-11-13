@@ -39,6 +39,19 @@ describe("buildTereoDocument", () => {
     ]);
   });
 
+  it("makes neither permission assignable inside an organization: sources are not organization-scoped", () => {
+    for (const permission of service.permissions!) {
+      expect(permission.orgAssignable).toBe(false);
+    }
+  });
+
+  it("describes each event type in words, not by its name", () => {
+    for (const eventType of service.eventTypes!) {
+      expect(eventType.description).not.toBe(eventType.eventType);
+      expect(eventType.description!.length).toBeGreaterThan(0);
+    }
+  });
+
   it("declares a system role that holds both permissions", () => {
     expect(service.systemRoles).toEqual([
       expect.objectContaining({

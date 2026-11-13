@@ -22,6 +22,18 @@ export const AUDIT_EVENTS = {
   relationRemoved: "zeteo.relation.removed",
 } as const;
 
+export type AuditEvent = (typeof AUDIT_EVENTS)[keyof typeof AUDIT_EVENTS];
+
+const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
+  [AUDIT_EVENTS.sourceCreated]: "A source was registered",
+  [AUDIT_EVENTS.sourceUpdated]:
+    "A source's settings, limits or descriptions were changed",
+  [AUDIT_EVENTS.sourceArchived]: "A source was archived",
+  [AUDIT_EVENTS.sourceRefreshed]: "A source's catalogue was refreshed",
+  [AUDIT_EVENTS.relationDeclared]: "A relation was declared between two tables",
+  [AUDIT_EVENTS.relationRemoved]: "A declared relation was removed",
+};
+
 /**
  * What Zeteo declares to tereo as an app service. Core applies the generated
  * `tereo-provisioning.json` from its provisioning folder.
@@ -39,14 +51,15 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         name: SOURCES_READ,
         displayName: "Read sources",
         description: "List and read the sources zeteo knows about",
-        orgAssignable: true,
+        // Sources are not scoped to an organization: a grant inside one would reach them all.
+        orgAssignable: false,
       },
       {
         name: SOURCES_WRITE,
         displayName: "Manage sources",
         description:
           "Register, change, archive and refresh sources, and declare relations; also grants Read sources",
-        orgAssignable: true,
+        orgAssignable: false,
       },
     ],
     systemRoles: [
@@ -60,7 +73,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
     ],
     eventTypes: Object.values(AUDIT_EVENTS).map((eventType) => ({
       eventType,
-      description: eventType,
+      description: EVENT_DESCRIPTIONS[eventType],
       readPermission: SOURCES_READ,
     })),
   },

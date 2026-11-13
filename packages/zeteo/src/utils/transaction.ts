@@ -1,14 +1,16 @@
-import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { runInTransactionScope, getTereo } from "./tereo.js";
 import type { AuditLogWritableAction } from "@tereo-io/sdk";
 import { collector } from "./outboxCollector.js";
 import type { Prisma } from "./db/prisma.js";
 import { prisma } from "./db/prisma.js";
 import env from "../env.js";
+import {
+  AUDIT_EVENTS,
+  type AuditEvent,
+} from "../definitions/tereoDeclaration.js";
 
 export interface AuditEntry {
-  /** One of `AUDIT_EVENTS`. */
-  action: string;
+  action: AuditEvent;
   resourceType: string;
   resourceId: string;
   /** The tereo user who made the change. */
@@ -20,7 +22,7 @@ export type Audit = (entry: AuditEntry) => void;
 
 // Tereo's audit entries carry one of six verbs; the event name stays in the
 // entry's metadata, so nothing of it is lost.
-const VERB: Record<string, AuditLogWritableAction> = {
+const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.sourceCreated]: "CREATE",
   [AUDIT_EVENTS.sourceUpdated]: "UPDATE",
   [AUDIT_EVENTS.sourceArchived]: "ARCHIVE",
@@ -54,11 +56,9 @@ export const withAudit = async <T>(
       const { outbox } = getTereo();
       const pending = collector();
       for (const entry of entries) {
-        const action = VERB[entry.action];
-        if (!action) throw new Error(`Unknown audit event ${entry.action}`);
         await outbox.audit(pending.client, {
           userId: entry.actorId,
-          action,
+          action: VERB[entry.action],
           entityType: entry.resourceType,
           entityId: entry.resourceId,
           metadata: { ...entry.metadata, event: entry.action },

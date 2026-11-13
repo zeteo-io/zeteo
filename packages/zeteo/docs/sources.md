@@ -138,7 +138,10 @@ first uses open one pool. A call running when its pool is closed finishes first.
 `zeteo.source.created`, `zeteo.source.updated` and `zeteo.source.archived` are written to the outbox
 in the change's transaction. A refresh, a table description change and a relation declared or
 removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an update the names of the fields
-changed, and for an override the finding codes. It never holds settings.
+changed, and for an override the finding codes. A create, and an update that carries `settings`,
+also records the settings as the adapter redacts them (for `postgres`: `host`, `port`, `database`,
+`user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the record. The password
+and `ca` are never in an audit entry.
 
 ## Error codes
 

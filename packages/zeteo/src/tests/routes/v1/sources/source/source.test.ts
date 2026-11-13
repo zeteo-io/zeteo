@@ -101,6 +101,37 @@ describe("/v1/sources/:sourceId", () => {
     );
   });
 
+  it("PATCH settings records the new redacted settings in the audit entry, and no password", async () => {
+    const source = await create();
+    const settings = sourceSettings("ro");
+    const changed = await call("PATCH", `/${source.id}`, { settings });
+    expect(changed.status).toBe(200);
+    const entry = (await auditRows(source.id)).find(
+      (r) =>
+        r.payload.metadata.event === "zeteo.source.updated" &&
+        r.payload.metadata.changed.includes("settings")
+    );
+    expect(entry?.payload.metadata.settings).toEqual({
+      host: settings.host,
+      port: settings.port,
+      database: settings.database,
+      user: settings.user,
+      tls: "off",
+    });
+    expect(JSON.stringify(entry?.payload)).not.toContain("ro-test-password");
+  });
+
+  it("PATCH without settings records no settings in the audit entry", async () => {
+    const source = await create();
+    expect(
+      (await call("PATCH", `/${source.id}`, { name: "Plain" })).status
+    ).toBe(200);
+    const entries = (await auditRows(source.id)).filter(
+      (r) => r.payload.metadata.event === "zeteo.source.updated"
+    );
+    expect(entries.at(-1)?.payload.metadata).not.toHaveProperty("settings");
+  });
+
   it("PATCH settings closes the source's open pool", async () => {
     const source = await create();
     await withSourceConnection(source.id, (c) => c.checkLogin());

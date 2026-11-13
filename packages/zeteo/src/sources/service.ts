@@ -147,6 +147,7 @@ export const createSource = async (
       metadata: {
         slug: row.slug,
         type: input.type,
+        settings: adapter.redact(settings),
         ...overrideMetadata(verdict),
       },
     });
@@ -176,6 +177,7 @@ export const updateSource = async (
   let settingsChange:
     | {
         sealed: unknown;
+        redacted: Record<string, unknown>;
         verdict: ReturnType<typeof judgeLogin>;
       }
     | undefined;
@@ -183,9 +185,11 @@ export const updateSource = async (
     const adapter = adapterFor(type);
     const settings = parseSettings(adapter, input.settings);
     const findings = await inspectLogin(adapter, settings);
+    const verdict = judgeLogin(findings, input.allow_writable_login ?? false);
     settingsChange = {
       sealed: sealSettings(settings, id),
-      verdict: judgeLogin(findings, input.allow_writable_login ?? false),
+      redacted: adapter.redact(settings),
+      verdict,
     };
   }
 
@@ -214,7 +218,10 @@ export const updateSource = async (
         changed: Object.keys(input).filter(
           (key) => key !== "allow_writable_login"
         ),
-        ...(settingsChange && overrideMetadata(settingsChange.verdict)),
+        ...(settingsChange && {
+          settings: settingsChange.redacted,
+          ...overrideMetadata(settingsChange.verdict),
+        }),
       },
     });
     return current;

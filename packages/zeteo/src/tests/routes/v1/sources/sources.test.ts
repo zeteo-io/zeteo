@@ -72,7 +72,7 @@ describe("/v1/sources", () => {
     expect(row.sealedSettings).toHaveProperty("ciphertext");
   });
 
-  it("records zeteo.source.created in the outbox without settings", async () => {
+  it("records zeteo.source.created with the redacted settings, TLS off included, and no password", async () => {
     const res = await create();
     const rows = (await auditRows(res.body.id)).filter(
       (r) => r.payload.metadata.event === "zeteo.source.created"
@@ -87,8 +87,15 @@ describe("/v1/sources", () => {
         type: "postgres",
       },
     });
+    const settings = sourceSettings("ro");
+    expect(rows[0].payload.metadata.settings).toEqual({
+      host: settings.host,
+      port: settings.port,
+      database: settings.database,
+      user: settings.user,
+      tls: "off",
+    });
     expect(JSON.stringify(rows[0].payload)).not.toContain("ro-test-password");
-    expect(JSON.stringify(rows[0].payload)).not.toContain("zeteo_ro");
   });
 
   it("reads the schema after the row is committed, so the catalogue is filled when the 201 arrives", async () => {
