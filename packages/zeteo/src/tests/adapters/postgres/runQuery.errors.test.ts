@@ -1,7 +1,6 @@
 // @module-tag int
 // @module-tag platform
 import { prepareAzureSqlQuery } from "../../../adapters/azure-sql/runQuery.js";
-import { preparePostgresQuery } from "../../../adapters/postgres/runQuery.js";
 import { fixtureSettings, fixtureTarget } from "../../support/fixtureDb.js";
 import { PostgresConnection } from "../../../adapters/postgres/connect.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +15,10 @@ import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { performance } from "node:perf_hooks";
 import type { EventEmitter } from "events";
 import { Client, Pool } from "pg";
+import {
+  PostgresPreparedQuery,
+  preparePostgresQuery,
+} from "../../../adapters/postgres/runQuery.js";
 import {
   mssqlFixtureSettings,
   mssqlFixtureTarget,
@@ -239,6 +242,15 @@ const runningOn = (view: string) =>
     [`%${view}%`]
   );
 
+const waitFor = async <T>(check: () => Promise<T[]>): Promise<T[]> => {
+  for (let i = 0; i < 100; i++) {
+    const found = await check();
+    if (found.length > 0) return found;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("never seen");
+};
+
 const noneWithin = async (view: string, ms: number) => {
   const until = Date.now() + ms;
   while (Date.now() < until) {
@@ -438,5 +450,88 @@ describe("postgres openQuery: the row stream", () => {
       );
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
+  });
+
+  describe("closed while a read is in flight", () => {
+    // Its first row comes at once; the rest wait 3 s on the server (the
+    // subquery runs once, when the second row is tested).
+    const slowAfterFirst = new PostgresPreparedQuery(
+      idsOf("sales", "accounts"),
+      `SELECT g AS c0 /* slow_after_first */ FROM generate_series(1, 5) g
+        WHERE g = 1 OR (SELECT true FROM pg_sleep(3))`,
+      []
+    );
+
+    it("stops a statement the read is waiting on, and gives the connection back", async () => {
+      const conn = await connectWith();
+      const stream = await conn.openQuery(slowAfterFirst, limitsOf(10_000));
+      expect(await stream.next(1)).toEqual([[1]]);
+      const reading = stream.next(10).then(
+        (rows) => ({ rows }),
+        (err: unknown) => ({ err })
+      );
+      await waitFor(() => runningOn("slow_after_first"));
+      const begun = Date.now();
+      await stream.close();
+      expect(Date.now() - begun).toBeLessThan(2000);
+      // The cancel landed: the read rejects, with no driver text.
+      const settled = await reading;
+      expect(settled).toHaveProperty("err");
+      expect((settled as { err: unknown }).err).toBeInstanceOf(AppError);
+      expect(await runningOn("slow_after_first")).toEqual([]);
+      expect(inUse(conn)).toBe(0);
+      const again = await conn.openQuery(
+        prepared(idsOf("sales", "accounts")),
+        limitsOf()
+      );
+      try {
+        expect(await drain(again)).toEqual(ACCOUNTS);
+      } finally {
+        await again.close();
+      }
+    });
+
+    it("closes cleanly when the read finishes before the cancel arrives", async () => {
+      const conn = await connectWith();
+      const stream = await conn.openQuery(
+        prepared(idsOf("probe", "wide_rows")),
+        limitsOf(10_000)
+      );
+      expect(await stream.next(1)).toEqual([[1]]);
+      // The cancel goes out only once the read has its rows, so it reaches
+      // a backend idle between fetches, which ignores it.
+      const real = cancel.sendCancelRequest;
+      let readSettled!: () => void;
+      const settled = new Promise<void>((resolve) => {
+        readSettled = resolve;
+      });
+      const sent = vi
+        .spyOn(cancel, "sendCancelRequest")
+        .mockImplementation(async (...args) => {
+          await settled;
+          return real(...args);
+        });
+      const reading = stream.next(5);
+      void reading.finally(readSettled).catch(() => undefined);
+      const begun = Date.now();
+      await stream.close();
+      expect(Date.now() - begun).toBeLessThan(2000);
+      expect(sent).toHaveBeenCalledTimes(1);
+      expect(await reading).toEqual([[2], [3], [4], [5], [6]]);
+      expect(await noneWithin("wide_rows", 2000)).toBe(true);
+      expect(inUse(conn)).toBe(0);
+      // Past the 1 s grace a confirmed cancel arms: nothing may cut the
+      // connection once it is back in the pool.
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      const again = await conn.openQuery(
+        prepared(idsOf("sales", "accounts")),
+        limitsOf()
+      );
+      try {
+        expect(await drain(again)).toEqual(ACCOUNTS);
+      } finally {
+        await again.close();
+      }
+    });
   });
 });
