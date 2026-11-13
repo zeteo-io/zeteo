@@ -41,6 +41,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `audit`       | audit entries a mutation records                                     |
   | `limits`      | quotas, size caps, rate limits, pagination bounds                    |
   | `errors`      | error mapping and failure paths                                      |
+  | `leak`        | that what a caller may not see fails exactly like what does not exist |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

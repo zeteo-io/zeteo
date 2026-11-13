@@ -10,6 +10,7 @@ export const ASPECTS = [
   "audit",
   "limits",
   "errors",
+  "leak",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

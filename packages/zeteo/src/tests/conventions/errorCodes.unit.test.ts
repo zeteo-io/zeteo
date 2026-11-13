@@ -14,6 +14,7 @@ import path from "path";
 // utils/errors.ts's own mapping.
 const SRC = fileURLToPath(new URL("../..", import.meta.url));
 const ERRORS_FILE = path.join(SRC, "utils/errors.ts");
+const QUERY_ERRORS_FILE = path.join(SRC, "engine/errors.ts");
 const CODE = /^[a-z][a-z0-9]*(_[a-z0-9]+)+$|^[a-z]+$/;
 
 interface Pair {
@@ -51,10 +52,13 @@ const apiSourceFiles = (): string[] =>
 
 const errorsFile = parse(ERRORS_FILE);
 
+// The query planner's errors live with the engine.
 const errorClasses = new Map<string, ts.ClassDeclaration>();
-walk(errorsFile, (n) => {
-  if (ts.isClassDeclaration(n) && n.name) errorClasses.set(n.name.text, n);
-});
+for (const file of [errorsFile, parse(QUERY_ERRORS_FILE)]) {
+  walk(file, (n) => {
+    if (ts.isClassDeclaration(n) && n.name) errorClasses.set(n.name.text, n);
+  });
+}
 
 /** What a construction comes to: a status if it is a literal, and the code expression. */
 interface Resolved {
@@ -195,10 +199,13 @@ describe("error codes", () => {
       "payload_too_large",
       "server_error",
       "temporarily_unavailable",
+      "not_found_or_not_accessible",
+      "invalid_operator",
     ]) {
       expect(codes).toContain(code);
     }
     expect(helpers.map((h) => h.name)).toContain("mapUniqueViolation");
+    expect(helpers.map((h) => h.name)).toContain("fail");
   });
 
   it("resolves a status for every HTTP code", () => {

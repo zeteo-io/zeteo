@@ -1,3 +1,4 @@
+import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import type { ResolvedTarget } from "../sources/network.js";
 import type { z } from "zod";
 
@@ -58,9 +59,50 @@ export interface ConnectOptions {
   queryTimeoutMs: number;
 }
 
+/** A catalogue column a query touches. */
+export interface Reference {
+  tableId: string;
+  columnId: string;
+}
+
+export interface OutputColumn {
+  name: string;
+  type: ColumnType;
+  /** The columns the value is computed from; none for `count(*)`. */
+  references: Reference[];
+}
+
+export interface QueryWarning {
+  code: "join_multiplies_rows";
+  message: string;
+  path: (string | number)[];
+}
+
+/** What every language's plan tells the engine, whatever the source family. */
+export interface QueryPlan {
+  /** Every column the query touches anywhere, join keys included, each once. */
+  references: Reference[];
+  /** The result's columns, in order. */
+  columns: OutputColumn[];
+  warnings: QueryWarning[];
+  /** As the query asked; the engine applies its own default and maximum. */
+  limit: number | undefined;
+  offset: number;
+}
+
+export interface QueryLanguage<Q = unknown, P extends QueryPlan = QueryPlan> {
+  id: "sql";
+  schema: z.ZodType<Q>;
+  /** JSON Schema of `schema`, for the catalogue and the AI. */
+  describe(): unknown;
+  /** Resolves a parsed query against what the caller may see; throws `QueryError`. */
+  plan(query: Q, catalog: VisibleCatalog): P;
+}
+
 export interface SourceAdapter<S = unknown> {
   type: SourceType;
   settingsSchema: z.ZodType<S>;
+  language: QueryLanguage;
   /** The host a source's settings point at, for the network rules. */
   hostOf(settings: S): string;
   /** Settings safe to return from the API. */
