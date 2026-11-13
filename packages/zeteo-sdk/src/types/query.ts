@@ -88,11 +88,12 @@ export interface QueryWarning {
 export interface QueryResult {
   columns: { name: string; type: ColumnType }[];
   /**
-   * Each row an array in the order of `columns`, in wire forms: 64-bit
-   * integers and decimals as strings, `count` and `countDistinct` as strings,
+   * Each row an array in the order of `columns`, in wire forms: 32-bit
+   * integers and floats as numbers (float `NaN` and infinities as strings),
+   * 64-bit integers and decimals as strings, `count` and `countDistinct` as strings,
    * `sum` as a string over integers and decimals and a number over floats,
    * `avg` as a number; dates `YYYY-MM-DD`; timestamps ISO 8601 in UTC with
-   * milliseconds.
+   * milliseconds; json as JSON.
    */
   rows: unknown[][];
   /** Rows were left out. */

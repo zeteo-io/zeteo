@@ -9,15 +9,49 @@ import { runsCalls } from "../calls/runs.js";
 describe("query-side calls", () => {
   const t = useStubbedClient();
 
-  it("health.get calls GET /health with the service token even for a person's context", async () => {
+  describe("health.get", () => {
     const body = { status: "ok", postgres: "ok", redis: "ok" };
-    t.stub.respond(() => ({ body }));
-    expect(await healthCalls(t.ctx("p-1")).get()).toEqual(body);
-    expect(t.stub.requests[0]).toMatchObject({
-      method: "GET",
-      path: "/health",
+    const degraded = { status: "degraded", postgres: "ok", redis: "fail" };
+
+    it("calls GET /health with no Authorization and no service token", async () => {
+      t.stub.respond(() => ({ body }));
+      expect(await healthCalls(t.ctx()).get()).toEqual(body);
+      expect(t.stub.requests[0]).toMatchObject({
+        method: "GET",
+        path: "/health",
+      });
+      expect(t.stub.requests[0].headers.authorization).toBeUndefined();
+      expect(t.stub.tokensIssued).toBe(0);
     });
-    expect(t.stub.requests[0].headers.authorization).toBe("Bearer svc-1");
+
+    it("sends no Authorization even with a person token", async () => {
+      t.stub.respond(() => ({ body }));
+      await healthCalls(t.ctx("p-1")).get();
+      expect(t.stub.requests[0].headers.authorization).toBeUndefined();
+      expect(t.stub.tokensIssued).toBe(0);
+    });
+
+    it("resolves with the body of a 503 and makes one request", async () => {
+      t.stub.respond(() => ({ status: 503, body: degraded }));
+      expect(await healthCalls(t.ctx()).get()).toEqual(degraded);
+      expect(t.stub.requests).toHaveLength(1);
+    });
+
+    it("throws on a 503 without a health body", async () => {
+      t.stub.respond(() => ({ status: 503, body: {} }));
+      await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
+        status: 503,
+        code: "http_503",
+      });
+    });
+
+    it("throws on a 500 after one request", async () => {
+      t.stub.respond(() => ({ status: 500, body: { error: "boom" } }));
+      await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
+        status: 500,
+      });
+      expect(t.stub.requests).toHaveLength(1);
+    });
   });
 
   it("catalog.get calls GET /v1/catalog, with source when given", async () => {

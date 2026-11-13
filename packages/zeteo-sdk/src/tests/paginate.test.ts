@@ -56,4 +56,34 @@ describe("paginate", () => {
     }
     expect(t.stub.requests).toHaveLength(1);
   });
+
+  it("throws pagination_stuck when next_cursor repeats the cursor sent", async () => {
+    t.stub.respond(() => ({ body: { data: [run("1")], next_cursor: "same" } }));
+    const calls = runsCalls(t.ctx("p-1"));
+    const ids: string[] = [];
+    await expect(
+      (async () => {
+        for await (const item of paginate((o) => calls.list(o), {
+          cursor: "same",
+        })) {
+          ids.push(item.id);
+        }
+      })()
+    ).rejects.toMatchObject({ status: null, code: "pagination_stuck" });
+    expect(t.stub.requests).toHaveLength(1);
+  });
+
+  it("leaves the caller's options unchanged", async () => {
+    t.stub.respond((req) => ({
+      body: req.query.cursor
+        ? { data: [run("2")], next_cursor: null }
+        : { data: [run("1")], next_cursor: "c1" },
+    }));
+    const calls = runsCalls(t.ctx("p-1"));
+    const options: ListRunsOptions = { limit: 1, outcome: "ok" };
+    for await (const item of paginate((o) => calls.list(o), options)) {
+      void item;
+    }
+    expect(options).toEqual({ limit: 1, outcome: "ok" });
+  });
 });

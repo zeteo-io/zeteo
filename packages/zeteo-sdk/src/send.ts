@@ -29,6 +29,10 @@ export interface SendOptions {
   signal?: AbortSignal;
   stream?: boolean;
   headers?: Record<string, string>;
+  /** Send no Authorization at all, whatever `ctx.token` is; needs no service token. */
+  anonymous?: boolean;
+  /** Statuses whose parsed body is returned instead of thrown. */
+  acceptStatus?: number[];
 }
 
 type Body = Record<string, unknown>;
@@ -117,7 +121,11 @@ async function execute(
   options: SendOptions
 ): Promise<DianemoResponse> {
   const { transport, token } = ctx;
-  if (token !== undefined && (typeof token !== "string" || token === "")) {
+  if (
+    !options.anonymous &&
+    token !== undefined &&
+    (typeof token !== "string" || token === "")
+  ) {
     throw new ZeteoError("invalid token", {
       status: null,
       code: "invalid_token",
@@ -127,7 +135,7 @@ async function execute(
   const op = OPERATIONS[options.op];
   const path = buildPath(op.path, options.params ?? {});
   const clientName =
-    token !== undefined
+    token !== undefined || options.anonymous
       ? options.once
         ? names.personOnce
         : names.person
@@ -140,7 +148,8 @@ async function execute(
       ([name]) => !/^authorization$/i.test(name)
     )
   );
-  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+  if (token !== undefined && !options.anonymous)
+    headers.Authorization = `Bearer ${token}`;
   const requestId = transport.getRequestId?.();
   if (requestId) headers["X-Request-ID"] = requestId;
 
@@ -164,6 +173,10 @@ async function execute(
     try {
       return await transport.handler.handleRequest(config);
     } catch (error) {
+      const response = (error as { response?: DianemoResponse })?.response;
+      if (response && options.acceptStatus?.includes(response.status)) {
+        return response;
+      }
       throw mapError(error, options.signal);
     }
   };
@@ -175,7 +188,8 @@ async function execute(
     if (
       !(error instanceof ZeteoError) ||
       error.status !== 401 ||
-      token !== undefined
+      token !== undefined ||
+      options.anonymous
     ) {
       throw error;
     }
