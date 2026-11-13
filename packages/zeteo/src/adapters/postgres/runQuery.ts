@@ -50,8 +50,15 @@ const wireOf = (field: FieldDef): WireKind =>
 // numeric lossily.
 const RAW_TEXT = { getTypeParser: () => (text: string) => text };
 
-/** Rows fetched per round trip: what the run holds beyond the rows it keeps. */
+/** The most rows fetched per round trip. */
 export const BATCH_ROWS = 250;
+/**
+ * About the most bytes one batch holds beyond the rows the run keeps: each
+ * batch after the first is sized from the average row read so far.
+ */
+export const BATCH_BYTES = 1024 * 1024;
+/** The first batch, read before any row's width is known. */
+const FIRST_BATCH_ROWS = 1;
 /** How long past the run's deadline the client waits on the connection before giving up on it. */
 const CLIENT_GRACE_MS = 2000;
 /** How long a cancelled statement gets to end before its connection is cut. */
@@ -166,6 +173,9 @@ const readBatch = (
  * Reads the cursor in batches, normalising as it goes, until `maxRows` rows
  * are kept and one more exists, the next row would pass `maxBytes`, or the
  * rows end. A row's size is its JSON plus one byte for the comma after it.
+ * The first batch is one row; each later one as many rows of the average
+ * size so far as fit `BATCH_BYTES`, at least one and at most `BATCH_ROWS`,
+ * so a result of wide rows is not buffered whole before the byte cap applies.
  */
 const readRows = async (
   cursor: Cursor<unknown[]>,
@@ -179,7 +189,16 @@ const readRows = async (
   let fetched = 0;
   let bytes = 0;
   for (;;) {
-    const want = Math.min(BATCH_ROWS, limits.maxRows + 1 - fetched);
+    // Every row read so far is kept and counted in `bytes`: the run returns
+    // at the first one it does not keep.
+    const fits =
+      rows.length === 0
+        ? FIRST_BATCH_ROWS
+        : Math.floor(BATCH_BYTES / (bytes / rows.length));
+    const want = Math.min(
+      Math.max(1, Math.min(BATCH_ROWS, fits)),
+      limits.maxRows + 1 - fetched
+    );
     const batch = await guard(readBatch(cursor, want));
     checkStop();
     if (!wires) {

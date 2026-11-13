@@ -7,7 +7,6 @@ import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
-import { BATCH_ROWS } from "../../../adapters/postgres/runQuery.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
@@ -20,6 +19,10 @@ import { db } from "../../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Client, Pool } from "pg";
 import Cursor from "pg-cursor";
+import {
+  BATCH_BYTES,
+  BATCH_ROWS,
+} from "../../../adapters/postgres/runQuery.js";
 import {
   fixtureAdminSettings,
   fixtureSettings,
@@ -419,6 +422,24 @@ describe("postgres runQuery", () => {
     expect(requested).toBeGreaterThan(0);
     expect(requested).toBeLessThanOrEqual(2 * BATCH_ROWS);
     expect(Date.now() - begun).toBeLessThan(1000);
+  });
+
+  it("sizes each batch from the rows read so far, so one stays within its byte bound", async () => {
+    const reads = vi.spyOn(Cursor.prototype, "read");
+    const result = await run(
+      { from: "huge_rows", select: ["id", "filler"], orderBy: [{ id: "asc" }] },
+      { maxRows: 50_000, maxBytes: 3_000_000 }
+    );
+    expect(result.truncated).toBe("bytes");
+    expect(result.rows).toHaveLength(9);
+    const rowBytes = Buffer.byteLength(JSON.stringify(result.rows[0])) + 1;
+    const asked = reads.mock.calls.map(([n]) => n);
+    // One row before any width is known, then as many as fit the bound.
+    expect(asked[0]).toBe(1);
+    const fit = Math.floor(BATCH_BYTES / rowBytes);
+    expect(fit).toBeGreaterThan(1);
+    expect(asked.slice(1)).toEqual(asked.slice(1).map(() => fit));
+    expect(fit * rowBytes).toBeLessThanOrEqual(BATCH_BYTES);
   });
 
   it("reads in batches across a row cap larger than one batch", async () => {
