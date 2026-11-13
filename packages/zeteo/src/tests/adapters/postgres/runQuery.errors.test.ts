@@ -3,12 +3,12 @@
 import { fixtureSettings, fixtureTarget } from "../../support/fixtureDb.js";
 import { PostgresConnection } from "../../../adapters/postgres/connect.js";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
 import { SourceUnreachableError } from "../../../utils/errors.js";
 import { fixtureAdminSettings } from "../../support/fixtureDb.js";
 import * as cancel from "../../../adapters/postgres/cancel.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
-import type { RunLimits } from "../../../adapters/types.js";
 import type { EventEmitter } from "events";
 import { Client, Pool } from "pg";
 
@@ -19,7 +19,7 @@ import { Client, Pool } from "pg";
 // ReadyForQuery back on the client's connection and drop the connection
 // meanwhile.
 
-const LIMITS: RunLimits = {
+const LIMITS: TestLimits = {
   maxRows: 1000,
   maxBytes: 1_000_000,
   timeoutMs: 5000,
@@ -116,7 +116,7 @@ describe("postgres runQuery: the connection lost after the cursor's Sync", () =>
     const { pool, connection } = await droppingAfterSync();
     const begun = Date.now();
     await expect(
-      connection.runQuery(accountIds(), LIMITS)
+      runPlan("postgres", connection, accountIds(), LIMITS)
     ).rejects.toBeInstanceOf(SourceUnreachableError);
     expect(Date.now() - begun).toBeLessThan(2000);
     expect(checkedOut(pool)).toBe(0);
@@ -126,7 +126,7 @@ describe("postgres runQuery: the connection lost after the cursor's Sync", () =>
     const { pool, connection } = await droppingAfterSync();
     const begun = Date.now();
     await expect(
-      connection.runQuery(accountIds(), { ...LIMITS, maxRows: 1 })
+      runPlan("postgres", connection, accountIds(), { ...LIMITS, maxRows: 1 })
     ).rejects.toBeInstanceOf(SourceUnreachableError);
     expect(Date.now() - begun).toBeLessThan(2000);
     expect(checkedOut(pool)).toBe(0);
@@ -153,7 +153,13 @@ describe("postgres runQuery: a cancel that is not confirmed", () => {
       ...accountIds(),
       from: { alias: "t0", schemaName: "sales", name: "slow_orders" },
     };
-    const running = connection.runQuery(slow, LIMITS, controller.signal);
+    const running = runPlan(
+      "postgres",
+      connection,
+      slow,
+      LIMITS,
+      controller.signal
+    );
     await new Promise((resolve) => setTimeout(resolve, 300));
     controller.abort(new Error("gone"));
     await expect(running).rejects.toThrow("gone");

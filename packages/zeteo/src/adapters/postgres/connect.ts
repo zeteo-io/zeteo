@@ -1,16 +1,19 @@
 import { sourceBusy, SourceUnreachableError } from "../../utils/errors.js";
 import { type PostgresSettings, toPgConfig } from "./settings.js";
-import { isPoolExhausted, runPostgresQuery } from "./runQuery.js";
 import type { ResolvedTarget } from "../../sources/network.js";
 import { logger } from "../../utils/logger.js";
-import type { SqlPlan } from "../sql/types.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
 import { Pool } from "pg";
+import {
+  isPoolExhausted,
+  PostgresPreparedQuery,
+  runPostgresQuery,
+} from "./runQuery.js";
 import type {
   ConnectOptions,
   LoginFinding,
-  QueryPlan,
+  PreparedQuery,
   QueryResult,
   RunLimits,
   SchemaSnapshot,
@@ -28,13 +31,17 @@ export class PostgresConnection implements SourceConnection {
     return this.guarded((pool) => readSchema(pool, schemas));
   }
 
-  /** The plan comes from this adapter's own language, so it is a SQL plan. */
   runQuery(
-    plan: QueryPlan,
+    prepared: PreparedQuery,
     limits: RunLimits,
     signal?: AbortSignal
   ): Promise<QueryResult> {
-    return runPostgresQuery(this.pool, plan as SqlPlan, limits, signal);
+    if (!(prepared instanceof PostgresPreparedQuery)) {
+      return Promise.reject(
+        new Error("a query prepared by another adapter cannot run here")
+      );
+    }
+    return runPostgresQuery(this.pool, prepared, limits, signal);
   }
 
   /**

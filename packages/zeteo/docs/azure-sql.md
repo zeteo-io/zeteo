@@ -150,8 +150,8 @@ UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC. `sum` of a `real
 
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on
 the server with an attention on its own connection (no second connection is needed, so a cancel
-never waits for a busy pool); the driver's own request timeout, two seconds later, is the
-backstop. Once the server acknowledges the cancel the connection goes back to the pool clean; if
+never waits for a busy pool); the driver's own request timeout, set when the request gets its
+connection to the time left plus two seconds, is the backstop. Once the server acknowledges the cancel the connection goes back to the pool clean; if
 it does not within two seconds, the connection is closed and the pool replaces it. Rows are read
 as they arrive: at the row or size limit the request is cancelled and the rest of the result is
 never read.

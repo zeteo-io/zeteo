@@ -1,9 +1,9 @@
 import { mssqlDialect, type MssqlParameter } from "../sql/dialects/mssql.js";
-import type { QueryResult, RunLimits } from "../types.js";
 import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
+import { performance } from "node:perf_hooks";
 import type { ConnectionPool } from "mssql";
 import sql from "mssql";
 import {
@@ -13,6 +13,12 @@ import {
   sourceBusy,
   SourceUnreachableError,
 } from "../../utils/errors.js";
+import type {
+  PreparedQuery,
+  QueryPlan,
+  QueryResult,
+  RunLimits,
+} from "../types.js";
 
 /**
  * Whether the pool had no connection free in time. tarn's TimeoutError keeps
@@ -189,23 +195,83 @@ const callerError = (err: unknown): AppError => {
 
 type Stop = "cap" | "timeout" | "abort" | "fault";
 
-// The driver takes a request's own timeout, over the pool's, as a second
-// constructor argument that its types leave out.
-const RequestWithTimeout = sql.Request as unknown as new (
-  pool: ConnectionPool,
-  overrides: { requestTimeout: number }
-) => sql.Request;
+/** A plan compiled to SQL Server SQL with its typed parameters. */
+export class AzureSqlPreparedQuery implements PreparedQuery {
+  constructor(
+    readonly plan: SqlPlan,
+    readonly sql: string,
+    readonly parameters: MssqlParameter[]
+  ) {}
+}
+
+/** Compiles a plan of the SQL language for SQL Server; throws `QueryError` `too_many_parameters`. */
+export const prepareAzureSqlQuery = (
+  plan: QueryPlan,
+  rows: { limit: number; offset: number }
+): AzureSqlPreparedQuery => {
+  // The plan comes from this adapter's own language, so it is a SQL plan.
+  const sqlPlan = plan as SqlPlan;
+  const { sql: text, parameters } = compileSql(sqlPlan, mssqlDialect, rows);
+  return new AzureSqlPreparedQuery(
+    sqlPlan,
+    text,
+    parameters as MssqlParameter[]
+  );
+};
+
+type Acquired = (err: unknown, connection?: unknown, config?: unknown) => void;
+
+// What the driver keeps on a pool and a request but its types leave out: the
+// pool's callback form of acquire, which a request calls on its parent, and
+// the request's own overrides, read once it has its connection.
+interface PoolInternals {
+  acquire(requester: unknown, callback: Acquired): unknown;
+  release(connection: unknown): unknown;
+}
+interface RequestInternals {
+  overrides: { requestTimeout?: number };
+}
 
 /**
- * Runs a compiled plan as one request on the pool: the compiled SELECT only,
- * its parameters bound with the types the dialect chose. Rows are read as
- * the driver parses them and normalised one by one; asks for one row past
- * `maxRows` to tell whether more exist, and at either cap cancels the
- * request, so the rest of the result is never read.
+ * The pool as one request's parent, so the request's time is measured once
+ * it has a connection: with none left by `deadlineAt` the connection goes
+ * back and the request fails before anything is sent; otherwise the driver's
+ * request timeout is the time left plus `DRIVER_GRACE_MS`. Everything else
+ * is the pool's own, through the prototype.
+ */
+const deadlineParent = (
+  pool: ConnectionPool,
+  deadlineAt: number
+): ConnectionPool => {
+  const own = pool as unknown as PoolInternals;
+  const parent = Object.create(pool) as PoolInternals;
+  parent.acquire = (requester, callback) =>
+    own.acquire(requester, (err, connection, config) => {
+      if (err) return callback(err);
+      const timeLeft = deadlineAt - performance.now();
+      if (timeLeft <= 0) {
+        own.release(connection);
+        return callback(new QueryTimeoutError());
+      }
+      (requester as RequestInternals).overrides.requestTimeout =
+        Math.ceil(timeLeft) + DRIVER_GRACE_MS;
+      callback(null, connection, config);
+    });
+  return parent as unknown as ConnectionPool;
+};
+
+/**
+ * Runs a prepared query as one request on the pool: the compiled SELECT
+ * only, its parameters bound with the types the dialect chose. Rows are read
+ * as the driver parses them and normalised one by one; the query asks for one
+ * row past `maxRows` to tell whether more exist, and at either cap the run
+ * cancels the request, so the rest of the result is never read.
  *
- * The run ends by `timeoutMs` with a deadline of its own that cancels the
- * request, and the driver's request timeout `DRIVER_GRACE_MS` later as a
- * backstop. An aborted `signal` cancels the same way. A cancel is an
+ * The run ends by `deadlineAt`, however long it waited for a connection: a
+ * deadline of its own cancels the request, before or after it has one; a
+ * request whose time is up once it has a connection sends nothing; and the
+ * driver's request timeout, the time left then plus `DRIVER_GRACE_MS`, is
+ * the backstop. An aborted `signal` cancels the same way. A cancel is an
  * attention on the request's own connection, so it never waits for another;
  * the run settles only once the driver has finished with the request, by
  * the server's acknowledgement (the connection goes back to the pool clean)
@@ -216,35 +282,29 @@ const RequestWithTimeout = sql.Request as unknown as new (
  */
 export const runAzureSqlQuery = async (
   pool: ConnectionPool,
-  plan: SqlPlan,
+  prepared: AzureSqlPreparedQuery,
   limits: RunLimits,
   signal?: AbortSignal
 ): Promise<QueryResult> => {
-  if (!Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs <= 0) {
+  if (!Number.isFinite(limits.deadlineAt)) {
     return Promise.reject(
-      new Error(`invalid query timeout: ${limits.timeoutMs}`)
+      new Error(`invalid query deadline: ${limits.deadlineAt}`)
     );
   }
   if (signal?.aborted) return Promise.reject(signal.reason);
-  const { sql: text, parameters } = compileSql(plan, mssqlDialect, {
-    limit: limits.maxRows + 1,
-    offset: plan.offset,
-  });
+  const { plan, sql: text, parameters } = prepared;
 
-  const request = new RequestWithTimeout(pool, {
-    requestTimeout: limits.timeoutMs + DRIVER_GRACE_MS,
-  });
+  const request = new sql.Request(deadlineParent(pool, limits.deadlineAt));
   request.stream = true;
   request.arrayRowMode = true;
   try {
-    (parameters as MssqlParameter[]).forEach((p, i) => {
+    parameters.forEach((p, i) => {
       request.input(String(i + 1), parameterType(p), p.value);
     });
   } catch (err) {
     logger.warn({ err }, "a query parameter could not be bound");
     return Promise.reject(new QueryFailedError());
   }
-
   return new Promise<QueryResult>((resolve, reject) => {
     const rows: unknown[][] = [];
     let readers: Reader[] | undefined;
@@ -317,7 +377,10 @@ export const runAzureSqlQuery = async (
       failure ??= err;
     });
 
-    const deadline = setTimeout(() => halt("timeout"), limits.timeoutMs);
+    const deadline = setTimeout(
+      () => halt("timeout"),
+      Math.max(0, limits.deadlineAt - performance.now())
+    );
     const onAbort = () => halt("abort");
     signal?.addEventListener("abort", onAbort, { once: true });
 

@@ -2,7 +2,6 @@ import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { adapterFor, NoAdapterError } from "../adapters/index.js";
 import { LIMIT_PROFILES, runLimits } from "../engine/limits.js";
 import type { SourceType } from "../adapters/types.js";
-import { queryNameOf } from "../adapters/sql/plan.js";
 import { logger } from "../utils/logger.js";
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -17,8 +16,9 @@ export const visibleCatalogView = (
   languageSchema: unknown
 ) => {
   const { source } = catalog;
+  const { language } = adapterFor(source.type);
   const queryNames = new Map(
-    catalog.tables.map((t) => [t.id, queryNameOf(catalog.tables, t)])
+    catalog.tables.map((t) => [t.id, language.tableName(catalog.tables, t)])
   );
   const relationsByTable = new Map<string, VisibleCatalog["relations"]>();
   for (const r of [...catalog.relations].sort((a, b) =>
@@ -36,7 +36,7 @@ export const visibleCatalogView = (
     name: source.name,
     type: source.type,
     language: {
-      id: adapterFor(source.type).language.id,
+      id: language.id,
       schema: languageSchema,
     },
     limits: {

@@ -1,4 +1,4 @@
-import type { VisibleCatalog } from "../grants/visibleCatalog.js";
+import type { VisibleCatalog, VisibleTable } from "../grants/visibleCatalog.js";
 import type { ResolvedTarget } from "../sources/network.js";
 import type { z } from "zod";
 
@@ -51,6 +51,16 @@ export interface RunLimits {
   /** The most bytes of the rows as JSON. */
   maxBytes: number;
   timeoutMs: number;
+  /** `performance.now()` value by which the run must have ended. */
+  deadlineAt: number;
+}
+
+/**
+ * A plan compiled for one source type, ready to run on that type's
+ * connections. Opaque beyond the plan: each adapter narrows its own.
+ */
+export interface PreparedQuery {
+  readonly plan: QueryPlan;
 }
 
 export interface QueryResult {
@@ -67,13 +77,15 @@ export interface SourceConnection {
   checkLogin(): Promise<LoginFinding[]>;
   readSchema(schemas: string[]): Promise<SchemaSnapshot>;
   /**
-   * Runs a plan made by this source's own language, read-only and within
-   * `limits`. Throws `QueryTimeoutError`, `QueryFailedError` or
+   * Runs a query prepared by this source's own adapter, read-only and within
+   * `limits`, ending by `limits.deadlineAt` however long it waited for a
+   * connection. Throws `QueryTimeoutError`, `QueryFailedError` or
    * `SourceUnreachableError`; when `signal` aborts, stops the query on the
-   * source and rejects with the signal's reason.
+   * source and rejects with the signal's reason. Throws an `Error` for a
+   * query another adapter prepared.
    */
   runQuery(
-    plan: QueryPlan,
+    prepared: PreparedQuery,
     limits: RunLimits,
     signal?: AbortSignal
   ): Promise<QueryResult>;
@@ -119,12 +131,14 @@ export interface QueryPlan {
 }
 
 export interface QueryLanguage<Q = unknown, P extends QueryPlan = QueryPlan> {
-  id: "sql";
+  id: string;
   schema: z.ZodType<Q>;
   /** JSON Schema of `schema`, for the catalogue and the AI. */
   describe(): unknown;
   /** Resolves a parsed query against what the caller may see; throws `QueryError`. */
   plan(query: Q, catalog: VisibleCatalog): P;
+  /** The name a query uses for `table` among `tables`. */
+  tableName(tables: VisibleTable[], table: VisibleTable): string;
 }
 
 export interface SourceAdapter<S = unknown> {
@@ -140,4 +154,9 @@ export interface SourceAdapter<S = unknown> {
     target: ResolvedTarget,
     options: ConnectOptions
   ): Promise<SourceConnection>;
+  /** Compiles a plan for this source type; throws `QueryError` (e.g. `too_many_parameters`). No I/O. */
+  prepare(
+    plan: QueryPlan,
+    rows: { limit: number; offset: number }
+  ): PreparedQuery;
 }

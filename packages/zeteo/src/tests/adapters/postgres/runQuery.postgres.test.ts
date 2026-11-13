@@ -1,11 +1,12 @@
 // @module-tag int
 // @module-tag platform
-import type { RunLimits, SourceConnection } from "../../../adapters/types.js";
 import { fixtureSettings, fixtureTarget } from "../../support/fixtureDb.js";
 import { buildVisibleCatalog } from "../../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
+import { runPlan, type TestLimits } from "../../support/runPlan.js";
+import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
@@ -26,7 +27,7 @@ import {
 // money, and domains over them (sales.ledger and sales.moods). Each works
 // with every operator and aggregate the planner allows for its type.
 
-const LIMITS: RunLimits = {
+const LIMITS: TestLimits = {
   maxRows: 1000,
   maxBytes: 10 * 1024 * 1024,
   timeoutMs: 5000,
@@ -43,7 +44,7 @@ const plan = (query: object): SqlPlan =>
   );
 
 const rowsOf = async (query: object) =>
-  (await connection.runQuery(plan(query), LIMITS)).rows;
+  (await runPlan("postgres", connection, plan(query), LIMITS)).rows;
 
 const INVALID_VALUE = {
   code: "invalid_value",
@@ -53,7 +54,7 @@ const INVALID_VALUE = {
 };
 
 const refusalOf = async (query: object) => {
-  const err = await connection.runQuery(plan(query), LIMITS).then(
+  const err = await runPlan("postgres", connection, plan(query), LIMITS).then(
     () => undefined,
     (e: unknown) => e
   );

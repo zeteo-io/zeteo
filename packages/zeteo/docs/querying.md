@@ -296,7 +296,11 @@ once.
 - When rows were left out the response has `truncated: true` and `truncated_by`: `rows` when
   more rows existed than the limit, `bytes` when the next row would have passed the size limit.
   A result that ends exactly at the limit is not truncated.
-- A query past its time limit is stopped on the source: `504 query_timeout`.
+- A query past its time limit is stopped on the source: `504 query_timeout`. The time limit is
+  counted from just before the concurrency check, so time spent waiting for a connection to the
+  source counts against it; a query with no time left once it has a connection is not sent.
+- A query the source cannot take (`422 too_many_parameters`) is refused before the concurrency
+  check, so it is never answered `429`.
 - Concurrency is counted in Redis, so it holds across replicas. A third query from one user is
   `429 too_many_queries`; a sixth on one source `429 source_busy`; both with `Retry-After` and
   `retry_after` (seconds). A slot is held at most the time limit plus 5 s, and is released as soon

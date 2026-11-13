@@ -1,10 +1,10 @@
-import type { RunLimits, SourceConnection } from "../../adapters/types.js";
 import { AzureSqlConnection } from "../../adapters/azure-sql/connect.js";
 import { buildVisibleCatalog } from "../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../grants/visibleCatalog.js";
 import { toMssqlConfig } from "../../adapters/azure-sql/settings.js";
 import { azureSqlAdapter } from "../../adapters/azure-sql/index.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
+import type { SourceConnection } from "../../adapters/types.js";
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import type { SqlPlan } from "../../adapters/sql/types.js";
 import { removeSources, uniqueSlug } from "./sources.js";
 import { refreshSource } from "../../catalog/refresh.js";
+import { runPlan, type TestLimits } from "./runPlan.js";
 import { planSql } from "../../adapters/sql/plan.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { db } from "../../utils/db/index.js";
@@ -33,7 +34,7 @@ export const OPTIONS = {
   poolSize: 3,
   queryTimeoutMs: 5000,
 };
-export const LIMITS: RunLimits = {
+export const LIMITS: TestLimits = {
   maxRows: 1000,
   maxBytes: 10 * 1024 * 1024,
   timeoutMs: 5000,
@@ -120,9 +121,9 @@ export const useMssqlRuns = () => {
 
   const run = (
     query: object,
-    limits: Partial<RunLimits> = {},
+    limits: Partial<TestLimits> = {},
     conn: SourceConnection = connection
-  ) => conn.runQuery(plan(query), { ...LIMITS, ...limits });
+  ) => runPlan("azure-sql", conn, plan(query), { ...LIMITS, ...limits });
 
   beforeAll(async () => {
     await initializeTereo();

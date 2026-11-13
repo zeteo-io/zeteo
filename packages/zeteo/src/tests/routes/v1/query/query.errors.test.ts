@@ -51,8 +51,8 @@ vi.mock(import("../../../../sources/pools.js"), async (importOriginal) => {
           checkLogin: () => conn.checkLogin(),
           readSchema: (s) => conn.readSchema(s),
           close: () => conn.close(),
-          runQuery: async (plan, limits, signal) => {
-            const result = await conn.runQuery(plan, limits, signal);
+          runQuery: async (prepared, limits, signal) => {
+            const result = await conn.runQuery(prepared, limits, signal);
             return tamper.result ? tamper.result(result) : result;
           },
         })

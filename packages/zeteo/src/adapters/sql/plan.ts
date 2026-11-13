@@ -1,4 +1,5 @@
 import type { OutputColumn, QueryWarning, Reference } from "../types.js";
+import type { SqlQueryErrorCode } from "./errors.js";
 import type {
   VisibleCatalog,
   VisibleColumn,
@@ -164,7 +165,7 @@ const joinPath = (prefix: string, name: string) =>
   prefix === "" ? name : `${prefix}.${name}`;
 
 const fail = (
-  code: ConstructorParameters<typeof QueryError>[0],
+  code: SqlQueryErrorCode,
   message: string,
   path: QueryPath
 ): QueryError => new QueryError(code, message, path);

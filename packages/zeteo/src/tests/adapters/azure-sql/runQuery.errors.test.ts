@@ -6,6 +6,7 @@ import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { QueryError } from "../../../engine/errors.js";
+import { runPlan } from "../../support/runPlan.js";
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
 import sql from "mssql";
@@ -44,7 +45,10 @@ describe("azure-sql runQuery: safety", () => {
       select: ["id"],
       where: { status: { eq: "paid" }, total: { gt: "100.5" } },
     });
-    await runs.connection().runQuery(planned, { ...LIMITS, maxRows: 3 });
+    await runPlan("azure-sql", runs.connection(), planned, {
+      ...LIMITS,
+      maxRows: 3,
+    });
     const compiled = compileSql(planned, mssqlDialect, {
       limit: 4,
       offset: 0,
@@ -164,7 +168,9 @@ describe("azure-sql runQuery: safety", () => {
       ...planned,
       columns: [...planned.columns, planned.columns[0]],
     };
-    const err = await failureOf(runs.connection().runQuery(widened, LIMITS));
+    const err = await failureOf(
+      runPlan("azure-sql", runs.connection(), widened, LIMITS)
+    );
     expect(err).toBeInstanceOf(QueryFailedError);
     expect((await run({ from: "accounts", select: ["id"] })).rows).toEqual(
       accountIds
@@ -174,13 +180,13 @@ describe("azure-sql runQuery: safety", () => {
   it("cancels the statement on the source when the signal aborts", async () => {
     const controller = new AbortController();
     const begun = Date.now();
-    const running = runs
-      .connection()
-      .runQuery(
-        plan({ from: "slow_orders", select: ["id"] }),
-        { ...LIMITS, timeoutMs: 10_000 },
-        controller.signal
-      );
+    const running = runPlan(
+      "azure-sql",
+      runs.connection(),
+      plan({ from: "slow_orders", select: ["id"] }),
+      { ...LIMITS, timeoutMs: 10_000 },
+      controller.signal
+    );
     await waitFor(() => runningOn("slow_orders"));
     controller.abort(new Error("client went away"));
     const err = await failureOf(running);
@@ -198,8 +204,12 @@ describe("azure-sql runQuery: safety", () => {
     const second = new AbortController();
     const slow = plan({ from: "slow_orders", select: ["id"] });
     const limits = { ...LIMITS, timeoutMs: 10_000 };
-    const one = failureOf(full.runQuery(slow, limits, first.signal));
-    const two = failureOf(full.runQuery(slow, limits, second.signal));
+    const one = failureOf(
+      runPlan("azure-sql", full, slow, limits, first.signal)
+    );
+    const two = failureOf(
+      runPlan("azure-sql", full, slow, limits, second.signal)
+    );
     await waitFor(async () =>
       (await runningOn("slow_orders")).length === 2 ? [true] : []
     );
@@ -268,7 +278,9 @@ describe("azure-sql runQuery: safety", () => {
     });
     const controller = new AbortController();
     const slow = failureOf(
-      single.runQuery(
+      runPlan(
+        "azure-sql",
+        single,
         plan({ from: "slow_orders", select: ["id"] }),
         { ...LIMITS, timeoutMs: 10_000 },
         controller.signal
@@ -387,7 +399,9 @@ describe("azure-sql runQuery: safety", () => {
     const where = planned.where;
     if (where?.kind !== "compare") throw new Error("expected a comparison");
     const err = await failureOf(
-      runs.connection().runQuery(
+      runPlan(
+        "azure-sql",
+        runs.connection(),
         {
           ...planned,
           where: {
@@ -414,13 +428,13 @@ describe("azure-sql runQuery: safety", () => {
     const controller = new AbortController();
     controller.abort(new Error("gone"));
     const err = await failureOf(
-      runs
-        .connection()
-        .runQuery(
-          plan({ from: "slow_orders", select: ["id"] }),
-          LIMITS,
-          controller.signal
-        )
+      runPlan(
+        "azure-sql",
+        runs.connection(),
+        plan({ from: "slow_orders", select: ["id"] }),
+        LIMITS,
+        controller.signal
+      )
     );
     expect(err.message).toBe("gone");
     expect(query).not.toHaveBeenCalled();

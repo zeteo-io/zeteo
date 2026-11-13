@@ -1,6 +1,6 @@
 import type { QueryLanguage } from "../types.js";
+import { planSql, queryNameOf } from "./plan.js";
 import type { SqlPlan } from "./types.js";
-import { planSql } from "./plan.js";
 import { z } from "zod";
 
 // The SQL-shaped JSON query language shared by every SQL source. Every object
@@ -245,4 +245,5 @@ export const sqlLanguage: QueryLanguage<SqlQuery, SqlPlan> = {
   describe: () =>
     z.toJSONSchema(sqlQuerySchema, { reused: "ref", unrepresentable: "any" }),
   plan: planSql,
+  tableName: queryNameOf,
 };

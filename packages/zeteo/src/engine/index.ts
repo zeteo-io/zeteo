@@ -173,7 +173,8 @@ const execute = async (
   const sourceId = catalog.source.id;
   progress.sourceId = sourceId;
 
-  const { language } = adapterFor(catalog.source.type);
+  const adapter = adapterFor(catalog.source.type);
+  const { language } = adapter;
   const parsed = language.schema.safeParse(body);
   if (!parsed.success) {
     progress.unrecorded = true;
@@ -183,6 +184,14 @@ const execute = async (
   checkReferences(plan, access, catalog);
 
   const limits = runLimits(entryPoint, plan.limit, catalog.source);
+  // Compiled before any lease is taken, so a query the source cannot take is
+  // refused as such, never as busy.
+  const prepared = adapter.prepare(plan, {
+    limit: limits.maxRows + 1,
+    offset: plan.offset,
+  });
+  // One deadline for the whole run, pool wait included.
+  const deadlineAt = performance.now() + limits.timeoutMs;
   signal?.throwIfAborted();
   const release = await acquireRunLeases(
     caller.userId,
@@ -192,7 +201,7 @@ const execute = async (
   let result: QueryResult;
   try {
     result = await withSourceConnection(sourceId, (conn) =>
-      conn.runQuery(plan, limits, signal)
+      conn.runQuery(prepared, { ...limits, deadlineAt }, signal)
     );
   } finally {
     // Not waited for: a release that fails is logged, and its lease lapses.

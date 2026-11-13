@@ -1,4 +1,5 @@
 import { postgresSettingsSchema, type PostgresSettings } from "./settings.js";
+import { preparePostgresQuery } from "./runQuery.js";
 import type { SourceAdapter } from "../types.js";
 import { sqlLanguage } from "../sql/language.js";
 import { connectPostgres } from "./connect.js";
@@ -10,4 +11,5 @@ export const postgresAdapter: SourceAdapter<PostgresSettings> = {
   hostOf: (settings) => settings.host,
   redact: ({ password: _password, ca: _ca, ...rest }) => rest,
   connect: connectPostgres,
+  prepare: preparePostgresQuery,
 };

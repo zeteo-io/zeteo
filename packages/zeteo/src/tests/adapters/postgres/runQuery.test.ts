@@ -1,12 +1,13 @@
 // @module-tag int
 // @module-tag platform
-import type { RunLimits, SourceConnection } from "../../../adapters/types.js";
 import { PostgresConnection } from "../../../adapters/postgres/connect.js";
 import { buildVisibleCatalog } from "../../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
+import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
+import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
@@ -49,7 +50,7 @@ import {
 } from "vitest";
 
 const OPTIONS = { connectTimeoutMs: 5000, poolSize: 3, queryTimeoutMs: 5000 };
-const LIMITS: RunLimits = {
+const LIMITS: TestLimits = {
   maxRows: 1000,
   maxBytes: 10 * 1024 * 1024,
   timeoutMs: 5000,
@@ -68,9 +69,9 @@ const plan = (query: object): SqlPlan =>
 
 const run = (
   query: object,
-  limits: Partial<RunLimits> = {},
+  limits: Partial<TestLimits> = {},
   conn: SourceConnection = connection
-) => conn.runQuery(plan(query), { ...LIMITS, ...limits });
+) => runPlan("postgres", conn, plan(query), { ...LIMITS, ...limits });
 
 const failureOf = async (promise: Promise<unknown>): Promise<Error> => {
   try {
@@ -578,14 +579,18 @@ describe("postgres runQuery", () => {
         ...planned,
         columns: [...planned.columns, planned.columns[0]],
       };
-      const err = await failureOf(connection.runQuery(widened, LIMITS));
+      const err = await failureOf(
+        runPlan("postgres", connection, widened, LIMITS)
+      );
       expect(err).toBeInstanceOf(QueryFailedError);
     });
 
     it("cancels the statement on the source when the signal aborts", async () => {
       const controller = new AbortController();
       const begun = Date.now();
-      const running = connection.runQuery(
+      const running = runPlan(
+        "postgres",
+        connection,
         plan({ from: "slow_orders", select: ["id"] }),
         { ...LIMITS, timeoutMs: 10_000 },
         controller.signal
@@ -608,8 +613,12 @@ describe("postgres runQuery", () => {
       const second = new AbortController();
       const slow = plan({ from: "slow_orders", select: ["id"] });
       const limits = { ...LIMITS, timeoutMs: 10_000 };
-      const one = failureOf(full.runQuery(slow, limits, first.signal));
-      const two = failureOf(full.runQuery(slow, limits, second.signal));
+      const one = failureOf(
+        runPlan("postgres", full, slow, limits, first.signal)
+      );
+      const two = failureOf(
+        runPlan("postgres", full, slow, limits, second.signal)
+      );
       await waitFor(async () =>
         (await runningOn("slow_orders")).length === 2 ? [true] : []
       );
@@ -627,7 +636,9 @@ describe("postgres runQuery", () => {
       vi.spyOn(cancel, "sendCancelRequest").mockResolvedValue(false);
       const controller = new AbortController();
       const running = failureOf(
-        connection.runQuery(
+        runPlan(
+          "postgres",
+          connection,
           plan({ from: "slow_orders", select: ["id"] }),
           { ...LIMITS, timeoutMs: 10_000 },
           controller.signal
@@ -659,7 +670,9 @@ describe("postgres runQuery", () => {
         },
       };
       const err = await failureOf(
-        connection.runQuery(
+        runPlan(
+          "postgres",
+          connection,
           {
             ...planned,
             where: {
@@ -684,7 +697,9 @@ describe("postgres runQuery", () => {
       controller.abort(new Error("gone"));
       const begun = Date.now();
       const err = await failureOf(
-        connection.runQuery(
+        runPlan(
+          "postgres",
+          connection,
           plan({ from: "slow_orders", select: ["id"] }),
           LIMITS,
           controller.signal

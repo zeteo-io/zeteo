@@ -20,15 +20,16 @@ export const LEASE_GRACE_MS = 5000;
 const RETRY_AFTER_SECONDS = 1;
 
 /**
- * The run's limits: the rows the query asked for (or the profile's default),
- * never more than the profile's or the source's maximum; the profile's byte
- * cap; the source's time limit.
+ * The run's limits but its deadline, which is set when the run is about to
+ * start: the rows the query asked for (or the profile's default), never more
+ * than the profile's or the source's maximum; the profile's byte cap; the
+ * source's time limit.
  */
 export const runLimits = (
   entryPoint: EntryPoint,
   requestedRows: number | undefined,
   source: { rowCap: number; timeoutMs: number }
-): RunLimits => {
+): Omit<RunLimits, "deadlineAt"> => {
   const profile = LIMIT_PROFILES[entryPoint];
   return {
     maxRows: Math.min(

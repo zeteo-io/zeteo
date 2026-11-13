@@ -2,11 +2,11 @@ import { DatabaseError, type FieldDef, type Pool, type PoolClient } from "pg";
 import { sendCancelRequest, type CancelTarget } from "./cancel.js";
 import { normaliseValue, type WireKind } from "../sql/values.js";
 import { postgresDialect } from "../sql/dialects/postgres.js";
-import type { QueryResult, RunLimits } from "../types.js";
 import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
+import { performance } from "node:perf_hooks";
 import Cursor from "pg-cursor";
 import {
   AppError,
@@ -15,6 +15,12 @@ import {
   sourceBusy,
   SourceUnreachableError,
 } from "../../utils/errors.js";
+import type {
+  PreparedQuery,
+  QueryPlan,
+  QueryResult,
+  RunLimits,
+} from "../types.js";
 
 // pg-pool's error, which carries no code, for a checkout that waited past the
 // connect timeout while every connection was in use.
@@ -221,6 +227,26 @@ const readRows = async (
   }
 };
 
+/** A plan compiled to Postgres SQL with its bound parameters. */
+export class PostgresPreparedQuery implements PreparedQuery {
+  constructor(
+    readonly plan: SqlPlan,
+    readonly sql: string,
+    readonly parameters: unknown[]
+  ) {}
+}
+
+/** Compiles a plan of the SQL language for Postgres; throws `QueryError` `too_many_parameters`. */
+export const preparePostgresQuery = (
+  plan: QueryPlan,
+  rows: { limit: number; offset: number }
+): PostgresPreparedQuery => {
+  // The plan comes from this adapter's own language, so it is a SQL plan.
+  const sqlPlan = plan as SqlPlan;
+  const { sql, parameters } = compileSql(sqlPlan, postgresDialect, rows);
+  return new PostgresPreparedQuery(sqlPlan, sql, parameters);
+};
+
 const checkout = async (pool: Pool): Promise<PoolClient> => {
   try {
     return await pool.connect();
@@ -260,37 +286,41 @@ const cancelTargetOf = (pool: Pool): CancelTarget => ({
 });
 
 /**
- * Runs a compiled plan on its own client inside a read-only transaction that
- * is always rolled back, reading the result through a cursor so no more than
- * one batch is held beyond the rows kept. Asks for one row past `maxRows` to
- * tell whether more exist.
+ * Runs a prepared query on its own client inside a read-only transaction
+ * that is always rolled back, reading the result through a cursor so no more
+ * than one batch is held beyond the rows kept. The query asks for one row
+ * past `maxRows` to tell whether more exist.
  *
- * The run ends by `timeoutMs` three ways: the server's statement timeout, a
- * deadline of its own that cancels the statement on the server, and the
- * client's read timeout `CLIENT_GRACE_MS` later. An aborted `signal` cancels
- * the same way. A cancel goes on a connection of its own, never one of the
- * pool's; when it is not confirmed, or the statement outlives it by
- * `STOP_GRACE_MS`, the client's connection is cut and the client destroyed.
- * Every wait on the cursor also ends when the connection is lost, and a
- * client whose protocol state is unknown is destroyed, never released.
+ * The run ends by `deadlineAt`, however long it waited for a client: one
+ * whose time is up once it has a client sends nothing. Otherwise the time
+ * left bounds it three ways: the server's statement timeout, a deadline of
+ * its own that cancels the statement on the server, and the client's read
+ * timeout `CLIENT_GRACE_MS` later. An aborted `signal` cancels the same way.
+ * A cancel goes on a connection of its own, never one of the pool's; when it
+ * is not confirmed, or the statement outlives it by `STOP_GRACE_MS`, the
+ * client's connection is cut and the client destroyed. Every wait on the
+ * cursor also ends when the connection is lost, and a client whose protocol
+ * state is unknown is destroyed, never released.
  */
 export const runPostgresQuery = async (
   pool: Pool,
-  plan: SqlPlan,
+  prepared: PostgresPreparedQuery,
   limits: RunLimits,
   signal?: AbortSignal
 ): Promise<QueryResult> => {
-  // The timeout is written into the SQL text, so only a whole number may be.
-  if (!Number.isSafeInteger(limits.timeoutMs) || limits.timeoutMs <= 0) {
-    throw new Error(`invalid query timeout: ${limits.timeoutMs}`);
+  if (!Number.isFinite(limits.deadlineAt)) {
+    throw new Error(`invalid query deadline: ${limits.deadlineAt}`);
   }
   signal?.throwIfAborted();
-  const { sql, parameters } = compileSql(plan, postgresDialect, {
-    limit: limits.maxRows + 1,
-    offset: plan.offset,
-  });
+  const { plan, sql, parameters } = prepared;
 
   const client = await checkout(pool);
+  // Whole milliseconds, as the statement timeout is written into the SQL text.
+  const timeLeft = Math.floor(limits.deadlineAt - performance.now());
+  if (timeLeft <= 0) {
+    client.release();
+    throw new QueryTimeoutError();
+  }
   const internals = client as unknown as ClientInternals;
   let broken: unknown;
   /** Set once the run is over and the client is about to be released or destroyed. */
@@ -362,13 +392,16 @@ export const runPostgresQuery = async (
   let cursorOpen = false;
 
   try {
-    await client.query(sessionSetup(limits.timeoutMs));
+    await client.query(sessionSetup(timeLeft));
     signal?.throwIfAborted();
     active = true;
-    deadline = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, limits.timeoutMs);
+    deadline = setTimeout(
+      () => {
+        timedOut = true;
+        stop();
+      },
+      Math.max(0, limits.deadlineAt - performance.now())
+    );
     const cursor = new Cursor<unknown[]>(sql, parameters, {
       rowMode: "array",
       types: RAW_TEXT,
@@ -377,7 +410,9 @@ export const runPostgresQuery = async (
     // read when it is submitted, before the pool's own; without it the
     // catalogue's shorter limit would apply.
     Object.assign(cursor, {
-      query_timeout: limits.timeoutMs + CLIENT_GRACE_MS,
+      query_timeout:
+        Math.max(1, Math.ceil(limits.deadlineAt - performance.now())) +
+        CLIENT_GRACE_MS,
     });
     client.query(cursor);
     cursorOpen = true;
