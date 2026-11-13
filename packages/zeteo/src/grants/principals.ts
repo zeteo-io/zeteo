@@ -93,11 +93,6 @@ export const groupIdsOf = async (caller: Caller): Promise<string[]> => {
     .map((g) => g.id);
 };
 
-/**
- * Whether a grant's principal still exists in tereo. A user is `orphaned`
- * when tereo has no such user. A group's existence cannot be read, so it is
- * `active` or, when tereo refuses or has none, `unknown`.
- */
 /** `principalStatus` against tereo itself. */
 export const statusFromTereo = async (
   type: "user" | "group",
@@ -119,6 +114,11 @@ export const statusFromTereo = async (
   }
 };
 
+/**
+ * Whether a grant's principal still exists in tereo. A user is `orphaned`
+ * when tereo has no such user. A group's existence cannot be read, so it is
+ * `active` or, when tereo refuses or has none, `unknown`.
+ */
 export const principalStatus = async (
   type: "user" | "group",
   id: string

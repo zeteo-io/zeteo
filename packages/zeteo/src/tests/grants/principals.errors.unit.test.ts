@@ -1,14 +1,21 @@
 // @module-tag unit
 // @module-tag platform
 import { ServiceUnavailableError } from "../../utils/errors.js";
+import { runInTransactionScope } from "../../utils/tereo.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as tereoGroups from "../../utils/tereoGroups.js";
+import { RequestError } from "@tereo-io/sdk/handler";
+import { requests } from "@tereo-io/sdk/handler";
 import {
   fetchGroupsFromTereo,
   statusFromTereo,
 } from "../../grants/principals.js";
 
 vi.mock("../../utils/tereoGroups.js");
+vi.mock("@tereo-io/sdk/handler", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tereo-io/sdk/handler")>()),
+  requests: { auth: { getUser: vi.fn() } },
+}));
 
 const failing = (status?: number) =>
   Object.assign(new Error("request failed"), {
@@ -54,5 +61,46 @@ describe("statusFromTereo for a group", () => {
     await expect(statusFromTereo("group", "g")).rejects.toBeInstanceOf(
       ServiceUnavailableError
     );
+  });
+});
+
+describe("statusFromTereo for a user", () => {
+  const getUser = () => vi.mocked(requests.auth.getUser);
+
+  it("is active when tereo has the user", async () => {
+    getUser().mockResolvedValue({} as never);
+    expect(await statusFromTereo("user", "u")).toBe("active");
+  });
+
+  it("is orphaned on an HTTP 404 (the SDK's RequestError)", async () => {
+    getUser().mockRejectedValue(
+      new RequestError("AS_0001", "no user", { httpStatus: 404 })
+    );
+    expect(await statusFromTereo("user", "u")).toBe("orphaned");
+  });
+
+  it("is a 503 on any other failure", async () => {
+    getUser().mockRejectedValue(
+      new RequestError("AS_0001", "boom", { httpStatus: 500 })
+    );
+    await expect(statusFromTereo("user", "u")).rejects.toBeInstanceOf(
+      ServiceUnavailableError
+    );
+  });
+});
+
+describe("transaction guard", () => {
+  it("refuses both tereo calls inside a transaction", async () => {
+    await runInTransactionScope(async () => {
+      await expect(fetchGroupsFromTereo("u")).rejects.toThrow(
+        /withAudit transaction/
+      );
+      await expect(statusFromTereo("user", "u")).rejects.toThrow(
+        /withAudit transaction/
+      );
+      await expect(statusFromTereo("group", "g")).rejects.toThrow(
+        /withAudit transaction/
+      );
+    });
   });
 });
