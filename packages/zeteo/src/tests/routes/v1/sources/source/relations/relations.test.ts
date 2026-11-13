@@ -85,13 +85,13 @@ describe("/v1/sources/:sourceId/relations", () => {
   });
 
   describe("GET /", () => {
-    it("lists the four discovered relations of the sales schema", async () => {
+    it("lists the six discovered relations of the sales schema", async () => {
       const res = await call("GET", `/${sourceId}/relations`, readToken());
       expect(res.status).toBe(200);
       const discovered = res.body.data.filter(
         (r: { origin: string }) => r.origin === "discovered"
       );
-      expect(discovered).toHaveLength(4);
+      expect(discovered).toHaveLength(6);
       expect(res.body.data[0]).toEqual({
         id: expect.any(String),
         name: expect.any(String),

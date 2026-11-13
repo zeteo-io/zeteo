@@ -45,10 +45,38 @@ export interface SchemaSnapshot {
   foreignKeys: SnapshotForeignKey[];
 }
 
+/** What one run may use; `maxRows` is the effective row limit. */
+export interface RunLimits {
+  maxRows: number;
+  /** The most bytes of the rows as JSON. */
+  maxBytes: number;
+  timeoutMs: number;
+}
+
+export interface QueryResult {
+  /** `plan.columns` by position. */
+  columns: { name: string; type: ColumnType }[];
+  /** Values in their wire forms. */
+  rows: unknown[][];
+  /** Why rows were left out, if any were: more than `maxRows`, or past `maxBytes`. */
+  truncated: false | "rows" | "bytes";
+}
+
 export interface SourceConnection {
   /** Inspects the login across the whole connected database, not a schema list. */
   checkLogin(): Promise<LoginFinding[]>;
   readSchema(schemas: string[]): Promise<SchemaSnapshot>;
+  /**
+   * Runs a plan made by this source's own language, read-only and within
+   * `limits`. Throws `QueryTimeoutError`, `QueryFailedError` or
+   * `SourceUnreachableError`; when `signal` aborts, stops the query on the
+   * source and rejects with the signal's reason.
+   */
+  runQuery(
+    plan: QueryPlan,
+    limits: RunLimits,
+    signal?: AbortSignal
+  ): Promise<QueryResult>;
   close(): Promise<void>;
 }
 

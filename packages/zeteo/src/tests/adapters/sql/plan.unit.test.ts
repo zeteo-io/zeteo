@@ -695,3 +695,56 @@ describe("planSql: suggestions", () => {
     expect(refusal({ select: ["zzzzzzzzzzzz"] }).suggestions).toEqual([]);
   });
 });
+
+describe("planSql: json columns", () => {
+  // Postgres `json` has no equality, so nothing may compare, group or sort it.
+  it.each([
+    [
+      "countDistinct",
+      { from: "customers", select: [{ countDistinct: "prefs" }] },
+      ["select", 0, "countDistinct"],
+    ],
+    [
+      "groupBy",
+      {
+        from: "customers",
+        select: ["prefs", { count: "*" }],
+        groupBy: ["prefs"],
+      },
+      ["groupBy", 0],
+    ],
+    [
+      "a distinct select",
+      { from: "customers", select: ["id", "prefs"], distinct: true },
+      ["select", 1],
+    ],
+    [
+      "orderBy on a select item",
+      { from: "customers", select: ["prefs"], orderBy: [{ prefs: "asc" }] },
+      ["orderBy", 0, "prefs"],
+    ],
+    [
+      "orderBy on a column not selected",
+      { from: "customers", select: ["id"], orderBy: [{ prefs: "desc" }] },
+      ["orderBy", 0, "prefs"],
+    ],
+  ])("refuses a json column in %s", (_, query, path) => {
+    expect(refusal(query)).toMatchObject({ code: "invalid_operator", path });
+  });
+
+  it("still selects and counts a json column", () => {
+    expect(
+      plan({ from: "customers", select: ["prefs"] }).columns
+    ).toMatchObject([{ name: "prefs", type: "json" }]);
+    expect(
+      plan({ from: "customers", select: [{ count: "prefs" }] }).columns
+    ).toMatchObject([{ name: "count_prefs", type: "number" }]);
+  });
+
+  it("leaves json items out of the default order", () => {
+    expect(
+      plan({ from: "customers", select: ["prefs", "id"] }).orderBy
+    ).toEqual([{ target: { kind: "output", index: 1 }, direction: "asc" }]);
+    expect(plan({ from: "customers", select: ["prefs"] }).orderBy).toEqual([]);
+  });
+});

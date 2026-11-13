@@ -36,11 +36,16 @@ describe("postgres readSchema", () => {
       .map((t) => `${t.schemaName}.${t.name}:${t.kind}`)
       .sort();
     expect(found).toEqual([
+      "sales.accounts:table",
       "sales.blobs:table",
+      "sales.broken_orders:view",
       "sales.customers:table",
       "sales.order_lines:table",
       "sales.orders:table",
       "sales.paid_orders:view",
+      "sales.session_flags:view",
+      "sales.slow_orders:view",
+      "sales.typed_values:table",
     ]);
   });
 
@@ -60,7 +65,7 @@ describe("postgres readSchema", () => {
   it("maps native types to normalised types", () => {
     expect(column("orders", "total")).toMatchObject({
       type: "number",
-      nativeType: "numeric",
+      nativeType: "numeric(12,2)",
     });
     expect(column("orders", "created_at").type).toBe("timestamp");
     expect(column("orders", "status").type).toBe("text");
@@ -72,7 +77,7 @@ describe("postgres readSchema", () => {
     expect(column("customers", "name").nullable).toBe(false);
     expect(column("customers", "region").nullable).toBe(true);
     expect(table("customers").columns.map((c) => c.position)).toEqual([
-      1, 2, 3, 4,
+      1, 2, 3, 4, 5,
     ]);
   });
 
@@ -85,7 +90,7 @@ describe("postgres readSchema", () => {
   });
 
   it("returns the foreign keys between listed relations", () => {
-    expect(snapshot.foreignKeys).toHaveLength(2);
+    expect(snapshot.foreignKeys).toHaveLength(3);
     expect(snapshot.foreignKeys).toContainEqual(
       expect.objectContaining({
         from: {

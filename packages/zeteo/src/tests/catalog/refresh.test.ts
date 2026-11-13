@@ -96,14 +96,14 @@ describe("refreshSource", () => {
     }),
   });
 
-  it("adds the five sales tables, their columns and four relations", async () => {
+  it("adds the ten sales tables and views, their columns and six relations", async () => {
     const summary = await refreshSource(sourceId, ACTOR);
     expect(summary).toEqual({
-      tables: { added: 5, missing: 0, restored: 0 },
-      columns: { added: 21, changed: 0, missing: 0, restored: 0 },
-      relations: { added: 4, missing: 0, restored: 0 },
+      tables: { added: 10, missing: 0, restored: 0 },
+      columns: { added: 44, changed: 0, missing: 0, restored: 0 },
+      relations: { added: 6, missing: 0, restored: 0 },
     });
-    expect(await counts()).toEqual({ tables: 5, columns: 21, relations: 4 });
+    expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
     expect((await tableRow("paid_orders")).kind).toBe("view");
     expect(await columnRow("orders", "total")).toMatchObject({
       type: "number",
@@ -209,7 +209,7 @@ describe("refreshSource", () => {
     expect(dropped.tables.missing).toBe(1);
     expect(dropped.columns.missing).toBe(3);
     expect((await tableRow("blobs")).missingSince).toBeInstanceOf(Date);
-    expect(await counts()).toMatchObject({ tables: 5, columns: 21 });
+    expect(await counts()).toMatchObject({ tables: 10, columns: 44 });
 
     await fixture.run(
       "CREATE TABLE sales.blobs (id integer, data bytea, tags text[]); GRANT SELECT ON sales.blobs TO zeteo_ro"
@@ -276,7 +276,7 @@ describe("refreshSource", () => {
     )
       .map((r) => r.name)
       .sort();
-    expect(names).toEqual(["orders", "orders_2"]);
+    expect(names).toEqual(["account", "orders", "orders_2"]);
   });
 
   it("updates a column whose type changed in place and counts it as changed", async () => {
@@ -383,14 +383,15 @@ describe("refreshSource", () => {
     await fixture.run("REVOKE SELECT ON sales.customers FROM zeteo_ro");
     const summary = await refreshSource(sourceId, ACTOR);
     expect(summary.tables.missing).toBe(1);
-    expect(summary.relations).toMatchObject({ missing: 2, restored: 0 });
+    // Both directions of orders–customers and of customers–accounts.
+    expect(summary.relations).toMatchObject({ missing: 4, restored: 0 });
     const pair = await fkRelations("orders_customer_id_fkey");
     expect(pair).toHaveLength(2);
     expect(pair.every((r) => r.missingSince !== null)).toBe(true);
 
     await fixture.run("GRANT SELECT ON sales.customers TO zeteo_ro");
     expect((await refreshSource(sourceId, ACTOR)).relations).toMatchObject({
-      restored: 2,
+      restored: 4,
     });
     expect(
       (await fkRelations("orders_customer_id_fkey")).every(
@@ -590,7 +591,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(results).toHaveLength(2);
-      expect(await counts()).toEqual({ tables: 5, columns: 21, relations: 4 });
+      expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
 
       const again = await Promise.all([
         refreshSource(sourceId, ACTOR),
@@ -598,7 +599,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(again).toHaveLength(3);
-      expect(await counts()).toEqual({ tables: 5, columns: 21, relations: 4 });
+      expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
     });
 
     it("ends matching the newer snapshot when an older read lands last", async () => {
@@ -674,7 +675,7 @@ describe("refreshSource", () => {
       await slow;
 
       const tables = await prisma.sourceTable.findMany({ where: { sourceId } });
-      expect(tables).toHaveLength(5);
+      expect(tables).toHaveLength(10);
       for (const table of tables) {
         expect(table.missingSince).not.toBeNull();
       }

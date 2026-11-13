@@ -137,6 +137,9 @@ export interface SqlPlan extends QueryPlan {
   groupBy: number[];
   /** Only when the query has an aggregate. */
   having: ResolvedFilter<HavingSubject> | undefined;
-  /** Never empty: with no `orderBy` in the query, every select item ascending, in order. */
+  /**
+   * With no `orderBy` in the query, every select item ascending, in order,
+   * except json items, which cannot be sorted; empty only when every item is json.
+   */
   orderBy: ResolvedOrder[];
 }

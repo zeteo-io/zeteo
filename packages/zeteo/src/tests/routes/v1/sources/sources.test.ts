@@ -103,7 +103,7 @@ describe("/v1/sources", () => {
     expect(res.status).toBe(201);
     expect(res.body.status).toBe("active");
     const tables = await get(`/${res.body.id}/tables`);
-    expect(tables.body.data).toHaveLength(5);
+    expect(tables.body.data).toHaveLength(10);
     const events = (await auditRows(res.body.id)).map(
       (r) => r.payload.metadata.event
     );

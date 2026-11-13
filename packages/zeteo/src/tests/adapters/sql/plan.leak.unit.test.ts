@@ -115,6 +115,19 @@ const CASES: Array<[string, object, hidden: string, name: string]> = [
     "lines",
   ],
   ["a table in from", { from: "customers" }, "customers", "customers"],
+  // json refusals come after the name resolves, so they cannot tell hidden from absent.
+  [
+    "a json column in countDistinct",
+    { from: "customers", select: [{ countDistinct: "prefs" }] },
+    "customers.prefs",
+    "prefs",
+  ],
+  [
+    "a json column in orderBy",
+    { from: "customers", select: ["id"], orderBy: [{ prefs: "asc" }] },
+    "customers.prefs",
+    "prefs",
+  ],
 ];
 
 const HIDDEN_NAMES = (hidden: string) => [hidden, hidden.split(".").at(-1)!];

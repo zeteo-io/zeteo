@@ -448,6 +448,23 @@ const resolveFilter = <S>(
   return leaves.length === 1 ? leaves[0] : { kind: "and", filters: leaves };
 };
 
+// Postgres `json` has no equality operator, so a json value cannot be
+// compared, grouped, deduplicated or sorted.
+const refuseJson = (
+  type: QueryableType,
+  label: string,
+  use: string,
+  path: QueryPath
+): void => {
+  if (type === "json") {
+    throw fail(
+      "invalid_operator",
+      `"${label}" is json, which cannot be used in ${use}`,
+      path
+    );
+  }
+};
+
 const aggregateFnOf = (
   item: Exclude<SelectItem, string>
 ): AggregateFn | undefined => AGGREGATE_FNS.find((fn) => fn in item);
@@ -522,6 +539,9 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
           i,
           fn,
         ]);
+        if (fn === "countDistinct") {
+          refuseJson(ref.type, arg, "countDistinct", ["select", i, fn]);
+        }
         const allowed = AGGREGATE_TYPES[fn];
         if (allowed && !allowed.includes(ref.type)) {
           throw fail(
@@ -557,6 +577,13 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
     selectPaths.push(columnPath);
   });
 
+  const distinct = query.distinct ?? false;
+  if (distinct) {
+    select.forEach((s, i) =>
+      refuseJson(s.type, s.output, "a distinct query", ["select", i])
+    );
+  }
+
   const outputIndex = (name: string) =>
     select.findIndex((s) => s.output === name);
   const hasAggregate = select.some((s) => s.kind === "aggregate");
@@ -580,6 +607,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
           ["groupBy", j]
         );
       }
+      refuseJson(select[named].type, entry, "groupBy", ["groupBy", j]);
       groupedItems.add(named);
       return;
     }
@@ -595,7 +623,10 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
         ["groupBy", j]
       );
     }
-    byPath.forEach((i) => groupedItems.add(i));
+    byPath.forEach((i) => {
+      refuseJson(select[i].type, entry, "groupBy", ["groupBy", j]);
+      groupedItems.add(i);
+    });
   });
   if (grouped) {
     select.forEach((s, i) => {
@@ -631,13 +662,15 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
       };
     });
 
-  const distinct = query.distinct ?? false;
   const orderBy: ResolvedOrder[] = query.orderBy
     ? query.orderBy.map((entry, j) => {
         const [key, direction] = Object.entries(entry)[0];
         const at = ["orderBy", j, key];
         const index = outputIndex(key);
-        if (index >= 0) return { target: { kind: "output", index }, direction };
+        if (index >= 0) {
+          refuseJson(select[index].type, key, "orderBy", at);
+          return { target: { kind: "output", index }, direction };
+        }
         if (grouped || distinct) {
           throw fail(
             "invalid_order",
@@ -646,12 +679,14 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
           );
         }
         const { ref } = planner.resolveColumn(key, at);
+        refuseJson(ref.type, key, "orderBy", at);
         return { target: { kind: "column", column: ref }, direction };
       })
-    : select.map((_, index) => ({
-        target: { kind: "output", index },
-        direction: "asc",
-      }));
+    : select.flatMap((s, index) =>
+        s.type === "json"
+          ? []
+          : [{ target: { kind: "output", index }, direction: "asc" }]
+      );
 
   const warnings: QueryWarning[] = hasAggregate
     ? toManyJoins.map(({ relation, path }) => ({

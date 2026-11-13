@@ -83,6 +83,15 @@ async function recreateFixtureDatabase(databaseUrl: string) {
   await loader.connect();
   try {
     await loader.query(await readFile(FIXTURE_SQL, "utf8"));
+    // Session defaults a user query must override to produce its wire forms:
+    // a zone off UTC by a fraction of an hour, day-first dates and floats
+    // printed short.
+    const ro = `ALTER ROLE ${quoteIdent(FIXTURE_ROLES.ro.user)} IN DATABASE ${quoteIdent(FIXTURE_DATABASE)}`;
+    await loader.query(`
+      ${ro} SET timezone = 'America/St_Johns';
+      ${ro} SET datestyle = 'SQL, DMY';
+      ${ro} SET extra_float_digits = 0;
+    `);
   } finally {
     await loader.end();
   }

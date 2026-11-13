@@ -122,6 +122,25 @@ export class SourceUnreachableError extends AppError {
   }
 }
 
+/** A query that ran past its time limit on the source; it was cancelled there. */
+export class QueryTimeoutError extends AppError {
+  constructor() {
+    super(504, "query_timeout", "The query ran past its time limit");
+    this.name = "QueryTimeoutError";
+  }
+}
+
+/**
+ * A query the source refused or failed to run. The message is fixed: the
+ * database's error goes to the log, never to the caller.
+ */
+export class QueryFailedError extends AppError {
+  constructor() {
+    super(502, "query_failed", "The source could not run the query");
+    this.name = "QueryFailedError";
+  }
+}
+
 export class SourceTypeUnavailableError extends AppError {
   constructor(type: string) {
     super(

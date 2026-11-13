@@ -1,13 +1,18 @@
 import { type PostgresSettings, toPgConfig } from "./settings.js";
 import { SourceUnreachableError } from "../../utils/errors.js";
 import type { ResolvedTarget } from "../../sources/network.js";
+import { runPostgresQuery } from "./runQuery.js";
 import { logger } from "../../utils/logger.js";
+import type { SqlPlan } from "../sql/types.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
 import { Pool } from "pg";
 import type {
   ConnectOptions,
   LoginFinding,
+  QueryPlan,
+  QueryResult,
+  RunLimits,
   SchemaSnapshot,
   SourceConnection,
 } from "../types.js";
@@ -21,6 +26,15 @@ export class PostgresConnection implements SourceConnection {
 
   readSchema(schemas: string[]): Promise<SchemaSnapshot> {
     return this.guarded((pool) => readSchema(pool, schemas));
+  }
+
+  /** The plan comes from this adapter's own language, so it is a SQL plan. */
+  runQuery(
+    plan: QueryPlan,
+    limits: RunLimits,
+    signal?: AbortSignal
+  ): Promise<QueryResult> {
+    return runPostgresQuery(this.pool, plan as SqlPlan, limits, signal);
   }
 
   /** Any driver failure, a timeout included, surfaces as the fixed error; the driver's is logged. */

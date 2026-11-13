@@ -62,17 +62,22 @@ describe("/v1/sources/:sourceId/tables", () => {
       expect(res.status).toBe(200);
       expect(res.body.next_cursor).toBeNull();
       expect(res.body.data.map((t: { name: string }) => t.name)).toEqual([
+        "accounts",
         "blobs",
+        "broken_orders",
         "customers",
         "order_lines",
         "orders",
         "paid_orders",
+        "session_flags",
+        "slow_orders",
+        "typed_values",
       ]);
       expect(res.body.data[0]).toEqual({
         id: expect.any(String),
         source_id: sourceId,
         schema_name: "sales",
-        name: "blobs",
+        name: "accounts",
         kind: "table",
         description: null,
         last_seen_at: expect.any(String),
@@ -85,22 +90,24 @@ describe("/v1/sources/:sourceId/tables", () => {
     });
 
     it("pages with limit and cursor", async () => {
-      const first = await call("GET", `/${sourceId}/tables?limit=2`);
-      expect(first.body.data).toHaveLength(2);
+      const first = await call("GET", `/${sourceId}/tables?limit=4`);
+      expect(first.body.data).toHaveLength(4);
       expect(first.body.next_cursor).toEqual(expect.any(String));
       const second = await call(
         "GET",
-        `/${sourceId}/tables?limit=2&cursor=${first.body.next_cursor}`
+        `/${sourceId}/tables?limit=4&cursor=${first.body.next_cursor}`
       );
       expect(second.body.data.map((t: { name: string }) => t.name)).toEqual([
         "order_lines",
         "orders",
+        "paid_orders",
+        "session_flags",
       ]);
       const last = await call(
         "GET",
-        `/${sourceId}/tables?limit=2&cursor=${second.body.next_cursor}`
+        `/${sourceId}/tables?limit=4&cursor=${second.body.next_cursor}`
       );
-      expect(last.body.data).toHaveLength(1);
+      expect(last.body.data).toHaveLength(2);
       expect(last.body.next_cursor).toBeNull();
       expect(
         (await call("GET", `/${sourceId}/tables?cursor=garbage`)).status
@@ -156,6 +163,7 @@ describe("/v1/sources/:sourceId/tables", () => {
         "total",
         "created_at",
         "notes",
+        "external_ref",
       ]);
       expect(res.body.columns[0]).toEqual({
         id: expect.any(String),
