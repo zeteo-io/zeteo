@@ -91,6 +91,8 @@ export const recordRun = (run: RunRecord): Promise<string> =>
       resourceId: row.id,
       actorId: run.caller.userId,
       metadata: runMetadata(run, run),
+      // This entry creates the run, an export's included.
+      verb: "CREATE",
     });
     return row.id;
   });

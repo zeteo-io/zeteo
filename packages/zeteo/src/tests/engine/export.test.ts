@@ -8,6 +8,7 @@ import { abortExports, runExport } from "../../engine/export.js";
 import { auditRows, removeSources } from "../support/sources.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
+import { recordExportStart } from "../../engine/record.js";
 import type { ExportSink } from "../../engine/export.js";
 import type { Caller } from "../../middleware/auth.js";
 import { leaseKey } from "../../engine/leases.js";
@@ -27,8 +28,11 @@ import {
 } from "../support/queries.js";
 
 // Every row stream the engine opens, and whether its run's signal had aborted
-// when it was closed.
+// when it was closed; `onClose`, when a test sets it, runs as one is closed.
 const closes = vi.hoisted(() => [] as boolean[]);
+const hooks = vi.hoisted(() => ({
+  onClose: undefined as (() => void) | undefined,
+}));
 vi.mock(import("../../sources/pools.js"), async (importOriginal) => {
   const actual = await importOriginal();
   const watched = (conn: SourceConnection): SourceConnection =>
@@ -46,6 +50,7 @@ vi.mock(import("../../sources/pools.js"), async (importOriginal) => {
               next: (n: number) => stream.next(n),
               close: () => {
                 closes.push(signal?.aborted === true);
+                hooks.onClose?.();
                 return stream.close();
               },
             };
@@ -62,6 +67,12 @@ vi.mock(import("../../sources/pools.js"), async (importOriginal) => {
       fn: (conn: SourceConnection) => Promise<T>
     ) => actual.withSourceConnection(sourceId, (conn) => fn(watched(conn))),
   };
+});
+
+// The recorder as the engine sees it, wrapped only when a test says so.
+vi.mock(import("../../engine/record.js"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, recordExportStart: vi.fn(actual.recordExportStart) };
 });
 
 type Call = ["start" | "rows" | "end", unknown];
@@ -149,9 +160,17 @@ describeEachEngine("runExport", (engine) => {
     return runs[0]!;
   };
 
-  const leasesHeld = async (caller: Caller, on: SeededSource) =>
-    (await redis.zcard(leaseKey(`export:user:${caller.userId}`))) +
-    (await redis.zcard(leaseKey(`export:source:${on.id}`)));
+  /** The export leases still held after up to a second: the release is not waited for. */
+  const leasesHeld = async (caller: Caller, on: SeededSource) => {
+    const held = async () =>
+      (await redis.zcard(leaseKey(`export:user:${caller.userId}`))) +
+      (await redis.zcard(leaseKey(`export:source:${on.id}`)));
+    const until = Date.now() + 1000;
+    while ((await held()) > 0 && Date.now() < until) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    return held();
+  };
 
   /** Resolves once `fn` is called; `fn` waits until the returned gate opens. */
   const gate = () => {
@@ -191,6 +210,7 @@ describeEachEngine("runExport", (engine) => {
   });
   beforeEach(() => {
     closes.length = 0;
+    hooks.onClose = undefined;
   });
   afterAll(async () => {
     await closeAllSourcePools();
@@ -239,9 +259,9 @@ describeEachEngine("runExport", (engine) => {
       truncated: false,
     });
     const audit = (await auditRows(run.id)).map((r) => r.payload);
-    expect(audit.map((a) => a.metadata.event)).toEqual([
-      "zeteo.export.started",
-      "zeteo.export.run",
+    expect(audit.map((a) => [a.metadata.event, a.action])).toEqual([
+      ["zeteo.export.started", "CREATE"],
+      ["zeteo.export.run", "UPDATE"],
     ]);
     expect(audit[0]).toMatchObject({
       entityType: "query_run",
@@ -309,9 +329,10 @@ describeEachEngine("runExport", (engine) => {
         rowCount: null,
       });
       const audit = await auditRows(run.id);
-      expect(audit.map((a) => a.payload.metadata.event)).toEqual([
-        "zeteo.export.run",
-      ]);
+      // The entry creates the run: the export never started.
+      expect(
+        audit.map((a) => [a.payload.metadata.event, a.payload.action])
+      ).toEqual([["zeteo.export.run", "CREATE"]]);
     }
   });
 
@@ -544,6 +565,77 @@ describeEachEngine("runExport", (engine) => {
       outcome: "failed",
       errorCode: "shutting_down",
     });
+    expect(closes).toEqual([true]);
+  });
+
+  it("does not end the sink of an export halted after its last rows, and records the halt", async () => {
+    const caller = await grantedCaller();
+    const { sink, calls, rows } = recorder();
+    hooks.onClose = () => abortExports();
+    const err = await rejectionOf(
+      runExport(
+        {
+          caller,
+          body: customers(source),
+          signal: new AbortController().signal,
+        },
+        sink
+      )
+    );
+    expect(err).toMatchObject({ statusCode: 503 });
+    expect(rows()).toEqual(CUSTOMERS);
+    expect(calls.some(([kind]) => kind === "end")).toBe(false);
+    const run = await onlyRunOf(caller.userId);
+    expect(run).toMatchObject({
+      outcome: "failed",
+      errorCode: "shutting_down",
+      rowCount: 3,
+      truncated: false,
+    });
+    const audit = await auditRows(run.id);
+    expect(audit.map((a) => a.payload.metadata.event)).toEqual([
+      "zeteo.export.started",
+      "zeteo.export.run",
+    ]);
+    expect(await leasesHeld(caller, source)).toBe(0);
+  });
+
+  it("does not start the sink of an export halted while its start is recorded, and records the halt", async () => {
+    const caller = await grantedCaller();
+    const actual = await vi.importActual<
+      typeof import("../../engine/record.js")
+    >("../../engine/record.js");
+    vi.mocked(recordExportStart).mockImplementationOnce(async (start) => {
+      const id = await actual.recordExportStart(start);
+      abortExports();
+      return id;
+    });
+    const { sink, calls } = recorder();
+    const err = await rejectionOf(
+      runExport(
+        {
+          caller,
+          body: customers(source),
+          signal: new AbortController().signal,
+        },
+        sink
+      )
+    );
+    expect(err).toMatchObject({ statusCode: 503 });
+    expect(calls).toEqual([]);
+    const run = await onlyRunOf(caller.userId);
+    expect(run).toMatchObject({
+      outcome: "failed",
+      errorCode: "shutting_down",
+      rowCount: 0,
+    });
+    const audit = await auditRows(run.id);
+    expect(
+      audit.map((a) => [a.payload.metadata.event, a.payload.action])
+    ).toEqual([
+      ["zeteo.export.started", "CREATE"],
+      ["zeteo.export.run", "UPDATE"],
+    ]);
     expect(closes).toEqual([true]);
   });
 });

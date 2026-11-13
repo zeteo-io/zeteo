@@ -177,8 +177,13 @@ export const runExport = async (
   /** `step`, or the halt's error as soon as the export is halted. */
   const untilHalted = <T>(step: Promise<T>): Promise<T> =>
     Promise.race([step, whenHalted]);
-  /** A call on the sink: its failure halts the export. */
+  /**
+   * A call on the sink, made only while the export is not halted, so a
+   * halted export never tells its reader it started or ended. Its failure
+   * halts the export.
+   */
   const toSink = (call: () => Promise<void>): Promise<void> => {
+    if (halted) return Promise.reject(halted.err);
     let pending: Promise<void>;
     try {
       pending = call();
@@ -295,8 +300,11 @@ export const runExport = async (
       });
     } finally {
       clearInterval(renewal);
-      await leases.release();
+      // Not waited for: a release that fails is logged, and its lease lapses.
+      void leases.release();
     }
+    // Recorded `ok` only once the reader has taken the end; a halt before
+    // it ends the export unended, recorded as halted.
     await toSink(() => sink.end(tail));
     await recordEnd(runId!, start!, {
       durationMs: elapsed(),

@@ -16,6 +16,8 @@ export interface AuditEntry {
   /** The tereo user who made the change. */
   actorId: string;
   metadata?: Record<string, unknown>;
+  /** The entry's verb, where the event's own does not fit this entry. */
+  verb?: AuditLogWritableAction;
 }
 
 export type Audit = (entry: AuditEntry) => void;
@@ -34,7 +36,8 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.grantRemoved]: "DELETE",
   [AUDIT_EVENTS.queryRun]: "CREATE",
   [AUDIT_EVENTS.exportStarted]: "CREATE",
-  // Usually closes the run its start created; a refused export has no start.
+  // Ends the run its start created; an export refused before it started
+  // creates its run instead (`recordRun` says so).
   [AUDIT_EVENTS.exportRun]: "UPDATE",
 };
 
@@ -72,7 +75,7 @@ export const withAudit = async <T>(
         for (const entry of entries) {
           await outbox.audit(pending.client, {
             userId: entry.actorId,
-            action: VERB[entry.action],
+            action: entry.verb ?? VERB[entry.action],
             entityType: entry.resourceType,
             entityId: entry.resourceId,
             metadata: { ...entry.metadata, event: entry.action },
