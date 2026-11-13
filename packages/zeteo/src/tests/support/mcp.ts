@@ -19,12 +19,26 @@ export interface McpSession {
   close(): Promise<void>;
 }
 
-/** An MCP client signed in with `token`, connected to `url` (the shared server's endpoint by default). */
+/** The 2026-era protocol revision a `modern` session pins. */
+export const MODERN_PROTOCOL = "2026-07-28";
+
+/**
+ * An MCP client signed in with `token`, connected to `url` (the shared
+ * server's endpoint by default). `era` is the protocol era: `legacy` (the
+ * 2025 `initialize` handshake, the client's default) or `modern`, pinned to
+ * `MODERN_PROTOCOL`.
+ */
 export const connectMcp = async (
   token: string,
-  url = MCP_URL
+  url = MCP_URL,
+  era: "legacy" | "modern" = "legacy"
 ): Promise<McpSession> => {
-  const client = new Client({ name: "zeteo-test-client", version: "0.0.0" });
+  const client = new Client(
+    { name: "zeteo-test-client", version: "0.0.0" },
+    era === "modern"
+      ? { versionNegotiation: { mode: { pin: MODERN_PROTOCOL } } }
+      : {}
+  );
   await client.connect(
     new StreamableHTTPClientTransport(new URL(url), {
       requestInit: { headers: { Authorization: `Bearer ${token}` } },

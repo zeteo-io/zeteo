@@ -1,6 +1,5 @@
 // @module-tag unit
 // @module-tag platform
-import { QueryFailedError, QueryTimeoutError } from "../../utils/errors.js";
 import { getRequestId, withRequestId } from "../../utils/requestId.js";
 import { asToolError, inToolCall } from "../../mcp/errors.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +7,14 @@ import { QueryError } from "../../engine/errors.js";
 import type { ToolContext } from "@tereo-io/mcp";
 import { logger } from "../../utils/logger.js";
 import { ToolError } from "@tereo-io/mcp";
+import {
+  AppError,
+  QueryFailedError,
+  QueryTimeoutError,
+  sourceBusy,
+  SourceUnreachableError,
+  TooManyRequestsError,
+} from "../../utils/errors.js";
 
 const toolError = (fn: () => unknown): ToolError => {
   try {
@@ -25,8 +32,8 @@ describe("asToolError", () => {
   });
 
   it.each([
+    ["500 server_error", new AppError(500, "server_error", "Internal error")],
     ["502 query_failed", new QueryFailedError()],
-    ["504 query_timeout", new QueryTimeoutError()],
   ])("logs a %s at error, with the error", (_, err) => {
     const error = vi.spyOn(logger, "error").mockImplementation(() => {});
     const thrown = toolError(() => asToolError(err, "req-1"));
@@ -37,6 +44,26 @@ describe("asToolError", () => {
     expect(error).toHaveBeenCalledTimes(1);
     expect(error.mock.calls[0]![0]).toMatchObject({ err });
   });
+
+  it.each([
+    ["504 query_timeout", new QueryTimeoutError()],
+    ["502 source_unreachable", new SourceUnreachableError()],
+    ["503 temporarily_unavailable (a busy source)", sourceBusy()],
+    [
+      "429 source_busy",
+      new TooManyRequestsError(1, "The source is busy", "source_busy"),
+    ],
+  ])(
+    "does not log an expected %s again: its cause is logged where it arose",
+    (_, err) => {
+      const logged = (["error", "warn", "info"] as const).map((level) =>
+        vi.spyOn(logger, level).mockImplementation(() => {})
+      );
+      const thrown = toolError(() => asToolError(err, "req-4"));
+      expect(JSON.parse(thrown.message).error).toBe(err.code);
+      for (const spy of logged) expect(spy).not.toHaveBeenCalled();
+    }
+  );
 
   it("does not log a 4xx at error", () => {
     const error = vi.spyOn(logger, "error").mockImplementation(() => {});
