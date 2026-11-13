@@ -7,8 +7,8 @@ import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { QueryError } from "../../../engine/errors.js";
-import { logger } from "../../../utils/logger.js";
 import { runPlan } from "../../support/runPlan.js";
+import { logger } from "../../../utils/logger.js";
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
 import sql from "mssql";
@@ -362,7 +362,9 @@ describe("azure-sql runQuery: safety", () => {
     const controller = new AbortController();
     const reason = new Error("client went away");
     const driverError = new sql.RequestError("Deadlock victim", "EREQUEST");
-    vi.spyOn(sql.Request.prototype, "cancel").mockImplementation(() => undefined);
+    vi.spyOn(sql.Request.prototype, "cancel").mockImplementation(
+      () => undefined
+    );
     vi.spyOn(sql.Request.prototype, "query").mockImplementation(function (
       this: sql.Request,
       _text: unknown,
