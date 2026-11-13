@@ -136,6 +136,10 @@ const CUSTOMERS = [
   [3, "MiXeD Case Ltd"],
 ];
 
+/** Rows by their first value, the id: an export with no orderBy sends them in no set order. */
+const byId = (rows: unknown[][]): unknown[][] =>
+  [...rows].sort((a, b) => (a[0] as number) - (b[0] as number));
+
 describeEachEngine("runExport", (engine) => {
   let source: SeededSource;
   let capped: SeededSource;
@@ -274,7 +278,7 @@ describeEachEngine("runExport", (engine) => {
       runId: run.id,
     });
     expect(seenAtStart).toBe("running");
-    expect(rows()).toEqual(CUSTOMERS);
+    expect(byId(rows())).toEqual(CUSTOMERS);
     expect(calls.at(-1)).toEqual(["end", { status: "complete", rows: 3 }]);
     expect(calls.slice(1, -1).every(([kind]) => kind === "rows")).toBe(true);
 
@@ -324,7 +328,10 @@ describeEachEngine("runExport", (engine) => {
       { caller, body: customers(capped), signal: new AbortController().signal },
       sink
     );
-    expect(rows()).toEqual(CUSTOMERS.slice(0, 2));
+    // Two of the three, whichever the source sent first.
+    expect(rows()).toHaveLength(2);
+    expect(new Set(rows().map(([id]) => id)).size).toBe(2);
+    expect(CUSTOMERS).toEqual(expect.arrayContaining(rows()));
     expect(calls.at(-1)).toEqual(["end", { status: "truncated", rows: 2 }]);
     expect(await onlyRunOf(caller.userId)).toMatchObject({
       outcome: "ok",
@@ -687,7 +694,7 @@ describeEachEngine("runExport", (engine) => {
       )
     );
     expect(err).toMatchObject({ statusCode: 503 });
-    expect(rows()).toEqual(CUSTOMERS);
+    expect(byId(rows())).toEqual(CUSTOMERS);
     expect(calls.some(([kind]) => kind === "end")).toBe(false);
     const run = await onlyRunOf(caller.userId);
     expect(run).toMatchObject({
