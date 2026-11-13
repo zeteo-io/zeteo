@@ -45,8 +45,8 @@ with `{"status":"ok", ...}` when both respond (`503` otherwise). Requests sign i
 and changes can write audit entries to tereo's outbox. Administrators can register, list, change,
 archive and test Postgres sources under `/v1/sources` (settings encrypted at rest, hosts limited by
 `SOURCE_ALLOWED_HOSTS`, a login check that refuses writable logins unless overridden). Each source's
-tables, views, columns and foreign keys are read into a catalogue when it is created, on
-`POST /v1/sources/:sourceId/refresh` and by a daily job; a refresh marks what disappeared instead of
+tables, views, columns and foreign keys are read into a catalogue when it is created, when its
+settings or schemas change, on `POST /v1/sources/:sourceId/refresh` and by a daily job; a refresh marks what disappeared instead of
 deleting it and never changes ids or descriptions. Administrators describe tables and columns,
 read the discovered relations (one pair per foreign key) and declare their own, under
 `/v1/sources/:sourceId/tables` and `/relations`. Nothing else exists yet: no grants, no queries.

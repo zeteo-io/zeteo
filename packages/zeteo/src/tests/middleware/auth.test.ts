@@ -61,7 +61,7 @@ describe("authenticate and requirePermission", () => {
     expect(res.body.error).toBe("unauthorized");
   });
 
-  it("answers 401 to a token that is not one tereo issued", async () => {
+  it("answers 401 when introspection of the token fails", async () => {
     const res = await get("/read", "not-a-token-of-this-core");
     expect(res.status).toBe(401);
     expect(res.body.error).toBe("unauthorized");

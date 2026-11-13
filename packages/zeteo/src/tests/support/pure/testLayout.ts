@@ -178,7 +178,6 @@ export function reachesInfrastructure(target: string): boolean {
     // The entry points start the server, database and Redis.
     target === "app.ts" ||
     target === "index.ts" ||
-    target === "worker.ts" ||
     // tags.ts is a pure declaration, imported by the config as well.
     (target.startsWith("tests/setup/") && target !== "tests/setup/tags.ts") ||
     (target.startsWith("tests/support/") &&

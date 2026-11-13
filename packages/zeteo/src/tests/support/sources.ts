@@ -12,7 +12,7 @@ export const writeToken = () => tokenFor({ permissions: [SOURCES_WRITE] });
 export const readToken = () => tokenFor({ permissions: [SOURCES_READ] });
 
 /** A slug no other test run uses. */
-export const uniqueSlug = (prefix = "t7") =>
+export const uniqueSlug = (prefix = "test") =>
   `${prefix}-${randomUUID().slice(0, 8)}`;
 
 export const sourceBody = (
@@ -35,9 +35,16 @@ export const auditRows = (id: string) =>
     SELECT payload FROM "core"."core_outbox"
     WHERE payload->>'entityId' = ${id} ORDER BY created_at, id`;
 
+/**
+ * Deletes the sources and every audit row about them or their relations (a
+ * relation's entries name the source in `metadata.source_id`).
+ */
 export const removeSources = async (ids: string[]) => {
   for (const id of ids) {
-    await prisma.$executeRaw`DELETE FROM "core"."core_outbox" WHERE payload->>'entityId' = ${id}`;
+    await prisma.$executeRaw`
+      DELETE FROM "core"."core_outbox"
+      WHERE payload->>'entityId' = ${id}
+         OR payload->'metadata'->>'source_id' = ${id}`;
   }
   await prisma.source.deleteMany({ where: { id: { in: ids } } });
 };

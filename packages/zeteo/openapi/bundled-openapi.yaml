@@ -128,10 +128,11 @@ paths:
         Registers a database. Before anything is stored, Zeteo validates `settings` against the
         type's schema, checks the host against the deploy's network rules, connects with the login
         and inspects its rights. A login that holds rights a read-only login would not is refused
-        with `422 writable_login` (the body lists the finding codes) unless `allow_writable_login`
+        with `422 writable_login` (the body lists the findings) unless `allow_writable_login`
         is true, in which case the source is stored with `writable_login_allowed: true` and the audit
         entry records the finding codes. Nothing is stored when any step fails. An audit entry
-        `zeteo.source.created` is written with the slug and type, never the settings.
+        `zeteo.source.created` is written with the slug, the type and the settings without
+        `password` and `ca`.
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
@@ -214,12 +215,15 @@ paths:
         - Sources
       summary: Change a source
       description: |
-        Changes any of the create fields except `slug` and `type`. A request without `settings`
-        never contacts the source. With `settings`, the new object replaces the old one whole and
-        goes through the same checks as a create (the login check included; send
-        `allow_writable_login: true` again to keep an override); the source's open connections are
-        closed so the next use connects with the new settings. An audit entry
-        `zeteo.source.updated` lists the names of the fields changed, never their values.
+        Changes any of the create fields except `slug` and `type`. A request with neither
+        `settings` nor `schemas` never contacts the source. With `settings`, the new object replaces
+        the old one whole and goes through the same checks as a create (the login check included;
+        send `allow_writable_login: true` again to keep an override); the source's open connections
+        are closed so the next use connects with the new settings. After a change to `settings` or
+        `schemas` is committed, the catalogue is refreshed; if that refresh fails, the change stands,
+        `status` is `unreachable` and the answer is still `200`. An audit entry
+        `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
+        the new settings without `password` and `ca`.
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
@@ -794,9 +798,14 @@ components:
                 type: string
         findings:
           type: array
-          description: On `writable_login`, the codes of what the login check found
+          description: On `writable_login`, what the login check found; at most 20
+          maxItems: 20
           items:
-            type: string
+            $ref: '#/components/schemas/LoginFinding'
+        truncated:
+          type: boolean
+          const: true
+          description: On `writable_login`, present when the check found more than the 20 listed
     HealthStatus:
       type: object
       required:
@@ -1089,8 +1098,14 @@ components:
           const: true
         findings:
           type: array
+          description: What the login check found; at most 20
+          maxItems: 20
           items:
             $ref: '#/components/schemas/LoginFinding'
+        truncated:
+          type: boolean
+          const: true
+          description: Present when the check found more than the 20 listed
     ColumnType:
       type: string
       enum:

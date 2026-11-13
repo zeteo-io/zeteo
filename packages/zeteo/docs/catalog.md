@@ -21,7 +21,9 @@ change to an archived source is `409 source_archived`; reads still work.
 ## Refresh
 
 A refresh reads the source's tables, views, columns and foreign keys in its `schemas` (what the
-login can select) and writes them to the catalogue in one transaction. It runs
+login can select) and writes them to the catalogue in one transaction. A table or view is listed
+only when the login holds `SELECT` on the whole of it; one it can read only through column-level
+`SELECT` grants is not listed. It runs
 
 - after `POST /v1/sources`, and after a `PATCH` that changes `settings` or `schemas` (a failure
   there leaves the source with `status: unreachable`; the create or change stands),
@@ -69,6 +71,8 @@ reads again (at most five reads; the fifth is applied). The catalogue therefore 
 newest read of the current settings. A wait for the lock longer than `DB_LOCK_TIMEOUT_MS` answers
 `503 temporarily_unavailable`. The write may run for up to 120 seconds, longer than an ordinary
 change (`DB_TRANSACTION_TIMEOUT_MS`), so a source with thousands of tables can be refreshed.
+Declaring and removing a relation take the same lock, so while a long refresh holds it they wait
+`DB_LOCK_TIMEOUT_MS` and then answer `503 temporarily_unavailable`; retry them.
 
 ## Descriptions
 
@@ -120,4 +124,6 @@ Declaring and removing are audited as `zeteo.relation.declared` and `zeteo.relat
 | 409 | `relation_name_taken` | the from table already has a relation of that name |
 | 409 | `relation_discovered` | removing a discovered relation |
 | 422 | `invalid_relation` | the declared relation fails a check above |
+| 422 | `host_not_allowed` | a refresh found the source's host no longer permitted by the network rules |
 | 502 | `source_unreachable` | a refresh could not read the source |
+| 503 | `temporarily_unavailable` | the database was busy, or a declare or remove waited too long for a refresh's lock |

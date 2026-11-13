@@ -50,9 +50,10 @@ writable_login_allowed, status, last_refreshed_at, created_at, archived_at }`.
 when given), `require` (encrypted, certificate not checked) or `off`. Unknown keys are refused.
 `password` and `ca` are encrypted at rest and never returned.
 
-zeteo sends the startup option `default_transaction_read_only=on` as a backstop. A Postgres source
-behind an old PgBouncer may refuse the `options` startup parameter zeteo sends, and then fails as
-`source_unreachable`.
+zeteo sends the startup option `default_transaction_read_only=on` as a backstop, and sets
+`statement_timeout` for the session. A Postgres source behind an old PgBouncer may refuse the
+`options` and `statement_timeout` startup parameters zeteo sends (unless they are listed in its
+`ignore_startup_parameters`), and then fails as `source_unreachable`.
 
 ### `azure-sql`
 
@@ -120,6 +121,13 @@ With findings, create and settings change answer `422 writable_login` and the bo
 
 Prefer a login that is read-only at the database; the override exists for logins that cannot be
 changed.
+
+## Master key
+
+`ZETEO_MASTER_KEY` wraps every source's data key. There is no key-rotation or rewrap command yet.
+Starting Zeteo with a different key leaves existing sources unreadable: they still list and view,
+with `settings: null`, and using them fails with `500 server_error`, until the original key is
+restored. In production the development key published in `docker-compose.yml` is refused.
 
 ## Network allowlist
 
