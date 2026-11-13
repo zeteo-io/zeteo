@@ -1,7 +1,8 @@
 // @module-tag unit
 // @module-tag platform
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import pg from "pg";
 import {
   postgresSettingsSchema,
   toPgConfig,
@@ -15,7 +16,7 @@ const settings = postgresSettingsSchema.parse({
   ca: "-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----",
 });
 
-const options = { connectTimeoutMs: 4000, poolSize: 3 };
+const options = { connectTimeoutMs: 4000, poolSize: 3, queryTimeoutMs: 7000 };
 
 describe("postgres settings", () => {
   it("refuses an unknown key", () => {
@@ -24,6 +25,21 @@ describe("postgres settings", () => {
       sslmode: "disable",
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it.each(["host", "database", "user", "password"])(
+    "refuses an empty %s",
+    (key) => {
+      expect(
+        postgresSettingsSchema.safeParse({ ...settings, [key]: "" }).success
+      ).toBe(false);
+    }
+  );
+
+  it.each([0, 65536, 1.5])("refuses the port %s", (port) => {
+    expect(
+      postgresSettingsSchema.safeParse({ ...settings, port }).success
+    ).toBe(false);
   });
 
   it("defaults the port and verifies TLS", () => {
@@ -64,7 +80,6 @@ describe("toPgConfig", () => {
       port: 5432,
       database: "sales",
       user: "reader",
-      password: "s3cret",
       application_name: "zeteo",
       connectionTimeoutMillis: 4000,
       max: 3,
@@ -115,5 +130,65 @@ describe("toPgConfig", () => {
     } as const;
     const { ssl } = toPgConfig(settings, literal, options);
     expect(ssl).not.toHaveProperty("servername");
+  });
+});
+
+describe("toPgConfig against the environment", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  const target = {
+    host: "db.example.com",
+    address: "10.1.2.3",
+    family: 4,
+  } as const;
+
+  it("hands the password over as a function, so an empty value cannot fall back", async () => {
+    const config = toPgConfig(settings, target, options);
+    expect(typeof config.password).toBe("function");
+    expect(await (config.password as () => string)()).toBe("s3cret");
+  });
+
+  it("derives every connection parameter from the settings, whatever PG* variables are set", () => {
+    for (const [key, value] of Object.entries({
+      PGPASSWORD: "env-password",
+      PGUSER: "env-user",
+      PGDATABASE: "env-database",
+      PGHOST: "env-host",
+      PGPORT: "6543",
+      PGSSLMODE: "disable",
+      PGOPTIONS: "-c search_path=evil",
+      PGAPPNAME: "env-app",
+      PGREPLICATION: "database",
+      PGSSLNEGOTIATION: "direct",
+      PGCONNECT_TIMEOUT: "99",
+    })) {
+      vi.stubEnv(key, value);
+    }
+    const client = new pg.Client(toPgConfig(settings, target, options));
+    const params = (
+      client as unknown as { connectionParameters: Record<string, unknown> }
+    ).connectionParameters;
+    expect(params).toMatchObject({
+      user: "reader",
+      database: "sales",
+      host: "10.1.2.3",
+      port: 5432,
+      options: "-c default_transaction_read_only=on",
+      application_name: "zeteo",
+      replication: "false",
+      sslnegotiation: "postgres",
+      connect_timeout: 4,
+      statement_timeout: 7000,
+      query_timeout: 7000,
+    });
+    expect(params.ssl).toMatchObject({ rejectUnauthorized: true });
+    expect(typeof params.password).toBe("function");
+    expect((params.password as () => string)()).toBe("s3cret");
+  });
+
+  it("limits every query on both sides", () => {
+    const config = toPgConfig(settings, target, options);
+    expect(config.query_timeout).toBe(7000);
+    expect(config.statement_timeout).toBe(7000);
   });
 });

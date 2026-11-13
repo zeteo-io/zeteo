@@ -4,11 +4,14 @@ import type { ResolvedTarget, Resolver } from "../../sources/network.js";
 import { lookup } from "node:dns/promises";
 
 export const FIXTURE_DATABASE = "zeteo_fixture";
+/** A second database, owned by `FIXTURE_ROLES.dbOwner`, which has revoked CREATE from itself. */
+export const FIXTURE_OWNED_DATABASE = "zeteo_fixture_owned";
 
 export const FIXTURE_ROLES = {
   ro: { user: "zeteo_ro", password: "ro-test-password" },
   rw: { user: "zeteo_rw", password: "rw-test-password" },
   owner: { user: "zeteo_owner", password: "owner-test-password" },
+  dbOwner: { user: "zeteo_dbowner", password: "dbowner-test-password" },
 } as const;
 
 /** The test server's address, taken from the test `DATABASE_URL`. */
@@ -24,12 +27,12 @@ const serverOf = () => {
 
 /** Settings for the fixture database as one of its roles; no TLS, the fixture server has none. */
 export const fixtureSettings = (
-  role: "ro" | "rw" | "owner",
+  role: "ro" | "rw" | "owner" | "dbOwner",
   overrides: Partial<PostgresSettings> = {}
 ): PostgresSettings => ({
   host: serverOf().host,
   port: serverOf().port,
-  database: FIXTURE_DATABASE,
+  database: role === "dbOwner" ? FIXTURE_OWNED_DATABASE : FIXTURE_DATABASE,
   ...FIXTURE_ROLES[role],
   tls: "off",
   ...overrides,

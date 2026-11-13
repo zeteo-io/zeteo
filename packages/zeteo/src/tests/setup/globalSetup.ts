@@ -48,16 +48,18 @@ const quoteLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
 async function recreateFixtureDatabase(databaseUrl: string) {
   const { Client } = await import("pg");
   const { readFile } = await import("fs/promises");
-  const { FIXTURE_DATABASE, FIXTURE_ROLES } =
+  const { FIXTURE_DATABASE, FIXTURE_OWNED_DATABASE, FIXTURE_ROLES } =
     await import("../support/fixtureDb.js");
   const admin = new URL(databaseUrl);
   admin.pathname = "/postgres";
   const client = new Client({ connectionString: admin.toString() });
   await client.connect();
   try {
-    await client.query(
-      `DROP DATABASE IF EXISTS ${quoteIdent(FIXTURE_DATABASE)} WITH (FORCE)`
-    );
+    for (const name of [FIXTURE_DATABASE, FIXTURE_OWNED_DATABASE]) {
+      await client.query(
+        `DROP DATABASE IF EXISTS ${quoteIdent(name)} WITH (FORCE)`
+      );
+    }
     for (const { user, password } of Object.values(FIXTURE_ROLES)) {
       await client.query(`DROP ROLE IF EXISTS ${quoteIdent(user)}`);
       await client.query(
@@ -65,6 +67,13 @@ async function recreateFixtureDatabase(databaseUrl: string) {
       );
     }
     await client.query(`CREATE DATABASE ${quoteIdent(FIXTURE_DATABASE)}`);
+    // The owner has revoked CREATE from itself: only ownership is left to find.
+    await client.query(
+      `CREATE DATABASE ${quoteIdent(FIXTURE_OWNED_DATABASE)} OWNER ${quoteIdent(FIXTURE_ROLES.dbOwner.user)}`
+    );
+    await client.query(
+      `REVOKE CREATE ON DATABASE ${quoteIdent(FIXTURE_OWNED_DATABASE)} FROM ${quoteIdent(FIXTURE_ROLES.dbOwner.user)}`
+    );
   } finally {
     await client.end();
   }

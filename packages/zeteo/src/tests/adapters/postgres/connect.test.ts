@@ -12,7 +12,7 @@ import {
   fixtureTarget,
 } from "../../support/fixtureDb.js";
 
-const options = { connectTimeoutMs: 3000, poolSize: 2 };
+const options = { connectTimeoutMs: 3000, poolSize: 2, queryTimeoutMs: 5000 };
 const ODD_PASSWORD = "p@ss/w%rd'x";
 const open: SourceConnection[] = [];
 
@@ -52,7 +52,7 @@ describe("postgres connect", () => {
       options
     );
     open.push(connection);
-    expect(await connection.checkLogin(["sales"])).toEqual([]);
+    expect(await connection.checkLogin()).toEqual([]);
   });
 
   it("fails a wrong password at connect, with no driver text", async () => {
@@ -118,6 +118,38 @@ describe("postgres connect", () => {
       options
     );
     open.push(connection);
-    expect(await connection.checkLogin(["sales"])).toEqual([]);
+    expect(await connection.checkLogin()).toEqual([]);
+  });
+
+  it("turns a catalog query that outlasts the query timeout into SourceUnreachableError", async () => {
+    const connection = (await postgresAdapter.connect(
+      fixtureSettings("ro"),
+      await fixtureTarget(),
+      { ...options, queryTimeoutMs: 300 }
+    )) as PostgresConnection;
+    open.push(connection);
+    const started = Date.now();
+    await expect(
+      connection.guarded((pool) => pool.query("SELECT pg_sleep(5)"))
+    ).rejects.toMatchObject({
+      name: "SourceUnreachableError",
+      message: "The source could not be reached or refused the login",
+    });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it("turns any driver error from the catalog queries into SourceUnreachableError", async () => {
+    const connection = (await postgresAdapter.connect(
+      fixtureSettings("ro"),
+      await fixtureTarget(),
+      options
+    )) as PostgresConnection;
+    await connection.pool.end();
+    await expect(connection.checkLogin()).rejects.toBeInstanceOf(
+      SourceUnreachableError
+    );
+    await expect(connection.readSchema(["sales"])).rejects.toBeInstanceOf(
+      SourceUnreachableError
+    );
   });
 });

@@ -6,6 +6,7 @@ import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
 import { Pool } from "pg";
 import type {
+  ConnectOptions,
   LoginFinding,
   SchemaSnapshot,
   SourceConnection,
@@ -14,12 +15,22 @@ import type {
 export class PostgresConnection implements SourceConnection {
   constructor(readonly pool: Pool) {}
 
-  checkLogin(schemas: string[]): Promise<LoginFinding[]> {
-    return checkLogin(this.pool, schemas);
+  checkLogin(): Promise<LoginFinding[]> {
+    return this.guarded((pool) => checkLogin(pool));
   }
 
   readSchema(schemas: string[]): Promise<SchemaSnapshot> {
-    return readSchema(this.pool, schemas);
+    return this.guarded((pool) => readSchema(pool, schemas));
+  }
+
+  /** Any driver failure, a timeout included, surfaces as the fixed error; the driver's is logged. */
+  async guarded<T>(run: (pool: Pool) => Promise<T>): Promise<T> {
+    try {
+      return await run(this.pool);
+    } catch (err) {
+      logger.warn({ err }, "source query failed");
+      throw new SourceUnreachableError();
+    }
   }
 
   async close(): Promise<void> {
@@ -34,7 +45,7 @@ export class PostgresConnection implements SourceConnection {
 export const connectPostgres = async (
   settings: PostgresSettings,
   target: ResolvedTarget,
-  options: { connectTimeoutMs: number; poolSize: number }
+  options: ConnectOptions
 ): Promise<PostgresConnection> => {
   const pool = new Pool(toPgConfig(settings, target, options));
   // An idle client dropped by the server must not crash the process.

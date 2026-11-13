@@ -20,7 +20,7 @@ beforeAll(async () => {
   connection = await postgresAdapter.connect(
     fixtureSettings("ro"),
     await fixtureTarget(),
-    { connectTimeoutMs: 5000, poolSize: 2 }
+    { connectTimeoutMs: 5000, poolSize: 2, queryTimeoutMs: 5000 }
   );
   snapshot = await connection.readSchema(["sales", "hr"]);
 });

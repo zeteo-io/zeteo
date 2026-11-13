@@ -14,7 +14,9 @@ export interface LoginFinding {
     | "owns_objects"
     | "can_write_tables"
     | "can_create_in_schema"
-    | "write_role_member";
+    | "write_role_member"
+    | "replication"
+    | "reads_server_files";
   detail: string;
 }
 
@@ -43,9 +45,17 @@ export interface SchemaSnapshot {
 }
 
 export interface SourceConnection {
-  checkLogin(schemas: string[]): Promise<LoginFinding[]>;
+  /** Inspects the login across the whole connected database, not a schema list. */
+  checkLogin(): Promise<LoginFinding[]>;
   readSchema(schemas: string[]): Promise<SchemaSnapshot>;
   close(): Promise<void>;
+}
+
+export interface ConnectOptions {
+  connectTimeoutMs: number;
+  poolSize: number;
+  /** Longest a catalog query may run, enforced by the client and the server. */
+  queryTimeoutMs: number;
 }
 
 export interface SourceAdapter<S = unknown> {
@@ -58,6 +68,6 @@ export interface SourceAdapter<S = unknown> {
   connect(
     settings: S,
     target: ResolvedTarget,
-    options: { connectTimeoutMs: number; poolSize: number }
+    options: ConnectOptions
   ): Promise<SourceConnection>;
 }
