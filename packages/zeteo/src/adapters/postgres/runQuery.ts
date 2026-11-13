@@ -12,12 +12,21 @@ import {
   AppError,
   QueryFailedError,
   QueryTimeoutError,
-  ServiceUnavailableError,
+  sourceBusy,
   SourceUnreachableError,
 } from "../../utils/errors.js";
 
+// pg-pool's error, which carries no code, for a checkout that waited past the
+// connect timeout while every connection was in use.
+const POOL_EXHAUSTED = "timeout exceeded when trying to connect";
+
+/** Whether the pool had no connection free in time. */
+export const isPoolExhausted = (err: unknown): boolean =>
+  err instanceof Error && err.message === POOL_EXHAUSTED;
+
 // Wire forms by the result field's type OID. A domain arrives as its base
-// type; every type not listed (enums, uuid, citext, money…) travels as text.
+// type; every type not listed (enums, uuid, citext…) travels as text. Money
+// never arrives as such: the dialect reads it as numeric.
 const WIRE_BY_OID: ReadonlyMap<number, WireKind> = new Map([
   [16, "boolean"],
   [20, "int64"],
@@ -73,9 +82,7 @@ const CONNECTION_MESSAGES = new Set([
   "Client has encountered a connection error and is not queryable",
   "Client was closed and is not queryable",
 ]);
-const POOL_EXHAUSTED = "timeout exceeded when trying to connect";
 const CLIENT_READ_TIMEOUT = "Query read timeout";
-const BUSY_RETRY_AFTER_SECONDS = 1;
 
 // Pins the forms the server prints values in, whatever the login's defaults:
 // timestamptz in UTC, ISO dates, floats with every digit (3 is full precision
@@ -199,12 +206,7 @@ const checkout = async (pool: Pool): Promise<PoolClient> => {
   } catch (err) {
     logger.warn({ err }, "no connection to the source for a query");
     // A pool with every connection in use is busy, not broken: it is kept.
-    if (err instanceof Error && err.message === POOL_EXHAUSTED) {
-      throw new ServiceUnavailableError(
-        "The source is busy; retry the request shortly",
-        BUSY_RETRY_AFTER_SECONDS
-      );
-    }
+    if (isPoolExhausted(err)) throw sourceBusy();
     throw new SourceUnreachableError();
   }
 };

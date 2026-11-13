@@ -10,13 +10,19 @@ import {
   AppError,
   QueryFailedError,
   QueryTimeoutError,
-  ServiceUnavailableError,
+  sourceBusy,
   SourceUnreachableError,
 } from "../../utils/errors.js";
 
+/**
+ * Whether the pool had no connection free in time. tarn's TimeoutError keeps
+ * Error's `name`; its class is what tells it apart.
+ */
+export const isPoolExhausted = (err: unknown): boolean =>
+  err instanceof Error && err.constructor.name === "TimeoutError";
+
 /** How long past the run's deadline the driver's own request timeout waits before it cancels. */
 const DRIVER_GRACE_MS = 2000;
-const BUSY_RETRY_AFTER_SECONDS = 1;
 
 /** The column metadata the driver gives in array row mode. */
 interface ResultColumn {
@@ -155,14 +161,10 @@ const isConnectionFailure = (err: unknown): boolean => {
 const callerError = (err: unknown): AppError => {
   if (err instanceof AppError) return err;
   const e = (err ?? {}) as DriverError;
-  // The pool had no connection free in time: busy, not broken. The pool's
-  // TimeoutError keeps Error's `name`; its class is what tells it apart.
-  if (err instanceof Error && err.constructor.name === "TimeoutError") {
+  // The pool had no connection free in time: busy, not broken.
+  if (isPoolExhausted(err)) {
     logger.warn({ err }, "no connection to the source for a query");
-    return new ServiceUnavailableError(
-      "The source is busy; retry the request shortly",
-      BUSY_RETRY_AFTER_SECONDS
-    );
+    return sourceBusy();
   }
   // A request that ran past the driver's timeout. Its cancel going
   // unacknowledged, which closes the connection, comes the same way: a

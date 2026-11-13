@@ -233,6 +233,13 @@ export class ServiceUnavailableError extends AppError {
 
 const BUSY_RETRY_AFTER_SECONDS = 1;
 
+/** A source whose pool had no connection free in time: busy, not broken, so the pool is kept. */
+export const sourceBusy = (): ServiceUnavailableError =>
+  new ServiceUnavailableError(
+    "The source is busy; retry the request shortly",
+    BUSY_RETRY_AFTER_SECONDS
+  );
+
 // pg-pool's errors carry no code: the first for a connection it could not hand
 // out in time, the second for a new one whose connect ran past the timeout.
 const CONNECT_TIMEOUT_MESSAGES = [

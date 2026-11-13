@@ -161,7 +161,8 @@ controls that name's DNS. Prefer address ranges where that matters.**
 
 ## Connection pools
 
-Each source has one pool per process (5 connections, connect timeout 5 s), opened on first use
+Each source has one pool per process (7 connections: the 5 queries a source may run at once, plus
+2, so a refresh or login check still gets one; connect timeout 5 s), opened on first use
 and closed after 5 idle minutes, on archive, on a settings change and on shutdown. Catalogue reads
 (the login check and schema reads) run under a 15 s query timeout; user queries run under the
 source's own `timeout_ms` ([querying.md](querying.md)). Concurrent first uses open one pool. A call
@@ -174,7 +175,9 @@ row newer than the pool (by `updated_at`) replaces it: a use whose read landed j
 settings change runs on the pool already opened with the new settings, and one that finds no pool
 (the change just closed it on this replica) reads the row again before opening one. A
 use that fails with `source_unreachable` closes the pool, so the next use resolves the host and
-connects again (after a database failover to a new address, for example). Once shutdown begins,
+connects again (after a database failover to a new address, for example). A use that finds every
+connection in use for the connect timeout is `503 temporarily_unavailable` (the source is busy): the
+pool is kept, and a refresh that meets it leaves the source's `status` as it was. Once shutdown begins,
 no new use is accepted (`503 temporarily_unavailable`), a use whose row read was under way is
 refused after it, and shutdown waits up to 2 s for the calls still running (HTTP has already drained
 by then). Past that it asks their pools to end and moves on; a call still running is not stopped,

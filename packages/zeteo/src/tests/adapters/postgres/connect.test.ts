@@ -4,7 +4,6 @@ import type { PostgresConnection } from "../../../adapters/postgres/connect.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceConnection } from "../../../adapters/types.js";
-import { SourceUnreachableError } from "../../../utils/errors.js";
 import { startSilentServer } from "../../support/silentServer.js";
 import { Client } from "pg";
 import {
@@ -12,6 +11,10 @@ import {
   fixtureSettings,
   fixtureTarget,
 } from "../../support/fixtureDb.js";
+import {
+  ServiceUnavailableError,
+  SourceUnreachableError,
+} from "../../../utils/errors.js";
 
 const options = { connectTimeoutMs: 3000, poolSize: 2, queryTimeoutMs: 5000 };
 const ODD_PASSWORD = "p@ss/w%rd'x";
@@ -171,5 +174,33 @@ describe("postgres connect", () => {
     await expect(connection.readSchema(["sales"])).rejects.toBeInstanceOf(
       SourceUnreachableError
     );
+  });
+
+  it("answers busy (503), not unreachable, for a catalogue read while every pool connection is in use", async () => {
+    const connection = (await postgresAdapter.connect(
+      fixtureSettings("ro"),
+      await fixtureTarget(),
+      { ...options, connectTimeoutMs: 500 }
+    )) as PostgresConnection;
+    open.push(connection);
+    const held = await Promise.all([
+      connection.pool.connect(),
+      connection.pool.connect(),
+    ]);
+    try {
+      for (const read of [
+        () => connection.readSchema(["sales"]),
+        () => connection.checkLogin(),
+      ]) {
+        const err = await read().catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ServiceUnavailableError);
+        expect(err).toMatchObject({ statusCode: 503 });
+      }
+    } finally {
+      for (const client of held) client.release();
+    }
+    expect(
+      (await connection.readSchema(["sales"])).tables.length
+    ).toBeGreaterThan(0);
   });
 });

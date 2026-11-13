@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { startSilentServer } from "../../support/silentServer.js";
-import { SourceUnreachableError } from "../../../utils/errors.js";
 import { logger } from "../../../utils/logger.js";
 import dns from "node:dns";
 import {
@@ -18,6 +17,10 @@ import {
   mssqlFixtureTarget,
   quoteMssqlIdent,
 } from "../../support/mssqlFixture.js";
+import {
+  ServiceUnavailableError,
+  SourceUnreachableError,
+} from "../../../utils/errors.js";
 
 const options = { connectTimeoutMs: 5000, poolSize: 2, queryTimeoutMs: 5000 };
 const ODD_LOGIN = "zeteo_odd_password";
@@ -196,5 +199,33 @@ describe("azure-sql connect", () => {
     await expect(connection.readSchema(["sales"])).rejects.toBeInstanceOf(
       SourceUnreachableError
     );
+  });
+
+  it("answers busy (503), not unreachable, for a catalogue read while every pool connection is in use", async () => {
+    const connection = await connect(mssqlFixtureSettings("ro"), {
+      ...options,
+      connectTimeoutMs: 500,
+    });
+    // The driver's own checkout, as a request makes it.
+    const pool = connection.pool as unknown as {
+      acquire(requester: object): Promise<object>;
+      release(held: object): void;
+    };
+    const held = await Promise.all([pool.acquire({}), pool.acquire({})]);
+    try {
+      for (const read of [
+        () => connection.readSchema(["sales"]),
+        () => connection.checkLogin(),
+      ]) {
+        const err = await read().catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(ServiceUnavailableError);
+        expect(err).toMatchObject({ statusCode: 503 });
+      }
+    } finally {
+      for (const c of held) pool.release(c);
+    }
+    expect(
+      (await connection.readSchema(["sales"])).tables.length
+    ).toBeGreaterThan(0);
   });
 });

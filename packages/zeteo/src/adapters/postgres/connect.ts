@@ -1,7 +1,7 @@
+import { sourceBusy, SourceUnreachableError } from "../../utils/errors.js";
 import { type PostgresSettings, toPgConfig } from "./settings.js";
-import { SourceUnreachableError } from "../../utils/errors.js";
+import { isPoolExhausted, runPostgresQuery } from "./runQuery.js";
 import type { ResolvedTarget } from "../../sources/network.js";
-import { runPostgresQuery } from "./runQuery.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { checkLogin } from "./loginCheck.js";
@@ -37,12 +37,17 @@ export class PostgresConnection implements SourceConnection {
     return runPostgresQuery(this.pool, plan as SqlPlan, limits, signal);
   }
 
-  /** Any driver failure, a timeout included, surfaces as the fixed error; the driver's is logged. */
+  /**
+   * Any driver failure, a timeout included, surfaces as the fixed error; the
+   * driver's is logged. A pool with every connection in use is busy (503),
+   * not unreachable, so the source keeps its status and its pool.
+   */
   async guarded<T>(run: (pool: Pool) => Promise<T>): Promise<T> {
     try {
       return await run(this.pool);
     } catch (err) {
       logger.warn({ err }, "source query failed");
+      if (isPoolExhausted(err)) throw sourceBusy();
       throw new SourceUnreachableError();
     }
   }
