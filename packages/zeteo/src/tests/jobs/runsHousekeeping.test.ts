@@ -181,7 +181,9 @@ describe("runs housekeeping", () => {
     it("does not overwrite an export that ended first, from the stale row the sweep read", async () => {
       const stale = await newRun(16 * MINUTE);
       expect(await endOk(stale.id, stale.userId)).toBe(true);
-      expect(await recordInterruptedExport(stale, NOW)).toBe(false);
+      expect(await recordInterruptedExport({ ...stale, sourceId }, NOW)).toBe(
+        false
+      );
       expect(await reload(stale.id)).toMatchObject({
         outcome: "ok",
         rowCount: 7,
@@ -191,7 +193,9 @@ describe("runs housekeeping", () => {
 
     it("leaves the sweep's close in place when the export ends after it", async () => {
       const stale = await newRun(16 * MINUTE);
-      expect(await recordInterruptedExport(stale, NOW)).toBe(true);
+      expect(await recordInterruptedExport({ ...stale, sourceId }, NOW)).toBe(
+        true
+      );
       expect(await endOk(stale.id, stale.userId)).toBe(false);
       expect(await reload(stale.id)).toMatchObject({
         outcome: "failed",
@@ -286,7 +290,9 @@ describe("runs housekeeping", () => {
         toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
       });
       // A held lock: the ticks do nothing but touch the lock.
-      const set = vi.spyOn(redis, "set").mockResolvedValue(null);
+      const set = vi
+        .spyOn(redis, "set")
+        .mockResolvedValue(null as unknown as "OK");
       const stop = startRunsHousekeepingJob();
       await vi.advanceTimersByTimeAsync(121_000);
       expect(set).toHaveBeenCalledTimes(1);
