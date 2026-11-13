@@ -1,10 +1,18 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag security
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { postgresAdapter } from "../../../../adapters/postgres/index.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { sealSettings } from "../../../../utils/crypto/envelope.js";
+import { CONNECT_TIMEOUT_MS } from "../../../../sources/connect.js";
+import type { LoginFinding } from "../../../../adapters/types.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../support/http.js";
+import {
+  startSilentServer,
+  type SilentServer,
+} from "../../../support/silentServer.js";
 import {
   auditRows,
   readToken,
@@ -16,6 +24,12 @@ import {
 } from "../../../support/sources.js";
 
 const ID = "0198f7a2-0000-7000-8000-000000000000";
+
+const manyFindings = (n: number): LoginFinding[] =>
+  Array.from({ length: n }, (_, i) => ({
+    code: "can_write_tables",
+    detail: `The login can INSERT on sales.t${i}`,
+  }));
 
 describe("/v1/sources failure paths", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
@@ -92,9 +106,39 @@ describe("/v1/sources failure paths", () => {
     );
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("writable_login");
-    expect(res.body.findings).toContain("can_write_tables");
+    expect(res.body.findings).toEqual([
+      {
+        code: "can_write_tables",
+        detail: expect.stringContaining("sales.orders"),
+      },
+    ]);
+    expect(res.body).not.toHaveProperty("truncated");
     expect(JSON.stringify(res.body)).not.toContain("rw-test-password");
     expect(await rowCount(slug)).toBe(0);
+  });
+
+  it("lists at most 20 findings in a writable_login refusal, and says so", async () => {
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    const spy = vi
+      .spyOn(postgresAdapter, "connect")
+      .mockImplementation(async (...args) => {
+        const conn = await connect(...args);
+        conn.checkLogin = async () => manyFindings(25);
+        return conn;
+      });
+    try {
+      const res = await call(
+        "POST",
+        "",
+        writeToken(),
+        sourceBody(sourceSettings("ro"))
+      );
+      expect(res.status).toBe(422);
+      expect(res.body.findings).toEqual(manyFindings(20));
+      expect(res.body.truncated).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("accepts it with allow_writable_login and records the override in the audit entry", async () => {
@@ -147,6 +191,57 @@ describe("/v1/sources failure paths", () => {
     expect(text).not.toContain(password);
     expect(text).not.toContain("password authentication failed");
     expect(await rowCount(slug)).toBe(0);
+  });
+
+  describe("a source that accepts the connection and never answers", () => {
+    let silent: SilentServer;
+    beforeAll(async () => {
+      silent = await startSilentServer();
+    });
+    afterAll(async () => {
+      await silent.close();
+    });
+    const limit = CONNECT_TIMEOUT_MS + 2000;
+
+    it("answers POST /v1/sources with 502 source_unreachable within the connect timeout", async () => {
+      const slug = uniqueSlug();
+      const started = Date.now();
+      const res = await call(
+        "POST",
+        "",
+        writeToken(),
+        sourceBody(sourceSettings("ro", { port: silent.port }), { slug })
+      );
+      expect(res.status).toBe(502);
+      expect(res.body.error).toBe("source_unreachable");
+      expect(Date.now() - started).toBeLessThan(limit);
+      expect(await rowCount(slug)).toBe(0);
+    });
+
+    it("answers POST /v1/sources/:id/test with 502 source_unreachable within the connect timeout", async () => {
+      const res = await call(
+        "POST",
+        "",
+        writeToken(),
+        sourceBody(sourceSettings("ro"))
+      );
+      expect(res.status).toBe(201);
+      created.push(res.body.id);
+      await prisma.source.update({
+        where: { id: res.body.id },
+        data: {
+          sealedSettings: sealSettings(
+            sourceSettings("ro", { port: silent.port }),
+            res.body.id
+          ) as object,
+        },
+      });
+      const started = Date.now();
+      const tested = await call("POST", `/${res.body.id}/test`, writeToken());
+      expect(tested.status).toBe(502);
+      expect(tested.body.error).toBe("source_unreachable");
+      expect(Date.now() - started).toBeLessThan(limit);
+    });
   });
 
   it("answers within 7 seconds when the port is closed", async () => {

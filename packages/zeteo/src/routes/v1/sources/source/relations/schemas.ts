@@ -1,4 +1,5 @@
 import { IdSchema } from "../../../../../utils/idSchema.js";
+import { noNul } from "../../../../../utils/text.js";
 import { z } from "zod";
 
 /** The database's own limit on a relation name, and the shape the query language will use. */
@@ -17,7 +18,10 @@ export const ListRelationsQuerySchema = z.strictObject({
 /** A list cursor's values: the relation's id. */
 export const RelationCursorSchema = z.tuple([IdSchema]);
 
-const Columns = z.array(z.string().min(1).max(128)).min(1).max(32);
+const Columns = z
+  .array(noNul(z.string().min(1).max(128)))
+  .min(1)
+  .max(32);
 
 export const DeclareRelationSchema = z.strictObject({
   name: z.string().regex(RELATION_NAME_PATTERN, {

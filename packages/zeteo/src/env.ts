@@ -55,6 +55,12 @@ const masterKey = z
     }
   );
 
+/**
+ * The key `docker-compose.yml` and the Docker test stack use (32 bytes of
+ * 0x07). It is public, so a production deploy must not run with it.
+ */
+const PUBLISHED_DEVELOPMENT_KEY = Buffer.alloc(32, 7).toString("base64url");
+
 /** The comma-separated destinations sources may connect to; a bad entry stops the service with its own message. */
 const allowedHosts = z
   .string()
@@ -146,6 +152,17 @@ const EnvFields = z
         code: "custom",
         path: ["ZETEO_MASTER_KEY"],
         message: "ZETEO_MASTER_KEY is required outside NODE_ENV=test",
+      });
+    }
+    if (
+      val.NODE_ENV === "production" &&
+      val.ZETEO_MASTER_KEY === PUBLISHED_DEVELOPMENT_KEY
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["ZETEO_MASTER_KEY"],
+        message:
+          "ZETEO_MASTER_KEY is the published development key, refused in production: generate one of your own",
       });
     }
     if (val.NODE_ENV === "production" && val.TEREO_TEST_MODE) {

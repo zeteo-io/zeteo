@@ -130,6 +130,11 @@ const ALWAYS_REFUSED = [
   "fd00:ec2::254/128",
   "::/128",
   "ff00::/8",
+  // Platform metadata and agent endpoints outside the link-local range:
+  // Azure's wire server, Alibaba Cloud's metadata, Oracle Cloud's.
+  "168.63.129.16/32",
+  "100.100.100.200/32",
+  "192.0.0.192/32",
 ].map(cidr);
 
 const isAlwaysRefused = (ip: Ip): boolean =>

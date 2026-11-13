@@ -11,7 +11,7 @@ never deleted.
 | `GET /v1/sources/:sourceId` | `zeteo.sources.read` | the source |
 | `PATCH /v1/sources/:sourceId` | `zeteo.sources.write` | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
-| `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings }` |
+| `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings, truncated? }` |
 | `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md) | |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
@@ -94,14 +94,14 @@ read-only login would not have. Each code means:
 
 | Code | Meaning |
 |------|---------|
-| `superuser` | the login, or a role it belongs to, is a superuser |
+| `superuser` | the login, or a role it belongs to, is a superuser (the check stops there and reports only the role attributes) |
 | `can_create_roles` | it may create roles |
 | `can_create_databases` | it may create databases |
 | `bypasses_row_security` | it ignores row-level security policies |
 | `owns_objects` | it owns a table, view, schema or the database, so it can change or grant on them |
 | `can_write_tables` | it holds INSERT, UPDATE, DELETE or TRUNCATE on a table (also through PUBLIC or a default privilege for tables created later) |
 | `can_create_in_schema` | it may create objects in a schema, or schemas in the database |
-| `write_role_member` | it belongs to `pg_write_all_data`, `pg_write_server_files` or `pg_execute_server_program` |
+| `write_role_member` | it belongs to `pg_write_all_data`, `pg_write_server_files`, `pg_execute_server_program`, `pg_maintain`, `pg_signal_backend`, `pg_checkpoint` or `pg_create_subscription` (the detail names the role) |
 | `replication` | it has the replication attribute |
 | `reads_server_files` | it belongs to `pg_read_server_files` |
 
@@ -112,8 +112,9 @@ refused with `can_create_in_schema` until the database administrator runs
 audited `allow_writable_login` override. A database created on PostgreSQL 15 or newer does not
 have this grant.
 
-With findings, create and settings change answer `422 writable_login` and the body lists the codes
-under `findings`. With `allow_writable_login: true` the source is stored with
+With findings, create and settings change answer `422 writable_login` and the body lists them as
+`{ code, detail }` under `findings`: at most 20, with `truncated: true` when there were more.
+`POST /v1/sources/:sourceId/test` caps its `findings` the same way. With `allow_writable_login: true` the source is stored with
 `writable_login_allowed: true` and the audit entry's metadata carries the codes. With no findings,
 `writable_login_allowed` is false whatever the flag says.
 
@@ -124,7 +125,9 @@ changed.
 
 `SOURCE_ALLOWED_HOSTS` (comma separated hostnames, `*.suffix`, IPs and CIDRs; empty means no source
 can be added) decides where sources may connect. Link-local, cloud metadata, unspecified and
-multicast addresses are refused whatever it says. The host is resolved once, checked, and the
+multicast addresses are refused whatever it says, and so are the platform endpoints outside the
+link-local range: `168.63.129.16` (Azure), `100.100.100.200` (Alibaba Cloud) and `192.0.0.192`
+(Oracle Cloud). The host is resolved once, checked, and the
 connection dials the address that was checked. The check runs again each time a pool is opened.
 
 **A hostname or `*.suffix` rule permits whatever non-refused address that name resolves to,

@@ -182,6 +182,14 @@ describe("/v1/sources", () => {
     });
   });
 
+  it("answers 400 invalid_request, not 500, to a name with a NUL character", async () => {
+    const res = await post(
+      sourceBody(sourceSettings("ro"), { name: "Sa\u0000les" })
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_request");
+  });
+
   it("answers 409 slug_taken for a duplicate slug", async () => {
     const first = await create();
     const again = await post(

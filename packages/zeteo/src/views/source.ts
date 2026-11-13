@@ -2,14 +2,19 @@ import type { Source } from "../../prisma/generated/client/index.js";
 import { readSettings } from "../sources/connect.js";
 import { adapterFor } from "../adapters/index.js";
 import { typeOf } from "../sources/types.js";
+import { logger } from "../utils/logger.js";
 
-/** The settings as the adapter redacts them; null when the stored value cannot be read. */
+/**
+ * The settings as the adapter redacts them; null, with the cause logged, when
+ * the type has no adapter or the stored value cannot be read, so the source
+ * can still be listed and viewed.
+ */
 const settingsView = (row: Source): Record<string, unknown> | null => {
   try {
     const adapter = adapterFor(typeOf(row));
     return adapter.redact(readSettings(adapter, row.id, row.sealedSettings));
-  } catch {
-    // readSettings has logged the cause.
+  } catch (err) {
+    logger.error({ err, source_id: row.id }, "source settings cannot be shown");
     return null;
   }
 };

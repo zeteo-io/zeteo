@@ -133,17 +133,31 @@ export class SourceTypeUnavailableError extends AppError {
   }
 }
 
+/** The most login-check findings a response lists. */
+export const MAX_FINDINGS = 20;
+
+/**
+ * Login-check findings as a response carries them: the first `MAX_FINDINGS`,
+ * with `truncated: true` when there were more.
+ */
+export const findingsBody = <F extends { code: string; detail: string }>(
+  findings: F[]
+): { findings: F[]; truncated?: true } => ({
+  findings: findings.slice(0, MAX_FINDINGS),
+  ...(findings.length > MAX_FINDINGS && { truncated: true as const }),
+});
+
 /**
  * A login that can change data or reach beyond the database, found by the
- * login check; `findings` are the codes, never the details.
+ * login check. The body lists the findings (code and detail).
  */
 export class WritableLoginError extends AppError {
-  constructor(findings: string[]) {
+  constructor(findings: Array<{ code: string; detail: string }>) {
     super(
       422,
       "writable_login",
       "The login can write or reach beyond the database; use a read-only login or set allow_writable_login",
-      { details: { findings } }
+      { details: findingsBody(findings) }
     );
     this.name = "WritableLoginError";
   }

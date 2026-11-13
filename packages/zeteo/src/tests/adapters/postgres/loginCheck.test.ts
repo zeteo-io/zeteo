@@ -1,7 +1,8 @@
 // @module-tag int
 // @module-tag platform
+import type { PostgresConnection } from "../../../adapters/postgres/connect.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { Client } from "pg";
 import {
@@ -43,6 +44,7 @@ const NOINHERIT = "zeteo_noinherit_login";
 const HR_WRITER = "zeteo_hr_writer";
 const REPLICATOR = "zeteo_replication_login";
 const FILE_READER = "zeteo_file_reader";
+const SIGNALLER = "zeteo_signaller";
 
 beforeAll(async () => {
   await asAdmin(
@@ -53,6 +55,7 @@ beforeAll(async () => {
     dropRole(HR_WRITER),
     dropRole(REPLICATOR),
     dropRole(FILE_READER),
+    dropRole(SIGNALLER),
     `CREATE ROLE ${GROUP}`,
     `GRANT USAGE ON SCHEMA sales TO ${GROUP}`,
     `GRANT UPDATE ON sales.blobs TO ${GROUP}`,
@@ -63,6 +66,7 @@ beforeAll(async () => {
     `GRANT SELECT, INSERT ON hr.salaries TO ${HR_WRITER}`,
     `CREATE ROLE ${REPLICATOR} LOGIN REPLICATION PASSWORD 'repl-pw'`,
     `CREATE ROLE ${FILE_READER} LOGIN PASSWORD 'file-pw' IN ROLE pg_read_server_files`,
+    `CREATE ROLE ${SIGNALLER} LOGIN PASSWORD 'signal-pw' IN ROLE pg_signal_backend`,
     `CREATE ROLE ${MEMBER} LOGIN PASSWORD 'member-pw' IN ROLE ${GROUP}, pg_write_all_data`,
     `CREATE ROLE ${DEFAULTS} LOGIN PASSWORD 'defaults-pw'`,
     `ALTER DEFAULT PRIVILEGES IN SCHEMA sales GRANT INSERT ON TABLES TO ${DEFAULTS}`
@@ -78,7 +82,8 @@ afterAll(async () => {
     dropRole(NOINHERIT),
     dropRole(HR_WRITER),
     dropRole(REPLICATOR),
-    dropRole(FILE_READER)
+    dropRole(FILE_READER),
+    dropRole(SIGNALLER)
   );
 });
 
@@ -105,16 +110,27 @@ describe("postgres checkLogin", () => {
     );
   });
 
-  it("finds a superuser", async () => {
-    const connection = await connectAs(fixtureAdminSettings());
+  it("finds a superuser and stops there, with one catalog query", async () => {
+    const connection = (await connectAs(
+      fixtureAdminSettings()
+    )) as PostgresConnection;
+    const query = vi.spyOn(connection.pool, "query");
     const findings = await connection.checkLogin();
     expect(findings.map((f) => f.code)).toContain("superuser");
+    // The superuser owns the fixture's tables; once found, nothing else is looked for.
+    expect(findings.map((f) => f.code)).not.toContain("owns_objects");
+    expect(query).toHaveBeenCalledTimes(1);
   });
 
-  it("does not splice a schema name into SQL", async () => {
-    const connection = await connectAs(fixtureSettings("ro"));
+  it("finds membership of a server role that signals other backends, naming the role", async () => {
+    const connection = await connectAs(
+      fixtureSettings("ro", { user: SIGNALLER, password: "signal-pw" })
+    );
     const findings = await connection.checkLogin();
-    expect(findings).toEqual([]);
+    expect(findings).toContainEqual({
+      code: "write_role_member",
+      detail: expect.stringContaining("pg_signal_backend"),
+    });
   });
 
   it("finds writes inherited from a role the login belongs to, and write-role membership", async () => {

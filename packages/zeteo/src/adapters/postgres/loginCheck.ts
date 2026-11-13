@@ -36,11 +36,15 @@ const ATTRIBUTES = `WITH ${ME}
          rolreplication
     FROM me ORDER BY rolname`;
 
-// Server-level roles that write, or read files, on the server's side.
+// Predefined roles that write, act on the server, or read its files. Matched
+// by name, so one an older server does not have (pg_maintain is new in 17,
+// pg_create_subscription in 16, pg_checkpoint in 15) is simply not found.
 const SERVER_ROLES = `WITH ${ME}
   SELECT rolname FROM me
    WHERE rolname IN ('pg_write_all_data', 'pg_write_server_files',
-                     'pg_execute_server_program', 'pg_read_server_files')
+                     'pg_execute_server_program', 'pg_read_server_files',
+                     'pg_maintain', 'pg_signal_backend', 'pg_checkpoint',
+                     'pg_create_subscription')
    ORDER BY rolname`;
 
 const OWNED_RELATIONS = `WITH ${ME}
@@ -144,6 +148,9 @@ export const checkLogin = async (pool: Pool): Promise<LoginFinding[]> => {
     if (role.rolreplication)
       add("replication", `The login has the replication attribute${where}`);
   }
+  // A superuser can do anything: the rest would only list everything it owns,
+  // which on a large cluster takes long enough to time the check out.
+  if (findings.some((f) => f.code === "superuser")) return findings;
 
   const serverRoles = await pool.query<{ rolname: string }>(SERVER_ROLES);
   for (const { rolname } of serverRoles.rows) {

@@ -164,4 +164,10 @@ TestSourceResponse:
     ok: { type: boolean, const: true }
     findings:
       type: array
+      description: What the login check found; at most 20
+      maxItems: 20
       items: { $ref: '#/LoginFinding' }
+    truncated:
+      type: boolean
+      const: true
+      description: Present when the check found more than the 20 listed

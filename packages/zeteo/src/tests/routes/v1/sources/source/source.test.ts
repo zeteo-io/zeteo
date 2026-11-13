@@ -78,6 +78,10 @@ describe("/v1/sources/:sourceId", () => {
     });
     expect(refused.status).toBe(422);
     expect(refused.body.error).toBe("writable_login");
+    expect(refused.body.findings).toContainEqual({
+      code: "can_write_tables",
+      detail: expect.stringContaining("sales.orders"),
+    });
     expect((await call("GET", `/${source.id}`)).body.settings.user).toBe(
       "zeteo_ro"
     );
@@ -283,5 +287,33 @@ describe("/v1/sources/:sourceId", () => {
     });
     expect(after.updatedAt).toEqual(before.updatedAt);
     expect(after.writableLoginAllowed).toBe(false);
+  });
+
+  it("POST /test lists at most 20 findings, and says so", async () => {
+    const source = await create();
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        code: "can_write_tables" as const,
+        detail: `The login can INSERT on sales.t${i}`,
+      }));
+    const spy = vi
+      .spyOn(postgresAdapter, "connect")
+      .mockImplementation(async (...args) => {
+        const conn = await connect(...args);
+        conn.checkLogin = async () => many(21);
+        return conn;
+      });
+    try {
+      const res = await call("POST", `/${source.id}/test`);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        ok: true,
+        findings: many(20),
+        truncated: true,
+      });
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

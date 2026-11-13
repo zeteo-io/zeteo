@@ -1,5 +1,6 @@
 import { CursorDateSchema } from "../../../utils/cursor.js";
 import { IdSchema } from "../../../utils/idSchema.js";
+import { noNul } from "../../../utils/text.js";
 import { z } from "zod";
 
 /** The database CHECK on `sources.slug`. */
@@ -27,7 +28,7 @@ const SchemaNameSchema = z
 
 /** The fields a create sets and an update may change, other than `slug` and `type`. */
 export const SourceFieldsShape = {
-  name: z.string().trim().min(1).max(255),
+  name: noNul(z.string().trim().min(1).max(255)),
   // The adapter of the source's type validates the contents.
   settings: z.record(z.string(), z.unknown()),
   schemas: z

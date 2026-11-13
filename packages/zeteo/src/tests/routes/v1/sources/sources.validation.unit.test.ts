@@ -1,5 +1,6 @@
 // @module-tag unit
 // @module-tag platform
+import { UpdateSourceSchema } from "../../../../routes/v1/sources/source/schemas.js";
 import { CreateSourceSchema } from "../../../../routes/v1/sources/schemas.js";
 import { describe, expect, it } from "vitest";
 
@@ -38,5 +39,25 @@ describe("source schema names", () => {
     ["a duplicate", ["sales", "sales"]],
   ])("refuses %s", (_, schemas) => {
     expect(create(schemas).success).toBe(false);
+  });
+});
+
+describe("source name", () => {
+  it("refuses a NUL character in the name of a create and of an update", () => {
+    const body = {
+      slug: "sales",
+      type: "postgres",
+      settings: {},
+      schemas: ["public"],
+    };
+    expect(
+      CreateSourceSchema.safeParse({ ...body, name: "Sa\u0000les" }).success
+    ).toBe(false);
+    expect(
+      CreateSourceSchema.safeParse({ ...body, name: "Sales" }).success
+    ).toBe(true);
+    expect(UpdateSourceSchema.safeParse({ name: "Sa\u0000les" }).success).toBe(
+      false
+    );
   });
 });

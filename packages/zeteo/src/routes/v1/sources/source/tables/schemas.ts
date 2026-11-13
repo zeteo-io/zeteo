@@ -1,3 +1,4 @@
+import { noNul } from "../../../../../utils/text.js";
 import { z } from "zod";
 
 export const ListTablesQuerySchema = z.strictObject({
@@ -10,4 +11,7 @@ export const ListTablesQuerySchema = z.strictObject({
 });
 
 /** A list cursor's values: `schema_name`, then `name`. */
-export const TableCursorSchema = z.tuple([z.string(), z.string()]);
+export const TableCursorSchema = z.tuple([
+  noNul(z.string()),
+  noNul(z.string()),
+]);

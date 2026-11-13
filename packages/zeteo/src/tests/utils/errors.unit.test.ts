@@ -1,10 +1,14 @@
 // @module-tag unit
 // @module-tag platform
 import { InvalidAuditEntryError } from "@tereo-io/sdk";
-import { errorHandler } from "../../utils/errors.js";
 import { describe, expect, it, vi } from "vitest";
 import type { Request, Response } from "express";
 import { logger } from "../../utils/logger.js";
+import {
+  errorHandler,
+  findingsBody,
+  WritableLoginError,
+} from "../../utils/errors.js";
 
 /** A response that records what the handler wrote. */
 const recorder = () => {
@@ -47,5 +51,33 @@ describe("errorHandler", () => {
     } finally {
       error.mockRestore();
     }
+  });
+});
+
+const findings = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    code: "can_write_tables",
+    detail: `The login can INSERT on sales.t${i}`,
+  }));
+
+describe("findingsBody", () => {
+  it("keeps up to 20 findings as they are", () => {
+    expect(findingsBody(findings(20))).toEqual({ findings: findings(20) });
+  });
+
+  it("keeps the first 20 of more, and says it left some out", () => {
+    expect(findingsBody(findings(21))).toEqual({
+      findings: findings(20),
+      truncated: true,
+    });
+  });
+});
+
+describe("WritableLoginError", () => {
+  it("carries the findings as code and detail, capped at 20", () => {
+    const err = new WritableLoginError(findings(25));
+    expect(err.statusCode).toBe(422);
+    expect(err.code).toBe("writable_login");
+    expect(err.details).toEqual({ findings: findings(20), truncated: true });
   });
 });

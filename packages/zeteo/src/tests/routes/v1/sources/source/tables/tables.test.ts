@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag platform
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { encodeCursor } from "../../../../../../utils/cursor.js";
 import { startV1Routes } from "../../../../../support/v1App.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -104,6 +105,10 @@ describe("/v1/sources/:sourceId/tables", () => {
       expect(
         (await call("GET", `/${sourceId}/tables?cursor=garbage`)).status
       ).toBe(400);
+      const nul = encodeCursor(["sa\u0000les", "orders"]);
+      const refused = await call("GET", `/${sourceId}/tables?cursor=${nul}`);
+      expect(refused.status).toBe(400);
+      expect(refused.body.error).toBe("invalid_request");
     });
 
     it("leaves out missing tables unless include_missing=true", async () => {

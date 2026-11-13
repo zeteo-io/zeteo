@@ -106,6 +106,34 @@ describe("env schema", () => {
       );
     });
 
+    it("refuses the published development key in production, without echoing it", () => {
+      const published = Buffer.alloc(32, 7).toString("base64url");
+      const production = {
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://x/y",
+        REDIS_URL: "redis://x",
+        PUBLIC_URL: "https://zeteo.example.com",
+        TEREO_URL: "http://core.example.com",
+        TEREO_CLIENT_ID: "zeteo",
+        TEREO_CLIENT_SECRET: "secret",
+        REQUEST_HANDLER_KEY: "k".repeat(32),
+      };
+      let message = "";
+      try {
+        parseEnv({ ...production, ZETEO_MASTER_KEY: published });
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message).toMatch(/ZETEO_MASTER_KEY/);
+      expect(message).not.toContain(published);
+      expect(
+        parseEnv({ ...production, ZETEO_MASTER_KEY: key }).ZETEO_MASTER_KEY
+      ).toBe(key);
+      expect(
+        parseEnv({ ...dev, ZETEO_MASTER_KEY: published }).ZETEO_MASTER_KEY
+      ).toBe(published);
+    });
+
     it.each([
       ["too short", Buffer.alloc(16, 9).toString("base64url")],
       ["too long", Buffer.alloc(33, 9).toString("base64url")],

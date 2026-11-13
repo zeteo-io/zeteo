@@ -234,6 +234,10 @@ describe("resolveAllowed: always refused", () => {
     "239.255.255.255",
     "ff02::1",
     "ff00::",
+    // Platform metadata and agent addresses outside the link-local range.
+    "168.63.129.16",
+    "100.100.100.200",
+    "192.0.0.192",
   ];
 
   it.each(refusedAddresses)(
@@ -260,6 +264,21 @@ describe("resolveAllowed: always refused", () => {
   ])("refuses the wrapped form %s", async (address) => {
     await refused(address, everything);
     await refused("host.test", everything, { "host.test": [address] });
+  });
+
+  it("refuses the platform addresses' mapped forms and allows their neighbours", async () => {
+    for (const address of [
+      "::ffff:168.63.129.16",
+      "::ffff:100.100.100.200",
+      "::ffff:192.0.0.192",
+    ]) {
+      await refused(address, everything);
+    }
+    for (const address of ["168.63.129.17", "100.100.100.201", "192.0.0.193"]) {
+      await expect(resolveAllowed(address, everything)).resolves.toMatchObject({
+        address,
+      });
+    }
   });
 
   it("allows what is not in a refused range", async () => {

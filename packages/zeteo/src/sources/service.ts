@@ -93,8 +93,8 @@ const inspectLogin = async (
  */
 const judgeLogin = (findings: LoginFinding[], allow: boolean) => {
   if (findings.length === 0) return { overridden: false, codes: [] };
+  if (!allow) throw new WritableLoginError(findings);
   const codes = [...new Set(findings.map((f) => f.code))];
-  if (!allow) throw new WritableLoginError(codes);
   return { overridden: true, codes };
 };
 

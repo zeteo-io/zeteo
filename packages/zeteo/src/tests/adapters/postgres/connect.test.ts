@@ -5,6 +5,7 @@ import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { SourceUnreachableError } from "../../../utils/errors.js";
+import { startSilentServer } from "../../support/silentServer.js";
 import { Client } from "pg";
 import {
   fixtureAdminSettings,
@@ -80,6 +81,25 @@ describe("postgres connect", () => {
       )
     ).rejects.toBeInstanceOf(SourceUnreachableError);
     expect(Date.now() - started).toBeLessThan(options.connectTimeoutMs + 1000);
+  });
+
+  it("fails a server that accepts and never answers within the connect timeout", async () => {
+    const silent = await startSilentServer();
+    try {
+      const started = Date.now();
+      await expect(
+        postgresAdapter.connect(
+          fixtureSettings("ro", { port: silent.port }),
+          await fixtureTarget(),
+          options
+        )
+      ).rejects.toBeInstanceOf(SourceUnreachableError);
+      expect(Date.now() - started).toBeLessThan(
+        options.connectTimeoutMs + 1000
+      );
+    } finally {
+      await silent.close();
+    }
   });
 
   it("refuses a write through the connection: the session is read-only", async () => {

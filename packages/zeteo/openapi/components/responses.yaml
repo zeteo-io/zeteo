@@ -23,9 +23,14 @@ Error:
             type: string
     findings:
       type: array
-      description: On `writable_login`, the codes of what the login check found
+      description: On `writable_login`, what the login check found; at most 20
+      maxItems: 20
       items:
-        type: string
+        $ref: './sources/schemas.yaml#/LoginFinding'
+    truncated:
+      type: boolean
+      const: true
+      description: On `writable_login`, present when the check found more than the 20 listed
 
 BadRequestResponse:
   description: Bad request - `invalid_request`, with `issues`
