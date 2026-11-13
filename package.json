@@ -45,12 +45,13 @@
     "singleQuote": false
   },
   "scripts": {
-    "format": "prettier --write --no-error-on-unmatched-pattern \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts",
-    "format:check": "prettier --check --no-error-on-unmatched-pattern \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts",
-    "lint": "eslint --no-error-on-unmatched-pattern packages/ scripts/ && { ls packages/*/package.json >/dev/null 2>&1 || exit 0; npm run lint --workspaces --if-present; }",
+    "format": "prettier --write --no-error-on-unmatched-pattern \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts \"e2e/**/*.ts\"",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"packages/*/src/**/*.{ts,tsx,js,jsx,css}\" scripts \"e2e/**/*.ts\"",
+    "lint": "eslint --no-error-on-unmatched-pattern packages/ scripts/ e2e/ && { ls packages/*/package.json >/dev/null 2>&1 || exit 0; npm run lint --workspaces --if-present; }",
     "sort-imports": "tsx scripts/sort-imports.ts",
     "sort-imports:check": "tsx scripts/sort-imports.ts --check",
     "check": "nx run-many -t check",
+    "test:e2e": "e2e/run.sh",
     "version-plan": "nx release plan"
   }
 }

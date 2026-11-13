@@ -22,3 +22,5 @@ vitest.config.*.timestamp*
 .claude/worktrees/
 # Agent working files
 .superpowers/
+# The e2e run's generated certificates (its .env.run is covered by .env*)
+e2e/certs/
