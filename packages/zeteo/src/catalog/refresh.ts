@@ -5,9 +5,10 @@ import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { withSourceConnection } from "../sources/pools.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { withAudit } from "../utils/transaction.js";
+import { db, prisma } from "../utils/db/index.js";
+import { lockSourceCatalog } from "./lock.js";
 import { typeOf } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
-import { db } from "../utils/db/index.js";
 import {
   HostNotAllowedError,
   NotFoundError,
@@ -73,8 +74,12 @@ const readSnapshot = async (row: Source): Promise<SchemaSnapshot> => {
       err instanceof HostNotAllowedError
     ) {
       // Only the status changes; the catalogue keeps what it knew.
-      await db.sources
-        .update(row.id, { status: "unreachable" })
+      // Only while no refresh has landed since the read began: a newer success stands.
+      await prisma.source
+        .updateMany({
+          where: { id: row.id, lastRefreshedAt: row.lastRefreshedAt },
+          data: { status: "unreachable" },
+        })
         .catch((cause: unknown) => {
           logger.error(
             { err: cause, source_id: row.id },
@@ -263,29 +268,45 @@ const applySnapshot = async (
   };
   for (const r of existingRelations) takenOn(r.fromTableId).add(r.name);
 
-  const discovered = new Map<string, (typeof existingRelations)[number]>();
-  for (const r of existingRelations) {
-    if (r.origin !== "discovered" || r.constraintName === null) continue;
-    discovered.set(
-      relationKey(
-        r.constraintName,
-        r.toMany ? r.toTableId : r.fromTableId,
-        r.toMany
-      ),
-      r
-    );
-  }
+  // Only foreign keys whose tables and columns are all in this snapshot: a
+  // table or column marked missing above must not keep a live relation.
+  const columnsInSnapshot = new Map(
+    snapshot.tables.map((t) => [
+      tableKey(t.schemaName, t.name),
+      new Set(t.columns.map((c) => c.name)),
+    ])
+  );
+  const present = (end: {
+    schemaName: string;
+    table: string;
+    columns: string[];
+  }) => {
+    const names = columnsInSnapshot.get(tableKey(end.schemaName, end.table));
+    return names !== undefined && end.columns.every((c) => names.has(c));
+  };
 
-  const seenRelationIds = new Set<string>();
-  const newRelations: Prisma.RelationCreateManyInput[] = [];
+  interface Side {
+    constraintName: string;
+    keyTableId: string;
+    toMany: boolean;
+    tableId: string;
+    columns: string[];
+    otherId: string;
+    otherColumns: string[];
+    baseName: string;
+  }
+  const sides: Side[] = [];
   for (const fk of snapshot.foreignKeys) {
+    if (!present(fk.from) || !present(fk.to)) continue;
     const fromId = tableIdByKey.get(
       tableKey(fk.from.schemaName, fk.from.table)
     );
     const toId = tableIdByKey.get(tableKey(fk.to.schemaName, fk.to.table));
     if (!fromId || !toId) continue;
-    const sides = [
+    sides.push(
       {
+        constraintName: fk.constraintName,
+        keyTableId: fromId,
         toMany: false,
         tableId: fromId,
         columns: fk.from.columns,
@@ -294,66 +315,151 @@ const applySnapshot = async (
         baseName: forwardName(fk),
       },
       {
+        constraintName: fk.constraintName,
+        keyTableId: fromId,
         toMany: true,
         tableId: toId,
         columns: fk.to.columns,
         otherId: fromId,
         otherColumns: fk.from.columns,
         baseName: reverseName(fk),
-      },
-    ];
-    for (const side of sides) {
-      const found = discovered.get(
-        relationKey(fk.constraintName, fromId, side.toMany)
-      );
-      if (!found) {
-        const name = uniqueName(side.baseName, takenOn(side.tableId));
+      }
+    );
+  }
+
+  const existingDiscovered = existingRelations
+    .filter((r) => r.origin === "discovered" && r.constraintName !== null)
+    .sort((a, b) =>
+      a.constraintName! === b.constraintName!
+        ? a.id.localeCompare(b.id)
+        : a.constraintName! < b.constraintName!
+          ? -1
+          : 1
+    );
+  const claimed = new Set<string>();
+  const matched = new Map<Side, (typeof existingRelations)[number]>();
+  const byKey = new Map<string, typeof existingDiscovered>();
+  const byShape = new Map<string, typeof existingDiscovered>();
+  const index = (
+    map: Map<string, typeof existingDiscovered>,
+    key: string,
+    row: (typeof existingDiscovered)[number]
+  ) => {
+    const rows = map.get(key);
+    if (rows) rows.push(row);
+    else map.set(key, [row]);
+  };
+  const shapeKey = (
+    toMany: boolean,
+    fromId: string,
+    fromColumns: string[],
+    toId: string,
+    toColumns: string[]
+  ) => JSON.stringify([toMany, fromId, fromColumns, toId, toColumns]);
+  for (const r of existingDiscovered) {
+    index(
+      byKey,
+      relationKey(
+        r.constraintName!,
+        r.toMany ? r.toTableId : r.fromTableId,
+        r.toMany
+      ),
+      r
+    );
+    index(
+      byShape,
+      shapeKey(
+        r.toMany,
+        r.fromTableId,
+        r.fromColumns,
+        r.toTableId,
+        r.toColumns
+      ),
+      r
+    );
+  }
+  const claim = (rows: typeof existingDiscovered | undefined, side: Side) => {
+    const found = rows?.find((r) => !claimed.has(r.id));
+    if (!found) return false;
+    claimed.add(found.id);
+    matched.set(side, found);
+    return true;
+  };
+  // Exact constraint name first, then the same shape under another name
+  // (a renamed or re-created constraint); a row is taken over at most once.
+  for (const side of sides) {
+    claim(
+      byKey.get(relationKey(side.constraintName, side.keyTableId, side.toMany)),
+      side
+    );
+  }
+  for (const side of sides) {
+    if (matched.has(side)) continue;
+    claim(
+      byShape.get(
+        shapeKey(
+          side.toMany,
+          side.tableId,
+          side.columns,
+          side.otherId,
+          side.otherColumns
+        )
+      ),
+      side
+    );
+  }
+
+  const newRelations: Prisma.RelationCreateManyInput[] = [];
+  for (const side of sides) {
+    const found = matched.get(side);
+    if (!found) {
+      const name = uniqueName(side.baseName, takenOn(side.tableId));
+      takenOn(side.tableId).add(name);
+      newRelations.push({
+        sourceId,
+        name,
+        fromTableId: side.tableId,
+        fromColumns: side.columns,
+        toTableId: side.otherId,
+        toColumns: side.otherColumns,
+        toMany: side.toMany,
+        origin: "discovered",
+        constraintName: side.constraintName,
+      });
+      summary.relations.added++;
+      continue;
+    }
+    if (found.missingSince) summary.relations.restored++;
+    const moved = found.fromTableId !== side.tableId;
+    if (
+      found.missingSince ||
+      moved ||
+      found.constraintName !== side.constraintName ||
+      found.toTableId !== side.otherId ||
+      !same(found.fromColumns, side.columns) ||
+      !same(found.toColumns, side.otherColumns)
+    ) {
+      let name = found.name;
+      if (moved) {
+        name = uniqueName(found.name, takenOn(side.tableId));
         takenOn(side.tableId).add(name);
-        newRelations.push({
-          sourceId,
+      }
+      await tx.relation.update({
+        where: { id: found.id },
+        data: {
           name,
+          constraintName: side.constraintName,
           fromTableId: side.tableId,
           fromColumns: side.columns,
           toTableId: side.otherId,
           toColumns: side.otherColumns,
-          toMany: side.toMany,
-          origin: "discovered",
-          constraintName: fk.constraintName,
-        });
-        summary.relations.added++;
-        continue;
-      }
-      seenRelationIds.add(found.id);
-      if (found.missingSince) summary.relations.restored++;
-      const moved = found.fromTableId !== side.tableId;
-      if (
-        found.missingSince ||
-        moved ||
-        found.toTableId !== side.otherId ||
-        !same(found.fromColumns, side.columns) ||
-        !same(found.toColumns, side.otherColumns)
-      ) {
-        let name = found.name;
-        if (moved) {
-          name = uniqueName(found.name, takenOn(side.tableId));
-          takenOn(side.tableId).add(name);
-        }
-        await tx.relation.update({
-          where: { id: found.id },
-          data: {
-            name,
-            fromTableId: side.tableId,
-            fromColumns: side.columns,
-            toTableId: side.otherId,
-            toColumns: side.otherColumns,
-            missingSince: null,
-          },
-        });
-      }
+          missingSince: null,
+        },
+      });
     }
   }
-  const newlyMissingRelationIds = [...discovered.values()]
-    .filter((r) => !seenRelationIds.has(r.id) && r.missingSince === null)
+  const newlyMissingRelationIds = existingDiscovered
+    .filter((r) => !claimed.has(r.id) && r.missingSince === null)
     .map((r) => r.id);
   summary.relations.missing = newlyMissingRelationIds.length;
   for (const rows of chunks(newRelations)) {
@@ -391,7 +497,7 @@ export const refreshSource = async (
     const lastRound = round >= MAX_READ_ROUNDS;
 
     const summary = await withAudit(async (tx, audit) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:refresh:${sourceId}`}, 0))`;
+      await lockSourceCatalog(tx, sourceId);
       const current = await tx.source.findUnique({ where: { id: sourceId } });
       if (!current) throw new NotFoundError("Source not found");
       if (current.archivedAt) throw new SourceArchivedError();

@@ -3,6 +3,7 @@
 import { fixtureSettings, fixtureTarget } from "../../support/fixtureDb.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createThrowawayDb } from "../../support/throwawayDb.js";
 import type {
   SchemaSnapshot,
   SourceConnection,
@@ -105,5 +106,30 @@ describe("postgres readSchema", () => {
         to: { schemaName: "sales", table: "customers", columns: ["id"] },
       })
     );
+  });
+});
+
+describe("postgres readSchema foreign keys", () => {
+  it("returns only keys whose both ends the login can read", async () => {
+    const db = await createThrowawayDb();
+    try {
+      await db.run("REVOKE SELECT ON sales.customers FROM zeteo_ro");
+      const conn = await postgresAdapter.connect(
+        fixtureSettings("ro", { database: db.name }),
+        await fixtureTarget(),
+        { connectTimeoutMs: 5000, poolSize: 2, queryTimeoutMs: 5000 }
+      );
+      try {
+        const result = await conn.readSchema(["sales"]);
+        expect(result.tables.map((t) => t.name)).not.toContain("customers");
+        expect(result.foreignKeys.map((k) => k.constraintName)).toEqual([
+          "order_lines_order_id_fkey",
+        ]);
+      } finally {
+        await conn.close();
+      }
+    } finally {
+      await db.drop();
+    }
   });
 });

@@ -8,6 +8,10 @@ import { logger } from "../../../utils/logger.js";
 import type { Request, Response } from "express";
 import { db } from "../../../utils/db/index.js";
 import {
+  HostNotAllowedError,
+  SourceUnreachableError,
+} from "../../../utils/errors.js";
+import {
   CreateSourceSchema,
   ListSourcesQuerySchema,
   SourceCursorSchema,
@@ -43,7 +47,10 @@ export const createSource = async (req: Request, res: Response) => {
   try {
     await refreshSource(created.id, actorId);
   } catch (err) {
-    logger.warn(
+    const expected =
+      err instanceof SourceUnreachableError ||
+      err instanceof HostNotAllowedError;
+    logger[expected ? "warn" : "error"](
       { err, source_id: created.id },
       "first catalogue refresh failed"
     );

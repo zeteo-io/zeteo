@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { SourceUnreachableError } from "../../../../utils/errors.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
+import { logger } from "../../../../utils/logger.js";
 import { fetchJson } from "../../../support/http.js";
 import {
   auditRows,
@@ -122,6 +123,56 @@ describe("/v1/sources", () => {
     } finally {
       connect.mockRestore();
     }
+  });
+
+  describe("when the first refresh fails", () => {
+    const failSecondConnect = (error: () => Error) => {
+      const original = postgresAdapter.connect.bind(postgresAdapter);
+      let calls = 0;
+      return vi
+        .spyOn(postgresAdapter, "connect")
+        .mockImplementation((...args) =>
+          ++calls === 1 ? original(...args) : Promise.reject(error())
+        );
+    };
+
+    it("logs an unreachable source as a warning", async () => {
+      const connect = failSecondConnect(() => new SourceUnreachableError());
+      const warn = vi.spyOn(logger, "warn");
+      const error = vi.spyOn(logger, "error");
+      try {
+        expect((await create({ schemas: ["sales"] })).status).toBe(201);
+        expect(warn).toHaveBeenCalledWith(
+          expect.objectContaining({ err: expect.any(SourceUnreachableError) }),
+          expect.any(String)
+        );
+        expect(error).not.toHaveBeenCalled();
+      } finally {
+        connect.mockRestore();
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
+
+    it("logs anything else as an error, and still answers 201", async () => {
+      const connect = failSecondConnect(() => new Error("boom"));
+      const warn = vi.spyOn(logger, "warn");
+      const error = vi.spyOn(logger, "error");
+      try {
+        expect((await create({ schemas: ["sales"] })).status).toBe(201);
+        expect(error).toHaveBeenCalledWith(
+          expect.objectContaining({
+            err: expect.objectContaining({ message: "boom" }),
+          }),
+          expect.any(String)
+        );
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        connect.mockRestore();
+        warn.mockRestore();
+        error.mockRestore();
+      }
+    });
   });
 
   it("answers 409 slug_taken for a duplicate slug", async () => {

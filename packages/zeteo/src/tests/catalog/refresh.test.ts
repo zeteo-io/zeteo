@@ -2,10 +2,12 @@
 // @module-tag platform
 import { createThrowawayDb, type ThrowawayDb } from "../support/throwawayDb.js";
 import { closeAllSourcePools, closeSourcePool } from "../../sources/pools.js";
+import { declareRelation, removeRelation } from "../../catalog/service.js";
 import { postgresAdapter } from "../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { SourceUnreachableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
+import { lockSourceCatalog } from "../../catalog/lock.js";
 import { refreshSource } from "../../catalog/refresh.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -364,6 +366,222 @@ describe("refreshSource", () => {
     expect(found.map((r) => r.name)).toEqual(["referrer_2"]);
   });
 
+  const fkRelations = (constraint: string) =>
+    prisma.relation.findMany({
+      where: { sourceId, constraintName: constraint },
+      orderBy: { name: "asc" },
+    });
+  const customerPair = () =>
+    prisma.relation.findMany({
+      where: { sourceId, name: { in: ["customer", "orders"] } },
+      orderBy: { name: "asc" },
+    });
+
+  it("marks relations missing when the table they point at is no longer readable", async () => {
+    await refreshSource(sourceId, ACTOR);
+    await fixture.run("REVOKE SELECT ON sales.customers FROM zeteo_ro");
+    const summary = await refreshSource(sourceId, ACTOR);
+    expect(summary.tables.missing).toBe(1);
+    expect(summary.relations).toMatchObject({ missing: 2, restored: 0 });
+    const pair = await fkRelations("orders_customer_id_fkey");
+    expect(pair).toHaveLength(2);
+    expect(pair.every((r) => r.missingSince !== null)).toBe(true);
+
+    await fixture.run("GRANT SELECT ON sales.customers TO zeteo_ro");
+    expect((await refreshSource(sourceId, ACTOR)).relations).toMatchObject({
+      restored: 2,
+    });
+    expect(
+      (await fkRelations("orders_customer_id_fkey")).every(
+        (r) => r.missingSince === null
+      )
+    ).toBe(true);
+  });
+
+  describe("a foreign key under a new constraint name", () => {
+    it("keeps the relations' ids and names when the constraint is renamed", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const before = await fkRelations("orders_customer_id_fkey");
+      await fixture.run(
+        "ALTER TABLE sales.orders RENAME CONSTRAINT orders_customer_id_fkey TO orders_cust_fk"
+      );
+      const summary = await refreshSource(sourceId, ACTOR);
+      expect(summary.relations).toEqual({ added: 0, missing: 0, restored: 0 });
+      const after = await fkRelations("orders_cust_fk");
+      expect(after.map((r) => [r.id, r.name, r.missingSince])).toEqual(
+        before.map((r) => [r.id, r.name, null])
+      );
+      expect(await fkRelations("orders_customer_id_fkey")).toEqual([]);
+    });
+
+    it("takes the missing relations over when it is re-created under a new name in a later refresh", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const before = await fkRelations("orders_customer_id_fkey");
+      await fixture.run(
+        "ALTER TABLE sales.orders DROP CONSTRAINT orders_customer_id_fkey"
+      );
+      await refreshSource(sourceId, ACTOR);
+      await fixture.run(
+        "ALTER TABLE sales.orders ADD CONSTRAINT orders_who_fkey FOREIGN KEY (customer_id) REFERENCES sales.customers (id)"
+      );
+      const summary = await refreshSource(sourceId, ACTOR);
+      expect(summary.relations).toEqual({ added: 0, missing: 0, restored: 2 });
+      const after = await fkRelations("orders_who_fkey");
+      expect(after.map((r) => [r.id, r.name, r.missingSince])).toEqual(
+        before.map((r) => [r.id, r.name, null])
+      );
+      expect(await customerPair()).toHaveLength(2);
+    });
+
+    it("never attaches one existing relation to two foreign keys of the same shape", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const before = await fkRelations("orders_customer_id_fkey");
+      await fixture.run(`
+        ALTER TABLE sales.orders DROP CONSTRAINT orders_customer_id_fkey;
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_a_fkey FOREIGN KEY (customer_id) REFERENCES sales.customers (id);
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_b_fkey FOREIGN KEY (customer_id) REFERENCES sales.customers (id);
+      `);
+      const summary = await refreshSource(sourceId, ACTOR);
+      expect(summary.relations).toEqual({ added: 2, missing: 0, restored: 0 });
+      // The first constraint name in order takes the old pair over.
+      const taken = await fkRelations("orders_a_fkey");
+      expect(taken.map((r) => r.id).sort()).toEqual(
+        before.map((r) => r.id).sort()
+      );
+      const fresh = await fkRelations("orders_b_fkey");
+      expect(fresh).toHaveLength(2);
+      expect(fresh.map((r) => r.name).sort()).toEqual([
+        "customer_2",
+        "orders_2",
+      ]);
+      const ids = [...taken, ...fresh].map((r) => r.id);
+      expect(new Set(ids).size).toBe(4);
+    });
+  });
+
+  it("names relations from mixed-case identifiers within the declared-name rules", async () => {
+    await fixture.run(`
+      CREATE TABLE sales."Order Items" ("itemId" integer PRIMARY KEY, "CustomerRef" integer REFERENCES sales.customers (id));
+      GRANT SELECT ON sales."Order Items" TO zeteo_ro;
+    `);
+    await refreshSource(sourceId, ACTOR);
+    const names = (await prisma.relation.findMany({ where: { sourceId } })).map(
+      (r) => r.name
+    );
+    expect(names).toContain("customer_ref");
+    expect(names).toContain("order_items");
+    expect(names.every((n) => /^[a-z][a-z0-9_]{0,62}$/.test(n))).toBe(true);
+  });
+
+  describe("declaring and removing relations while a refresh holds the lock", () => {
+    const holdLock = async () => {
+      let release!: () => void;
+      let locked!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const ready = new Promise<void>((resolve) => (locked = resolve));
+      const holder = prisma.$transaction(async (tx) => {
+        await lockSourceCatalog(tx, sourceId);
+        locked();
+        await held;
+      });
+      await ready;
+      return { release, holder };
+    };
+    const pending = async (promise: Promise<unknown>) => {
+      let done = false;
+      const tracked = promise.then(() => {
+        done = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return { isDone: () => done, tracked };
+    };
+
+    it("waits for the lock before declaring", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const orders = await tableRow("orders");
+      const customers = await tableRow("customers");
+      const lock = await holdLock();
+      const declared = pending(
+        declareRelation(
+          sourceId,
+          {
+            name: "by_status",
+            fromTableId: orders.id,
+            fromColumns: ["status"],
+            toTableId: customers.id,
+            toColumns: ["region"],
+            toMany: false,
+          },
+          ACTOR
+        )
+      );
+      const waiting = await declared;
+      expect(waiting.isDone()).toBe(false);
+      lock.release();
+      await lock.holder;
+      await waiting.tracked;
+      expect(waiting.isDone()).toBe(true);
+    });
+
+    it("waits for the lock before removing", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const orders = await tableRow("orders");
+      const customers = await tableRow("customers");
+      const relation = await declareRelation(
+        sourceId,
+        {
+          name: "by_status",
+          fromTableId: orders.id,
+          fromColumns: ["status"],
+          toTableId: customers.id,
+          toColumns: ["region"],
+          toMany: false,
+        },
+        ACTOR
+      );
+      const lock = await holdLock();
+      const waiting = await pending(
+        removeRelation(sourceId, relation.id, ACTOR)
+      );
+      expect(waiting.isDone()).toBe(false);
+      lock.release();
+      await lock.holder;
+      await waiting.tracked;
+      expect(await prisma.relation.count({ where: { id: relation.id } })).toBe(
+        0
+      );
+    });
+
+    it("never fails a refresh or a declare racing for one name", async () => {
+      await refreshSource(sourceId, ACTOR);
+      await fixture.run(`
+        ALTER TABLE sales.orders ADD COLUMN referrer_id integer;
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_referrer_fkey FOREIGN KEY (referrer_id) REFERENCES sales.customers (id);
+      `);
+      const orders = await tableRow("orders");
+      const customers = await tableRow("customers");
+      const [refreshed, declared] = await Promise.allSettled([
+        refreshSource(sourceId, ACTOR),
+        declareRelation(
+          sourceId,
+          {
+            name: "referrer",
+            fromTableId: orders.id,
+            fromColumns: ["status"],
+            toTableId: customers.id,
+            toColumns: ["region"],
+            toMany: false,
+          },
+          ACTOR
+        ),
+      ]);
+      expect(refreshed.status).toBe("fulfilled");
+      if (declared.status === "rejected") {
+        expect(declared.reason).toMatchObject({ code: "relation_name_taken" });
+      }
+    });
+  });
+
   describe("concurrency", () => {
     it("lets two refreshes started together both resolve, leaving no duplicate rows", async () => {
       const results = await Promise.all([
@@ -449,6 +667,45 @@ describe("refreshSource", () => {
       expect(source.status).toBe("unreachable");
       expect(source.lastRefreshedAt).toEqual(refreshedAt);
       expect(await dump()).toEqual(before);
+    });
+
+    it("does not overwrite a newer success with unreachable", async () => {
+      await refreshSource(sourceId, ACTOR);
+      await closeSourcePool(sourceId);
+      let release!: () => void;
+      let started!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const read = new Promise<void>((resolve) => (started = resolve));
+      const connect = postgresAdapter.connect.bind(postgresAdapter);
+      let first = true;
+      vi.spyOn(postgresAdapter, "connect").mockImplementation(
+        async (...args) => {
+          const conn = await connect(...args);
+          const readSchema = conn.readSchema.bind(conn);
+          conn.readSchema = async (schemas) => {
+            if (first) {
+              first = false;
+              started();
+              await held;
+              throw new SourceUnreachableError();
+            }
+            return readSchema(schemas);
+          };
+          return conn;
+        }
+      );
+      const failing = refreshSource(sourceId, ACTOR);
+      const rejected = expect(failing).rejects.toBeInstanceOf(
+        SourceUnreachableError
+      );
+      await read;
+      await refreshSource(sourceId, ACTOR);
+      release();
+      await rejected;
+      expect(
+        (await prisma.source.findUniqueOrThrow({ where: { id: sourceId } }))
+          .status
+      ).toBe("active");
     });
 
     it("sets the source active again on a successful refresh", async () => {

@@ -2,6 +2,7 @@ import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
+import { lockSourceCatalog } from "./lock.js";
 import { typeOf } from "../sources/types.js";
 import type {
   Relation,
@@ -180,6 +181,7 @@ export const declareRelation = async (
   actorId: string
 ): Promise<Relation> =>
   withAudit(async (tx, audit) => {
+    await lockSourceCatalog(tx, sourceId);
     const source = await requireActiveSource(tx, sourceId);
     const tables = await tx.sourceTable.findMany({
       where: { sourceId, id: { in: [input.fromTableId, input.toTableId] } },
@@ -256,6 +258,7 @@ export const removeRelation = async (
   actorId: string
 ): Promise<void> => {
   await withAudit(async (tx, audit) => {
+    await lockSourceCatalog(tx, sourceId);
     const source = await requireActiveSource(tx, sourceId);
     const relation = await tx.relation.findFirst({
       where: { id: relationId, sourceId },

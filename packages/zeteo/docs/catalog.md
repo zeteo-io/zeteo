@@ -37,7 +37,8 @@ missing in this refresh.
 **A refresh changes:**
 
 - adds tables, columns and discovered relations that are new;
-- marks a table, column or discovered relation that is no longer in the source with `missing_since`
+- marks a table, column or discovered relation that is no longer in the source (a relation also
+  goes missing when either of its tables or columns does) with `missing_since`
   (set once; later refreshes keep the first value), and clears it when the thing returns;
 - updates a column in place when its normalised type, native type, nullability or primary-key flag
   changed (counted as `changed`), and its position;
@@ -78,9 +79,15 @@ Each foreign key gives two **discovered** relations, matched across refreshes by
   when the key has several columns or nothing is left of the column's name (`id`);
 - reverse, on the referenced table, `to_many: true`, named after the table that holds the key.
 
+Discovered names follow the declared-name pattern: camelCase boundaries become `_`, the name is
+lower-cased, other characters become `_`, a name not starting with a letter gets `r_` in front, an
+empty one is `relation`, and it is cut so that a `_N` suffix still fits in 63 characters. Names
+already stored are never renamed.
+
 When a name is already taken on that table (by another relation, discovered or declared) a `_2`,
 `_3`, ... is appended. A discovered relation keeps its name and id when its foreign key is dropped
-and created again, and cannot be removed (`409 relation_discovered`).
+and created again, even under another constraint name (a missing or renamed relation with the same
+tables, columns and direction is taken over; exact constraint names are matched first), and cannot be removed (`409 relation_discovered`).
 
 A **declared** relation is one an administrator adds, for a join the database does not enforce:
 
