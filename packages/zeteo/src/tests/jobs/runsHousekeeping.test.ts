@@ -1,15 +1,14 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag job
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import type { RunOutcome } from "../../../prisma/generated/client/index.js";
 import { sourceSettings, uniqueSlug } from "../support/sources.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { auditRows, removeSources } from "../support/sources.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
-import { recordExportEnd } from "../../engine/record.js";
 import { removeRunsOf } from "../support/queries.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { logger } from "../../utils/logger.js";
 import { redis } from "../../utils/redis.js";
 import { randomUUID } from "crypto";
 import {
@@ -17,7 +16,21 @@ import {
   closeInterruptedExports,
   deleteOldRuns,
   runHousekeeping,
+  startRunsHousekeepingJob,
 } from "../../jobs/runsHousekeeping.js";
+import {
+  recordExportEnd,
+  recordInterruptedExport,
+} from "../../engine/record.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
@@ -72,6 +85,8 @@ describe("runs housekeeping", () => {
     });
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
     await redis.del("zeteo:job:runs-housekeeping");
     await removeRunsOf(users.splice(0));
   });
@@ -146,6 +161,47 @@ describe("runs housekeeping", () => {
       expect(final.outcome).toBe(ended ? "ok" : "failed");
     });
 
+    const endOk = (runId: string, userId: string) =>
+      recordExportEnd(
+        runId,
+        { caller: { userId }, sourceId },
+        {
+          durationMs: 1,
+          rowCount: 7,
+          outcome: "ok",
+          errorCode: null,
+          truncated: false,
+        }
+      );
+    const exportRunEntries = async (id: string) =>
+      (await auditRows(id)).filter(
+        (r) => r.payload.metadata.event === "zeteo.export.run"
+      );
+
+    it("does not overwrite an export that ended first, from the stale row the sweep read", async () => {
+      const stale = await newRun(16 * MINUTE);
+      expect(await endOk(stale.id, stale.userId)).toBe(true);
+      expect(await recordInterruptedExport(stale, NOW)).toBe(false);
+      expect(await reload(stale.id)).toMatchObject({
+        outcome: "ok",
+        rowCount: 7,
+      });
+      expect(await exportRunEntries(stale.id)).toHaveLength(1);
+    });
+
+    it("leaves the sweep's close in place when the export ends after it", async () => {
+      const stale = await newRun(16 * MINUTE);
+      expect(await recordInterruptedExport(stale, NOW)).toBe(true);
+      expect(await endOk(stale.id, stale.userId)).toBe(false);
+      expect(await reload(stale.id)).toMatchObject({
+        outcome: "failed",
+        errorCode: "interrupted",
+      });
+      const entries = await exportRunEntries(stale.id);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.payload.metadata.outcome).toBe("failed");
+    });
+
     it("closes nothing a second time", async () => {
       await newRun(16 * MINUTE);
       expect(await closeInterruptedExports(NOW)).toBe(1);
@@ -207,11 +263,36 @@ describe("runs housekeeping", () => {
       expect(await redis.get("zeteo:job:runs-housekeeping")).toBe("other");
     });
 
+    it("skips the tick, logged and not thrown, when Redis fails", async () => {
+      const old = await newRun(16 * MINUTE);
+      vi.spyOn(redis, "set").mockRejectedValue(new Error("redis down"));
+      const warn = vi.spyOn(logger, "warn");
+      await expect(runHousekeeping(NOW)).resolves.toBeUndefined();
+      expect(warn).toHaveBeenCalled();
+      expect((await reload(old.id)).outcome).toBe("running");
+    });
+
     it("closes interrupted exports and releases the lock", async () => {
       const old = await newRun(16 * MINUTE);
       await runHousekeeping(NOW);
       expect((await reload(old.id)).errorCode).toBe("interrupted");
       expect(await redis.get("zeteo:job:runs-housekeeping")).toBeNull();
+    });
+  });
+
+  describe("startRunsHousekeepingJob", () => {
+    it("sweeps after its first delay, and not after the stop function resolves", async () => {
+      vi.useFakeTimers({
+        toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval"],
+      });
+      // A held lock: the ticks do nothing but touch the lock.
+      const set = vi.spyOn(redis, "set").mockResolvedValue(null);
+      const stop = startRunsHousekeepingJob();
+      await vi.advanceTimersByTimeAsync(121_000);
+      expect(set).toHaveBeenCalledTimes(1);
+      await expect(stop()).resolves.toBeUndefined();
+      await vi.advanceTimersByTimeAsync(3 * 3_600_000);
+      expect(set).toHaveBeenCalledTimes(1);
     });
   });
 });
