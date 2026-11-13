@@ -4,7 +4,6 @@ import { REDIS_COMMAND_TIMEOUT_MS } from "../../utils/redisTimeout.js";
 import { ServiceUnavailableError } from "../../utils/errors.js";
 import { runInTransactionScope } from "../../utils/tereo.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import * as tereoGroups from "../../utils/tereoGroups.js";
 import type { Caller } from "../../middleware/auth.js";
 import { RequestError } from "@tereo-io/sdk/handler";
 import { requests } from "@tereo-io/sdk/handler";
@@ -17,7 +16,14 @@ import {
   statusFromTereo,
 } from "../../grants/principals.js";
 
-vi.mock("../../utils/tereoGroups.js");
+const auth = vi.hoisted(() => ({
+  listUserGroups: vi.fn(),
+  getGroup: vi.fn(),
+}));
+vi.mock("../../utils/tereo.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../utils/tereo.js")>()),
+  getTereo: () => ({ auth }),
+}));
 // Commands of a client whose Redis is gone: the shared client queues them
 // while it reconnects and never settles them.
 const redis = vi.hoisted(() => ({
@@ -31,47 +37,48 @@ vi.mock("@tereo-io/sdk/handler", async (importOriginal) => ({
   requests: { auth: { getUser: vi.fn() } },
 }));
 
+// As the SDK's core client rejects: the RequestError with core's status, or
+// without one when no answer came.
 const failing = (status?: number) =>
-  Object.assign(new Error("request failed"), {
-    response: status === undefined ? undefined : { status },
-  });
+  new RequestError("AS_0001", "request failed", { httpStatus: status });
 
 afterEach(() => vi.resetAllMocks());
 
 describe("fetchGroupsFromTereo", () => {
   it("returns id and organizationId of each group", async () => {
-    vi.mocked(tereoGroups.listUserGroups).mockResolvedValue({
-      data: [{ id: "g", organizationId: "o", name: "x" } as never],
-    });
+    auth.listUserGroups.mockResolvedValue([
+      { id: "g", organizationId: "o", name: "x" },
+    ]);
     expect(await fetchGroupsFromTereo("u")).toEqual([
       { id: "g", organizationId: "o" },
     ]);
   });
 
-  it("reads a 404 as no groups", async () => {
-    vi.mocked(tereoGroups.listUserGroups).mockRejectedValue(failing(404));
+  it("reads null (core's 404) as no groups", async () => {
+    auth.listUserGroups.mockResolvedValue(null);
     expect(await fetchGroupsFromTereo("u")).toEqual([]);
   });
 
   it("rethrows any other failure", async () => {
-    vi.mocked(tereoGroups.listUserGroups).mockRejectedValue(failing(500));
+    auth.listUserGroups.mockRejectedValue(failing(500));
     await expect(fetchGroupsFromTereo("u")).rejects.toThrow("request failed");
   });
 });
 
 describe("statusFromTereo for a group", () => {
-  it("is active on 200", async () => {
-    vi.mocked(tereoGroups.getGroup).mockResolvedValue({});
+  it("is active when tereo has the group", async () => {
+    auth.getGroup.mockResolvedValue({ id: "g" });
     expect(await statusFromTereo("group", "g")).toBe("active");
   });
 
-  it.each([403, 404])("is unknown on %i", async (status) => {
-    vi.mocked(tereoGroups.getGroup).mockRejectedValue(failing(status));
-    expect(await statusFromTereo("group", "g")).toBe("unknown");
+  it("is orphaned on null (core's 404)", async () => {
+    auth.getGroup.mockResolvedValue(null);
+    expect(await statusFromTereo("group", "g")).toBe("orphaned");
   });
 
-  it.each([500, undefined])("is a 503 on %s", async (status) => {
-    vi.mocked(tereoGroups.getGroup).mockRejectedValue(failing(status));
+  // 403: a deploy whose service lacks group_resolver.
+  it.each([403, 500, undefined])("is a 503 on %s", async (status) => {
+    auth.getGroup.mockRejectedValue(failing(status));
     await expect(statusFromTereo("group", "g")).rejects.toBeInstanceOf(
       ServiceUnavailableError
     );

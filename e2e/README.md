@@ -27,7 +27,7 @@ which waits out zeteo's 30 s group cache twice.
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
 
-- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.0`),
+- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.1`),
   pulled when it is not present. If it cannot be pulled the run stops and names the image it needs.
 - **zeteo's image** is built from this checkout as `zeteo:e2e` (`ZETEO_IMAGE`; `SKIP_ZETEO_BUILD=1`
   reuses one already built).
@@ -46,7 +46,7 @@ which waits out zeteo's 30 s group cache twice.
 - **Images left behind**: the run keeps the images, so the next one starts faster:
   `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images
   `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
-  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.0 zeteo:e2e`, adding the base images only if
+  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.1 zeteo:e2e`, adding the base images only if
   nothing else uses them; `docker builder prune` drops the build cache of `zeteo:e2e`.
 
 Sign-in is scripted over HTTP, as Tereo's own tests do it: `GET /oauth/authorize`, the password
@@ -74,8 +74,8 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 | File | Case |
 |------|------|
 | `auth.e2e.test.ts` | A user's token reaches `GET /v1/catalog`; a token Tereo issued to a client without `zeteo` in its audience (live: Tereo answers its userinfo) is 401 |
-| `groups.e2e.test.ts` | bob, refused before, can query once Tereo puts him in the group, and is refused again within 35 s of leaving it (`GET /v1/admin/users/:id/groups`); a group grant's `principal_status` comes back from `GET /v1/admin/groups/:id` without a logged failure (`unknown`: zeteo's service cannot hold `groups.read`) |
-| `serviceToken.e2e.test.ts` | Tereo revokes zeteo's service token (revoking and re-approving one of its access rows); the next query's group lookup gets the 401, retries with a new token and the query answers 200 |
+| `groups.e2e.test.ts` | bob, refused before, can query once Tereo puts him in the group, and is refused again within 35 s of leaving it (`GET /v1/admin/users/:id/groups`); a group grant's `principal_status` is `active` (`GET /v1/admin/groups/:id` answers 200 under zeteo's `group_resolver`), a grant to a group Tereo never had is `orphaned` (404), and neither lookup logs a failure |
+| `serviceToken.e2e.test.ts` | Tereo revokes zeteo's service token (revoking and re-approving one of its access rows); the next query's group lookup gets the 401, the SDK retries it with a new token and the query answers 200 |
 | `tls.e2e.test.ts` | `tls: verify` against the untrusted certificate is `502 source_unreachable`; the replica with `NODE_EXTRA_CA_CERTS` registers and queries the same source; `verify` with the CA in the source's `ca` setting works; `tls: require` works without trusting the CA |
 | `audit.e2e.test.ts` | A query's `zeteo.query.run` and an export's `zeteo.export.started` and `zeteo.export.run` reach Tereo's audit log through the outbox |
 | `mcp.e2e.test.ts` | An unauthenticated `initialize` gets the 401 challenge naming the resource metadata, which names Tereo; a token from a client not in `MCP_ALLOWED_CLIENTS` is refused; a user signed in through `e2e-mcp`, found from the challenge as an MCP client finds it, lists the four tools and runs `query` |

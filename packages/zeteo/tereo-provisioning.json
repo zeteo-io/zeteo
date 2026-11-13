@@ -7,7 +7,8 @@
     "access": {
       "roles": [
         "audit_writer",
-        "user_resolver"
+        "user_resolver",
+        "group_resolver"
       ]
     },
     "permissions": [

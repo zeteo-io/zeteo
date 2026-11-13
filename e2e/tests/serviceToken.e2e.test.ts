@@ -67,10 +67,12 @@ describe("zeteo's service token", () => {
         401
       )
     ).toContain(401);
-    // ...and the SDK's own retry did not handle it: zeteo's group request did.
+    // ...and the SDK's group request retried with a new token.
     const sdkRetries = serviceLogs("zeteo", since).filter(
-      (line) => line.message === SDK_RETRY_LOG
+      (line) =>
+        line.message === SDK_RETRY_LOG &&
+        line.requestName === "core.groups.listForUser"
     );
-    expect(sdkRetries).toEqual([]);
+    expect(sdkRetries).toHaveLength(1);
   });
 });

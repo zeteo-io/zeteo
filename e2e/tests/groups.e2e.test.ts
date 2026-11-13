@@ -1,7 +1,8 @@
 import { serviceLogs, waitForTereoStatus } from "../support/compose.js";
-import { PAID_ORDER_IDS, query } from "../support/zeteo.js";
+import { PAID_ORDER_IDS, grantTable, query } from "../support/zeteo.js";
 import { requestJson, waitFor } from "../support/http.js";
 import { describe, expect, inject, it } from "vitest";
+import { randomUUID } from "node:crypto";
 import { stack } from "../support/stack.js";
 import {
   addGroupMember,
@@ -56,7 +57,7 @@ describe("access through a Tereo group", () => {
     expect(left.elapsedMs).toBeLessThanOrEqual(MEMBERSHIP_DELAY_MS);
   });
 
-  it("a group grant's principal status is read from Tereo without an error", async () => {
+  it("a group grant's principal status is read from Tereo: active, or orphaned for a group Tereo does not have", async () => {
     const since = new Date().toISOString();
 
     const res = await requestJson(
@@ -64,18 +65,30 @@ describe("access through a Tereo group", () => {
       `${stack.zeteoUrl}/v1/grants/${e2e.groupGrantId}`,
       { token: e2e.admin.zeteoToken }
     );
-
     expect(res.status).toBe(200);
-    // A failed lookup shows `unknown` too, and is logged: this one is not.
+    // zeteo holds group_resolver, so Tereo describes the group.
+    expect(
+      await waitForTereoStatus(since, `/v1/admin/groups/${e2e.groupId}`, 200)
+    ).toEqual([200]);
+    expect(res.body.principal_status).toBe("active");
+
+    // Tereo never deletes a group, so the orphaned one is an id it never had.
+    const missingGroupId = randomUUID();
+    const orphaned = await grantTable(
+      stack.zeteoUrl,
+      e2e.admin.zeteoToken,
+      { type: "group", id: missingGroupId },
+      e2e.source.tables.orders
+    );
+    expect(orphaned.principal_status).toBe("orphaned");
+    expect(
+      await waitForTereoStatus(since, `/v1/admin/groups/${missingGroupId}`, 404)
+    ).toEqual([404]);
+
+    // A failed lookup would show `unknown` and be logged: neither was.
     const failures = serviceLogs("zeteo", since).filter(
       (line) => line.message === "reading a principal failed"
     );
     expect(failures).toEqual([]);
-    // zeteo's service account cannot hold groups.read, so Tereo refuses to
-    // describe the group (403) and the status is `unknown`, as documented.
-    expect(
-      await waitForTereoStatus(since, `/v1/admin/groups/${e2e.groupId}`, 403)
-    ).toEqual([403]);
-    expect(res.body.principal_status).toBe("unknown");
   });
 });

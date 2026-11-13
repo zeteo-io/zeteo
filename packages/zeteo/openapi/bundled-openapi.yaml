@@ -2454,9 +2454,9 @@ components:
         - unknown
       description: |
         Whether the principal still exists in tereo, looked up when the grant or limits row is shown.
-        A user is `active`, or `orphaned` when tereo has no such user; an orphaned row is inert. Zeteo
-        reads a user's groups but cannot read a group itself, so a group is `unknown`. A lookup that
-        fails is also shown as `unknown`.
+        A user or group is `active`, or `orphaned` when tereo has no such user or group; an orphaned
+        row is inert. An archived group is `active`, though its row reaches no one. A lookup that fails
+        is shown as `unknown`.
     Grant:
       type: object
       description: What one user or group may query of one table

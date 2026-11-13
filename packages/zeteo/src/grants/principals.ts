@@ -1,8 +1,7 @@
-import { getGroup, listUserGroups } from "../utils/tereoGroups.js";
+import { assertNoTransaction, getTereo } from "../utils/tereo.js";
 import { requests, RequestError } from "@tereo-io/sdk/handler";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
-import { assertNoTransaction } from "../utils/tereo.js";
 import type { Caller } from "../middleware/auth.js";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
@@ -31,18 +30,16 @@ const httpStatusOf = (err: unknown): number | undefined => {
   return typeof status === "number" ? status : undefined;
 };
 
-/** A user's groups from tereo; a 404 (no such user, or a core without groups) is no groups. */
+/** A user's groups from tereo; null (a 404: no such user, or a core without groups) is no groups. */
 export const fetchGroupsFromTereo = async (
   userId: string
 ): Promise<GroupRef[]> => {
   assertNoTransaction("tereo listUserGroups()");
-  try {
-    const { data } = await listUserGroups(userId);
-    return data.map(({ id, organizationId }) => ({ id, organizationId }));
-  } catch (err) {
-    if (httpStatusOf(err) === 404) return [];
-    throw err;
-  }
+  const groups = await getTereo().auth.listUserGroups(userId);
+  return (groups ?? []).map(({ id, organizationId }) => ({
+    id,
+    organizationId,
+  }));
 };
 
 /**
@@ -114,26 +111,27 @@ export const statusFromTereo = async (
 ): Promise<PrincipalStatus> => {
   assertNoTransaction(`tereo ${type === "user" ? "getUser" : "getGroup"}()`);
   try {
-    if (type === "user") await requests.auth.getUser(id);
-    else await getGroup(id);
-    return "active";
-  } catch (err) {
-    const status = httpStatusOf(err);
-    if (type === "user" && status === 404) return "orphaned";
-    if (type === "group" && (status === 403 || status === 404)) {
-      return "unknown";
+    if (type === "user") {
+      await requests.auth.getUser(id);
+      return "active";
     }
+    // Reading a group needs group_resolver; without it tereo answers 403,
+    // which fails here like any other error rather than reading as missing.
+    return (await getTereo().auth.getGroup(id)) === null
+      ? "orphaned"
+      : "active";
+  } catch (err) {
+    if (type === "user" && httpStatusOf(err) === 404) return "orphaned";
     logger.error({ err, principal_id: id }, "reading a principal failed");
     throw unavailable();
   }
 };
 
 /**
- * Whether a grant's principal still exists in tereo. A user is `orphaned`
- * when tereo has no such user. A group principal is `unknown`: zeteo cannot
- * read a group itself with a service's access, so tereo refuses (or has
- * none). It would be `active` only were tereo to let the service read the
- * group, as test mode does.
+ * Whether a grant's principal still exists in tereo: `orphaned` when tereo
+ * has no such user or group. An archived group still exists, so it is
+ * `active`, though its grants reach no one: tereo lists a user's unarchived
+ * groups only.
  */
 export const principalStatus = async (
   type: "user" | "group",

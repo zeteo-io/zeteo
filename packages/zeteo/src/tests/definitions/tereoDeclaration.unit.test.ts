@@ -32,8 +32,12 @@ describe("buildTereoDocument", () => {
     expect(service.secretFrom).toBe("TEREO_CLIENT_SECRET");
   });
 
-  it("asks for the core role that writes audit entries", () => {
-    expect(service.access?.roles).toEqual(["audit_writer", "user_resolver"]);
+  it("asks for the core roles that write audit entries and read users and groups", () => {
+    expect(service.access?.roles).toEqual([
+      "audit_writer",
+      "user_resolver",
+      "group_resolver",
+    ]);
   });
 
   it("declares exactly the eight zeteo permissions", () => {

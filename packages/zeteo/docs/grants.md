@@ -61,16 +61,18 @@ shown (once per distinct principal in a list), never stored.
 | Status | Meaning |
 |--------|---------|
 | `active` | Tereo knows the user or group |
-| `orphaned` | A user Tereo no longer has. The grant is inert and stays until an admin removes it |
-| `unknown` | A group, or a principal whose lookup failed |
+| `orphaned` | A user or group Tereo does not have. The grant is inert and stays until an admin removes it |
+| `unknown` | A principal whose lookup failed |
 
 A failed lookup is logged and shown as `unknown`; it never fails the request, since the grant itself
 was read or changed.
 
-Zeteo reads a user's groups from Tereo (that is how a group's grants reach its members), but it
-cannot read a group itself with the access a service has, so a group principal's
-`principal_status` is always `unknown`, never `active` or `orphaned`. It only reports; a group
-grant counts for its members whatever its status.
+Zeteo reads a user's groups from Tereo (that is how a group's grants reach its members) under the
+core role `user_resolver`, and a group by id under `group_resolver`; its provisioning document
+requests both. Without `group_resolver` Tereo refuses every group lookup, so each group principal
+is `unknown`. Tereo archives groups rather than deleting them, and an archived group is `active`:
+Tereo still knows it, though it lists only a user's unarchived groups, so its grants reach no one.
+The status only reports; a group grant counts for its members whatever its status.
 
 ## Concurrency limits
 
