@@ -362,7 +362,7 @@ describe("azure-sql runQuery: safety", () => {
     const controller = new AbortController();
     const reason = new Error("client went away");
     const driverError = new sql.RequestError("Deadlock victim", "EREQUEST");
-    vi.spyOn(sql.Request.prototype, "cancel").mockReturnValue(true);
+    vi.spyOn(sql.Request.prototype, "cancel").mockImplementation(() => undefined);
     vi.spyOn(sql.Request.prototype, "query").mockImplementation(function (
       this: sql.Request,
       _text: unknown,
