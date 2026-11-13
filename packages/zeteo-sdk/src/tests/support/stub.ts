@@ -26,6 +26,8 @@ export type Stub = {
   url: string;
   requests: Recorded[];
   tokensIssued: number;
+  /** Paths of streamed responses whose connection closed before their end. */
+  cutByClient: string[];
   onToken(fn: (auth: string | undefined, body: string) => void): void;
   respond(fn: (req: Recorded) => StubResponse | undefined): void;
   close(): Promise<void>;
@@ -45,9 +47,16 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   }
 }
 
-async function send(res: ServerResponse, out: StubResponse): Promise<void> {
+async function send(
+  res: ServerResponse,
+  out: StubResponse,
+  onCut?: () => void
+): Promise<void> {
   const status = out.status ?? 200;
   if (out.chunks) {
+    res.once("close", () => {
+      if (!res.writableFinished && !out.cutAfterChunks) onCut?.();
+    });
     res.writeHead(status, {
       "content-type": "application/x-ndjson",
       ...out.headers,
@@ -73,6 +82,7 @@ export async function startStub(): Promise<Stub> {
     url: "",
     requests: [],
     tokensIssued: 0,
+    cutByClient: [],
     onToken: (fn) => void tokenListeners.push(fn),
     respond: (fn) => void responders.unshift(fn),
     close: () =>
@@ -118,7 +128,7 @@ export async function startStub(): Promise<Stub> {
         out = fn(recorded);
         if (out) break;
       }
-      await send(res, out ?? {});
+      await send(res, out ?? {}, () => stub.cutByClient.push(recorded.path));
     })().catch(() => res.destroy());
   });
 

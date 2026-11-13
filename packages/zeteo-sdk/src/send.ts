@@ -3,6 +3,7 @@ import { OPERATIONS, type OperationId } from "./operations.js";
 import { QueryRefusedError, ZeteoError } from "./errors.js";
 import type { ClientNames } from "./template.js";
 import type RequestHandler from "@dianemo/core";
+import type { Readable } from "node:stream";
 import { buildPath } from "./paths.js";
 
 export interface Transport {
@@ -101,6 +102,35 @@ function fromResponse(response: {
   return new ZeteoError(message, init);
 }
 
+const MAX_ERROR_BODY_BYTES = 1024 * 1024;
+
+const isStream = (value: unknown): value is Readable =>
+  typeof (value as { pipe?: unknown } | null)?.pipe === "function";
+
+// A streamed request's error body arrives as a stream: read it so it can be
+// mapped, and destroy it so the connection is not held.
+async function readErrorBody(stream: Readable): Promise<unknown> {
+  const parts: Buffer[] = [];
+  let size = 0;
+  try {
+    for await (const chunk of stream) {
+      const part = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      parts.push(part as Buffer);
+      size += (part as Buffer).length;
+      if (size > MAX_ERROR_BODY_BYTES) return undefined;
+    }
+  } catch {
+    return undefined;
+  } finally {
+    stream.destroy();
+  }
+  try {
+    return JSON.parse(Buffer.concat(parts).toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 function mapError(error: unknown, signal?: AbortSignal): ZeteoError {
   if (error instanceof ZeteoError) return error;
   const response = (error as { response?: Parameters<typeof fromResponse>[0] })
@@ -176,6 +206,9 @@ async function execute(
       const response = (error as { response?: DianemoResponse })?.response;
       if (response && options.acceptStatus?.includes(response.status)) {
         return response;
+      }
+      if (response && isStream(response.data)) {
+        response.data = await readErrorBody(response.data);
       }
       throw mapError(error, options.signal);
     }

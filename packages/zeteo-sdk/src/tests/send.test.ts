@@ -312,12 +312,30 @@ describe("send", () => {
     expect(err).toMatchObject({ status: 403, code: "forbidden" });
   });
 
-  it("sendRaw maps an error status whose body is a stream by status only", async () => {
-    stub.respond(() => ({ status: 403, chunks: ['{"error":"forbidden"}'] }));
+  it("sendRaw reads and maps an error body that arrives as a stream", async () => {
+    stub.respond(() => ({
+      status: 403,
+      chunks: ['{"error":', '"forbidden"}'],
+    }));
+    const err = await catchError(
+      sendRaw(ctx(), { op: "exportQuery", body: {}, stream: true })
+    );
+    expect(err).toMatchObject({ status: 403, code: "forbidden" });
+  });
+
+  it("sendRaw maps a streamed error body over 1 MB, or not JSON, by status only", async () => {
+    const big = `{"error":"forbidden","x":"${"a".repeat(1024 * 1024)}"}`;
+    stub.respond(() => ({ status: 403, chunks: [big] }));
     const err = await catchError(
       sendRaw(ctx(), { op: "exportQuery", body: {}, stream: true })
     );
     expect(err).toMatchObject({ status: 403, code: "http_403" });
+
+    stub.respond(() => ({ status: 403, chunks: ["<html>"] }));
+    const html = await catchError(
+      sendRaw(ctx(), { op: "exportQuery", body: {}, stream: true })
+    );
+    expect(html).toMatchObject({ status: 403, code: "http_403" });
   });
 
   it("leaks no secret into a thrown error", async () => {

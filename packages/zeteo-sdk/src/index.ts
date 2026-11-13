@@ -38,3 +38,4 @@ export type {
   Catalog,
 } from "./types/catalog.js";
 export type { RunOutcome, QueryRun, ListRunsOptions } from "./types/runs.js";
+export type { ExportEnd, ExportRows, ExportStream } from "./calls/export.js";
