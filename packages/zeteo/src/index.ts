@@ -5,6 +5,7 @@ import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { stopSourcePools } from "./sources/pools.js";
+import { abortExports } from "./engine/export.js";
 import { createServer, type Server } from "http";
 import { logger } from "./utils/logger.js";
 import env from "./env.js";
@@ -81,6 +82,10 @@ export function createAppServer(
           }
         };
 
+        // Running exports would hold the drain for up to their time limit:
+        // each is stopped at once, recorded as shutting down, and its
+        // connection cut.
+        await step("exports", async () => abortExports());
         // Drain HTTP before tearing anything down: handlers would otherwise
         // throw "pool ended" / "client closed" mid-flight.
         if (server) {

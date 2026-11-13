@@ -65,6 +65,26 @@ describe("visibleCatalogView", () => {
   });
 });
 
+describe("visibleCatalogView limits", () => {
+  it.each([
+    [false, 0, { enabled: false, max_rows: 0 }],
+    [false, 500, { enabled: false, max_rows: 0 }],
+    [true, 0, { enabled: false, max_rows: 0 }],
+    [true, 500, { enabled: true, max_rows: 500 }],
+  ])(
+    "shows exports on %s with a cap of %i as %j",
+    (exportEnabled, exportRowCap, expected) => {
+      const view = visibleCatalogView(
+        catalog({
+          source: { ...catalog().source, exportEnabled, exportRowCap },
+        }),
+        {}
+      );
+      expect(view.limits.export).toEqual(expected);
+    }
+  );
+});
+
 describe("visibleCatalogViews", () => {
   it("skips a source whose type has no adapter instead of failing the listing", () => {
     const broken = catalog({

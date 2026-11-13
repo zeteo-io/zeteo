@@ -5,7 +5,9 @@
 --   probe.typed_values  3 rows of SQL Server's own types, for the wire forms;
 --   probe.legacy_times  datetime values off the millisecond (1/300 s ticks)
 --                       and smalldatetime minutes, to filter on as returned;
---   probe.legacy_text   text, ntext and xml, which SQL Server cannot sort.
+--   probe.legacy_text   text, ntext and xml, which SQL Server cannot sort;
+--   probe.trickle    a view of 100 rows of 8,000 characters, the first at once
+--                    and each later one 200 ms after the one before.
 -- zeteo_ro reads it as a member of db_datareader.
 
 CREATE SCHEMA probe;
@@ -88,4 +90,29 @@ INSERT INTO probe.legacy_text VALUES
   (1, 'Alpha memo', N'Wide ALPHA', N'<a>one</a>'),
   (2, 'beta memo', N'wide beta', N'<b>two</b>'),
   (3, NULL, NULL, NULL);
+GO
+
+-- A function can spin on the clock where a view cannot wait; INLINE = OFF
+-- keeps it a call per row, made as each row is produced.
+CREATE FUNCTION probe.trickle_pad (@n int)
+RETURNS varchar(8000)
+WITH INLINE = OFF
+AS
+BEGIN
+  IF @n > 1
+  BEGIN
+    DECLARE @until datetime2 = DATEADD(millisecond, 200, SYSDATETIME());
+    WHILE SYSDATETIME() < @until SET @n = @n;
+  END
+  RETURN REPLICATE(CAST('t' AS varchar(8000)), 8000);
+END
+GO
+
+CREATE VIEW probe.trickle AS
+  SELECT g.n AS id, probe.trickle_pad(g.n) AS filler
+    FROM (
+      SELECT a.d + 10 * b.d + 1 AS n
+        FROM (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) a (d)
+       CROSS JOIN (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) b (d)
+    ) g;
 GO

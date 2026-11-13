@@ -67,7 +67,11 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     expect(entry).toMatchObject({
       slug: source.slug,
       type: engine.type,
-      limits: { default_rows: 1000, max_rows: 50000 },
+      limits: {
+        default_rows: 1000,
+        max_rows: 50000,
+        export: { enabled: false, max_rows: 0 },
+      },
     });
     expect(entry.limits.timeout_ms).toBeGreaterThan(0);
     expect(entry.tables.map((t: Table) => t.name)).toEqual([
@@ -192,6 +196,24 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       limit: 5,
     });
     expect(run.status, JSON.stringify(run.body)).toBe(200);
+  });
+
+  it("shows whether a source exports, and up to how many rows", async () => {
+    const exporting = await seedQuerySource(
+      engine,
+      { export_enabled: true, export_row_cap: 500 },
+      "catalog-export"
+    );
+    try {
+      await grantTo(narrow.principal, exporting.tables.accounts!, "all");
+      const res = await catalog(narrow.token, `?source=${exporting.slug}`);
+      expect(res.body.sources[0].limits.export).toEqual({
+        enabled: true,
+        max_rows: 500,
+      });
+    } finally {
+      await removeSources([exporting.id]);
+    }
   });
 
   it("needs zeteo.data.read", async () => {

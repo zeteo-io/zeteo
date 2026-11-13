@@ -28,6 +28,7 @@ export const visibleCatalogView = (
     list.push(r);
     relationsByTable.set(r.fromTableId, list);
   }
+  const exports = source.exportEnabled && source.exportRowCap > 0;
   const tables = [...catalog.tables].sort(
     (a, b) => compare(a.schemaName, b.schemaName) || compare(a.name, b.name)
   );
@@ -43,6 +44,10 @@ export const visibleCatalogView = (
       default_rows: runLimits("api", undefined, source).maxRows,
       max_rows: runLimits("api", LIMIT_PROFILES.api.maxRows, source).maxRows,
       timeout_ms: source.timeoutMs,
+      export: {
+        enabled: exports,
+        max_rows: exports ? source.exportRowCap : 0,
+      },
     },
     tables: tables.map((table) => ({
       name: queryNames.get(table.id),

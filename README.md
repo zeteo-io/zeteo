@@ -60,5 +60,7 @@ and changes write audit entries to tereo's outbox.
 - **Querying.** `GET /v1/catalog` lists what the caller may query, with the query language's JSON
   Schema; `POST /v1/query` runs a validated query, read-only and within limits, with the same
   language and results on both engines; `GET /v1/runs` reads the record of every query.
+- **Export.** `POST /v1/export?format=ndjson|csv` streams the result of the same query, up to the
+  source's export cap, from sources whose exports are on; gzipped when the client accepts it.
 
-Not there yet: the MCP connection, export and row filters on grants.
+Not there yet: the MCP connection and row filters on grants.
