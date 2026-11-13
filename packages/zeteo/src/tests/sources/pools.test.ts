@@ -6,6 +6,7 @@ import { SourceUnreachableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { fetchJson } from "../support/http.js";
+import { db } from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Router } from "express";
 import {
@@ -177,6 +178,32 @@ describe("withSourceConnection", () => {
     expect(closes[0]).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps a newer pool when a call holds a row read before the settings changed", async () => {
+    const source = await newSource();
+    const { closes, connect } = watchConnections();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    const updated = await prisma.source.update({
+      where: { id: source.id },
+      data: {
+        sealedSettings: sealSettings(sourceSettings("rw"), source.id) as object,
+      },
+    });
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(updated.updatedAt.getTime()).toBeGreaterThan(
+      source.updatedAt.getTime()
+    );
+    // A call whose read landed before the change, answered after it.
+    vi.spyOn(db.sources, "findById").mockResolvedValueOnce(source);
+    const findings = await withSourceConnection(source.id, (c) =>
+      c.checkLogin()
+    );
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(findings.map((f) => f.code)).toContain("can_write_tables");
+    expect(closes[1]).not.toHaveBeenCalled();
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+  });
+
   it("refuses with source_archived, and closes the pool, when the row was archived elsewhere", async () => {
     const source = await newSource();
     const { closes } = watchConnections();
@@ -263,6 +290,67 @@ describe("withSourceConnection", () => {
       fresh.withSourceConnection(source.id, (c) => c.checkLogin())
     ).rejects.toMatchObject({ code: "temporarily_unavailable" });
     expect(fresh.isSourcePoolOpen(source.id)).toBe(false);
+  });
+
+  it("refuses a call whose row read was still running when shutdown began", async () => {
+    vi.resetModules();
+    const fresh = await import("../../sources/pools.js");
+    const { db: freshDb } = await import("../../utils/db/index.js");
+    const source = await newSource();
+    let readStarted!: () => void;
+    let finishRead!: () => void;
+    const reading = new Promise<void>((resolve) => (readStarted = resolve));
+    const gate = new Promise<void>((resolve) => (finishRead = resolve));
+    const read = freshDb.sources.findById;
+    vi.spyOn(freshDb.sources, "findById").mockImplementationOnce(async (id) => {
+      readStarted();
+      await gate;
+      return read(id);
+    });
+    const call = fresh.withSourceConnection(source.id, (c) => c.checkLogin());
+    await reading;
+    await fresh.stopSourcePools();
+    finishRead();
+    await expect(call).rejects.toMatchObject({
+      code: "temporarily_unavailable",
+    });
+    expect(fresh.isSourcePoolOpen(source.id)).toBe(false);
+  });
+
+  it("stops waiting for running calls after the drain time and closes their pools", async () => {
+    vi.resetModules();
+    const fresh = await import("../../sources/pools.js");
+    const { postgresAdapter: freshAdapter } =
+      await import("../../adapters/postgres/index.js");
+    const source = await newSource();
+    const connect = freshAdapter.connect.bind(freshAdapter);
+    const close = vi.fn();
+    vi.spyOn(freshAdapter, "connect").mockImplementation(async (...args) => {
+      const conn = await connect(...args);
+      const end = conn.close.bind(conn);
+      conn.close = async () => {
+        close();
+        await end();
+      };
+      return conn;
+    });
+    let started!: () => void;
+    let finish!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+    const hold = new Promise<void>((resolve) => (finish = resolve));
+    const call = fresh.withSourceConnection(source.id, async () => {
+      started();
+      await hold;
+    });
+    await running;
+    const begun = Date.now();
+    await fresh.stopSourcePools(50);
+    expect(Date.now() - begun).toBeLessThan(1000);
+    expect(close).toHaveBeenCalledTimes(1);
+    finish();
+    await call;
+    // The call's own release does not close the pool a second time.
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   it("closes a pool idle for five minutes", async () => {

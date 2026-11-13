@@ -13,6 +13,9 @@ import env from "./env.js";
 // the shutdown (Redis, the database) takes a moment more, so the default 25s
 // fits the 30s that follow SIGTERM in a Kubernetes pod.
 const DRAIN_TIMEOUT_MS = env.SHUTDOWN_TIMEOUT_SECONDS * 1000;
+// Source calls still running once HTTP has drained belong to requests already
+// cut off, so they get only a moment more within what is left of the grace.
+const SOURCE_POOL_DRAIN_MS = 2_000;
 
 export interface ServerInstance {
   start: () => Promise<void>;
@@ -92,7 +95,7 @@ export function createAppServer(
           await stopRefreshJob?.();
           stopRefreshJob = null;
         });
-        await step("source pools", stopSourcePools);
+        await step("source pools", () => stopSourcePools(SOURCE_POOL_DRAIN_MS));
         await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);

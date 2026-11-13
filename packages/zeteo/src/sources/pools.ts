@@ -13,17 +13,24 @@ import {
 } from "../utils/errors.js";
 
 export const POOL_IDLE_MS = 5 * 60_000;
+/** How long closing every pool waits for the calls still running on them. */
+export const POOL_DRAIN_MS = 10_000;
 
 interface Entry {
+  sourceId: string;
   connection: Promise<SourceConnection>;
   /** Which sealed settings the pool was opened with. */
   fingerprint: string;
+  /** The newest `updated_at` of the source's row seen by a call on this pool. */
+  updatedAt: Date;
   /** Calls running on this pool. */
   active: number;
   /** Taken out of the map: closes once the last running call ends. */
   retired: boolean;
   /** Opening failed: nothing to close. */
   failed: boolean;
+  /** Set once the pool is being closed, so it is closed once. */
+  closing?: Promise<void>;
   idleTimer?: NodeJS.Timeout;
   /** Settles once a retired entry with running calls has closed. */
   drained?: Promise<void>;
@@ -53,13 +60,16 @@ const openConnection = (row: Source): Promise<SourceConnection> => {
   );
 };
 
-const closeEntry = async (sourceId: string, entry: Entry): Promise<void> => {
-  if (entry.failed) return;
-  try {
-    await (await entry.connection).close();
-  } catch (err) {
-    logger.warn({ err, source_id: sourceId }, "closing a source pool failed");
-  }
+const closeEntry = (sourceId: string, entry: Entry): Promise<void> => {
+  if (entry.failed) return Promise.resolve();
+  entry.closing ??= (async () => {
+    try {
+      await (await entry.connection).close();
+    } catch (err) {
+      logger.warn({ err, source_id: sourceId }, "closing a source pool failed");
+    }
+  })();
+  return entry.closing;
 };
 
 const retire = (sourceId: string, entry: Entry): Promise<void> => {
@@ -87,14 +97,25 @@ const armIdleTimer = (sourceId: string, entry: Entry): void => {
 const acquire = (row: Source): Entry => {
   const fingerprint = fingerprintOf(row.sealedSettings);
   let entry = entries.get(row.id);
-  if (entry && entry.fingerprint !== fingerprint) {
+  // Only a row newer than the pool's replaces it: a call whose read landed
+  // before a settings change uses the pool opened with the new settings.
+  if (
+    entry &&
+    entry.fingerprint !== fingerprint &&
+    row.updatedAt > entry.updatedAt
+  ) {
     void retire(row.id, entry);
     entry = undefined;
   }
+  if (entry && row.updatedAt > entry.updatedAt) {
+    entry.updatedAt = row.updatedAt;
+  }
   if (!entry) {
     const created: Entry = {
+      sourceId: row.id,
       connection: openConnection(row),
       fingerprint,
+      updatedAt: row.updatedAt,
       active: 0,
       retired: false,
       failed: false,
@@ -141,6 +162,10 @@ export const withSourceConnection = async <T>(
     throw new ServiceUnavailableError("The service is shutting down");
   }
   const row = await db.sources.findById(sourceId);
+  // Shutdown may have closed every pool while the row was read.
+  if (stopping) {
+    throw new ServiceUnavailableError("The service is shutting down");
+  }
   if (!row || row.archivedAt) {
     const stale = entries.get(sourceId);
     if (stale) await retire(sourceId, stale);
@@ -164,16 +189,41 @@ export const closeSourcePool = async (sourceId: string): Promise<void> => {
   if (entry) await retire(sourceId, entry);
 };
 
-/** Closes every pool, and waits for calls still running on any of them to finish and their pools to close. */
-export const closeAllSourcePools = async (): Promise<void> => {
+/**
+ * Closes every pool, and waits up to `drainMs` for calls still running on any
+ * of them to finish and their pools to close. Past that it closes the pools
+ * that are left without waiting for them: their calls fail.
+ */
+export const closeAllSourcePools = async (
+  drainMs = POOL_DRAIN_MS
+): Promise<void> => {
   await Promise.all([...entries].map(([id, entry]) => retire(id, entry)));
-  await Promise.all([...draining].map((entry) => entry.drained));
+  let timer: NodeJS.Timeout | undefined;
+  const drained = await Promise.race([
+    Promise.all([...draining].map((entry) => entry.drained)).then(() => true),
+    new Promise<false>((resolve) => {
+      timer = setTimeout(() => resolve(false), drainMs);
+    }),
+  ]);
+  clearTimeout(timer);
+  if (drained) return;
+  logger.warn(
+    { pools: draining.size },
+    "source calls still running after the drain time; closing their pools"
+  );
+  // A pool waits for its checked-out clients before it ends, so this only
+  // starts the closing.
+  for (const entry of draining) {
+    void closeEntry(entry.sourceId, entry);
+  }
 };
 
-/** For shutdown: refuses every later call, then closes every pool. */
-export const stopSourcePools = async (): Promise<void> => {
+/** For shutdown: refuses every later call, then closes every pool, waiting up to `drainMs` for running calls. */
+export const stopSourcePools = async (
+  drainMs = POOL_DRAIN_MS
+): Promise<void> => {
   stopping = true;
-  await closeAllSourcePools();
+  await closeAllSourcePools(drainMs);
 };
 
 export const isSourcePoolOpen = (sourceId: string): boolean =>
