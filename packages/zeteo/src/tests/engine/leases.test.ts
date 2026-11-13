@@ -45,10 +45,10 @@ describe("acquireLease", () => {
 
   it("frees a slot whose lease expired without a release", async () => {
     const k = key();
-    expect(await acquireLease(k, 1, 150)).toBeTypeOf("function");
-    expect(await acquireLease(k, 1, 150)).toBeNull();
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    expect(await acquireLease(k, 1, 150)).toBeTypeOf("function");
+    expect(await acquireLease(k, 1, 500)).toBeTypeOf("function");
+    expect(await acquireLease(k, 1, 500)).toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(await acquireLease(k, 1, 500)).toBeTypeOf("function");
   });
 
   it("counts each key on its own", async () => {

@@ -38,6 +38,18 @@ interface Entry {
 }
 
 const entries = new Map<string, Entry>();
+/** Per source, the newest `updated_at` this process has seen, pools or not. */
+const newestSeen = new Map<string, Date>();
+
+const noteSeen = (sourceId: string, updatedAt: Date): void => {
+  const seen = newestSeen.get(sourceId);
+  if (!seen || updatedAt > seen) newestSeen.set(sourceId, updatedAt);
+};
+
+const isOlderThanSeen = (row: Source): boolean => {
+  const seen = newestSeen.get(row.id);
+  return seen !== undefined && row.updatedAt < seen;
+};
 /** Retired entries whose calls are still running. */
 const draining = new Set<Entry>();
 let stopping = false;
@@ -161,7 +173,13 @@ export const withSourceConnection = async <T>(
   if (stopping) {
     throw new ServiceUnavailableError("The service is shutting down");
   }
-  const row = await db.sources.findById(sourceId);
+  let row = await db.sources.findById(sourceId);
+  // A row read before a change this process has already seen (a settings
+  // change that just closed the pool, say) must not open a pool: read again.
+  if (row && isOlderThanSeen(row)) {
+    row = await db.sources.findById(sourceId);
+  }
+  if (row) noteSeen(sourceId, row.updatedAt);
   // Shutdown may have closed every pool while the row was read.
   if (stopping) {
     throw new ServiceUnavailableError("The service is shutting down");
@@ -183,16 +201,25 @@ export const withSourceConnection = async <T>(
   }
 };
 
-/** Closes the source's pool; calls still running on it finish first. */
-export const closeSourcePool = async (sourceId: string): Promise<void> => {
+/**
+ * Closes the source's pool; calls still running on it finish first.
+ * `updatedAt` is the row's after the change that closes it: a call holding
+ * an older row then reads the row again before opening another pool.
+ */
+export const closeSourcePool = async (
+  sourceId: string,
+  updatedAt?: Date
+): Promise<void> => {
+  if (updatedAt) noteSeen(sourceId, updatedAt);
   const entry = entries.get(sourceId);
   if (entry) await retire(sourceId, entry);
 };
 
 /**
  * Closes every pool, and waits up to `drainMs` for calls still running on any
- * of them to finish and their pools to close. Past that it closes the pools
- * that are left without waiting for them: their calls fail.
+ * of them to finish and their pools to close. Past that it returns: the pools
+ * left are told to end, which each does once its running calls release their
+ * connections, unless the process exits first.
  */
 export const closeAllSourcePools = async (
   drainMs = POOL_DRAIN_MS
@@ -211,8 +238,8 @@ export const closeAllSourcePools = async (
     { pools: draining.size },
     "source calls still running after the drain time; closing their pools"
   );
-  // A pool waits for its checked-out clients before it ends, so this only
-  // starts the closing.
+  // A pool ends only once its checked-out clients are released, so this only
+  // asks; it does not stop the calls.
   for (const entry of draining) {
     void closeEntry(entry.sourceId, entry);
   }

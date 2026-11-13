@@ -6,6 +6,7 @@
 --   sales.blobs          0   (types no query can use)
 --   sales.typed_values   5   (Postgres-only types, for the wire forms)
 --   hr.salaries          0   (not granted)
+-- probe.sql adds a large table in schema `probe`, in the shared fixture only.
 -- Views:
 --   sales.paid_orders    the paid orders
 --   sales.slow_orders    sleeps 3 s each time it is selected from

@@ -7,10 +7,11 @@ import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
+import { BATCH_ROWS } from "../../../adapters/postgres/runQuery.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
+import * as cancel from "../../../adapters/postgres/cancel.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -18,6 +19,7 @@ import { prisma } from "../../../utils/db/prisma.js";
 import { db } from "../../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Client, Pool } from "pg";
+import Cursor from "pg-cursor";
 import {
   fixtureAdminSettings,
   fixtureSettings,
@@ -33,6 +35,15 @@ import {
   sourceSettings,
   uniqueSlug,
 } from "../../support/sources.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const OPTIONS = { connectTimeoutMs: 5000, poolSize: 3, queryTimeoutMs: 5000 };
 const LIMITS: RunLimits = {
@@ -116,7 +127,7 @@ beforeAll(async () => {
       name: "Query test",
       type: "postgres",
       sealedSettings: sealSettings(sourceSettings("ro"), id) as object,
-      schemas: ["sales"],
+      schemas: ["sales", "probe"],
       createdBy: randomUUID(),
     },
   });
@@ -129,6 +140,10 @@ beforeAll(async () => {
     tableAccess: () => "all",
   });
   connection = await connectWith();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 afterAll(async () => {
@@ -388,6 +403,34 @@ describe("postgres runQuery", () => {
     });
   });
 
+  it("reads a result far past the byte cap in a batch or two, not whole", async () => {
+    const reads = vi.spyOn(Cursor.prototype, "read");
+    const begun = Date.now();
+    const result = await run(
+      { from: "wide_rows", select: ["id", "filler"], orderBy: [{ id: "asc" }] },
+      { maxRows: 50_000, maxBytes: 100_000 }
+    );
+    expect(result.truncated).toBe("bytes");
+    expect(result.rows.length).toBeGreaterThan(40);
+    expect(result.rows.length).toBeLessThan(50);
+    expect(result.rows[0]).toEqual([1, "x".repeat(2048)]);
+    // Asked of the server: at most two batches of the 50,001 rows allowed.
+    const requested = reads.mock.calls.reduce((sum, [n]) => sum + n, 0);
+    expect(requested).toBeGreaterThan(0);
+    expect(requested).toBeLessThanOrEqual(2 * BATCH_ROWS);
+    expect(Date.now() - begun).toBeLessThan(1000);
+  });
+
+  it("reads in batches across a row cap larger than one batch", async () => {
+    const result = await run(
+      { from: "wide_rows", select: ["id"], orderBy: [{ id: "asc" }] },
+      { maxRows: 600 }
+    );
+    expect(result.rows).toHaveLength(600);
+    expect(result.rows.at(-1)).toEqual([600]);
+    expect(result.truncated).toBe("rows");
+  });
+
   describe("safety", () => {
     it("runs inside a read-only transaction even when the session default allows writes", async () => {
       const pool = new Pool({
@@ -420,6 +463,42 @@ describe("postgres runQuery", () => {
         [1],
         [2],
       ]);
+    });
+
+    it("stops at its own deadline when the server's statement timeout does not fire", async () => {
+      const pool = new Pool(
+        toPgConfig(fixtureSettings("ro"), await fixtureTarget(), {
+          ...OPTIONS,
+          queryTimeoutMs: 60_000,
+        })
+      );
+      // Every statement on this pool runs with no server-side timeout.
+      const connect = pool.connect.bind(pool);
+      pool.connect = (async () => {
+        const client = await connect();
+        const query = client.query.bind(client) as (...a: unknown[]) => unknown;
+        client.query = ((text: unknown, ...rest: unknown[]) =>
+          query(
+            typeof text === "string"
+              ? text.replace(/statement_timeout = \d+/, "statement_timeout = 0")
+              : text,
+            ...rest
+          )) as typeof client.query;
+        return client;
+      }) as typeof pool.connect;
+      const unbounded = new PostgresConnection(pool);
+      opened.push(unbounded);
+      const begun = Date.now();
+      const err = await failureOf(
+        run(
+          { from: "slow_orders", select: ["id"] },
+          { timeoutMs: 500 },
+          unbounded
+        )
+      );
+      expect(err).toBeInstanceOf(QueryTimeoutError);
+      expect(Date.now() - begun).toBeLessThan(1500);
+      expect(await runningOn("slow_orders")).toEqual([]);
     });
 
     it("lets a query run past the pool's own query timeout when its limit is longer", async () => {
@@ -473,6 +552,83 @@ describe("postgres runQuery", () => {
       expect(err.message).toBe("client went away");
       expect(Date.now() - begun).toBeLessThan(2500);
       expect(await runningOn("slow_orders")).toEqual([]);
+      expect((await run({ from: "accounts", select: ["id"] })).rows).toEqual([
+        [1],
+        [2],
+      ]);
+    });
+
+    it("cancels an aborted statement while every pool connection is in use", async () => {
+      const full = await connectWith({ ...OPTIONS, poolSize: 2 });
+      const first = new AbortController();
+      const second = new AbortController();
+      const slow = plan({ from: "slow_orders", select: ["id"] });
+      const limits = { ...LIMITS, timeoutMs: 10_000 };
+      const one = failureOf(full.runQuery(slow, limits, first.signal));
+      const two = failureOf(full.runQuery(slow, limits, second.signal));
+      await waitFor(async () =>
+        (await runningOn("slow_orders")).length === 2 ? [true] : []
+      );
+      const begun = Date.now();
+      first.abort(new Error("first gone"));
+      expect((await one).message).toBe("first gone");
+      expect(Date.now() - begun).toBeLessThan(1000);
+      expect(await runningOn("slow_orders")).toHaveLength(1);
+      second.abort(new Error("second gone"));
+      expect((await two).message).toBe("second gone");
+      expect(await runningOn("slow_orders")).toEqual([]);
+    });
+
+    it("cuts the connection, and rejects at once, when the cancel cannot be delivered", async () => {
+      vi.spyOn(cancel, "sendCancelRequest").mockResolvedValue(false);
+      const controller = new AbortController();
+      const running = failureOf(
+        connection.runQuery(
+          plan({ from: "slow_orders", select: ["id"] }),
+          { ...LIMITS, timeoutMs: 10_000 },
+          controller.signal
+        )
+      );
+      await waitFor(() => runningOn("slow_orders"));
+      const begun = Date.now();
+      controller.abort(new Error("gone"));
+      expect((await running).message).toBe("gone");
+      expect(Date.now() - begun).toBeLessThan(1000);
+      // Undelivered, the cancel left the statement running on the server
+      // until it next writes to the cut connection; later tests look for
+      // their own statements there.
+      for (const { pid } of await runningOn("slow_orders")) {
+        await asAdmin("SELECT pg_terminate_backend($1)", [pid]);
+      }
+      vi.restoreAllMocks();
+      expect((await run({ from: "accounts", select: ["id"] })).rows).toEqual([
+        [1],
+        [2],
+      ]);
+    });
+
+    it("answers query_failed, not source_unreachable, for a local failure with no SQLSTATE", async () => {
+      const planned = plan({ from: "accounts", select: ["id"] });
+      const unserialisable = {
+        toPostgres: () => {
+          throw new Error("cannot serialise");
+        },
+      };
+      const err = await failureOf(
+        connection.runQuery(
+          {
+            ...planned,
+            where: {
+              kind: "compare",
+              op: "eq",
+              subject: planned.select[0].column as never,
+              value: unserialisable as never,
+            },
+          } as SqlPlan,
+          LIMITS
+        )
+      );
+      expect(err).toBeInstanceOf(QueryFailedError);
       expect((await run({ from: "accounts", select: ["id"] })).rows).toEqual([
         [1],
         [2],

@@ -204,6 +204,31 @@ describe("withSourceConnection", () => {
     expect(isSourcePoolOpen(source.id)).toBe(true);
   });
 
+  it("reads the row again instead of opening a pool with a row older than one already seen", async () => {
+    const source = await newSource();
+    const { connect } = watchConnections();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    // A settings change on this replica: the row, then the pool closed.
+    const updated = await prisma.source.update({
+      where: { id: source.id },
+      data: {
+        sealedSettings: sealSettings(sourceSettings("rw"), source.id) as object,
+      },
+    });
+    await closeSourcePool(source.id, updated.updatedAt);
+    // A call whose read landed before the change finds no pool.
+    const reads = vi
+      .spyOn(db.sources, "findById")
+      .mockResolvedValueOnce(source);
+    const findings = await withSourceConnection(source.id, (c) =>
+      c.checkLogin()
+    );
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(connect.mock.calls[1]![0]).toMatchObject({ user: "zeteo_rw" });
+    expect(findings.map((f) => f.code)).toContain("can_write_tables");
+  });
+
   it("refuses with source_archived, and closes the pool, when the row was archived elsewhere", async () => {
     const source = await newSource();
     const { closes } = watchConnections();

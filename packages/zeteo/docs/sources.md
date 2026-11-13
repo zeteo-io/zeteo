@@ -154,12 +154,14 @@ Every use reads the source's row (one indexed read), so a change made through an
 reaches this one at its next use: a pool opened with other sealed settings than the row now holds
 is closed and a new one opened, and an archived source is refused with `409 source_archived`. Only a
 row newer than the pool (by `updated_at`) replaces it: a use whose read landed just before a
-settings change runs on the pool already opened with the new settings. A
+settings change runs on the pool already opened with the new settings, and one that finds no pool
+(the change just closed it on this replica) reads the row again before opening one. A
 use that fails with `source_unreachable` closes the pool, so the next use resolves the host and
 connects again (after a database failover to a new address, for example). Once shutdown begins,
 no new use is accepted (`503 temporarily_unavailable`), a use whose row read was under way is
 refused after it, and shutdown waits up to 2 s for the calls still running (HTTP has already drained
-by then) before it closes their pools regardless.
+by then). Past that it asks their pools to end and moves on; a call still running is not stopped,
+and ends with the process.
 
 ## Audit
 

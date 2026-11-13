@@ -1,9 +1,12 @@
+import { DatabaseError, type FieldDef, type Pool, type PoolClient } from "pg";
+import { sendCancelRequest, type CancelTarget } from "./cancel.js";
 import { normaliseValue, type WireKind } from "../sql/values.js";
 import { postgresDialect } from "../sql/dialects/postgres.js";
 import type { QueryResult, RunLimits } from "../types.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
+import Cursor from "pg-cursor";
 import {
   AppError,
   QueryFailedError,
@@ -11,14 +14,6 @@ import {
   ServiceUnavailableError,
   SourceUnreachableError,
 } from "../../utils/errors.js";
-import {
-  DatabaseError,
-  type FieldDef,
-  type Pool,
-  type PoolClient,
-  type QueryArrayConfig,
-  type QueryArrayResult,
-} from "pg";
 
 // Wire forms by the result field's type OID. A domain arrives as its base
 // type; every type not listed (enums, uuid, citext, money…) travels as text.
@@ -45,46 +40,78 @@ const wireOf = (field: FieldDef): WireKind =>
 // numeric lossily.
 const RAW_TEXT = { getTypeParser: () => (text: string) => text };
 
-/** How long past the server's own timeout the client waits before giving up on the connection. */
+/** Rows fetched per round trip: what the run holds beyond the rows it keeps. */
+export const BATCH_ROWS = 250;
+/** How long past the run's deadline the client waits on the connection before giving up on it. */
 const CLIENT_GRACE_MS = 2000;
+/** How long a cancelled statement gets to end before its connection is cut. */
+const STOP_GRACE_MS = 1000;
 
 const QUERY_CANCELED = "57014";
 // Class 08 is a connection exception; 57P01 to 57P03, the server shutting
 // down, crashing or not yet accepting connections.
 const CONNECTION_CODES = ["57P01", "57P02", "57P03"];
+// The socket's own failures, and pg's errors for a connection that ended.
+const SOCKET_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "ECONNABORTED",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENETDOWN",
+]);
+const CONNECTION_MESSAGES = new Set([
+  "Connection terminated",
+  "Connection terminated unexpectedly",
+  "Client has encountered a connection error and is not queryable",
+  "Client was closed and is not queryable",
+]);
 const POOL_EXHAUSTED = "timeout exceeded when trying to connect";
 const CLIENT_READ_TIMEOUT = "Query read timeout";
 const BUSY_RETRY_AFTER_SECONDS = 1;
 
 // Pins the forms the server prints values in, whatever the login's defaults:
-// timestamptz in UTC, ISO dates, floats with every digit.
+// timestamptz in UTC, ISO dates, floats with every digit (3 is full precision
+// before Postgres 12 and the same as 1 since).
 const sessionSetup = (timeoutMs: number) =>
   [
     "BEGIN TRANSACTION READ ONLY",
     `SET LOCAL statement_timeout = ${timeoutMs}`,
     "SET LOCAL TIME ZONE 'UTC'",
     "SET LOCAL DateStyle = 'ISO, YMD'",
-    "SET LOCAL extra_float_digits = 1",
+    "SET LOCAL extra_float_digits = 3",
   ].join("; ");
 
 const isClientReadTimeout = (err: unknown): boolean =>
   err instanceof Error && err.message === CLIENT_READ_TIMEOUT;
 
-/**
- * A driver error as the caller's; the driver's text goes only to the log.
- * Errors without a SQLSTATE come from the connection itself.
- */
+const isConnectionFailure = (err: unknown): boolean => {
+  if (err instanceof DatabaseError) {
+    return (
+      err.code?.startsWith("08") === true ||
+      CONNECTION_CODES.includes(err.code ?? "")
+    );
+  }
+  return (
+    err instanceof Error &&
+    (SOCKET_ERROR_CODES.has((err as NodeJS.ErrnoException).code ?? "") ||
+      CONNECTION_MESSAGES.has(err.message))
+  );
+};
+
+/** A driver error as the caller's; the driver's text goes only to the log. */
 const callerError = (err: unknown): AppError => {
+  if (err instanceof AppError) return err;
   if (isClientReadTimeout(err)) {
-    logger.warn({ err }, "source query outlived its server-side timeout");
+    logger.warn({ err }, "source query outlived its deadline on the client");
     return new QueryTimeoutError();
   }
-  if (!(err instanceof DatabaseError)) {
-    logger.warn({ err }, "source connection failed during a query");
-    return new SourceUnreachableError();
+  if (err instanceof DatabaseError && err.code === QUERY_CANCELED) {
+    return new QueryTimeoutError();
   }
-  if (err.code === QUERY_CANCELED) return new QueryTimeoutError();
-  if (err.code?.startsWith("08") || CONNECTION_CODES.includes(err.code ?? "")) {
+  if (isConnectionFailure(err)) {
     logger.warn({ err }, "source connection failed during a query");
     return new SourceUnreachableError();
   }
@@ -108,40 +135,52 @@ const checkFields = (fields: FieldDef[], plan: SqlPlan): void => {
   }
 };
 
+const readBatch = (
+  cursor: Cursor<unknown[]>,
+  count: number
+): Promise<{ rows: unknown[][]; fields: FieldDef[] }> =>
+  new Promise((resolve, reject) => {
+    cursor.read(count, (err, rows, result) => {
+      if (err) reject(err);
+      else resolve({ rows, fields: result.fields });
+    });
+  });
+
 /**
- * Normalises rows in order until `maxRows` are kept or the next would pass
- * `maxBytes`. A row's size is its JSON plus one byte for the comma after it.
+ * Reads the cursor in batches, normalising as it goes, until `maxRows` rows
+ * are kept and one more exists, the next row would pass `maxBytes`, or the
+ * rows end. A row's size is its JSON plus one byte for the comma after it.
  */
-const collect = (
-  result: QueryArrayResult,
+const readRows = async (
+  cursor: Cursor<unknown[]>,
   plan: SqlPlan,
-  limits: RunLimits
-): QueryResult => {
-  checkFields(result.fields, plan);
-  const wires = result.fields.map(wireOf);
+  limits: RunLimits,
+  checkStop: () => void
+): Promise<Pick<QueryResult, "rows" | "truncated">> => {
   const rows: unknown[][] = [];
+  let wires: WireKind[] | undefined;
+  let fetched = 0;
   let bytes = 0;
-  let truncated: QueryResult["truncated"] = false;
-  for (const raw of result.rows) {
-    if (rows.length === limits.maxRows) {
-      truncated = "rows";
-      break;
+  for (;;) {
+    const want = Math.min(BATCH_ROWS, limits.maxRows + 1 - fetched);
+    const batch = await readBatch(cursor, want);
+    checkStop();
+    if (!wires) {
+      checkFields(batch.fields, plan);
+      wires = batch.fields.map(wireOf);
     }
-    const row = raw.map((value, i) =>
-      normaliseValue(value as string | null, wires[i])
-    );
-    bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
-    if (bytes > limits.maxBytes) {
-      truncated = "bytes";
-      break;
+    fetched += batch.rows.length;
+    for (const raw of batch.rows) {
+      if (rows.length === limits.maxRows) return { rows, truncated: "rows" };
+      const row = raw.map((value, i) =>
+        normaliseValue(value as string | null, wires![i])
+      );
+      bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
+      if (bytes > limits.maxBytes) return { rows, truncated: "bytes" };
+      rows.push(row);
     }
-    rows.push(row);
+    if (batch.rows.length < want) return { rows, truncated: false };
   }
-  return {
-    columns: plan.columns.map(({ name, type }) => ({ name, type })),
-    rows,
-    truncated,
-  };
 };
 
 const checkout = async (pool: Pool): Promise<PoolClient> => {
@@ -160,15 +199,6 @@ const checkout = async (pool: Pool): Promise<PoolClient> => {
   }
 };
 
-/** Stops the backend's running statement, from another of the pool's connections. */
-const cancelOnServer = async (pool: Pool, pid: number): Promise<void> => {
-  try {
-    await pool.query("SELECT pg_cancel_backend($1)", [pid]);
-  } catch (err) {
-    logger.warn({ err }, "cancelling a source query failed");
-  }
-};
-
 /** Rolls back and returns the client to the pool, or destroys it when it cannot be trusted. */
 const finish = async (client: PoolClient, broken: unknown): Promise<void> => {
   if (broken === undefined) {
@@ -183,11 +213,31 @@ const finish = async (client: PoolClient, broken: unknown): Promise<void> => {
   client.release(broken instanceof Error ? broken : true);
 };
 
+// pg keeps these on every connected client; its types omit them.
+interface ClientInternals {
+  processID: number;
+  secretKey: number;
+  connection: { stream: { destroy(): void } };
+}
+
+/** Where the pool connects: the address that passed the network rules when it was opened. */
+const cancelTargetOf = (pool: Pool): CancelTarget => ({
+  host: String(pool.options.host),
+  port: Number(pool.options.port ?? 5432),
+});
+
 /**
  * Runs a compiled plan on its own client inside a read-only transaction that
- * is always rolled back. The server stops the statement at `timeoutMs`; the
- * client gives up `CLIENT_GRACE_MS` later. Asks for one row past `maxRows` to
+ * is always rolled back, reading the result through a cursor so no more than
+ * one batch is held beyond the rows kept. Asks for one row past `maxRows` to
  * tell whether more exist.
+ *
+ * The run ends by `timeoutMs` three ways: the server's statement timeout, a
+ * deadline of its own that cancels the statement on the server, and the
+ * client's read timeout `CLIENT_GRACE_MS` later. An aborted `signal` cancels
+ * the same way. A cancel goes on a connection of its own, never one of the
+ * pool's; when it cannot be delivered, or the statement outlives it by
+ * `STOP_GRACE_MS`, the client's connection is cut and the client destroyed.
  */
 export const runPostgresQuery = async (
   pool: Pool,
@@ -206,43 +256,88 @@ export const runPostgresQuery = async (
   });
 
   const client = await checkout(pool);
+  const internals = client as unknown as ClientInternals;
   let broken: unknown;
   // A checked-out client that loses its connection emits `error`; unheard,
   // it would crash the process.
   const onClientError = (err: Error) => {
-    broken = err;
+    broken ??= err;
   };
   client.on("error", onClientError);
-  let running = false;
-  let cancelling: Promise<void> | undefined;
-  const onAbort = () => {
-    // pg sets the backend's pid on every connected client; its types omit it.
-    const { processID } = client as PoolClient & { processID: number };
-    if (running) cancelling = cancelOnServer(pool, processID);
-  };
-  signal?.addEventListener("abort", onAbort, { once: true });
 
-  let result: QueryArrayResult;
+  let reading = false;
+  let timedOut = false;
+  let stopping: Promise<void> | undefined;
+  let cutTimer: NodeJS.Timeout | undefined;
+  const cut = () => {
+    if (!reading) return;
+    broken ??= new Error("connection cut after a cancel");
+    internals.connection.stream.destroy();
+  };
+  const stop = () => {
+    if (!reading || stopping) return;
+    stopping = sendCancelRequest(
+      cancelTargetOf(pool),
+      internals.processID,
+      internals.secretKey
+    ).then((delivered) => {
+      if (!delivered) cut();
+      else cutTimer = setTimeout(cut, STOP_GRACE_MS);
+    });
+  };
+  const onAbort = () => stop();
+  signal?.addEventListener("abort", onAbort, { once: true });
+  let deadline: NodeJS.Timeout | undefined;
+  // A cancel that reaches the backend between two fetches is ignored, so the
+  // read also stops itself after each batch.
+  const checkStop = () => {
+    signal?.throwIfAborted();
+    if (timedOut) throw new QueryTimeoutError();
+  };
+  /** The cursor's portal is open and idle: the connection is mid-statement. */
+  let cursorOpen = false;
+
   try {
     await client.query(sessionSetup(limits.timeoutMs));
     signal?.throwIfAborted();
-    running = true;
-    // A per-query `query_timeout` replaces the pool's own (pg reads the
-    // query's first), so the catalogue's shorter limit never applies here.
-    const query: QueryArrayConfig & { query_timeout: number } = {
-      text: sql,
-      values: parameters,
+    reading = true;
+    deadline = setTimeout(() => {
+      timedOut = true;
+      stop();
+    }, limits.timeoutMs);
+    const cursor = new Cursor<unknown[]>(sql, parameters, {
       rowMode: "array",
       types: RAW_TEXT,
+    });
+    // pg arms its read timeout from the submitted object's `query_timeout`,
+    // read when it is submitted, before the pool's own; without it the
+    // catalogue's shorter limit would apply.
+    Object.assign(cursor, {
       query_timeout: limits.timeoutMs + CLIENT_GRACE_MS,
+    });
+    client.query(cursor);
+    cursorOpen = true;
+    // A failed read leaves no portal open: the driver ends the statement.
+    cursor.once("error", () => {
+      cursorOpen = false;
+    });
+    const read = await readRows(cursor, plan, limits, checkStop);
+    await cursor.close();
+    cursorOpen = false;
+    return {
+      columns: plan.columns.map(({ name, type }) => ({ name, type })),
+      ...read,
     };
-    try {
-      result = await client.query(query);
-    } finally {
-      running = false;
-    }
   } catch (err) {
+    // Left mid-read, the statement is still open on the connection: it is
+    // dropped rather than closed and waited for.
+    if (cursorOpen) broken ??= err;
     if (signal?.aborted) throw signal.reason;
+    if (timedOut && !(err instanceof AppError)) {
+      logger.info({ err }, "source query stopped at its deadline");
+      broken ??= isConnectionFailure(err) ? err : undefined;
+      throw new QueryTimeoutError();
+    }
     const failure = callerError(err);
     // A client that timed out on its side is still busy with the statement;
     // one whose connection failed is gone.
@@ -251,12 +346,14 @@ export const runPostgresQuery = async (
     }
     throw failure;
   } finally {
+    reading = false;
+    clearTimeout(deadline);
     signal?.removeEventListener("abort", onAbort);
     // The cancel must land while this client is still ours: once released,
     // its backend may be running someone else's statement.
-    await cancelling;
+    await stopping;
+    clearTimeout(cutTimer);
     await finish(client, broken);
     client.off("error", onClientError);
   }
-  return collect(result, plan, limits);
 };

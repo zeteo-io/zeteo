@@ -7,6 +7,10 @@ const FIXTURE_SQL = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../fixtures/postgres/sales.sql"
 );
+const PROBE_SQL = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../fixtures/postgres/probe.sql"
+);
 
 let server: ServerInstance | null = null;
 
@@ -83,6 +87,7 @@ async function recreateFixtureDatabase(databaseUrl: string) {
   await loader.connect();
   try {
     await loader.query(await readFile(FIXTURE_SQL, "utf8"));
+    await loader.query(await readFile(PROBE_SQL, "utf8"));
     // Session defaults a user query must override to produce its wire forms:
     // a zone off UTC by a fraction of an hour, day-first dates and floats
     // printed short.

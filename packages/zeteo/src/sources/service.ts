@@ -227,7 +227,7 @@ export const updateSource = async (
     return current;
   });
 
-  if (settingsChange) await closeSourcePool(id);
+  if (settingsChange) await closeSourcePool(id, updated.updatedAt);
   return updated;
 };
 
