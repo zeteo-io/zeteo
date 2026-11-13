@@ -635,3 +635,84 @@ describe("compileSql on SQL Server: the parameter limit", () => {
     );
   });
 });
+
+describe("compileSql on SQL Server: without the default order", () => {
+  const unordered = (query: object, fetch = { limit: 1001, offset: 0 }) =>
+    compileSql(plan(query), mssqlDialect, { ...fetch, defaultOrder: false });
+
+  it("pages a query with no orderBy in an order of no columns, keeping every parameter", () => {
+    expect(
+      unordered(
+        {
+          select: ["id", "status"],
+          where: { status: { eq: "paid" } },
+        },
+        { limit: 11, offset: 20 }
+      )
+    ).toEqual({
+      sql:
+        "select [t0].[id] as [c0], [t0].[status] as [c1] from [shop].[orders] as [t0]" +
+        " where [t0].[status] = @1" +
+        " order by (select null) offset @2 rows fetch next @3 rows only",
+      parameters: [nvarchar("paid"), bigint("20"), bigint("11")],
+    });
+  });
+
+  it("adds no sort key to a distinct or grouped query with no orderBy", () => {
+    expect(unordered({ select: ["status", "id"], distinct: true }).sql).toBe(
+      "select [t0].[status] as [c0], [t0].[id] as [c1] from [shop].[orders] as [t0]" +
+        " group by [t0].[status], [t0].[id]" +
+        ` order by (select null)${tail()}`
+    );
+    expect(
+      unordered({
+        select: ["status", { count: "*", as: "n" }],
+        groupBy: ["status"],
+      }).sql
+    ).toBe(
+      "select [t0].[status] as [c0], count_big(*) as [c1] from [shop].[orders] as [t0]" +
+        " group by [t0].[status]" +
+        ` order by (select null)${tail()}`
+    );
+  });
+
+  it("compiles a query with its own orderBy exactly as with the default order", () => {
+    const queries = [
+      { select: ["id", "total"], orderBy: [{ total: "desc" }, { id: "asc" }] },
+      { orderBy: [{ notes: "desc" }] },
+      { select: ["id", "status"], orderBy: [{ status: "asc" }] },
+      {
+        select: ["status", { sum: "total", as: "revenue" }],
+        groupBy: ["status"],
+        orderBy: [{ revenue: "desc" }],
+      },
+    ];
+    for (const query of queries) {
+      expect(unordered(query, { limit: 11, offset: 20 })).toEqual(
+        compile(query, { limit: 11, offset: 20 })
+      );
+    }
+  });
+
+  it("leaves out an orderBy identical to the default order, which the plan cannot tell from it", () => {
+    expect(unordered({ orderBy: [{ id: "asc" }] }).sql).toBe(
+      "select [t0].[id] as [c0] from [shop].[orders] as [t0]" +
+        ` order by (select null)${tail()}`
+    );
+  });
+
+  it("orders by every select item when defaultOrder is true or unset", () => {
+    const query = { select: ["id", "status"] };
+    const today = compile(query);
+    expect(today.sql).toContain(
+      ` order by ${by("[t0].[id]")}, ${by("[t0].[status]")}`
+    );
+    expect(
+      compileSql(plan(query), mssqlDialect, {
+        limit: 1001,
+        offset: 0,
+        defaultOrder: true,
+      })
+    ).toEqual(today);
+  });
+});

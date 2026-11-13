@@ -173,9 +173,14 @@ export interface SourceAdapter<S = unknown> {
     target: ResolvedTarget,
     options: ConnectOptions
   ): Promise<SourceConnection>;
-  /** Compiles a plan for this source type; throws `QueryError` (e.g. `too_many_parameters`). No I/O. */
+  /**
+   * Compiles a plan for this source type; throws `QueryError` (e.g.
+   * `too_many_parameters`). No I/O. `rows.defaultOrder` (default true) false
+   * leaves out the order a query with no `orderBy` gets by default, so its
+   * rows come in whatever order the source makes them.
+   */
   prepare(
     plan: QueryPlan,
-    rows: { limit: number; offset: number }
+    rows: { limit: number; offset: number; defaultOrder?: boolean }
   ): PreparedQuery;
 }

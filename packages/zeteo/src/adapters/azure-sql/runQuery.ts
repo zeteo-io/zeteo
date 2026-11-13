@@ -205,7 +205,7 @@ export class AzureSqlPreparedQuery implements PreparedQuery {
 /** Compiles a plan of the SQL language for SQL Server; throws `QueryError` `too_many_parameters`. */
 export const prepareAzureSqlQuery = (
   plan: QueryPlan,
-  rows: { limit: number; offset: number }
+  rows: { limit: number; offset: number; defaultOrder?: boolean }
 ): AzureSqlPreparedQuery => {
   // The plan comes from this adapter's own language, so it is a SQL plan.
   const sqlPlan = plan as SqlPlan;

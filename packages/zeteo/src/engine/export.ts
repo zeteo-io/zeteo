@@ -7,6 +7,7 @@ import type { Caller } from "../middleware/auth.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
 import { BATCH_ROWS } from "./collect.js";
+import { QueryError } from "./errors.js";
 import {
   CLIENT_CLOSED,
   failureOf,
@@ -70,14 +71,41 @@ const SHUTDOWN_CODE = "shutting_down";
 /** Every running export in this process, by how to stop it. */
 const running = new Set<(halt: Halt) => void>();
 
-/** Aborts every running export in this process with a `shutting_down` reason. */
+/** Set once the process stops: no new export starts. */
+let shuttingDown = false;
+/** The errors shutdown stopped or refused exports with. */
+const shutdownErrors = new WeakSet<object>();
+
+const shutdownError = (): ServiceUnavailableError => {
+  const err = new ServiceUnavailableError("The service is shutting down");
+  shutdownErrors.add(err);
+  return err;
+};
+
+/** Whether `err` is what an export stopped or refused by shutdown rejects with. */
+export const isExportShutdown = (err: unknown): boolean =>
+  typeof err === "object" && err !== null && shutdownErrors.has(err);
+
+/**
+ * Aborts every running export in this process with a `shutting_down` reason,
+ * and refuses every later one.
+ */
 export const abortExports = (): void => {
+  shuttingDown = true;
   for (const halt of running) {
-    halt({
-      why: "shutting_down",
-      err: new ServiceUnavailableError("The service is shutting down"),
-    });
+    halt({ why: "shutting_down", err: shutdownError() });
   }
+};
+
+/** Lets exports start again after `abortExports`; for tests. */
+export const resetExportShutdown = (): void => {
+  shuttingDown = false;
+};
+
+/** Whether the query names an order of its own: the SQL language's `orderBy`. */
+const namesOrder = (body: unknown): boolean => {
+  const { orderBy } = body as { orderBy?: unknown };
+  return Array.isArray(orderBy) && orderBy.length > 0;
 };
 
 /** A failure after the start: never `refused`, as the export was accepted. */
@@ -139,11 +167,14 @@ const recordEnd = async (
 };
 
 /**
- * Runs one export: checks its shape, resolves its source and plans it
- * against what the caller may see, as a query; refuses it unless the source
- * allows exports; takes the export leases and opens the run on the source;
- * records it as started, then passes its rows to `sink` in the batches the
- * source gives, up to the source's export cap, and records how it ended.
+ * Runs one export: checks its shape, and refuses it, unrecorded, once
+ * `abortExports` has been called; resolves its source and plans it against
+ * what the caller may see, as a query; refuses it unless the source allows
+ * exports, and refuses an offset without an `orderBy`; takes the export
+ * leases and opens the run on the source, unsorted unless the query names an
+ * order; records it as started, then passes its rows to `sink` in the
+ * batches the source gives, up to the source's export cap, and records how
+ * it ended.
  *
  * Rejects before `sink.start` for anything refused, recorded as a query's
  * refusal is. After it, a rejection means the stream must be cut: the export
@@ -158,6 +189,8 @@ export const runExport = async (
   options: { timeoutMs?: number } = {}
 ): Promise<void> => {
   const slug = sourceSlugOf(input.body);
+  // Not recorded: the service is stopping, not refusing the export.
+  if (shuttingDown) throw shutdownError();
   const began = performance.now();
   const elapsed = () => Math.round(performance.now() - began);
   const timeoutMs = options.timeoutMs ?? EXPORT_TIMEOUT_MS;
@@ -225,6 +258,16 @@ export const runExport = async (
       throw new ExportNotEnabledError();
     }
     const { adapter, plan } = planFor(input.body, access, catalog, progress);
+    // An export has no default order (sorting everything would hold back
+    // its first row), so an offset with no orderBy would skip arbitrary rows.
+    const ordered = namesOrder(input.body);
+    if (plan.offset > 0 && !ordered) {
+      throw new QueryError(
+        "invalid_order",
+        "An export with an offset needs an orderBy",
+        ["offset"]
+      );
+    }
     const ownLimits = input.userLimits ?? (await loadUserLimits(access));
     const cap = Math.min(
       plan.limit ?? source.exportRowCap,
@@ -234,6 +277,7 @@ export const runExport = async (
     const prepared = adapter.prepare(plan, {
       limit: cap + 1,
       offset: plan.offset,
+      defaultOrder: ordered,
     });
 
     const deadlineAt = performance.now() + timeoutMs;

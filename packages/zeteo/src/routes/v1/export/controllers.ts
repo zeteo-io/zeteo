@@ -1,9 +1,9 @@
+import { isExportShutdown, runExport } from "../../../engine/export.js";
 import { AppError, QueryTimeoutError } from "../../../utils/errors.js";
 import { validateQuery } from "../../../utils/validateReq.js";
 import type { ExportSink } from "../../../engine/export.js";
 import { httpSink } from "../../../export/httpSink.js";
 import { callerOf } from "../../../middleware/auth.js";
-import { runExport } from "../../../engine/export.js";
 import { logger } from "../../../utils/logger.js";
 import { ExportQuerySchema } from "./schemas.js";
 import type { Request, Response } from "express";
@@ -48,7 +48,8 @@ export const postExport = async (req: Request, res: Response) => {
       logger.info(context, "export abandoned by its client");
     } else if (
       (err instanceof AppError && err.statusCode < 500) ||
-      err instanceof QueryTimeoutError
+      err instanceof QueryTimeoutError ||
+      isExportShutdown(err)
     ) {
       logger.warn(context, "export stopped mid-stream");
     } else {

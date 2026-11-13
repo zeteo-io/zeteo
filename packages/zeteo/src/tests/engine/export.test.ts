@@ -2,9 +2,7 @@
 // @module-tag platform
 // @module-tag slow
 import { DATA_EXPORT, DATA_READ } from "../../definitions/tereoDeclaration.js";
-import { afterAll, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
-import { abortExports, runExport } from "../../engine/export.js";
 import { auditRows, removeSources } from "../support/sources.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
@@ -23,6 +21,11 @@ import type {
   SourceConnection,
 } from "../../adapters/types.js";
 import {
+  abortExports,
+  resetExportShutdown,
+  runExport,
+} from "../../engine/export.js";
+import {
   grantTo,
   newQueryUser,
   removeRunsOf,
@@ -30,6 +33,15 @@ import {
   seedQuerySource,
   type SeededSource,
 } from "../support/queries.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // Every row stream the engine opens, and whether its run's signal had aborted
 // when it was closed; `onClose`, when a test sets it, runs as one is closed.
@@ -227,6 +239,8 @@ describeEachEngine("runExport", (engine) => {
     closes.length = 0;
     hooks.onClose = undefined;
   });
+  // abortExports refuses every later export in the process.
+  afterEach(() => resetExportShutdown());
   afterAll(async () => {
     await closeAllSourcePools();
     await removePrincipalLimits(users);
@@ -727,5 +741,36 @@ describeEachEngine("runExport", (engine) => {
       ["zeteo.export.run", "UPDATE"],
     ]);
     expect(closes).toEqual([true]);
+  });
+  it("refuses a new export with 503 once abortExports has been called, recording nothing and taking no lease", async () => {
+    abortExports();
+    const caller = await grantedCaller();
+    const { sink, calls } = recorder();
+    const err = await rejectionOf(
+      runExport(
+        {
+          caller,
+          body: customers(source),
+          signal: new AbortController().signal,
+        },
+        sink
+      )
+    );
+    expect(err).toMatchObject({
+      statusCode: 503,
+      code: "temporarily_unavailable",
+      message: "The service is shutting down",
+    });
+    expect(calls).toEqual([]);
+    expect(closes).toEqual([]);
+    expect(await runsOf([caller.userId])).toEqual([]);
+    expect(await leasesHeld(caller, source)).toBe(0);
+
+    resetExportShutdown();
+    await runExport(
+      { caller, body: customers(source), signal: new AbortController().signal },
+      recorder().sink
+    );
+    expect(await onlyRunOf(caller.userId)).toMatchObject({ outcome: "ok" });
   });
 });

@@ -98,15 +98,25 @@ describe("csvRow", () => {
   });
 
   it("writes null as an empty field and an empty string as a quoted empty one", () => {
-    const row = csvRow([null, "", null], typed("text", "text", "number"));
-    expect(row).toBe(',"",\r\n');
+    const row = csvRow(
+      [null, "", null, ""],
+      typed("text", "text", "number", "other")
+    );
+    expect(row).toBe(',"",,""\r\n');
     expect(readCsv(row)).toEqual([
       [
         { value: "", quoted: false },
         { value: "", quoted: true },
         { value: "", quoted: false },
+        { value: "", quoted: true },
       ],
     ]);
+  });
+
+  it("writes a json empty string as its JSON text, not as an empty field", () => {
+    const row = csvRow([""], typed("json"));
+    expect(row).toBe('""""""\r\n');
+    expect(readCsvValues(row)).toEqual([['""']]);
   });
 
   it("keeps characters outside the Basic Multilingual Plane whole", () => {

@@ -6,10 +6,12 @@ import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { tokenFor } from "../../../support/tokens.js";
+import { performance } from "node:perf_hooks";
 import {
   eventually,
   ndjsonLines,
   newExportUser,
+  openExport,
   postExport,
 } from "../../../support/exports.js";
 import {
@@ -39,6 +41,8 @@ describeEachEngine("POST /v1/export", (engine) => {
   let source: SeededSource;
   let capped: SeededSource;
   let off: SeededSource;
+  /** The sales and probe schemas, for the trickle view. */
+  let probe: SeededSource;
   const user = newExportUser();
 
   const orders = (on: SeededSource = source, extra: object = {}) => ({
@@ -66,14 +70,24 @@ describeEachEngine("POST /v1/export", (engine) => {
       "export"
     );
     off = await seedQuerySource(engine, {}, "export");
+    probe = await seedQuerySource(
+      engine,
+      {
+        export_enabled: true,
+        export_row_cap: 1_000_000,
+        schemas: ["sales", "probe"],
+      },
+      "export"
+    );
     for (const on of [source, capped, off]) {
       await grantTo(user.principal, on.tables.orders!, "all");
       await grantTo(user.principal, on.tables.customers!, "all");
     }
+    await grantTo(user.principal, probe.tables.trickle!, "all");
   });
   afterAll(async () => {
     await removeRunsOf([user.id]);
-    await removeSources([source.id, capped.id, off.id]);
+    await removeSources([source.id, capped.id, off.id, probe.id]);
   });
 
   it("streams NDJSON: the head, the rows /v1/query answers, and a complete tail", async () => {
@@ -293,5 +307,114 @@ describeEachEngine("POST /v1/export", (engine) => {
       return JSON.stringify(rest).replace(/acc?ounts/g, "…");
     };
     expect(shape(hidden.text)).toBe(shape(missing.text));
+  });
+  it("streams the first row of an export with no orderBy at once, while the source is still making the rest", async () => {
+    // 30 rows of the trickle view, 200 ms apart after the first: about 6 s.
+    // Sorted, every row would be made before the first is sent.
+    const began = performance.now();
+    const res = await openExport({
+      token: user.token,
+      body: {
+        source: probe.slug,
+        from: "trickle",
+        select: ["id", "filler"],
+        limit: 30,
+      },
+    });
+    expect(res.statusCode).toBe(200);
+    let text = "";
+    let firstRowAt: number | undefined;
+    for await (const chunk of res) {
+      text += (chunk as Buffer).toString("utf8");
+      // The head is the first line; the first row ends the second.
+      if (firstRowAt === undefined && text.split("\n").length > 2) {
+        firstRowAt = performance.now() - began;
+      }
+    }
+    const endedAt = performance.now() - began;
+    expect(firstRowAt).toBeDefined();
+    expect(endedAt).toBeGreaterThanOrEqual(5000);
+    expect(firstRowAt!).toBeLessThan(1500);
+    const lines = ndjsonLines(text);
+    // The view has more rows than the limit.
+    expect(lines.at(-1)).toEqual({ status: "truncated", rows: 30 });
+    expect(
+      new Set(lines.slice(1, -1).map((row) => (row as unknown[])[0])).size
+    ).toBe(30);
+  }, 60_000);
+
+  it("exports with no orderBy the same rows as with one, as a set", async () => {
+    const { orderBy: _orderBy, ...unordered } = ORDERS;
+    const sorted = await postExport({ token: user.token, body: orders() });
+    const unsorted = await postExport({
+      token: user.token,
+      body: { source: source.slug, ...unordered, offset: 0 },
+    });
+    const rowsOf = (text: string) =>
+      ndjsonLines(text).slice(1, -1) as unknown[][];
+    const byId = (rows: unknown[][]) =>
+      [...rows].sort((a, b) => Number(a[0]) - Number(b[0]));
+    expect(rowsOf(sorted.text)).toHaveLength(12);
+    expect(byId(rowsOf(unsorted.text))).toEqual(rowsOf(sorted.text));
+  });
+
+  it("exports in the orderBy's order", async () => {
+    const res = await postExport({
+      token: user.token,
+      body: orders(source, { orderBy: [{ id: "desc" }] }),
+    });
+    const ids = ndjsonLines(res.text)
+      .slice(1, -1)
+      .map((row) => Number((row as unknown[])[0]));
+    expect(ids).toHaveLength(12);
+    expect(ids).toEqual([...ids].sort((a, b) => b - a));
+  });
+
+  it("answers 422 invalid_order for an offset without orderBy, recorded as refused, and pages with one", async () => {
+    const { orderBy: _orderBy, ...unordered } = ORDERS;
+    for (const orderBy of [undefined, []]) {
+      const refused = await postExport({
+        token: user.token,
+        body: { source: source.slug, ...unordered, orderBy, offset: 5 },
+      });
+      expect(refused.status).toBe(422);
+      expect(JSON.parse(refused.text)).toMatchObject({
+        error: "invalid_order",
+        error_description: "An export with an offset needs an orderBy",
+        path: ["offset"],
+      });
+    }
+    const refusals = (await runsOf([user.id])).filter(
+      (run) => run.errorCode === "invalid_order"
+    );
+    expect(refusals).toHaveLength(2);
+    for (const run of refusals) {
+      expect(run).toMatchObject({ entryPoint: "export", outcome: "refused" });
+    }
+
+    // A table the caller cannot see is reported first.
+    const hidden = await postExport({
+      token: user.token,
+      body: {
+        source: source.slug,
+        from: "accounts",
+        select: ["id"],
+        offset: 5,
+      },
+    });
+    expect(hidden.status).toBe(422);
+    expect(JSON.parse(hidden.text)).toMatchObject({
+      error: "not_found_or_not_accessible",
+    });
+
+    const all = await postExport({ token: user.token, body: orders() });
+    const paged = await postExport({
+      token: user.token,
+      body: orders(source, { offset: 5 }),
+    });
+    expect(paged.status).toBe(200);
+    expect(ndjsonLines(paged.text).slice(1, -1)).toEqual(
+      ndjsonLines(all.text).slice(6, -1)
+    );
   });
 });

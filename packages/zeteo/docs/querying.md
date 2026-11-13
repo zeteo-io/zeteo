@@ -56,7 +56,10 @@ results for the same data:
 - **`orderBy`** is a list of `{ "<name>": "asc" | "desc" }`, each a select item or, in a query
   that is neither grouped nor distinct, any granted column. Nulls sort last ascending and first
   descending, on every engine. Without `orderBy`, rows are ordered by every select item ascending
-  (json items aside), so paging with `offset` is stable.
+  (json items aside), so paging with `offset` is stable. An export (`POST /v1/export`) has no
+  such default: without `orderBy` its rows come in whatever order the source makes them, so the
+  first is sent without waiting for the source to sort them all, and an export with an `offset`
+  above 0 and no `orderBy` is refused (`422 invalid_order` at path `["offset"]`).
 - **`limit`** (default 1,000) and **`offset`** (at most 1,000,000) page the result.
 
 Every object is strict: an unknown key is refused. There are no expressions, function calls,
@@ -347,7 +350,8 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
   values than the source's engine takes; see *Filters*).
 - From running: `502 query_failed` (the source refused or failed to run the query),
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
-  `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable).
+  `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable;
+  for an export, also one started while the service shuts down, which is not recorded).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
   fixed message and the request's `request_id`, which finds the log line.
 

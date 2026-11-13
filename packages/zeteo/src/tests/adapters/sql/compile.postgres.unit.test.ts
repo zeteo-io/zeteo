@@ -496,3 +496,102 @@ describe("compileSql on Postgres: the parameter limit", () => {
     );
   });
 });
+
+describe("compileSql on Postgres: without the default order", () => {
+  const unordered = (query: object, fetch = { limit: 1001, offset: 0 }) =>
+    compileSql(
+      planSql(
+        sqlQuerySchema.parse({
+          source: "shop",
+          from: "orders",
+          select: ["id"],
+          ...query,
+        }),
+        shopCatalog()
+      ),
+      postgresDialect,
+      { ...fetch, defaultOrder: false }
+    );
+
+  it("emits no order for a query with no orderBy, keeping the limit, the offset and every parameter", () => {
+    expect(
+      unordered(
+        {
+          select: ["id", "status"],
+          where: { status: { eq: "paid" } },
+        },
+        { limit: 11, offset: 20 }
+      )
+    ).toEqual({
+      sql:
+        'select "t0"."id" as "c0", "t0"."status" as "c1" from "shop"."orders" as "t0"' +
+        ' where "t0"."status" = $1 limit $2 offset $3',
+      parameters: ["paid", 11, 20],
+    });
+  });
+
+  it("emits no order for a distinct or grouped query with no orderBy", () => {
+    expect(unordered({ select: ["status"], distinct: true }).sql).toBe(
+      'select distinct "t0"."status" as "c0" from "shop"."orders" as "t0"' +
+        " limit $1 offset $2"
+    );
+    expect(
+      unordered({
+        select: [
+          "status",
+          { bucket: "month", column: "created_at", as: "month" },
+          { count: "*", as: "n" },
+        ],
+        groupBy: ["status", "month"],
+      })
+    ).toEqual({
+      sql:
+        'select "t0"."status" as "c0", date_trunc($1, "t0"."created_at") as "c1",' +
+        ' count(*) as "c2" from "shop"."orders" as "t0"' +
+        " group by 1, 2 limit $2 offset $3",
+      parameters: ["month", 1001, 0],
+    });
+  });
+
+  it("compiles a query with its own orderBy exactly as with the default order", () => {
+    const queries = [
+      { select: ["id", "total"], orderBy: [{ total: "desc" }, { id: "asc" }] },
+      { orderBy: [{ notes: "desc" }] },
+      { select: ["id", "status"], orderBy: [{ status: "asc" }] },
+      {
+        select: ["status", { sum: "total", as: "revenue" }],
+        groupBy: ["status"],
+        orderBy: [{ revenue: "desc" }],
+      },
+    ];
+    for (const query of queries) {
+      expect(unordered(query, { limit: 11, offset: 20 })).toEqual(
+        compile(query, { limit: 11, offset: 20 })
+      );
+    }
+  });
+
+  it("leaves out an orderBy identical to the default order, which the plan cannot tell from it", () => {
+    expect(unordered({ orderBy: [{ id: "asc" }] }).sql).toBe(
+      'select "t0"."id" as "c0" from "shop"."orders" as "t0" limit $1 offset $2'
+    );
+  });
+
+  it("orders by every select item when defaultOrder is true or unset", () => {
+    const query = { select: ["id", "status"] };
+    const today = compile(query);
+    expect(today.sql).toContain(
+      ' order by "c0" asc nulls last, "c1" asc nulls last'
+    );
+    expect(
+      compileSql(
+        planSql(
+          sqlQuerySchema.parse({ source: "shop", from: "orders", ...query }),
+          shopCatalog()
+        ),
+        postgresDialect,
+        { limit: 1001, offset: 0, defaultOrder: true }
+      )
+    ).toEqual(today);
+  });
+});

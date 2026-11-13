@@ -16,8 +16,6 @@ const guarded = (text: string): string =>
 
 const cell = (value: unknown, type: ColumnType): string => {
   if (value === null || value === undefined) return "";
-  // Quoted, so an empty string is not read back as null.
-  if (value === "") return '""';
   switch (type) {
     // Numbers (64-bit integers and decimals arrive as strings), booleans,
     // dates and timestamps: their own text, never a formula.
@@ -30,6 +28,8 @@ const cell = (value: unknown, type: ColumnType): string => {
       return field(guarded(JSON.stringify(value)));
     case "text":
     case "other":
+      // Quoted, so an empty string is not read back as null.
+      if (value === "") return '""';
       return field(
         guarded(typeof value === "string" ? value : JSON.stringify(value))
       );
