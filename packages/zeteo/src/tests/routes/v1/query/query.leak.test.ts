@@ -51,7 +51,6 @@ const POSITIONS: Array<[string, (column: string) => Record<string, unknown>]> =
       }),
     ],
     ["orderBy", (c) => ({ select: ["id"], orderBy: [{ [c]: "asc" }] })],
-    ["groupBy", (c) => ({ select: ["id"], groupBy: [c] })],
   ];
 
 /**
@@ -111,11 +110,25 @@ describeEachEngine("POST /v1/query: leaks", (engine) => {
       async (column) => {
         const ungranted = await query(build(column));
         const invented = await query(build(INVENTED));
-        expect(ungranted.status).not.toBe(200);
+        expect(ungranted.body.error).toBe("not_found_or_not_accessible");
+        expect(invented.body.error).toBe("not_found_or_not_accessible");
         expect(shapeOf(ungranted, column)).toEqual(shapeOf(invented, INVENTED));
       }
     );
   }
+
+  // groupBy names select items, never catalogue columns: a name there is
+  // refused before any lookup, the same way whether it exists or not.
+  it.each(UNGRANTED_COLUMNS)(
+    "refuses ungranted %s in groupBy, which names only select items, exactly as an invented name",
+    async (column) => {
+      const build = (c: string) => ({ select: ["id"], groupBy: [c] });
+      const ungranted = await query(build(column));
+      const invented = await query(build(INVENTED));
+      expect(ungranted.body.error).toBe("invalid_grouping");
+      expect(shapeOf(ungranted, column)).toEqual(shapeOf(invented, INVENTED));
+    }
+  );
 
   it("refuses an ungranted column with not_found_or_not_accessible and the column's path", async () => {
     const res = await query({ select: ["id", "total"] });
