@@ -26,6 +26,7 @@ export type Stub = {
   url: string;
   requests: Recorded[];
   tokensIssued: number;
+  onToken(fn: (auth: string | undefined, body: string) => void): void;
   respond(fn: (req: Recorded) => StubResponse | undefined): void;
   close(): Promise<void>;
 };
@@ -65,11 +66,14 @@ async function send(res: ServerResponse, out: StubResponse): Promise<void> {
 }
 
 export async function startStub(): Promise<Stub> {
+  const tokenListeners: ((auth: string | undefined, body: string) => void)[] =
+    [];
   const responders: ((req: Recorded) => StubResponse | undefined)[] = [];
   const stub: Stub = {
     url: "",
     requests: [],
     tokensIssued: 0,
+    onToken: (fn) => void tokenListeners.push(fn),
     respond: (fn) => void responders.unshift(fn),
     close: () =>
       new Promise((ok) => {
@@ -84,6 +88,9 @@ export async function startStub(): Promise<Stub> {
       const body = await readBody(req);
       if (req.method === "POST" && url.pathname === "/oauth/token") {
         stub.tokensIssued += 1;
+        for (const fn of tokenListeners) {
+          fn(req.headers.authorization, String(body ?? ""));
+        }
         await send(res, {
           body: {
             access_token: `svc-${stub.tokensIssued}`,
@@ -112,7 +119,7 @@ export async function startStub(): Promise<Stub> {
         if (out) break;
       }
       await send(res, out ?? {});
-    })();
+    })().catch(() => res.destroy());
   });
 
   await new Promise<void>((ok) => server.listen(0, "127.0.0.1", ok));

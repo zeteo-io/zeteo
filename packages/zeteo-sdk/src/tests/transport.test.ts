@@ -95,7 +95,9 @@ describe("request handler transport", () => {
         ? { status: 429, headers: { "retry-after": "30" }, body: {} }
         : undefined
     );
-    await expect(handler.handleRequest(req())).rejects.toBeDefined();
+    await expect(handler.handleRequest(req())).rejects.toMatchObject({
+      response: { status: 429 },
+    });
     const started = Date.now();
     await handler.handleRequest(req());
     expect(Date.now() - started).toBeLessThan(500);
