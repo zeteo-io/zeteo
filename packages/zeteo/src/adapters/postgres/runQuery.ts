@@ -93,7 +93,8 @@ const CLIENT_READ_TIMEOUT = "Query read timeout";
 
 // Pins the forms the server prints values in, whatever the login's defaults:
 // timestamptz in UTC, ISO dates, floats with every digit (3 is full precision
-// before Postgres 12 and the same as 1 since).
+// before Postgres 12 and the same as 1 since); and how it reads the compiled
+// SQL: a backslash in a string literal (LIKE's `escape '\'`) is itself.
 const sessionSetup = (timeoutMs: number) =>
   [
     "BEGIN TRANSACTION READ ONLY",
@@ -101,6 +102,7 @@ const sessionSetup = (timeoutMs: number) =>
     "SET LOCAL TIME ZONE 'UTC'",
     "SET LOCAL DateStyle = 'ISO, YMD'",
     "SET LOCAL extra_float_digits = 3",
+    "SET LOCAL standard_conforming_strings = on",
   ].join("; ");
 
 const isClientReadTimeout = (err: unknown): boolean =>

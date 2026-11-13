@@ -272,6 +272,29 @@ describe("postgres runQuery", () => {
     ]);
   });
 
+  it("reads the compiled LIKE escape as written, whatever the login's standard_conforming_strings", async () => {
+    // The fixture login defaults to standard_conforming_strings = off, where
+    // the compiled `escape '\\'` would open an escape instead of a string.
+    expect(
+      (
+        await run({
+          from: "customers",
+          select: ["id"],
+          where: { name: { contains: "100% Organic_" } },
+        })
+      ).rows
+    ).toEqual([[2]]);
+    expect(
+      (
+        await run({
+          from: "customers",
+          select: ["id"],
+          where: { name: { startsWith: "acme" } },
+        })
+      ).rows
+    ).toEqual([[1]]);
+  });
+
   it("returns counts and sums as strings and averages as numbers", async () => {
     const result = await run({
       from: "orders",

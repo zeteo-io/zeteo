@@ -88,14 +88,16 @@ async function recreateFixtureDatabase(databaseUrl: string) {
   try {
     await loader.query(await readFile(FIXTURE_SQL, "utf8"));
     await loader.query(await readFile(PROBE_SQL, "utf8"));
-    // Session defaults a user query must override to produce its wire forms:
-    // a zone off UTC by a fraction of an hour, day-first dates and floats
-    // printed short.
+    // Session defaults a user query must override to produce its wire forms
+    // and read its SQL as compiled: a zone off UTC by a fraction of an hour,
+    // day-first dates, floats printed short, and backslashes in string
+    // literals read as escapes.
     const ro = `ALTER ROLE ${quoteIdent(FIXTURE_ROLES.ro.user)} IN DATABASE ${quoteIdent(FIXTURE_DATABASE)}`;
     await loader.query(`
       ${ro} SET timezone = 'America/St_Johns';
       ${ro} SET datestyle = 'SQL, DMY';
       ${ro} SET extra_float_digits = 0;
+      ${ro} SET standard_conforming_strings = off;
     `);
   } finally {
     await loader.end();
