@@ -1,0 +1,48 @@
+{
+  "name": "@zeteo-io/sdk",
+  "version": "0.0.0",
+  "description": "Client SDK for zeteo, the query service for apps built on tereo",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zeteo-io/zeteo.git",
+    "directory": "packages/zeteo-sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!dist/tests",
+    "!src/tests",
+    "!**/*.tsbuildinfo",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test:unit": "vitest run",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "dependencies": {
+    "@dianemo/backend-redis": "^2.0.0",
+    "@dianemo/core": "^2.1.0",
+    "axios": "^1.20.0",
+    "ioredis": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.9",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.4"
+  }
+}

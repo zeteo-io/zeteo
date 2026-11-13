@@ -44,6 +44,13 @@
         "releaseTag": {
           "pattern": "zeteo@{version}"
         }
+      },
+      "sdk": {
+        "projects": ["@zeteo-io/sdk"],
+        "projectsRelationship": "independent",
+        "releaseTag": {
+          "pattern": "{projectName}@{version}"
+        }
       }
     },
     "versionPlans": {
@@ -51,6 +58,8 @@
         "**/*.md",
         "packages/zeteo/src/tests/**",
         "packages/zeteo/vitest.config.ts",
+        "packages/zeteo-sdk/src/tests/**",
+        "packages/zeteo-sdk/vitest.config.ts",
         "docker/test/**"
       ]
     },

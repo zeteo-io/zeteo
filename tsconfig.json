@@ -3,6 +3,9 @@
   "references": [
     {
       "path": "./packages/zeteo"
+    },
+    {
+      "path": "./packages/zeteo-sdk"
     }
   ],
   "compilerOptions": {
