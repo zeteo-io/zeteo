@@ -2,6 +2,7 @@ import { ExportNotEnabledError, QueryTimeoutError } from "../utils/errors.js";
 import type { ColumnType, QueryWarning } from "../adapters/types.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { withSourceConnection } from "../sources/pools.js";
+import { loadUserLimits } from "../limits/resolve.js";
 import type { Caller } from "../middleware/auth.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
@@ -17,7 +18,6 @@ import {
 } from "./record.js";
 import {
   acquireExportLeases,
-  defaultUserLimits,
   type UserLimits,
   EXPORT_LEASE_MS,
   EXPORT_LEASE_RENEW_MS,
@@ -52,7 +52,7 @@ export interface RunExportInput {
   body: unknown;
   /** Aborts when the caller goes away: the export is stopped on the source. */
   signal: AbortSignal;
-  /** The caller's concurrency limits; every user's defaults when absent. */
+  /** The caller's concurrency limits; read for the caller as the export starts when absent. */
   userLimits?: UserLimits;
 }
 
@@ -225,6 +225,7 @@ export const runExport = async (
       throw new ExportNotEnabledError();
     }
     const { adapter, plan } = planFor(input.body, access, catalog, progress);
+    const ownLimits = input.userLimits ?? (await loadUserLimits(access));
     const cap = Math.min(
       plan.limit ?? source.exportRowCap,
       source.exportRowCap
@@ -245,7 +246,7 @@ export const runExport = async (
       input.caller.userId,
       source,
       EXPORT_LEASE_MS,
-      input.userLimits ?? defaultUserLimits()
+      ownLimits
     );
     const renewal = setInterval(
       () => void leases.renew(EXPORT_LEASE_MS),

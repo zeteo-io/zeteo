@@ -1,3 +1,4 @@
+import * as principalLimits from "./principalLimits.js";
 import * as queryRuns from "./queryRuns.js";
 import * as sources from "./sources.js";
 import * as catalog from "./catalog.js";
@@ -8,6 +9,7 @@ export const db = {
   sources,
   catalog,
   grants,
+  principalLimits,
   queryRuns,
 };
 

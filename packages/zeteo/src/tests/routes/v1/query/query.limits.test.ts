@@ -1,10 +1,12 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag slow
+import { clearTestGroups, setTestGroups } from "../../../support/principals.js";
 import { initializeTereo, stopTereo } from "../../../../utils/tereo.js";
 import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
 import { removeSources, writeToken } from "../../../support/sources.js";
 import { describeEachEngine } from "../../../support/engines.js";
+import { grantsWriteToken } from "../../../support/grants.js";
 import type { Caller } from "../../../../middleware/auth.js";
 import type { JsonResponse } from "../../../support/http.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -12,6 +14,11 @@ import { runQuery } from "../../../../engine/index.js";
 import { fetchJson } from "../../../support/http.js";
 import { BASE_URL } from "../../../support/http.js";
 import env from "../../../../env.js";
+import { randomUUID } from "crypto";
+import {
+  removePrincipalLimits,
+  setPrincipalLimit,
+} from "../../../support/principalLimits.js";
 import {
   grantTo,
   newQueryUser,
@@ -39,6 +46,8 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
   let roomy: { source: SeededSource; queryConcurrency: number };
   const extra: string[] = [];
   const users: string[] = [];
+  /** Principals given their own limits. */
+  const limited: string[] = [];
   const errorBodies: unknown[] = [];
 
   /** A user granted every portable table of `on`, and the slow and broken views. */
@@ -81,6 +90,8 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
   });
   afterAll(async () => {
     await stopTereo();
+    await removePrincipalLimits(limited);
+    for (const id of users) await clearTestGroups(id);
     await removeRunsOf(users);
     await removeSources([
       source.id,
@@ -230,6 +241,71 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
       code: "too_many_queries",
       message: "At most 1 query may run at once for one user",
     });
+  });
+
+  it("holds a user to their group's query_concurrency 1, and lets a user with their own row of 3 run three", async () => {
+    const groupId = randomUUID();
+    limited.push(groupId);
+    await setPrincipalLimit(
+      { type: "group", id: groupId },
+      { query_concurrency: 1 }
+    );
+    const member = await grantedUser(roomy.source);
+    await setTestGroups(member.id, [{ id: groupId, organizationId: null }]);
+    const memberRuns = await Promise.all([
+      slowQuery(member.token, roomy.source),
+      slowQuery(member.token, roomy.source),
+    ]);
+    expect(memberRuns.map((r) => r.status).sort()).toEqual([200, 429]);
+    expect(memberRuns.find((r) => r.status === 429)!.body).toMatchObject({
+      error: "too_many_queries",
+      error_description: "At most 1 query may run at once for one user",
+    });
+
+    const own = await grantedUser(roomy.source);
+    limited.push(own.id);
+    await setPrincipalLimit(
+      { type: "user", id: own.id },
+      { query_concurrency: 3 }
+    );
+    const ownRuns = await Promise.all(
+      Array.from({ length: 4 }, () => slowQuery(own.token, roomy.source))
+    );
+    expect(ownRuns.map((r) => r.status).sort()).toEqual([200, 200, 200, 429]);
+    expect(ownRuns.find((r) => r.status === 429)!.body).toMatchObject({
+      error: "too_many_queries",
+      error_description: "At most 3 queries may run at once for one user",
+    });
+  });
+
+  it("holds a service account to its own row, and applies a change to the runs that start after it", async () => {
+    const id = randomUUID();
+    users.push(id);
+    limited.push(id);
+    await grantTo(
+      { type: "user", id },
+      roomy.source.tables.slow_orders!,
+      "all"
+    );
+    const token = `test-token-${id}|client=${id}|perms=${DATA_READ}`;
+    const limitId = await setPrincipalLimit(
+      { type: "user", id },
+      { query_concurrency: 1 }
+    );
+    const twice = () =>
+      Promise.all([
+        slowQuery(token, roomy.source),
+        slowQuery(token, roomy.source),
+      ]);
+    expect((await twice()).map((r) => r.status).sort()).toEqual([200, 429]);
+    const patched = await fetchJson(
+      "PATCH",
+      `${BASE_URL}/v1/principal-limits/${limitId}`,
+      grantsWriteToken(),
+      { query_concurrency: 2 }
+    );
+    expect(patched.status).toBe(200);
+    expect((await twice()).map((r) => r.status)).toEqual([200, 200]);
   });
 
   it("refuses a second query on a source with query_concurrency 1 from another user with 429 source_busy and Retry-After", async () => {

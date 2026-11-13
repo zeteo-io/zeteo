@@ -1,12 +1,14 @@
 import { QueryFailedError, ValidationError } from "../utils/errors.js";
+import { loadAccess, type CallerAccess } from "../grants/access.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
-import { loadAccess, type Access } from "../grants/access.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
+import { loadUserLimits } from "../limits/resolve.js";
 import type { Caller } from "../middleware/auth.js";
 import { notFound, QueryError } from "./errors.js";
 import type { QueryEntryPoint } from "./limits.js";
+import type { Access } from "../grants/access.js";
 import { adapterFor } from "../adapters/index.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
@@ -22,7 +24,6 @@ import type {
 } from "../adapters/types.js";
 import {
   acquireRunLeases,
-  defaultUserLimits,
   LEASE_GRACE_MS,
   runLimits,
   type UserLimits,
@@ -42,7 +43,7 @@ export interface RunQueryInput {
   body: unknown;
   /** Aborts when the caller goes away: the run is stopped on the source. */
   signal?: AbortSignal;
-  /** The caller's concurrency limits; every user's defaults when absent. */
+  /** The caller's concurrency limits; read for the caller as the run starts when absent. */
   userLimits?: UserLimits;
 }
 
@@ -206,7 +207,7 @@ export const loadCatalogFor = async (
   caller: Caller,
   slug: string,
   progress: Progress
-): Promise<{ access: Access; catalog: VisibleCatalog }> => {
+): Promise<{ access: CallerAccess; catalog: VisibleCatalog }> => {
   const access = await loadAccess(caller);
   const catalog = await loadVisibleCatalog(slug, access);
   if (!catalog) {
@@ -271,6 +272,7 @@ const execute = async (
   const { access, catalog } = await loadCatalogFor(caller, slug, progress);
   const sourceId = catalog.source.id;
   const { adapter, plan } = planFor(body, access, catalog, progress);
+  const ownLimits = userLimits ?? (await loadUserLimits(access));
 
   const limits = runLimits(entryPoint, plan.limit, catalog.source);
   // Compiled before any lease is taken, so a query the source cannot take is
@@ -287,7 +289,7 @@ const execute = async (
     caller.userId,
     catalog.source,
     limits.timeoutMs + LEASE_GRACE_MS,
-    userLimits ?? defaultUserLimits()
+    ownLimits
   );
   let result: QueryResult;
   try {

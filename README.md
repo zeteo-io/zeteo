@@ -57,6 +57,7 @@ and changes write audit entries to tereo's outbox.
   Administrators describe tables and columns, read the discovered relations and declare their own,
   under `/v1/sources/:sourceId/tables` and `/relations`.
 - **Grants.** `/v1/grants` gives a user or group one table, all its columns or a list. Default deny.
+  `/v1/principal-limits` gives a user or group its own limits on queries and exports at once.
 - **Querying.** `GET /v1/catalog` lists what the caller may query, with the query language's JSON
   Schema; `POST /v1/query` runs a validated query, read-only and within limits, with the same
   language and results on both engines; `GET /v1/runs` reads the record of every query.

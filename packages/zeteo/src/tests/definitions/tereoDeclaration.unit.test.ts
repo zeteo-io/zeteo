@@ -101,6 +101,24 @@ describe("buildTereoDocument", () => {
     expect(read[AUDIT_EVENTS.sourceCreated]).toBe(SOURCES_READ);
   });
 
+  it("gates principal limit events on grants read", () => {
+    const read = Object.fromEntries(
+      service.eventTypes!.map((e) => [e.eventType, e.readPermission])
+    );
+    expect(AUDIT_EVENTS.principalLimitCreated).toBe(
+      "zeteo.principal_limit.created"
+    );
+    expect(AUDIT_EVENTS.principalLimitUpdated).toBe(
+      "zeteo.principal_limit.updated"
+    );
+    expect(AUDIT_EVENTS.principalLimitRemoved).toBe(
+      "zeteo.principal_limit.removed"
+    );
+    expect(read[AUDIT_EVENTS.principalLimitCreated]).toBe(GRANTS_READ);
+    expect(read[AUDIT_EVENTS.principalLimitUpdated]).toBe(GRANTS_READ);
+    expect(read[AUDIT_EVENTS.principalLimitRemoved]).toBe(GRANTS_READ);
+  });
+
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
       "zeteo.export.run",
@@ -108,6 +126,9 @@ describe("buildTereoDocument", () => {
       "zeteo.grant.created",
       "zeteo.grant.removed",
       "zeteo.grant.updated",
+      "zeteo.principal_limit.created",
+      "zeteo.principal_limit.removed",
+      "zeteo.principal_limit.updated",
       "zeteo.query.run",
       "zeteo.relation.declared",
       "zeteo.relation.removed",

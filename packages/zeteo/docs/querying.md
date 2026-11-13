@@ -289,7 +289,7 @@ once.
 | Rows, default / maximum | 1,000 / 50,000 | 100 / 5,000 |
 | Result size (rows as JSON) | 10 MB | 1 MB |
 | Time | the source's `timeout_ms` (default 30 s) | same |
-| Queries at once | `USER_QUERY_CONCURRENCY` per user (default 5), the source's `query_concurrency` (default 5) | shared |
+| Queries at once | the user's limit (`USER_QUERY_CONCURRENCY` unless set for them, default 5), the source's `query_concurrency` (default 5) | shared |
 
 - The row limit is `limit`, or the default, lowered to the maximum and to the source's `row_cap`.
   A `limit` above the maximum is lowered, not refused.
@@ -302,13 +302,15 @@ once.
 - A query the source cannot take (`422 too_many_parameters`) is refused before the concurrency
   check, so it is never answered `429`.
 - Concurrency is counted in Redis, so it holds across replicas. A user may run
-  `USER_QUERY_CONCURRENCY` queries at once (1 to 100, default 5, set in the environment); one more
-  is `429 too_many_queries`. A source runs its `query_concurrency` at once (1 to 50, default 5, set
+  `USER_QUERY_CONCURRENCY` queries at once (1 to 100, default 5, set in the environment) unless
+  an administrator gave them or one of their groups its own limit
+  ([grants.md](grants.md#concurrency-limits): the user's own, else the highest of their groups');
+  one more is `429 too_many_queries`. A source runs its `query_concurrency` at once (1 to 50, default 5, set
   per source, [sources.md](sources.md#the-source)); one more is `429 source_busy`. Both answers
   carry `Retry-After` and `retry_after` (seconds), and their message states the limit that applied.
   The limits are read as each query starts: a change applies to the queries that start after it,
   and queries already running go on. Exports are counted apart, against `USER_EXPORT_CONCURRENCY`
-  per user (1 to 10, default 1; `429 too_many_exports`) and the source's `export_concurrency`
+  per user (1 to 10, default 1, or the user's own limit as for queries; `429 too_many_exports`) and the source's `export_concurrency`
   (1 to 10, default 2; `429 source_busy`). A slot is held at most the time limit plus 5 s, and is released as soon
   as the query ends, however it ends; the response does not wait for the release, and a release
   Redis does not take lapses at that expiry. When Redis fails or does not answer within a second,

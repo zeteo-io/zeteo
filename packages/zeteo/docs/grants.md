@@ -70,3 +70,37 @@ was read or changed.
 With today's Tereo a service cannot read groups at all, so in production a group grant's
 `principal_status` is always `unknown`, never `active`. It only reports; a group grant counts for its
 members whatever its status.
+
+## Concurrency limits
+
+Each user may run `USER_QUERY_CONCURRENCY` queries and `USER_EXPORT_CONCURRENCY` exports at once
+([querying.md](querying.md#limits)). An administrator can give a user (a service account included)
+or a group its own limits instead, under the same permissions as grants:
+
+| Route | Permission | Result |
+|-------|------------|--------|
+| `GET /v1/principal-limits` (`principal_type`, `principal_id`, `limit`, `cursor`) | `zeteo.grants.read` | `{ data, next_cursor }` |
+| `POST /v1/principal-limits` | `zeteo.grants.write` | `201`, the row |
+| `GET /v1/principal-limits/:principalLimitId` | `zeteo.grants.read` | the row |
+| `PATCH /v1/principal-limits/:principalLimitId` | `zeteo.grants.write` | the row |
+| `DELETE /v1/principal-limits/:principalLimitId` | `zeteo.grants.write` | `204` |
+
+The row: `{ id, principal_type, principal_id, principal_status, query_concurrency,
+export_concurrency, created_by, created_at, updated_at }`, with `principal_status` as for a grant
+([below](#principal-statuses)) and a limit the row does not set shown as `null`.
+
+- Create takes `{ principal_type, principal_id, query_concurrency?, export_concurrency? }` with at
+  least one limit: `query_concurrency` 1 to 100, `export_concurrency` 1 to 10 (`400
+  invalid_request` otherwise). A principal has at most one row (`409 conflict`). Like a grant, a
+  row does not need its principal to exist; a row for a principal Tereo does not know is inert.
+- `PATCH` takes either limit or both; `null` clears one. A change that would leave neither set is
+  `400 invalid_request`: remove the row instead. The principal never changes.
+- Each create, change and removal writes one audit entry (`zeteo.principal_limit.created`,
+  `zeteo.principal_limit.updated`, `zeteo.principal_limit.removed`) in the same transaction, with
+  `{ principal_type, principal_id, query_concurrency, export_concurrency }` as metadata and, on a
+  change, the values before it under `previous`. A refused request writes none.
+
+Which limit applies is decided for each limit apart, as each query or export starts: the user's own
+row if it sets that limit; otherwise the highest value among the rows of the groups that count for
+the user (the same groups as for grants); otherwise the environment's default. A group's row
+replaces the default even when it is lower. A change applies to the runs that start after it.

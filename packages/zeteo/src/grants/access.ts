@@ -10,8 +10,15 @@ export interface Access {
   tableAccess(tableId: string): "all" | ReadonlySet<string> | undefined;
 }
 
+/** A caller's access, with whom it was loaded for. */
+export interface CallerAccess extends Access {
+  userId: string;
+  /** The groups that count for the caller, as `groupIdsOf` gave them. */
+  groupIds: readonly string[];
+}
+
 /** The union of the caller's own grants and those of the groups that count for them. */
-export const loadAccess = async (caller: Caller): Promise<Access> => {
+export const loadAccess = async (caller: Caller): Promise<CallerAccess> => {
   const groupIds = await groupIdsOf(caller);
   const grants = await db.grants.listForPrincipals([
     { type: "user", id: caller.userId },
@@ -36,6 +43,8 @@ export const loadAccess = async (caller: Caller): Promise<Access> => {
   }
 
   return {
+    userId: caller.userId,
+    groupIds,
     sourceIds,
     tableAccess: (tableId) => tables.get(tableId),
     allows: (tableId, columnId) => {

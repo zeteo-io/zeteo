@@ -12,10 +12,10 @@ export const SOURCES_READ = "zeteo.sources.read";
 /** Registers, changes, archives and refreshes sources; includes `zeteo.sources.read`. */
 export const SOURCES_WRITE = "zeteo.sources.write";
 
-/** Lists and reads grants. */
+/** Lists and reads grants and the concurrency limits of users and groups. */
 export const GRANTS_READ = "zeteo.grants.read";
 
-/** Creates, changes and removes grants; includes `zeteo.grants.read`. */
+/** Creates, changes and removes grants and concurrency limits; includes `zeteo.grants.read`. */
 export const GRANTS_WRITE = "zeteo.grants.write";
 
 /** Runs queries over the tables and columns the caller is granted. */
@@ -41,6 +41,9 @@ export const AUDIT_EVENTS = {
   grantCreated: "zeteo.grant.created",
   grantUpdated: "zeteo.grant.updated",
   grantRemoved: "zeteo.grant.removed",
+  principalLimitCreated: "zeteo.principal_limit.created",
+  principalLimitUpdated: "zeteo.principal_limit.updated",
+  principalLimitRemoved: "zeteo.principal_limit.removed",
   queryRun: "zeteo.query.run",
   exportStarted: "zeteo.export.started",
   exportRun: "zeteo.export.run",
@@ -59,6 +62,12 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.grantCreated]: "A grant to a table was created",
   [AUDIT_EVENTS.grantUpdated]: "A grant's columns were changed",
   [AUDIT_EVENTS.grantRemoved]: "A grant was removed",
+  [AUDIT_EVENTS.principalLimitCreated]:
+    "A user or group was given its own concurrency limits",
+  [AUDIT_EVENTS.principalLimitUpdated]:
+    "A user's or group's concurrency limits were changed",
+  [AUDIT_EVENTS.principalLimitRemoved]:
+    "A user's or group's own concurrency limits were removed",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
   [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
   [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
@@ -74,6 +83,9 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.grantCreated]: GRANTS_READ,
   [AUDIT_EVENTS.grantUpdated]: GRANTS_READ,
   [AUDIT_EVENTS.grantRemoved]: GRANTS_READ,
+  [AUDIT_EVENTS.principalLimitCreated]: GRANTS_READ,
+  [AUDIT_EVENTS.principalLimitUpdated]: GRANTS_READ,
+  [AUDIT_EVENTS.principalLimitRemoved]: GRANTS_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
   [AUDIT_EVENTS.exportStarted]: RUNS_READ,
   [AUDIT_EVENTS.exportRun]: RUNS_READ,
@@ -110,14 +122,15 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
       {
         name: GRANTS_READ,
         displayName: "Read grants",
-        description: "List and read who may query which tables and columns",
+        description:
+          "List and read who may query which tables and columns, and users' and groups' concurrency limits",
         orgAssignable: false,
       },
       {
         name: GRANTS_WRITE,
         displayName: "Manage grants",
         description:
-          "Create, change and remove grants; also grants Read grants",
+          "Create, change and remove grants and concurrency limits; also grants Read grants",
         orgAssignable: false,
       },
       {

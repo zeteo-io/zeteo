@@ -13,6 +13,10 @@ import type { ExportSink } from "../../engine/export.js";
 import type { Caller } from "../../middleware/auth.js";
 import { leaseKey } from "../../engine/leases.js";
 import { redis } from "../../utils/redis.js";
+import {
+  removePrincipalLimits,
+  setPrincipalLimit,
+} from "../support/principalLimits.js";
 import type {
   OpenLimits,
   PreparedQuery,
@@ -225,6 +229,7 @@ describeEachEngine("runExport", (engine) => {
   });
   afterAll(async () => {
     await closeAllSourcePools();
+    await removePrincipalLimits(users);
     await removeRunsOf(users);
     await removeSources([source.id, capped.id, off.id, zeroCap.id, single.id]);
     await stopTereo();
@@ -450,9 +455,12 @@ describeEachEngine("runExport", (engine) => {
     ]);
   });
 
-  it("runs two exports by one user at once when their limit is 2", async () => {
+  it("runs two exports by one user at once when their own row sets export_concurrency 2", async () => {
     const caller = await grantedCaller();
-    const userLimits = { queryConcurrency: 5, exportConcurrency: 2 };
+    await setPrincipalLimit(
+      { type: "user", id: caller.userId },
+      { export_concurrency: 2 }
+    );
     const gates = [gate(), gate()];
     const running = gates.map((g) =>
       runExport(
@@ -460,12 +468,15 @@ describeEachEngine("runExport", (engine) => {
           caller,
           body: customers(source),
           signal: new AbortController().signal,
-          userLimits,
         },
         recorder({ rows: g.wait }).sink
       )
     );
-    await Promise.all(gates.map((g) => g.reached));
+    // Under the default of 1 the second is refused: fail on that, not hang.
+    const refused = new Promise<never>((_, reject) => {
+      for (const run of running) run.catch(reject);
+    });
+    await Promise.race([Promise.all(gates.map((g) => g.reached)), refused]);
     for (const g of gates) g.open();
     await Promise.all(running);
     const runs = await runsOf([caller.userId]);

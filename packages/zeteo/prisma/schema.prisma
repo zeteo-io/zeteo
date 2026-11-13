@@ -259,6 +259,25 @@ model GrantColumn {
   @@schema("zeteo")
 }
 
+// A user's or group's own concurrency limits, in place of the environment's
+// defaults. The principal is a tereo id, so it has no foreign key.
+// CHECK constraints in the migration: query_concurrency 1..100,
+// export_concurrency 1..10, at least one of them set.
+model PrincipalLimit {
+  id                String        @id @default(uuid(7)) @db.Uuid
+  principalType     PrincipalType @map("principal_type")
+  principalId       String        @map("principal_id") @db.Uuid
+  queryConcurrency  Int?          @map("query_concurrency")
+  exportConcurrency Int?          @map("export_concurrency")
+  createdBy         String        @map("created_by") @db.Uuid
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  @@unique([principalType, principalId])
+  @@map("principal_limits")
+  @@schema("zeteo")
+}
+
 // Every query that passed the shape check. source_id is null when the source
 // did not resolve.
 model QueryRun {

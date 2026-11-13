@@ -26,13 +26,13 @@
       {
         "name": "zeteo.grants.read",
         "displayName": "Read grants",
-        "description": "List and read who may query which tables and columns",
+        "description": "List and read who may query which tables and columns, and users' and groups' concurrency limits",
         "orgAssignable": false
       },
       {
         "name": "zeteo.grants.write",
         "displayName": "Manage grants",
-        "description": "Create, change and remove grants; also grants Read grants",
+        "description": "Create, change and remove grants and concurrency limits; also grants Read grants",
         "orgAssignable": false
       },
       {
@@ -122,6 +122,21 @@
       {
         "eventType": "zeteo.grant.removed",
         "description": "A grant was removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.created",
+        "description": "A user or group was given its own concurrency limits",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.updated",
+        "description": "A user's or group's concurrency limits were changed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.removed",
+        "description": "A user's or group's own concurrency limits were removed",
         "readPermission": "zeteo.grants.read"
       },
       {
