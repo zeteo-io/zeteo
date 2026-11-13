@@ -11,6 +11,7 @@ export function buildPath(
     if (
       typeof value !== "string" ||
       value === "" ||
+      value === "." ||
       value === ".." ||
       FORBIDDEN.test(value)
     ) {

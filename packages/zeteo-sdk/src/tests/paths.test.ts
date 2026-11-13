@@ -12,7 +12,7 @@ describe("buildPath", () => {
     ).toBe("/v1/sources/a%20b/tables/t%251");
   });
 
-  it.each(["", "a/b", "..", "a?b", "a#b", "a\\b"])(
+  it.each(["", "a/b", ".", "..", "a?b", "a#b", "a\\b"])(
     "refuses %j with invalid_id",
     (value) => {
       let error: unknown;

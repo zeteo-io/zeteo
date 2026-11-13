@@ -237,12 +237,64 @@ describe("send", () => {
     expect(stub.requests).toHaveLength(0);
   });
 
-  it("refuses a bad id without a request", async () => {
+  it.each(["a/b", ".", ".."])("refuses id %j without a request", async (id) => {
     const err = await catchError(
-      send(ctx(), { op: "getSource", params: { sourceId: "a/b" } })
+      send(ctx(), { op: "getSource", params: { sourceId: id } })
     );
     expect(err).toMatchObject({ status: null, code: "invalid_id" });
     expect(stub.requests).toHaveLength(0);
+  });
+
+  it.each(["", 5 as unknown as string])(
+    "refuses token %j without a request",
+    async (token) => {
+      const err = await catchError(send(ctx(token), { op: "getCatalog" }));
+      expect(err).toMatchObject({ status: null, code: "invalid_token" });
+      expect(stub.requests).toHaveLength(0);
+    }
+  );
+
+  it("drops a caller-supplied Authorization header", async () => {
+    await send(ctx(), {
+      op: "getCatalog",
+      headers: { authorization: "Bearer x" },
+    });
+    await send(ctx("p-1"), {
+      op: "getCatalog",
+      headers: { AUTHORIZATION: "Bearer x" },
+    });
+    expect(stub.requests.map((r) => r.headers.authorization)).toEqual([
+      "Bearer svc-1",
+      "Bearer p-1",
+    ]);
+  });
+
+  it("throws the original 401 when purging the token fails", async () => {
+    stub.respond(() => ({ status: 401, body: { error: "invalid_token" } }));
+    const transport = {
+      ...client.transport,
+      purgeServiceToken: () => Promise.reject(new Error("redis down")),
+    };
+    const err = await catchError(send({ transport }, { op: "getCatalog" }));
+    expect(err).toMatchObject({ status: 401, code: "invalid_token" });
+    expect(stub.requests).toHaveLength(1);
+  });
+
+  it("takes Retry-After only as a non-negative integer", async () => {
+    const cases: [Record<string, string>, unknown, number | undefined][] = [
+      [{ "retry-after": "7abc" }, {}, undefined],
+      [{ "retry-after": "1.5" }, {}, undefined],
+      [{ "retry-after": "12" }, { retry_after: -1 }, 12],
+      [{}, { retry_after: 1.5 }, undefined],
+      [{}, { retry_after: 4 }, 4],
+    ];
+    for (const [headers, body, expected] of cases) {
+      stub.respond(() => ({ status: 503, headers, body }));
+      const err = await catchError(
+        send(ctx(), { op: "getCatalog", once: true })
+      );
+      expect(err.retryAfter).toBe(expected);
+    }
   });
 
   it("sendRaw returns the untouched response", async () => {
@@ -293,8 +345,11 @@ describe("send", () => {
       if (seen.has(value)) return "[circular]";
       seen.add(value);
       const out: Record<string, unknown> = {};
-      for (const key of Object.getOwnPropertyNames(value)) {
-        out[key] = walk((value as Record<string, unknown>)[key]);
+      for (const key of [
+        ...Object.getOwnPropertyNames(value),
+        ...Object.getOwnPropertySymbols(value),
+      ]) {
+        out[String(key)] = walk((value as Record<PropertyKey, unknown>)[key]);
       }
       return out;
     };

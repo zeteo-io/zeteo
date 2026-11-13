@@ -63,20 +63,21 @@ function fromResponse(response: {
 }): ZeteoError {
   const { status } = response;
   const body: Body = isObject(response.data) ? response.data : {};
-  const retryHeader = Number.parseInt(
-    header(response.headers, "retry-after") ?? "",
-    10
-  );
+  const rawRetry = header(response.headers, "retry-after");
+  const retryHeader =
+    rawRetry !== undefined && /^\d+$/.test(rawRetry)
+      ? Number.parseInt(rawRetry, 10)
+      : undefined;
   const init = {
     status,
     code: str(body.error) ?? `http_${status}`,
     requestId: str(body.request_id) ?? header(response.headers, "x-request-id"),
     retryAfter:
-      typeof body.retry_after === "number"
+      typeof body.retry_after === "number" &&
+      Number.isInteger(body.retry_after) &&
+      body.retry_after >= 0
         ? body.retry_after
-        : Number.isNaN(retryHeader)
-          ? undefined
-          : retryHeader,
+        : retryHeader,
     issues: Array.isArray(body.issues)
       ? (body.issues as { path: string; message: string }[])
       : undefined,
@@ -116,19 +117,30 @@ async function execute(
   options: SendOptions
 ): Promise<DianemoResponse> {
   const { transport, token } = ctx;
+  if (token !== undefined && (typeof token !== "string" || token === "")) {
+    throw new ZeteoError("invalid token", {
+      status: null,
+      code: "invalid_token",
+    });
+  }
   const { names } = transport;
   const op = OPERATIONS[options.op];
   const path = buildPath(op.path, options.params ?? {});
-  const clientName = token
-    ? options.once
-      ? names.personOnce
-      : names.person
-    : options.once
-      ? names.serviceOnce
-      : names.service;
+  const clientName =
+    token !== undefined
+      ? options.once
+        ? names.personOnce
+        : names.person
+      : options.once
+        ? names.serviceOnce
+        : names.service;
 
-  const headers: Record<string, string> = { ...options.headers };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers: Record<string, string> = Object.fromEntries(
+    Object.entries(options.headers ?? {}).filter(
+      ([name]) => !/^authorization$/i.test(name)
+    )
+  );
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
   const requestId = transport.getRequestId?.();
   if (requestId) headers["X-Request-ID"] = requestId;
 
@@ -156,15 +168,25 @@ async function execute(
     }
   };
 
+  let unauthorized: ZeteoError;
   try {
     return await attempt();
   } catch (error) {
-    if (!(error instanceof ZeteoError) || error.status !== 401 || token) {
+    if (
+      !(error instanceof ZeteoError) ||
+      error.status !== 401 ||
+      token !== undefined
+    ) {
       throw error;
     }
+    unauthorized = error;
   }
   // The service token may have been revoked or rotated; fetch a new one, once.
-  await transport.purgeServiceToken();
+  try {
+    await transport.purgeServiceToken();
+  } catch {
+    throw unauthorized;
+  }
   return attempt();
 }
 
