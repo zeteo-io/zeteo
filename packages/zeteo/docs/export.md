@@ -63,9 +63,11 @@ Headers, for both formats:
 | `Trailer` | CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows` |
 | `X-Zeteo-Warnings` | CSV only, when the query has warnings: their codes, comma separated |
 
-The status and headers are sent before the first row is read from the source. Rows are written in
-the batches the source gives, and the next batch waits until the client has taken the last one, so
-a slow client slows the export rather than filling memory.
+The status and headers are sent before the first row is read from the source. Rows are read in
+batches sized by bytes, as a query's are: one row first, then as many rows of the average width so
+far as fit about 1 MB, at most 250. Each batch is written in chunks of about 64 KB, and each chunk
+waits until the client has taken the last, so a slow client slows the export rather than filling
+memory, however wide its rows.
 
 ### NDJSON
 

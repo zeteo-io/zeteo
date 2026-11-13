@@ -14,6 +14,13 @@ const CONTENT_TYPES: Record<ExportFormat, string> = {
   csv: "text/csv; charset=utf-8",
 };
 
+/**
+ * About the most text a batch's lines are joined into before it is written
+ * (one line is never split): each write waits for the buffer to drain, so a
+ * batch is never held twice over, as rows and as one string.
+ */
+export const EXPORT_CHUNK_BYTES = 64 * 1024;
+
 const STATUS_TRAILER = "X-Zeteo-Export-Status";
 const ROWS_TRAILER = "X-Zeteo-Export-Rows";
 
@@ -66,8 +73,9 @@ class ResponseClosedError extends Error {
 /**
  * A sink writing an export to `res` as NDJSON or CSV, gzipped when the
  * request accepts it. Nothing is written or set before `start`, so a refusal
- * before it is an ordinary error response. Each batch is written whole and
- * the next waits until the response (or gzip) buffer has drained. A CSV
+ * before it is an ordinary error response. A batch is written in chunks of
+ * about `EXPORT_CHUNK_BYTES`, each waiting until the response (or gzip)
+ * buffer has drained. A CSV
  * export ends with its status and row count as HTTP trailers, NDJSON in its
  * last line. Every call rejects once the response has closed.
  */
@@ -160,8 +168,12 @@ export const httpSink = (
       let text = "";
       for (const row of batch) {
         text += format === "csv" ? csvRow(row, columns) : ndjsonRow(row);
+        if (text.length >= EXPORT_CHUNK_BYTES) {
+          await write(text);
+          text = "";
+        }
       }
-      await write(text);
+      if (text.length > 0) await write(text);
     },
 
     end: async (tail) => {

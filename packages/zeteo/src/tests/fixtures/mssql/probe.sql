@@ -2,6 +2,8 @@
 -- Postgres one:
 --   probe.wide_rows  a view of 60,000 rows of 2 KB of text, made on the fly,
 --                    far more than a byte cap, for reading a result in part;
+--   probe.huge_rows  a view of 100 rows of 300,000 characters each, made on
+--                    the fly, for sizing batches by the width of their rows;
 --   probe.typed_values  3 rows of SQL Server's own types, for the wire forms;
 --   probe.legacy_times  datetime values off the millisecond (1/300 s ticks)
 --                       and smalldatetime minutes, to filter on as returned;
@@ -24,6 +26,15 @@ CREATE VIEW probe.wide_rows AS
        CROSS JOIN (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) f (d)
     ) g
    WHERE g.n <= 60000;
+GO
+
+CREATE VIEW probe.huge_rows AS
+  SELECT g.n AS id, REPLICATE(CAST('y' AS varchar(max)), 300000) AS filler
+    FROM (
+      SELECT a.d + 10 * b.d + 1 AS n
+        FROM (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) a (d)
+       CROSS JOIN (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) b (d)
+    ) g;
 GO
 
 CREATE TABLE probe.typed_values (

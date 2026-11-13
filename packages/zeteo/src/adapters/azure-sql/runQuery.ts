@@ -1,5 +1,6 @@
 import { mssqlDialect, type MssqlParameter } from "../sql/dialects/mssql.js";
 import { invalidValue } from "../../engine/errors.js";
+import { approxRowBytes } from "../rowSize.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
@@ -262,6 +263,22 @@ const deadlineParent = (
 export const HIGH_WATER_ROWS = 500;
 /** A paused request resumes once fewer rows than this are queued. */
 export const LOW_WATER_ROWS = 100;
+/**
+ * Queued rows over this many bytes (`approxRowBytes`) also pause the request,
+ * so a result of wide rows holds about a batch's bytes, not 500 rows.
+ */
+export const HIGH_WATER_BYTES = 1024 * 1024;
+/** A paused request resumes only once the queue also holds fewer bytes than this. */
+export const LOW_WATER_BYTES = 256 * 1024;
+
+/** The most bytes (`approxRowBytes`) one request of this process has queued at once. For tests. */
+let queuedHighWater = 0;
+export const queuedBytes = {
+  highWater: (): number => queuedHighWater,
+  reset: (): void => {
+    queuedHighWater = 0;
+  },
+};
 
 /** Why the run was stopped on this side. */
 type Stop = "timeout" | "abort" | "fault" | "close";
@@ -273,8 +290,9 @@ const closedError = () => new Error("the row stream is closed");
  * only, its parameters bound with the types the dialect chose. It resolves
  * once the result's columns are known and checked against the plan; the
  * request stays in stream mode, its rows normalised and queued as the driver
- * parses them. Above `HIGH_WATER_ROWS` queued the request is paused, so the
- * server waits on the connection, and it resumes below `LOW_WATER_ROWS`.
+ * parses them. Above `HIGH_WATER_ROWS` or `HIGH_WATER_BYTES` queued the
+ * request is paused, so the server waits on the connection, and it resumes
+ * below both `LOW_WATER_ROWS` and `LOW_WATER_BYTES`.
  * `next` hands out queued rows, waiting for one when none is queued.
  *
  * The run ends by `deadlineAt`, however long it waited for a connection: a
@@ -319,6 +337,8 @@ export const openAzureSqlQuery = async (
 
   /** Normalised rows not yet handed out. */
   let queue: unknown[][] = [];
+  /** The bytes queued, by `approxRowBytes`. */
+  let queued = 0;
   let paused = false;
   let readers: Reader[] | undefined;
   let stop: Stop | undefined;
@@ -396,10 +416,16 @@ export const openAzureSqlQuery = async (
     if (stop || driverError !== undefined) return;
     try {
       if (!readers) throw new Error("a row before its columns");
-      queue.push(
-        raw.map((value, i) => (value === null ? null : readers![i]!(value)))
+      const row = raw.map((value, i) =>
+        value === null ? null : readers![i]!(value)
       );
-      if (queue.length > HIGH_WATER_ROWS && !paused) {
+      queue.push(row);
+      queued += approxRowBytes(row);
+      if (queued > queuedHighWater) queuedHighWater = queued;
+      if (
+        !paused &&
+        (queue.length > HIGH_WATER_ROWS || queued > HIGH_WATER_BYTES)
+      ) {
         paused = true;
         request.pause();
       }
@@ -464,7 +490,13 @@ export const openAzureSqlQuery = async (
   const take = (maxRows: number): unknown[][] => {
     const rows = queue.length <= maxRows ? queue : queue.slice(0, maxRows);
     queue = rows === queue ? [] : queue.slice(maxRows);
-    if (paused && queue.length < LOW_WATER_ROWS && !stop) {
+    for (const row of rows) queued -= approxRowBytes(row);
+    if (
+      paused &&
+      queue.length < LOW_WATER_ROWS &&
+      queued < LOW_WATER_BYTES &&
+      !stop
+    ) {
       paused = false;
       request.resume();
     }

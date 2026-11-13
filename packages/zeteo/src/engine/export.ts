@@ -2,11 +2,12 @@ import { ExportNotEnabledError, QueryTimeoutError } from "../utils/errors.js";
 import type { ColumnType, QueryWarning } from "../adapters/types.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { withSourceConnection } from "../sources/pools.js";
+import { approxRowBytes } from "../adapters/rowSize.js";
 import { loadUserLimits } from "../limits/resolve.js";
 import type { Caller } from "../middleware/auth.js";
 import { performance } from "node:perf_hooks";
+import { nextBatchRows } from "./collect.js";
 import { logger } from "../utils/logger.js";
-import { BATCH_ROWS } from "./collect.js";
 import { QueryError } from "./errors.js";
 import {
   CLIENT_CLOSED,
@@ -166,9 +167,10 @@ const recordEnd = async (
  * what the caller may see, as a query; refuses it unless the source allows
  * exports, and refuses an offset without an `orderBy`; takes the export
  * leases and opens the run on the source, unsorted unless the query names an
- * order (the plan's `defaultOrder`); records it as started, then passes its rows to `sink` in the
- * batches the source gives, up to the source's export cap, and records how
- * it ended.
+ * order (the plan's `defaultOrder`); records it as started, then passes its
+ * rows to `sink` in batches sized by bytes as a query's are (`nextBatchRows`
+ * over `approxRowBytes`), up to the source's export cap, and records how it
+ * ended.
  *
  * Rejects before `sink.start` for anything refused, recorded as a query's
  * refusal is. After it, a rejection means the stream must be cut: the export
@@ -241,6 +243,8 @@ export const runExport = async (
   let runId: string | undefined;
   /** Rows handed to the sink. */
   let sent = 0;
+  /** Rows read from the stream and their bytes, which size the next batch. */
+  const read = { rows: 0, bytes: 0 };
   try {
     const { access, catalog } = await loadCatalogFor(
       input.caller,
@@ -315,12 +319,14 @@ export const runExport = async (
           await toSink(() => sink.start(head));
           for (;;) {
             const batch = await untilHalted(
-              stream.next(Math.min(BATCH_ROWS, cap + 1 - sent))
+              stream.next(Math.min(nextBatchRows(read), cap + 1 - sent))
             );
             if (batch.length === 0) {
               drained = true;
               return { status: "complete" as const, rows: sent };
             }
+            read.rows += batch.length;
+            for (const row of batch) read.bytes += approxRowBytes(row);
             checkRows(plan, stream.columns, batch, source.id);
             const room = cap - sent;
             const kept = batch.length > room ? batch.slice(0, room) : batch;

@@ -1,8 +1,13 @@
 // @module-tag unit
 // @module-tag platform
-import { BATCH_BYTES, BATCH_ROWS, collect } from "../../engine/collect.js";
 import type { RowStream } from "../../adapters/types.js";
 import { describe, expect, it, vi } from "vitest";
+import {
+  BATCH_BYTES,
+  BATCH_ROWS,
+  collect,
+  nextBatchRows,
+} from "../../engine/collect.js";
 
 /** A stream over `rows` that gives at most `per` rows a call, and records what it was asked for. */
 const fakeStream = (rows: unknown[][], per = Infinity) => {
@@ -120,5 +125,26 @@ describe("collect", () => {
       close: async () => undefined,
     };
     await expect(collect(stream, LARGE)).rejects.toBe(failure);
+  });
+});
+
+describe("nextBatchRows", () => {
+  it("asks for one row before any row's width is known", () => {
+    expect(nextBatchRows({ rows: 0, bytes: 0 })).toBe(1);
+  });
+
+  it("asks for as many rows of the average size so far as fit BATCH_BYTES", () => {
+    const average = 300_000;
+    expect(nextBatchRows({ rows: 4, bytes: 4 * average })).toBe(
+      Math.floor(BATCH_BYTES / average)
+    );
+  });
+
+  it("asks for at most BATCH_ROWS, however narrow the rows", () => {
+    expect(nextBatchRows({ rows: 1000, bytes: 1000 })).toBe(BATCH_ROWS);
+  });
+
+  it("asks for at least one row, however wide the rows", () => {
+    expect(nextBatchRows({ rows: 1, bytes: 5 * BATCH_BYTES })).toBe(1);
   });
 });

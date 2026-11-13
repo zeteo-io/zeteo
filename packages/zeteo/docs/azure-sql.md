@@ -174,8 +174,8 @@ a value a query returned finds its row; a bound between two ticks (`.005`) round
 ## Exports and load
 
 Exports ([export.md](export.md)) run as one request each, as a query does, read as their rows
-arrive and held back when the client is slow (the request is paused, so the server waits on the
-connection); they are stopped the same way.
+arrive and held back when the client is slow (the request is paused once about 1 MB or 500 rows
+are read ahead, so the server waits on the connection); they are stopped the same way.
 
 A source's queries and exports run on the database it names. To keep exports and heavy reads off a primary,
 point the source at a readable secondary or a copy that has its own hostname (a geo-replica, a
