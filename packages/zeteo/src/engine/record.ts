@@ -1,10 +1,10 @@
 import type { RunOutcome } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { EXPORT_TIMEOUT_MS, type EntryPoint } from "./limits.js";
 import type { Caller } from "../middleware/auth.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/index.js";
 import { AppError } from "../utils/errors.js";
-import type { EntryPoint } from "./limits.js";
 import { logger } from "../utils/logger.js";
 
 export interface RunRecord {
@@ -136,7 +136,7 @@ export const recordExportStart = (run: ExportStart): Promise<string> =>
 export type ExportEnd = Pick<
   RunRecord,
   "durationMs" | "outcome" | "errorCode" | "truncated"
-> & { rowCount: number };
+> & { rowCount: number | null };
 
 /**
  * Closes an export's run with how it ended, and writes `zeteo.export.run`, in
@@ -146,7 +146,7 @@ export type ExportEnd = Pick<
  */
 export const recordExportEnd = (
   runId: string,
-  run: ExportStart,
+  run: Pick<ExportStart, "sourceId"> & { caller: Pick<Caller, "userId"> },
   end: ExportEnd
 ): Promise<boolean> =>
   withAudit(async (tx, audit) => {
@@ -179,3 +179,34 @@ export const recordExportEnd = (
     });
     return true;
   });
+
+/**
+ * Closes an export whose process died: `failed` with `interrupted`, its row
+ * count kept, its duration the time since it started (never more than the
+ * export limit). It goes through `recordExportEnd`, so an export ending at
+ * this moment and this call cannot both write.
+ */
+export const recordInterruptedExport = (
+  row: {
+    id: string;
+    userId: string;
+    sourceId: string;
+    rowCount: number | null;
+    createdAt: Date;
+  },
+  now: Date
+): Promise<boolean> =>
+  recordExportEnd(
+    row.id,
+    { caller: { userId: row.userId }, sourceId: row.sourceId },
+    {
+      durationMs: Math.min(
+        Math.max(now.getTime() - row.createdAt.getTime(), 0),
+        EXPORT_TIMEOUT_MS
+      ),
+      rowCount: row.rowCount,
+      outcome: "failed",
+      errorCode: "interrupted",
+      truncated: false,
+    }
+  );

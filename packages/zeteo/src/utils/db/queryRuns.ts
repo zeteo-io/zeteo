@@ -25,3 +25,39 @@ export const listPage = async (options: {
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
+
+/** Exports still `running` that started before `cutoff`, oldest first, after the `after` id. */
+export const listRunningExportsBefore = (
+  cutoff: Date,
+  after: string | undefined,
+  limit: number
+) =>
+  prisma.queryRun.findMany({
+    where: {
+      outcome: "running",
+      entryPoint: "export",
+      createdAt: { lt: cutoff },
+      sourceId: { not: null },
+      ...(after && { id: { gt: after } }),
+    },
+    orderBy: { id: "asc" },
+    take: limit,
+  });
+
+/** Deletes up to `limit` runs created before `cutoff`, never a `running` one; resolves how many. */
+export const deleteFinishedBefore = async (
+  cutoff: Date,
+  limit: number
+): Promise<number> => {
+  const ids = await prisma.queryRun.findMany({
+    where: { createdAt: { lt: cutoff }, outcome: { not: "running" } },
+    orderBy: { id: "asc" },
+    take: limit,
+    select: { id: true },
+  });
+  if (ids.length === 0) return 0;
+  const { count } = await prisma.queryRun.deleteMany({
+    where: { id: { in: ids.map((r) => r.id) }, outcome: { not: "running" } },
+  });
+  return count;
+};

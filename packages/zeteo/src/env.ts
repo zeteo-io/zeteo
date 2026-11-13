@@ -92,6 +92,8 @@ const EnvFields = z
     DATABASE_URL: z.string(),
     REDIS_URL: z.string(),
     // Postgres connections per process.
+    // Days a query or export run is kept in `query_runs`; 0 keeps them all.
+    QUERY_RUNS_RETENTION_DAYS: int(0, 3650, 90),
     DB_POOL_MAX: int(1, 1000, 10),
     DB_POOL_MIN: int(0, 1000, 0),
     // How long a query waits for a free connection before it fails.

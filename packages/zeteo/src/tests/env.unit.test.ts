@@ -18,6 +18,20 @@ describe("env schema", () => {
     });
   });
 
+  it("defaults QUERY_RUNS_RETENTION_DAYS to 90 and takes 0 to 3650 only", () => {
+    expect(parseEnv(base).QUERY_RUNS_RETENTION_DAYS).toBe(90);
+    expect(
+      parseEnv({ ...base, QUERY_RUNS_RETENTION_DAYS: "0" })
+        .QUERY_RUNS_RETENTION_DAYS
+    ).toBe(0);
+    expect(() =>
+      parseEnv({ ...base, QUERY_RUNS_RETENTION_DAYS: "3651" })
+    ).toThrow(/QUERY_RUNS_RETENTION_DAYS/);
+    expect(() =>
+      parseEnv({ ...base, QUERY_RUNS_RETENTION_DAYS: "-1" })
+    ).toThrow(/QUERY_RUNS_RETENTION_DAYS/);
+  });
+
   it("refuses a PORT that is not a number", () => {
     expect(() => parseEnv({ ...base, PORT: "abc" })).toThrow(/PORT/);
   });

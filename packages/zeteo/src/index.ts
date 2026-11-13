@@ -2,6 +2,7 @@ import "./preload.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
+import { startRunsHousekeepingJob } from "./jobs/runsHousekeeping.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { stopSourcePools } from "./sources/pools.js";
@@ -25,7 +26,7 @@ export interface ServerInstance {
 }
 
 export interface AppServerOptions {
-  /** Runs the scheduled catalogue refresh; off for the test suite's shared server, whose sweeps would touch other tests' sources. */
+  /** Runs the scheduled catalogue refresh and the runs housekeeping; off for the test suite's shared server, whose sweeps would touch other tests' sources. */
   refreshJob?: boolean;
 }
 
@@ -37,6 +38,7 @@ export function createAppServer(
   let running = false;
   let stopping: Promise<void> | null = null;
   let stopRefreshJob: (() => Promise<void>) | null = null;
+  let stopHousekeepingJob: (() => Promise<void>) | null = null;
 
   return {
     start: async () => {
@@ -62,7 +64,10 @@ export function createAppServer(
           resolve();
         });
       });
-      if (refreshJob) stopRefreshJob = startRefreshJob();
+      if (refreshJob) {
+        stopRefreshJob = startRefreshJob();
+        stopHousekeepingJob = startRunsHousekeepingJob();
+      }
     },
 
     stop: () => {
@@ -99,6 +104,10 @@ export function createAppServer(
         await step("refresh job", async () => {
           await stopRefreshJob?.();
           stopRefreshJob = null;
+        });
+        await step("runs housekeeping job", async () => {
+          await stopHousekeepingJob?.();
+          stopHousekeepingJob = null;
         });
         await step("source pools", () => stopSourcePools(SOURCE_POOL_DRAIN_MS));
         await step("tereo", stopTereo);
