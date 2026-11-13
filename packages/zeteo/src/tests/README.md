@@ -15,10 +15,11 @@ and lists the offending paths when one breaks.
 | entry points `index.ts`, `app.ts`         | `index.test.ts`, `app.test.ts`                                     |
 | behaviour spanning several routes         | `flows/<area>/<flow>.test.ts` (one folder per area, not nested)    |
 | checks on the repo's own conventions      | `conventions/<name>.unit.test.ts`                                  |
+| pure test helper `support/pure/x.ts`      | `support/pure/x.unit.test.ts`, beside it                           |
 
 Not tests: `setup/` (`globalSetup.ts`, `setup.ts`, `testEnv.ts`, `tags.ts`), `support/` (shared
-helpers; `support/pure/` holds those with no database, server or Redis), `fixtures/` (static data and
-child-process scripts).
+helpers; `support/pure/` holds those with no database, server or Redis, and the unit tests of those
+that need one), `fixtures/` (static data and child-process scripts).
 
 A test that exercises one route belongs to that route even if it sets up state through others.
 `flows/` is for tests whose subject is a sequence across routes.

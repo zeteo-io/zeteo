@@ -1,6 +1,6 @@
 // @module-tag int
 // @module-tag platform
-import { bufferedStream } from "../../../../adapters/bufferedStream.js";
+import { bufferedStream } from "../../../support/pure/bufferedStream.js";
 import { closeAllSourcePools } from "../../../../sources/pools.js";
 import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";

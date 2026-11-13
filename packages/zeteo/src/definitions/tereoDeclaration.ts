@@ -23,7 +23,8 @@ export const DATA_READ = "zeteo.data.read";
 
 /**
  * Exports what a query over the caller's grants returns, up to the source's
- * export cap; the caller also needs `zeteo.data.read`.
+ * export cap. `POST /v1/export` needs only this permission, not
+ * `zeteo.data.read` as well.
  */
 export const DATA_EXPORT = "zeteo.data.export";
 

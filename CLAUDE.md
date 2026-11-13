@@ -32,7 +32,7 @@ One ordinary package:
 
 | Path | Holds |
 |------|-------|
-| `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop) and the Express app (`createApp`, which mounts the MCP router, behind Host and Origin checks, when MCP is on) |
+| `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop, whose first steps are `drainRequests`: running exports stopped, then HTTP drained) and the Express app (`createApp`, which mounts the MCP router, behind Host and Origin checks, when MCP is on) |
 | `src/env.ts` | The one env schema. `src/preload.ts` must be the first import of every entry point |
 | `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.data.export`, `zeteo.runs.read`, `zeteo.mcp.use`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin`, `zeteo_user` and `zeteo_mcp_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
 | `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerFromAuth`, `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |

@@ -1,6 +1,6 @@
 // @module-tag unit
 // @module-tag platform
-import { bufferedStream } from "../../adapters/bufferedStream.js";
+import { bufferedStream } from "./bufferedStream.js";
 import { describe, expect, it, vi } from "vitest";
 
 const COLUMNS = [{ name: "id", type: "number" as const }];

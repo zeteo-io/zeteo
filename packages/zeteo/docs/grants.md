@@ -109,5 +109,5 @@ the user (the same groups as for grants); otherwise the environment's default. A
 replaces the default even when it is lower. A change applies to the runs that start after it.
 
 Every source keeps its own limits on top (`query_concurrency`, `export_concurrency`,
-[sources.md](sources.md#the-source)): a user allowed ten queries still waits for a slot on a source
-that runs five.
+[sources.md](sources.md#the-source)): a user allowed ten queries is still refused at once with
+`429 source_busy` when a source that runs five already has five running; nothing waits for a slot.

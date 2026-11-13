@@ -28,7 +28,8 @@ Three things must all allow it:
 `?format=` is `ndjson` (the default) or `csv`; any other value, or any other query parameter, is
 `400 invalid_request`. The body is a query in the source's language, at most 64 KB.
 
-Everything refused before the first row is an ordinary JSON error response with the codes of
+Everything refused before the stream starts (its head: the status line, the headers and, in
+NDJSON, the first line) is an ordinary JSON error response with the codes of
 `POST /v1/query`, plus `403 export_not_enabled`, `429 too_many_exports` and `422 invalid_order` at
 path `["offset"]` (below). Once the status line has been sent no error body can follow: a failure
 after that cuts the connection (see *How a stream ends*).
@@ -63,7 +64,9 @@ Headers, for both formats:
 | `Trailer` | CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows` |
 | `X-Zeteo-Warnings` | CSV only, when the query has warnings: their codes, comma separated |
 
-The status and headers are sent before the first row is read from the source. Rows are read in
+The status and headers are sent once the source has started the result: on Postgres once its first
+row has been read (or the result is known to be empty), so a query slow to make its first row holds
+them back; on Azure SQL once the result's columns are known. Rows are read in
 batches sized by bytes, as a query's are: one row first, then as many rows of the average width so
 far as fit about 1 MB, at most 250. Each batch is written in chunks of about 64 KB, and each chunk
 waits until the client has taken the last, so a slow client slows the export rather than filling
@@ -92,7 +95,7 @@ field holding `"`, `,`, CR or LF is quoted, with `"` doubled.
 - A null is an empty field; an empty string is `""`, so the two read back apart.
 - Numbers, booleans, dates and timestamps are written as their wire forms (64-bit integers and
   decimals with all their digits). A json value is written as its JSON text.
-- **The formula guard.** A text or json cell that starts with `=`, `+`, `-`, `@`, tab or CR is
+- **The formula guard.** A text, json or `other` cell that starts with `=`, `+`, `-`, `@`, tab or CR is
   written with a leading `'`, so a spreadsheet reads it as text instead of running it as a
   formula. Numbers, dates and timestamps are never guarded (`-42` stays `-42`). CSV text is
   therefore not byte-exact: a value that started with one of those characters comes back with a
@@ -126,8 +129,10 @@ recorded `failed` with `client_closed`.
   `limit`. There is no byte cap.
 - **Time.** 10 minutes from the start to the last row, time spent waiting on a slow client
   included; the source's own `timeout_ms` does not apply. Past it the query is cancelled on the
-  source and the stream cut (recorded `timeout`, `query_timeout`); one that runs out before its
-  first row is an ordinary `504 query_timeout`.
+  source and the stream cut (recorded `timeout`, `query_timeout`); one that runs out before the
+  stream starts (its head) is an ordinary `504 query_timeout`. On Postgres an export reads inside
+  one transaction, idle between fetches while its client is slow, so a source's
+  `idle_in_transaction_session_timeout` cuts an export whose reader is slower than it.
 - **Concurrency.** Counted in Redis across replicas, apart from queries: per user
   `USER_EXPORT_CONCURRENCY` at once (1 to 10, default 1), unless the user or one of their groups
   has its own limit ([grants.md](grants.md#concurrency-limits)), one more being
@@ -144,7 +149,7 @@ recorded `failed` with `client_closed`.
 An export goes in the run log ([querying.md](querying.md#the-run-log)) with entry point `export`,
 and never with any of its rows.
 
-- **Refused before it starts** (any `4xx`, or a failure before the first row): one `query_runs`
+- **Refused before it starts** (any `4xx`, or a failure before the stream starts, its head): one `query_runs`
   row and one `zeteo.export.run` audit entry (verb `CREATE`), exactly as a refused query.
 - **Started**: just before its head is sent, a row with outcome `running` and a
   `zeteo.export.started` entry (`{ source_id, entry_point }`), in one transaction. When it ends
@@ -205,4 +210,4 @@ Beyond those of `POST /v1/query` ([querying.md](querying.md#errors)):
 | 422 | `invalid_order` | `offset` above 0 without `orderBy`, at path `["offset"]` |
 | 429 | `too_many_exports` / `source_busy` | the user's or the source's export limit is reached |
 | 503 | `temporarily_unavailable` | Redis, group membership or the source briefly unavailable, or the service is shutting down |
-| 504 | `query_timeout` | the 10 minutes ran out before the first row |
+| 504 | `query_timeout` | the 10 minutes ran out before the stream started (its head) |

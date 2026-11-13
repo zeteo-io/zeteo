@@ -1311,7 +1311,7 @@ paths:
         the source makes them, and a capped export is an arbitrary subset. `offset` above 0 needs
         an `orderBy` (`422 invalid_order` at path `["offset"]`).
 
-        **CSV text.** A text or json cell starting with `=`, `+`, `-`, `@`, tab or CR is written
+        **CSV text.** A text, json or `other` cell starting with `=`, `+`, `-`, `@`, tab or CR is written
         with a leading `'`, so spreadsheets read it as text; CSV is therefore not byte-exact.
         NDJSON is.
 
@@ -1321,7 +1321,7 @@ paths:
 
         **Record.** A refused export is recorded as a refused query is, with entry point `export`
         and a `zeteo.export.run` audit entry. One that starts is recorded as `running` with a
-        `zeteo.export.started` entry before its first row, and closed with a `zeteo.export.run`
+        `zeteo.export.started` entry before its head is sent, and closed with a `zeteo.export.run`
         entry when it ends. See `docs/export.md`.
 
         **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
@@ -1477,7 +1477,7 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '502':
           description: |
-            Bad gateway - `query_failed` or `source_unreachable`, before the first row. The
+            Bad gateway - `query_failed` or `source_unreachable`, before the stream starts (its head). The
             database's own error text is never returned.
           content:
             application/json:
@@ -1498,7 +1498,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '504':
-          description: Gateway timeout - `query_timeout`, the export's time ran out before its first row
+          description: Gateway timeout - `query_timeout`, the export's time ran out before the stream started (its head)
           content:
             application/json:
               schema:

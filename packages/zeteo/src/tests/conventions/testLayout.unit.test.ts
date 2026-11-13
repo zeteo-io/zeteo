@@ -40,6 +40,7 @@ describe("path mapping", () => {
     "preload.test.ts",
     "flows/platform/startup.test.ts",
     "conventions/testLayout.unit.test.ts",
+    "support/pure/bufferedStream.unit.test.ts",
   ])("maps %s", (rel) => {
     expect(mapTestPath(rel)).toBeNull();
   });
@@ -49,6 +50,7 @@ describe("path mapping", () => {
     ["jobs/jobs.test.ts", "no src/jobs/jobs.ts"],
     ["utils/db/db.test.ts", "no src/utils/db/db.ts"],
     ["utils/nope.test.ts", "no src/utils/nope.ts"],
+    ["support/pure/nope.unit.test.ts", "no support/pure/nope.ts beside it"],
     ["routes/v1/admin/users/user/user.misc.test.ts", "undeclared name segment"],
     [
       "routes/v1/admin/users/user/user.validation.put.patch.test.ts",

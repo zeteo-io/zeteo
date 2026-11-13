@@ -130,8 +130,10 @@ export const statusFromTereo = async (
 
 /**
  * Whether a grant's principal still exists in tereo. A user is `orphaned`
- * when tereo has no such user. A group's existence cannot be read, so it is
- * `active` or, when tereo refuses or has none, `unknown`.
+ * when tereo has no such user. A group principal is `unknown`: zeteo cannot
+ * read a group itself with a service's access, so tereo refuses (or has
+ * none). It would be `active` only were tereo to let the service read the
+ * group, as test mode does.
  */
 export const principalStatus = async (
   type: "user" | "group",

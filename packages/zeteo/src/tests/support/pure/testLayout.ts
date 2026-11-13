@@ -95,7 +95,8 @@ function isRouterFolder(dir: string): boolean {
 /**
  * Why `rel` (a test path under `src/tests`) maps to no source, or `null` when
  * it does: a source file, a router folder, the root router (`routes/routes`),
- * a flow, or a convention.
+ * a flow, a convention, or a pure helper of the tests' own beside it
+ * (`support/pure/<name>.unit.test.ts` for `support/pure/<name>.ts`).
  */
 export function mapTestPath(rel: string): string | null {
   if (!rel.endsWith(".test.ts")) return "not a *.test.ts file";
@@ -111,6 +112,11 @@ export function mapTestPath(rel: string): string | null {
       deeper.length === 0
       ? null
       : "flows/<area>/ must be an area folder, not nested";
+  }
+  if (dir === "support/pure") {
+    return existsSync(path.join(TESTS_DIR, dir, `${base}.ts`))
+      ? null
+      : `no ${dir}/${base}.ts beside it`;
   }
   const srcDir = dir === "." ? "" : dir;
   if (existsSync(path.join(SRC_DIR, srcDir, `${base}.ts`))) return null;

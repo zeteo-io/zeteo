@@ -1,4 +1,4 @@
-import type { RowStream } from "./types.js";
+import type { RowStream } from "../../../adapters/types.js";
 
 /**
  * A RowStream over rows already in memory; `close` calls `onClose` once,
