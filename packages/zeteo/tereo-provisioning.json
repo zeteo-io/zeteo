@@ -52,6 +52,12 @@
         "displayName": "Read query runs",
         "description": "List the record of queries that were run",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.mcp.use",
+        "displayName": "Use over MCP",
+        "description": "Use zeteo through an AI connected over MCP",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
@@ -66,7 +72,8 @@
           "zeteo.grants.write",
           "zeteo.data.read",
           "zeteo.data.export",
-          "zeteo.runs.read"
+          "zeteo.runs.read",
+          "zeteo.mcp.use"
         ]
       },
       {
@@ -75,6 +82,15 @@
         "description": "Queries the data they are granted",
         "permissions": [
           "zeteo.data.read"
+        ]
+      },
+      {
+        "name": "zeteo_mcp_user",
+        "displayName": "Zeteo MCP user",
+        "description": "Queries the data they are granted, also through an AI connected over MCP",
+        "permissions": [
+          "zeteo.data.read",
+          "zeteo.mcp.use"
         ]
       }
     ],

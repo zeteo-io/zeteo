@@ -1,19 +1,24 @@
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { adapterFor, NoAdapterError } from "../adapters/index.js";
-import { LIMIT_PROFILES, runLimits } from "../engine/limits.js";
 import type { SourceType } from "../adapters/types.js";
 import { logger } from "../utils/logger.js";
+import {
+  LIMIT_PROFILES,
+  runLimits,
+  type QueryEntryPoint,
+} from "../engine/limits.js";
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
  * What a caller may discover about one source: the names a query is written
  * with, and nothing else. Ids, native types, settings and every name outside
- * their grants stay out.
+ * their grants stay out. The row limits are those of `entryPoint`.
  */
 export const visibleCatalogView = (
   catalog: VisibleCatalog,
-  languageSchema: unknown
+  languageSchema: unknown,
+  entryPoint: QueryEntryPoint = "api"
 ) => {
   const { source } = catalog;
   const { language } = adapterFor(source.type);
@@ -41,8 +46,12 @@ export const visibleCatalogView = (
       schema: languageSchema,
     },
     limits: {
-      default_rows: runLimits("api", undefined, source).maxRows,
-      max_rows: runLimits("api", LIMIT_PROFILES.api.maxRows, source).maxRows,
+      default_rows: runLimits(entryPoint, undefined, source).maxRows,
+      max_rows: runLimits(
+        entryPoint,
+        LIMIT_PROFILES[entryPoint].maxRows,
+        source
+      ).maxRows,
       timeout_ms: source.timeoutMs,
       export: {
         enabled: exports,
@@ -78,13 +87,18 @@ export const visibleCatalogView = (
  */
 export const visibleCatalogViews = (
   catalogs: VisibleCatalog[],
-  languageSchemaOf: (type: SourceType) => unknown
+  languageSchemaOf: (type: SourceType) => unknown,
+  entryPoint: QueryEntryPoint = "api"
 ) => {
   const views = [];
   for (const catalog of catalogs) {
     try {
       views.push(
-        visibleCatalogView(catalog, languageSchemaOf(catalog.source.type))
+        visibleCatalogView(
+          catalog,
+          languageSchemaOf(catalog.source.type),
+          entryPoint
+        )
       );
     } catch (err) {
       if (!(err instanceof NoAdapterError)) throw err;

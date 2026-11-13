@@ -81,3 +81,6 @@ services:
       DATABASE_URL: postgresql://zeteo:zeteo@postgres:5432/zeteo_test
       REDIS_URL: redis://redis:6379
       TEST_MSSQL_URL: mssql://sa:Zeteo-test-1@mssql:1433
+      # The shared server serves MCP to this client; testEnv.ts names the same.
+      MCP_ALLOWED_CLIENTS: zeteo-test-connector
+      MCP_ALLOWED_ORIGINS: https://connector.example.com

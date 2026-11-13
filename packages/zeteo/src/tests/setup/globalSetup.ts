@@ -13,6 +13,7 @@ const PROBE_SQL = path.resolve(
 );
 
 let server: ServerInstance | null = null;
+let stubCore: { coreUrl: string; close(): Promise<void> } | null = null;
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -132,9 +133,14 @@ export async function setup() {
   await redis.flushdb();
   await redis.quit();
 
+  // Serves only tereo's authorization-server metadata, which MCP fetches at start.
+  const { startStubCore } = await import("@tereo-io/mcp/testing");
+  stubCore = await startStubCore();
+
   const { createAppServer } = await import("../../index.js");
   server = createAppServer(Number(process.env.PORT ?? 4201), {
     refreshJob: false,
+    mcpCoreUrl: stubCore.coreUrl,
   });
   await server.start();
 }
@@ -142,6 +148,8 @@ export async function setup() {
 export async function teardown() {
   await server?.stop();
   server = null;
+  await stubCore?.close();
+  stubCore = null;
   // A lingering ioredis socket can keep the process alive. Force the exit
   // if so, keeping the exit code vitest sets: an unconditional exit(0)
   // would report a failing run as passing.

@@ -4,7 +4,7 @@
 
 zeteo (Greek zēteō, 'to seek') is a query service for apps built on tereo: admins register databases as sources and grant tables and columns to tereo users and groups; people query through a validated JSON query language over HTTP or through an AI connected over MCP.
 
-The repository has all of it except the MCP connection: a service with sign-in through
+The repository has all of it except querying over MCP: a service with sign-in through
 [tereo](https://github.com/tereo-io/tereo), the sources admin API (register a Postgres or Azure SQL
 database, see [docs/sources.md](packages/zeteo/docs/sources.md)), the catalogue of each source's
 tables, columns and relations ([docs/catalog.md](packages/zeteo/docs/catalog.md)), grants
@@ -63,4 +63,8 @@ and changes write audit entries to tereo's outbox.
 - **Export.** `POST /v1/export?format=ndjson|csv` streams the result of the same query, up to the
   source's export cap, from sources whose exports are on; gzipped when the client accepts it.
 
-Not there yet: the MCP connection and row filters on grants.
+- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves an AI signed in through tereo three
+  read-only tools: `list_sources`, `list_tables` and `describe_table`. A user sees them only with
+  `zeteo.mcp.use`, and each needs `zeteo.data.read` too.
+
+Not there yet: a query tool over MCP and row filters on grants.

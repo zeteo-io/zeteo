@@ -74,6 +74,39 @@ const allowedHosts = z
     }
   });
 
+/** A comma-separated list, entries trimmed and empty ones dropped; empty by default. */
+const commaList = z
+  .string()
+  .default("")
+  .transform((val) =>
+    val
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+
+/** Browser origins: scheme, host and optional port, nothing else. */
+const originList = commaList.superRefine((origins, ctx) => {
+  for (const origin of origins) {
+    let url: URL | undefined;
+    try {
+      url = new URL(origin);
+    } catch {
+      url = undefined;
+    }
+    if (
+      !url ||
+      (url.protocol !== "https:" && url.protocol !== "http:") ||
+      url.origin !== origin.replace(/\/$/, "")
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: `${JSON.stringify(origin)} is not an origin such as "https://app.example.com"`,
+      });
+    }
+  }
+});
+
 /** An integer setting within [min, max]: a duration, a count or a port. */
 const int = (min: number, max: number, fallback: number) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
@@ -137,6 +170,16 @@ const EnvFields = z
     USER_EXPORT_CONCURRENCY: int(1, 10, 1),
     // On SIGTERM, how long in-flight requests get before they are cut off.
     SHUTDOWN_TIMEOUT_SECONDS: int(1, 3600, 25),
+    // OAuth client ids of the MCP connectors (one login client per AI, created
+    // in tereo); tokens issued to any other client are refused at /mcp. Empty
+    // turns MCP off: the endpoint is not served.
+    MCP_ALLOWED_CLIENTS: commaList,
+    // Browser origins allowed to call /mcp, compared by hostname. A request
+    // from any other origin is refused; one without an Origin (an AI's
+    // server) is not checked.
+    MCP_ALLOWED_ORIGINS: originList,
+    // MCP tool calls one user may make per minute, across every replica.
+    MCP_RATE_LIMIT_PER_MINUTE: int(1, 10_000, 120),
   })
   .superRefine((val, ctx) => {
     if (val.DB_POOL_MIN > val.DB_POOL_MAX) {

@@ -16,8 +16,10 @@ source, with encrypted settings, a network allowlist, a login check and per-sour
 pools), the catalogue of each source (a refresh reads tables, columns and foreign keys;
 descriptions; discovered and declared relations), grants of tables and columns to users and groups
 (`/v1/grants`), querying (`GET /v1/catalog`, `POST /v1/query`, `GET /v1/runs`) and the streaming
-export (`POST /v1/export`, NDJSON or CSV). There is no MCP connection or row filter yet. Do not
-describe or rely on those as existing.
+export (`POST /v1/export`, NDJSON or CSV), and an MCP endpoint (`/mcp`, on when
+`MCP_ALLOWED_CLIENTS` is set) with three discovery tools: `list_sources`, `list_tables`,
+`describe_table`. There is no MCP query tool or row filter yet. Do not describe or rely on those as
+existing.
 
 Read [README.md](README.md) first. The design and the plans are in `docs/superpowers/` (kept out of
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the
@@ -29,10 +31,11 @@ One ordinary package:
 
 | Path | Holds |
 |------|-------|
-| `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop) and the Express app |
+| `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop) and the Express app (`createApp`, which mounts the MCP router, behind Host and Origin checks, when MCP is on) |
 | `src/env.ts` | The one env schema. `src/preload.ts` must be the first import of every entry point |
-| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.data.export`, `zeteo.runs.read`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin` and `zeteo_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
-| `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |
+| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.data.export`, `zeteo.runs.read`, `zeteo.mcp.use`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin`, `zeteo_user` and `zeteo_mcp_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
+| `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerFromAuth`, `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |
+| `src/mcp/` | The MCP server on `@tereo-io/mcp` (vendored, see `vendor/README.md`): `index.ts` (`createMcpRouter`, null when `MCP_ALLOWED_CLIENTS` is empty), `tools.ts` (the discovery tools, each gated on `zeteo.mcp.use` and requiring `zeteo.data.read`, built from the caller's visible catalogue only), `caller.ts`, `errors.ts` (`asToolError`: zeteo's error body as a tool error), `redis.ts` (the rate limiter's Redis, every call bounded) |
 | `src/sources/network.ts` | The one decision whether zeteo may connect to a host: `SOURCE_ALLOWED_HOSTS` rules (`parseAllowedHosts`, parsed at start by `env.ts`) and `resolveAllowed`, which resolves once and returns the address to dial. Link-local, metadata (including Azure's, Alibaba's and Oracle's outside link-local), unspecified and multicast addresses are refused whatever the rules say |
 | `src/adapters/` | `SourceAdapter` (settings schema, redaction, connect, login check, schema read, query language, `prepare`, and `openQuery`, a pull-based row stream) per source type, `postgres/` and `azure-sql/`; `adapterFor`. `sql/` is the SQL query language shared by both: `language.ts` (the JSON Schema and parsing), `plan.ts` (the planner over a visible catalogue), `compile.ts` and `dialect.ts` with `dialects/` (the Postgres and SQL Server SQL), `values.ts` (wire forms) |
 | `src/sources/` | `service.ts` (create, update, archive, test: the checks, sealing and audit), `pools.ts` (`withSourceConnection`: one pool per source per process, checked against the source's row on every call, retired on a settings change, archive, `source_unreachable` or idle; `stopSourcePools` at shutdown), `connect.ts` (reads settings, `connectChecked`), `network.ts` |
