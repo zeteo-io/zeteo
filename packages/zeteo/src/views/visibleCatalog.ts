@@ -1,8 +1,8 @@
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
+import { adapterFor, NoAdapterError } from "../adapters/index.js";
 import { LIMIT_PROFILES, runLimits } from "../engine/limits.js";
 import type { SourceType } from "../adapters/types.js";
 import { queryNameOf } from "../adapters/sql/plan.js";
-import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
 
 const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
@@ -77,16 +77,17 @@ export const visibleCatalogViews = (
 ) => {
   const views = [];
   for (const catalog of catalogs) {
-    if (!adapterFor(catalog.source.type)) {
+    try {
+      views.push(
+        visibleCatalogView(catalog, languageSchemaOf(catalog.source.type))
+      );
+    } catch (err) {
+      if (!(err instanceof NoAdapterError)) throw err;
       logger.warn(
         { source: catalog.source.slug, type: catalog.source.type },
         "Skipping a source whose type has no adapter"
       );
-      continue;
     }
-    views.push(
-      visibleCatalogView(catalog, languageSchemaOf(catalog.source.type))
-    );
   }
   return views;
 };
