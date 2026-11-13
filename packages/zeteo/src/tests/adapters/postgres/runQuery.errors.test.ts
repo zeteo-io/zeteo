@@ -3,7 +3,6 @@
 import { prepareAzureSqlQuery } from "../../../adapters/azure-sql/runQuery.js";
 import { fixtureSettings, fixtureTarget } from "../../support/fixtureDb.js";
 import { PostgresConnection } from "../../../adapters/postgres/connect.js";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { runPlan, type TestLimits } from "../../support/runPlan.js";
@@ -25,10 +24,20 @@ import {
 } from "../../support/mssqlFixture.js";
 import {
   AppError,
+  QueryFailedError,
   QueryTimeoutError,
   ServiceUnavailableError,
   SourceUnreachableError,
 } from "../../../utils/errors.js";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const LIMITS: TestLimits = {
   maxRows: 1000,
@@ -451,6 +460,162 @@ describe("postgres openQuery: the row stream", () => {
       );
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(AppError);
+  });
+
+  describe("a connection reused after a failed run", { tags: ["slow"] }, () => {
+    const SECOND_RUN_ROWS = 1500;
+    const BATCH = 250;
+    /** `n` ids in order, slow to read only because its reader is. */
+    const series = new PostgresPreparedQuery(
+      idsOf("sales", "accounts"),
+      `SELECT g AS c0 FROM generate_series(1, ${SECOND_RUN_ROWS}) g ORDER BY g`,
+      []
+    );
+    const sleeper = new PostgresPreparedQuery(
+      idsOf("sales", "accounts"),
+      `SELECT 1 AS c0 /* reuse_sleeper */ FROM pg_sleep(3)`,
+      []
+    );
+    const FIRST_RUN_MS = 800;
+
+    const uncaught: unknown[] = [];
+    const record = (err: unknown) => uncaught.push(err);
+    beforeEach(() => {
+      uncaught.length = 0;
+      process.on("uncaughtException", record);
+    });
+    afterEach(() => {
+      process.off("uncaughtException", record);
+    });
+
+    /**
+     * On the same one-connection pool, a second run read slowly until well
+     * past the first run's deadline plus the client's 2 s grace.
+     */
+    const readSlowlyPastFirstDeadline = async (
+      conn: PostgresConnection,
+      firstDeadlineAt: number
+    ) => {
+      const stream = await conn.openQuery(series, limitsOf(30_000));
+      const rows: unknown[][] = [];
+      try {
+        for (;;) {
+          const batch = await Promise.race([
+            stream.next(BATCH),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error("the read hung")), 5000)
+            ),
+          ]);
+          if (batch.length === 0) break;
+          rows.push(...batch);
+          // Eight batches, 700 ms apart: the read straddles the moment the
+          // first run's client timer would fire.
+          await new Promise((r) => setTimeout(r, 700));
+        }
+      } finally {
+        await stream.close();
+      }
+      expect(performance.now()).toBeGreaterThan(firstDeadlineAt + 2500);
+      return rows;
+    };
+
+    const expectEveryRow = (rows: unknown[][]) => {
+      expect(rows).toHaveLength(SECOND_RUN_ROWS);
+      expect(rows.at(-1)).toEqual([SECOND_RUN_ROWS]);
+      expect(uncaught).toEqual([]);
+    };
+
+    it("after a run refused invalid_value", async () => {
+      const conn = await connectWith();
+      const limits = limitsOf(FIRST_RUN_MS);
+      const refused = await conn
+        .openQuery(
+          new PostgresPreparedQuery(
+            idsOf("sales", "accounts"),
+            "SELECT $1::int AS c0",
+            ["x"]
+          ),
+          limits
+        )
+        .then(
+          () => undefined,
+          (e: unknown) => e
+        );
+      expect(refused).toMatchObject({ code: "invalid_value" });
+      expect(inUse(conn)).toBe(0);
+      expect(conn.pool.totalCount).toBe(1);
+      expectEveryRow(
+        await readSlowlyPastFirstDeadline(conn, limits.deadlineAt)
+      );
+    });
+
+    it("after a run that timed out", async () => {
+      const conn = await connectWith();
+      const limits = limitsOf(FIRST_RUN_MS);
+      await expect(conn.openQuery(sleeper, limits)).rejects.toBeInstanceOf(
+        QueryTimeoutError
+      );
+      expect(inUse(conn)).toBe(0);
+      expectEveryRow(
+        await readSlowlyPastFirstDeadline(conn, limits.deadlineAt)
+      );
+    });
+
+    it("after a run that was cancelled", async () => {
+      const conn = await connectWith();
+      const limits = limitsOf(FIRST_RUN_MS);
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new Error("gone")), 200);
+      await expect(
+        conn.openQuery(sleeper, limits, controller.signal)
+      ).rejects.toThrow("gone");
+      expect(inUse(conn)).toBe(0);
+      expectEveryRow(
+        await readSlowlyPastFirstDeadline(conn, limits.deadlineAt)
+      );
+    });
+  });
+
+  it("rejects a read the driver answers without a result, and destroys the client", async () => {
+    const conn = await connectWith();
+    const connect = conn.pool.connect.bind(conn.pool);
+    let connection: EventEmitter | undefined;
+    conn.pool.connect = (async () => {
+      const client = await connect();
+      connection = (client as unknown as { connection: EventEmitter })
+        .connection;
+      return client;
+    }) as typeof conn.pool.connect;
+    const uncaught: unknown[] = [];
+    const record = (err: unknown) => uncaught.push(err);
+    process.on("uncaughtException", record);
+    try {
+      const stream = await conn.openQuery(
+        prepared(idsOf("probe", "wide_rows")),
+        limitsOf(10_000)
+      );
+      expect(await stream.next(1)).toEqual([[1]]);
+      // A ReadyForQuery the cursor did not ask for marks it done: its next
+      // read calls back with no rows and no result.
+      connection!.emit("readyForQuery", { status: "T" });
+      const err = await Promise.race([
+        stream.next(5).then(
+          () => undefined,
+          (e: unknown) => e
+        ),
+        new Promise((r) => setTimeout(() => r("hung"), 3000)),
+      ]);
+      expect(err).toBeInstanceOf(QueryFailedError);
+      await stream.close();
+      expect(uncaught).toEqual([]);
+      expect(conn.pool.totalCount).toBe(0);
+    } finally {
+      process.off("uncaughtException", record);
+      // The statement the destroyed client left is still running.
+      for (const { pid } of await runningOn("wide_rows")) {
+        await asAdmin("SELECT pg_terminate_backend($1)", [pid]);
+      }
+    }
   });
 
   describe("closed while a read is in flight", () => {

@@ -160,6 +160,12 @@ const checkFields = (fields: FieldDef[], plan: SqlPlan): void => {
   }
 };
 
+const NO_RESULT = "the driver ended a read without its result";
+
+/** The cursor's protocol state no longer matches the connection's: the client is not to be trusted. */
+const isNoResult = (err: unknown): boolean =>
+  err instanceof Error && err.message === NO_RESULT;
+
 const readBatch = (
   cursor: Cursor<unknown[]>,
   count: number
@@ -167,9 +173,34 @@ const readBatch = (
   new Promise((resolve, reject) => {
     cursor.read(count, (err, rows, result) => {
       if (err) reject(err);
-      else resolve({ rows, fields: result.fields });
+      // A cursor marked done by a ReadyForQuery it did not ask for answers
+      // with no rows and no result, as if the rows had ended.
+      else if (!(result as typeof result | undefined)) {
+        reject(new Error(NO_RESULT));
+      } else resolve({ rows, fields: result.fields });
     });
   });
+
+// What pg puts on a submitted query and pg-cursor's types leave out.
+interface SubmittedCursor {
+  callback?: (err?: Error) => void;
+  handleError(err: Error): void;
+}
+
+/**
+ * Disarms pg's read timer for the cursor. pg arms one for every submitted
+ * query and clears it only in the callback it wraps around the query's own,
+ * which pg-cursor never calls. Left armed, it fires at the run's deadline plus
+ * `CLIENT_GRACE_MS` and calls the cursor's `handleError`, which on a cursor
+ * that ended in error sends a Sync on the connection: its ReadyForQuery then
+ * ends whatever runs on the client next. The cursor also stops handling
+ * errors, so a timer armed some other way can do nothing.
+ */
+const disarmReadTimeout = (cursor: Cursor<unknown[]>): void => {
+  const submitted = cursor as unknown as SubmittedCursor;
+  submitted.callback?.();
+  submitted.handleError = () => undefined;
+};
 
 /** A plan compiled to Postgres SQL with its bound parameters. */
 export class PostgresPreparedQuery implements PreparedQuery {
@@ -362,7 +393,13 @@ export const openPostgresQuery = async (
     if (cursorOpen) broken ??= err;
     // A client that timed out on its side is still busy with the statement;
     // one whose connection failed is gone.
-    if (isClientReadTimeout(err) || isConnectionFailure(err)) broken ??= err;
+    if (
+      isClientReadTimeout(err) ||
+      isConnectionFailure(err) ||
+      isNoResult(err)
+    ) {
+      broken ??= err;
+    }
     if (signal?.aborted) return signal.reason;
     if (timedOut && !(err instanceof AppError)) {
       logger.info({ err }, "source query stopped at its deadline");
@@ -404,6 +441,8 @@ export const openPostgresQuery = async (
         }
       }
       finished = true;
+      // Before the client can serve anyone else, whichever way the run ended.
+      if (cursor) disarmReadTimeout(cursor);
       clearTimeout(deadline);
       signal?.removeEventListener("abort", onAbort);
       // The cancel must land while this client is still ours: once released,
@@ -462,8 +501,9 @@ export const openPostgresQuery = async (
       types: RAW_TEXT,
     });
     // pg arms its read timeout from the submitted object's `query_timeout`,
-    // read when it is submitted, before the pool's own; without it the
-    // catalogue's shorter limit would apply.
+    // read when it is submitted, before the pool's own; without it (or with
+    // 0, which pg reads as unset) the catalogue's shorter limit would apply.
+    // `close` disarms it.
     Object.assign(cursor, {
       query_timeout:
         Math.max(1, Math.ceil(limits.deadlineAt - performance.now())) +
