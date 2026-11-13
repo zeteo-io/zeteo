@@ -86,6 +86,21 @@ jobs:
         if: steps.check-plans.outputs.has_plans == 'true'
         run: npx nx release --skip-publish
 
+      # The committed provisioning document carries the package version, and
+      # a unit test holds the two together. Only the version changes here, so
+      # it is set directly: no dependency code runs with the write token.
+      - name: Sync the provisioning document to the bumped version
+        if: steps.check-plans.outputs.has_plans == 'true'
+        working-directory: packages/zeteo
+        run: |
+          node -e '
+            const fs = require("fs");
+            const file = "tereo-provisioning.json";
+            const doc = JSON.parse(fs.readFileSync(file, "utf-8"));
+            doc.version = require("./package.json").version;
+            fs.writeFileSync(file, JSON.stringify(doc, null, 2) + "\n");
+          '
+
       - name: Sync lockfile to bumped versions
         if: steps.check-plans.outputs.has_plans == 'true'
         run: npm install --package-lock-only
@@ -97,7 +112,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           rm -f .nx/version-plans/*.md
-          git add packages/*/package.json packages/*/CHANGELOG.md package-lock.json .nx/version-plans/
+          git add packages/*/package.json packages/*/CHANGELOG.md packages/zeteo/tereo-provisioning.json package-lock.json .nx/version-plans/
 
           if git diff --staged --quiet; then
             echo "No version changes to commit."
