@@ -427,9 +427,15 @@ const errorResponse = (err: Error): ErrorResponse => {
   };
 };
 
+/**
+ * Writes the body `{ error, error_description, ...details, request_id }`;
+ * `request_id` is the request's `X-Request-ID`, left out only where no
+ * request id middleware ran.
+ */
 const writeError = (
   res: Response,
-  { status, code, message, details, headers }: ErrorResponse
+  { status, code, message, details, headers }: ErrorResponse,
+  requestId: string | undefined
 ): void => {
   if (res.headersSent) {
     // The status line is out: only a reset tells the client the body is cut.
@@ -441,9 +447,12 @@ const writeError = (
   for (const [name, value] of Object.entries(headers ?? {})) {
     res.setHeader(name, value);
   }
-  res
-    .status(status)
-    .json({ error: code, error_description: message, ...details });
+  res.status(status).json({
+    error: code,
+    error_description: message,
+    ...details,
+    ...(requestId !== undefined && { request_id: requestId }),
+  });
 };
 
 /**
@@ -489,5 +498,5 @@ export const errorHandler = (
     logger.warn({ ...context, code, name: err.name }, logged.message);
   }
 
-  writeError(res, response);
+  writeError(res, response, req.requestId);
 };

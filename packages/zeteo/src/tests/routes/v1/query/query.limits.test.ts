@@ -67,6 +67,7 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     expect(res.body).toEqual({
       error: "query_timeout",
       error_description: "The query ran past its time limit",
+      request_id: expect.any(String),
     });
     expect(Date.now() - begun).toBeLessThan(2900);
     expect(await engine.runningOn("slow_orders")).toBe(0);
@@ -82,6 +83,7 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     expect(res.body).toEqual({
       error: "query_failed",
       error_description: "The source could not run the query",
+      request_id: expect.any(String),
     });
   });
 
@@ -143,6 +145,7 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
       error: "too_many_queries",
       error_description: expect.any(String),
       retry_after: 1,
+      request_id: expect.any(String),
     });
     const fourth = await ask(user.token, source, {
       from: "orders",

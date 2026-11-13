@@ -7,6 +7,7 @@ import { logger } from "../../utils/logger.js";
 import {
   errorHandler,
   findingsBody,
+  NotFoundError,
   WritableLoginError,
 } from "../../utils/errors.js";
 
@@ -51,6 +52,42 @@ describe("errorHandler", () => {
     } finally {
       error.mockRestore();
     }
+  });
+});
+
+describe("errorHandler's request id", () => {
+  it("adds the request's id to the body as request_id", () => {
+    const { res, written } = recorder();
+    errorHandler(
+      new NotFoundError("Source not found"),
+      { ...req, requestId: "req-123" } as Request,
+      res,
+      () => {}
+    );
+    expect(written).toEqual({
+      status: 404,
+      body: {
+        error: "not_found",
+        error_description: "Source not found",
+        request_id: "req-123",
+      },
+    });
+  });
+
+  it("puts request_id after the error's own details", () => {
+    const { res, written } = recorder();
+    errorHandler(
+      new WritableLoginError(findings(1)),
+      { ...req, requestId: "req-123" } as Request,
+      res,
+      () => {}
+    );
+    expect(Object.keys(written.body as object)).toEqual([
+      "error",
+      "error_description",
+      "findings",
+      "request_id",
+    ]);
   });
 });
 

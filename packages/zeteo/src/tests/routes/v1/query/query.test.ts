@@ -416,6 +416,7 @@ describeEachEngine("POST /v1/query", (engine) => {
       error_description: expect.any(String),
       path: ["where", "status", "gt"],
       suggestions: [],
+      request_id: expect.any(String),
     });
   });
 

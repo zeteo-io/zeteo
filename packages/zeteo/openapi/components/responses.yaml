@@ -9,6 +9,9 @@ Error:
     error_description:
       type: string
       description: A human-readable explanation
+    request_id:
+      type: string
+      description: The request's id, as in its `X-Request-ID` response header; the server's log lines for the request carry it too
     issues:
       type: array
       description: On `invalid_request`, the failed checks

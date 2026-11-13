@@ -56,9 +56,10 @@ info:
 
     ## Errors
 
-    An error is `{ "error": "<code>", "error_description": "<text>", ...details }`. A validation
-    failure is `400 invalid_request` with `issues`, a list of `{ path, message }`. The text of a
-    database's own error never appears in a response.
+    An error is `{ "error": "<code>", "error_description": "<text>", ...details, "request_id": "<id>" }`,
+    where `request_id` is the request's `X-Request-ID` (the server's log lines for the request
+    carry it too). A validation failure is `400 invalid_request` with `issues`, a list of
+    `{ path, message }`. The text of a database's own error never appears in a response.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -1241,6 +1242,9 @@ components:
         error_description:
           type: string
           description: A human-readable explanation
+        request_id:
+          type: string
+          description: The request's id, as in its `X-Request-ID` response header; the server's log lines for the request carry it too
         issues:
           type: array
           description: On `invalid_request`, the failed checks
@@ -2289,6 +2293,9 @@ components:
           description: The closest names the caller can see, closest first
           items:
             type: string
+        request_id:
+          type: string
+          description: The request's id, as in its `X-Request-ID` response header
     QueryWarning:
       type: object
       required:

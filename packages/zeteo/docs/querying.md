@@ -290,7 +290,8 @@ once.
 
 ## Errors
 
-Every error is `{ error, error_description, ... }`. A query the language accepts but which cannot
+Every error is `{ error, error_description, ..., request_id }`, where `request_id` is the request's
+`X-Request-ID` header, also on the server's log lines for it. A query the language accepts but which cannot
 be run as written is `422` with `path` (keys and array indexes from the root of the query) and
 `suggestions` (up to three close names, closest first).
 
@@ -317,7 +318,7 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
   `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
-  fixed message, and the request's id is in the log line.
+  fixed message and the request's `request_id`, which finds the log line.
 
 ## The run log
 

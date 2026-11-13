@@ -54,11 +54,19 @@ const POSITIONS: Array<[string, (column: string) => Record<string, unknown>]> =
     ["groupBy", (c) => ({ select: ["id"], groupBy: [c] })],
   ];
 
-/** The parts of an error a caller can compare, with the name it echoes (in the message, or as a key in the path) replaced. */
+/**
+ * The parts of an error a caller can compare, with the name it echoes (in the
+ * message, or as a key in the path) replaced, and the request id, which
+ * differs for every request, normalised.
+ */
 const shapeOf = (res: JsonResponse, name: string) => ({
   status: res.status,
   body: {
     ...res.body,
+    request_id:
+      typeof res.body?.request_id === "string"
+        ? "<request id>"
+        : res.body?.request_id,
     error_description:
       typeof res.body?.error_description === "string"
         ? res.body.error_description.replaceAll(name, "<name>")
@@ -117,6 +125,7 @@ describeEachEngine("POST /v1/query: leaks", (engine) => {
       error_description: 'Column "total" was not found or is not accessible',
       path: ["select", 1],
       suggestions: [],
+      request_id: expect.any(String),
     });
   });
 
@@ -167,6 +176,7 @@ describeEachEngine("POST /v1/query: leaks", (engine) => {
       error_description: `Source "${other.slug}" was not found or is not accessible`,
       path: ["source"],
       suggestions: [],
+      request_id: expect.any(String),
     });
     expect(shapeOf(ungranted, other.slug)).toEqual(
       shapeOf(unknown, "invented-zzqxw")

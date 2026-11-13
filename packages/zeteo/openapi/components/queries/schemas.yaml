@@ -197,6 +197,9 @@ QueryError:
       maxItems: 3
       description: The closest names the caller can see, closest first
       items: { type: string }
+    request_id:
+      type: string
+      description: The request's id, as in its `X-Request-ID` response header
 
 RunOutcome:
   type: string
