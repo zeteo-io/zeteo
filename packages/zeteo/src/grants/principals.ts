@@ -1,3 +1,4 @@
+import { getGroup, listUserGroups } from "../utils/tereoGroups.js";
 import { requests, RequestError } from "@tereo-io/sdk/handler";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { assertNoTransaction } from "../utils/tereo.js";
@@ -18,22 +19,29 @@ export const groupsKey = (userId: string) => `zeteo:groups:${userId}`;
 export const testGroupsKey = (userId: string) => `zeteo:test:groups:${userId}`;
 export const TEST_ORPHANED_KEY = "zeteo:test:orphaned";
 
-// The installed SDK's types predate its group requests; this is the part used.
-interface GroupRequests {
-  listUserGroups?: (userId: string) => Promise<{ data: GroupRef[] }>;
-  getGroup?: (id: string) => Promise<unknown>;
-}
-const groupRequests = (): GroupRequests => requests.auth as GroupRequests;
-
 const unavailable = () =>
   new ServiceUnavailableError("Group membership is temporarily unavailable");
 
-const fetchGroupsFromTereo = async (userId: string): Promise<GroupRef[]> => {
-  assertNoTransaction("tereo auth.listUserGroups()");
-  const list = groupRequests().listUserGroups;
-  if (!list) throw new Error("the tereo SDK has no listUserGroups");
-  const { data } = await list(userId);
-  return data.map(({ id, organizationId }) => ({ id, organizationId }));
+/** The HTTP status of a failed request to tereo (an axios error or the SDK's), if it got an answer. */
+const httpStatusOf = (err: unknown): number | undefined => {
+  if (err instanceof RequestError) return err.httpStatus;
+  const status = (err as { response?: { status?: unknown } } | null)?.response
+    ?.status;
+  return typeof status === "number" ? status : undefined;
+};
+
+/** A user's groups from tereo; a 404 (no such user, or a core without groups) is no groups. */
+export const fetchGroupsFromTereo = async (
+  userId: string
+): Promise<GroupRef[]> => {
+  assertNoTransaction("tereo listUserGroups()");
+  try {
+    const { data } = await listUserGroups(userId);
+    return data.map(({ id, organizationId }) => ({ id, organizationId }));
+  } catch (err) {
+    if (httpStatusOf(err) === 404) return [];
+    throw err;
+  }
 };
 
 /**
@@ -85,14 +93,32 @@ export const groupIdsOf = async (caller: Caller): Promise<string[]> => {
     .map((g) => g.id);
 };
 
-const httpStatusOf = (err: unknown): number | undefined =>
-  err instanceof RequestError ? err.httpStatus : undefined;
-
 /**
  * Whether a grant's principal still exists in tereo. A user is `orphaned`
  * when tereo has no such user. A group's existence cannot be read, so it is
  * `active` or, when tereo refuses or has none, `unknown`.
  */
+/** `principalStatus` against tereo itself. */
+export const statusFromTereo = async (
+  type: "user" | "group",
+  id: string
+): Promise<PrincipalStatus> => {
+  assertNoTransaction(`tereo ${type === "user" ? "getUser" : "getGroup"}()`);
+  try {
+    if (type === "user") await requests.auth.getUser(id);
+    else await getGroup(id);
+    return "active";
+  } catch (err) {
+    const status = httpStatusOf(err);
+    if (type === "user" && status === 404) return "orphaned";
+    if (type === "group" && (status === 403 || status === 404)) {
+      return "unknown";
+    }
+    logger.error({ err, principal_id: id }, "reading a principal failed");
+    throw unavailable();
+  }
+};
+
 export const principalStatus = async (
   type: "user" | "group",
   id: string
@@ -102,24 +128,5 @@ export const principalStatus = async (
       ? "orphaned"
       : "active";
   }
-  assertNoTransaction(
-    `tereo auth.${type === "user" ? "getUser" : "getGroup"}()`
-  );
-  try {
-    if (type === "user") {
-      await requests.auth.getUser(id);
-      return "active";
-    }
-    const get = groupRequests().getGroup;
-    if (!get) return "unknown";
-    await get(id);
-    return "active";
-  } catch (err) {
-    const status = httpStatusOf(err);
-    if (status === 404 || (type === "group" && status === 403)) {
-      return type === "user" ? "orphaned" : "unknown";
-    }
-    logger.error({ err, principal_id: id }, "reading a principal failed");
-    throw unavailable();
-  }
+  return statusFromTereo(type, id);
 };
