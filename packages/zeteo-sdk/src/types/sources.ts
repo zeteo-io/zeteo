@@ -61,12 +61,10 @@ export interface Source {
   archived_at: string | null;
 }
 
-export interface CreateSourceRequest {
+interface CreateSourceFields {
   /** Matches `^[a-z][a-z0-9-]{1,62}$`. */
   slug: string;
   name: string;
-  type: SourceType;
-  settings: PostgresSettings | AzureSqlSettings;
   /** 1 to 20 schema names. */
   schemas: string[];
   allow_writable_login?: boolean;
@@ -82,6 +80,12 @@ export interface CreateSourceRequest {
   /** 1 to 10; the API's default is 2. */
   export_concurrency?: number;
 }
+
+export type CreateSourceRequest = CreateSourceFields &
+  (
+    | { type: "postgres"; settings: PostgresSettings }
+    | { type: "azure-sql"; settings: AzureSqlSettings }
+  );
 
 /** At least one field; `settings` replaces the whole settings object. */
 export interface UpdateSourceRequest {

@@ -1,4 +1,13 @@
+import { principalLimitsCalls } from "./calls/principalLimits.js";
 import { redisBackend } from "@dianemo/backend-redis";
+import { catalogCalls } from "./calls/catalog.js";
+import { sourcesCalls } from "./calls/sources.js";
+import { healthCalls } from "./calls/health.js";
+import { exportCalls } from "./calls/export.js";
+import { grantsCalls } from "./calls/grants.js";
+import { queryCalls } from "./calls/query.js";
+import type { CallContext } from "./send.js";
+import { runsCalls } from "./calls/runs.js";
 import RequestHandler from "@dianemo/core";
 import type { Transport } from "./send.js";
 import { zeteoPlugin } from "./plugin.js";
@@ -24,11 +33,33 @@ export type ZeteoClientOptions = {
 
 type OwnHandlerOptions = Extract<ZeteoClientOptions, { redis: Redis }>;
 
-export interface ZeteoClient {
+const buildCalls = (ctx: CallContext) => ({
+  health: healthCalls(ctx),
+  catalog: catalogCalls(ctx),
+  query: queryCalls(ctx),
+  export: exportCalls(ctx),
+  runs: runsCalls(ctx),
+  sources: sourcesCalls(ctx),
+  grants: grantsCalls(ctx),
+  principalLimits: principalLimitsCalls(ctx),
+});
+
+export type ZeteoCalls = ReturnType<typeof buildCalls>;
+
+export interface ZeteoClient extends ZeteoCalls {
+  /** The same calls, made with a person's bearer token instead of the service's own credentials. */
+  withToken(token: string): ZeteoCalls;
   start(): Promise<void>;
   stop(): Promise<void>;
-  /** @internal */
-  transport: Transport;
+}
+
+const transports = new WeakMap<ZeteoClient, Transport>();
+
+/** @internal For tests, which need the handler and client names. */
+export function transportOf(client: ZeteoClient): Transport {
+  const transport = transports.get(client);
+  if (!transport) throw new Error("not a client from createZeteoClient");
+  return transport;
 }
 
 const fail = (message: string): never => {
@@ -90,7 +121,28 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
 
   const getRequestId = options.getRequestId ?? (() => undefined);
 
-  return {
+  const transport: Transport = {
+    handler,
+    names: clientNames(),
+    getRequestId,
+    async purgeServiceToken() {
+      // `getClient` is protected in @dianemo/core's types; the client it
+      // returns has `purgeCredentials` as a public method.
+      const h = handler as unknown as {
+        getClient(name: string): { purgeCredentials(): Promise<void> };
+      };
+      await h.getClient(clientNames().service).purgeCredentials();
+    },
+  };
+
+  const client: ZeteoClient = {
+    ...buildCalls({ transport }),
+    withToken(token) {
+      if (typeof token !== "string" || token === "") {
+        fail("withToken needs a token");
+      }
+      return buildCalls({ transport, token });
+    },
     async start() {
       await added;
       await handler.start();
@@ -103,18 +155,7 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
     async stop() {
       if (ownsHandler) await handler.stop();
     },
-    transport: {
-      handler,
-      names: clientNames(),
-      getRequestId,
-      async purgeServiceToken() {
-        // `getClient` is protected in @dianemo/core's types; the client it
-        // returns has `purgeCredentials` as a public method.
-        const h = handler as unknown as {
-          getClient(name: string): { purgeCredentials(): Promise<void> };
-        };
-        await h.getClient(clientNames().service).purgeCredentials();
-      },
-    },
   };
+  transports.set(client, transport);
+  return client;
 }

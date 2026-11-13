@@ -1,7 +1,7 @@
 import { startStub, testHandler, type Stub } from "./support/stub.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import RequestHandler, { memoryBackend } from "@dianemo/core";
-import { createZeteoClient } from "../client.js";
+import { createZeteoClient, transportOf } from "../client.js";
 import { Redis } from "ioredis";
 
 describe("createZeteoClient lifecycle", () => {
@@ -61,7 +61,7 @@ describe("createZeteoClient lifecycle", () => {
     await zeteo.start();
     await zeteo.stop();
     await handler.handleRequest({
-      clientName: zeteo.transport.names.service,
+      clientName: transportOf(zeteo).names.service,
       requestName: "t",
       method: "GET",
       url: "/v1/catalog",
@@ -76,7 +76,7 @@ describe("createZeteoClient lifecycle", () => {
     const zeteo = createZeteoClient({ ...base(), handler });
     await zeteo.start();
     await handler.handleRequest({
-      clientName: zeteo.transport.names.service,
+      clientName: transportOf(zeteo).names.service,
       requestName: "t",
       method: "GET",
       url: "/v1/catalog",
@@ -116,7 +116,7 @@ describe("createZeteoClient lifecycle", () => {
     await zeteo.start();
     await starting;
     await handler.handleRequest({
-      clientName: zeteo.transport.names.service,
+      clientName: transportOf(zeteo).names.service,
       requestName: "t",
       method: "GET",
       url: "/v1/catalog",
@@ -133,7 +133,7 @@ describe("createZeteoClient lifecycle", () => {
       redis,
       requestHandlerKey: "k".repeat(32),
     } as never);
-    expect(zeteo.transport.handler).toBeDefined();
+    expect(transportOf(zeteo).handler).toBeDefined();
     redis.disconnect();
   });
 
@@ -145,11 +145,11 @@ describe("createZeteoClient lifecycle", () => {
       requestHandlerKey: "k".repeat(32),
     });
     // No public accessor for the namespace.
-    const internal = zeteo.transport.handler as unknown as {
+    const internal = transportOf(zeteo).handler as unknown as {
       namespace: string;
     };
     expect(internal.namespace).toContain("@zeteo-io/sdk:svc");
-    expect(zeteo.transport.handler.getMetadata().priority).toBe(1);
+    expect(transportOf(zeteo).handler.getMetadata().priority).toBe(1);
     redis.disconnect();
   });
 });

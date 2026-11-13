@@ -18,6 +18,8 @@ interface Row {
   query?: Record<string, string>;
   // 204 operations resolve void.
   noContent?: true;
+  // True when a 5xx is repeated by the handler, false when it is thrown.
+  retried: boolean;
 }
 
 const sourceBody = { name: "Sales", schemas: ["public"] };
@@ -48,6 +50,7 @@ const rows: Row[] = [
   {
     name: "sources.list",
     op: "listSources",
+    retried: true,
     call: (c) =>
       sourcesCalls(c).list({ limit: 5, cursor: "c", include_archived: true }),
     query: { limit: "5", cursor: "c", include_archived: "true" },
@@ -55,18 +58,21 @@ const rows: Row[] = [
   {
     name: "sources.get",
     op: "getSource",
+    retried: true,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).get(ID),
   },
   {
     name: "sources.create",
     op: "createSource",
+    retried: false,
     call: (c) => sourcesCalls(c).create(createSource),
     body: createSource,
   },
   {
     name: "sources.update",
     op: "updateSource",
+    retried: false,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).update(ID, sourceBody),
     body: sourceBody,
@@ -74,6 +80,7 @@ const rows: Row[] = [
   {
     name: "sources.archive",
     op: "archiveSource",
+    retried: false,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).archive(ID),
     noContent: true,
@@ -81,18 +88,21 @@ const rows: Row[] = [
   {
     name: "sources.test",
     op: "testSource",
+    retried: false,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).test(ID),
   },
   {
     name: "sources.refresh",
     op: "refreshSource",
+    retried: false,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).refresh(ID),
   },
   {
     name: "sources.tables.list",
     op: "listTables",
+    retried: true,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).tables.list(ID, { include_missing: true }),
     query: { include_missing: "true" },
@@ -100,12 +110,14 @@ const rows: Row[] = [
   {
     name: "sources.tables.get",
     op: "getTable",
+    retried: true,
     params: { sourceId: ID, tableId: ID2 },
     call: (c) => sourcesCalls(c).tables.get(ID, ID2),
   },
   {
     name: "sources.tables.update",
     op: "patchTable",
+    retried: false,
     params: { sourceId: ID, tableId: ID2 },
     call: (c) => sourcesCalls(c).tables.update(ID, ID2, { description: null }),
     body: { description: null },
@@ -113,6 +125,7 @@ const rows: Row[] = [
   {
     name: "sources.relations.list",
     op: "listRelations",
+    retried: true,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).relations.list(ID, { limit: 2 }),
     query: { limit: "2" },
@@ -120,6 +133,7 @@ const rows: Row[] = [
   {
     name: "sources.relations.declare",
     op: "declareRelation",
+    retried: false,
     params: { sourceId: ID },
     call: (c) => sourcesCalls(c).relations.declare(ID, relation),
     body: relation,
@@ -127,6 +141,7 @@ const rows: Row[] = [
   {
     name: "sources.relations.delete",
     op: "deleteRelation",
+    retried: true,
     params: { sourceId: ID, relationId: ID2 },
     call: (c) => sourcesCalls(c).relations.delete(ID, ID2),
     noContent: true,
@@ -134,6 +149,7 @@ const rows: Row[] = [
   {
     name: "grants.list",
     op: "listGrants",
+    retried: true,
     call: (c) =>
       grantsCalls(c).list({
         principal_type: "group",
@@ -153,18 +169,21 @@ const rows: Row[] = [
   {
     name: "grants.get",
     op: "getGrant",
+    retried: true,
     params: { grantId: ID },
     call: (c) => grantsCalls(c).get(ID),
   },
   {
     name: "grants.create",
     op: "createGrant",
+    retried: false,
     call: (c) => grantsCalls(c).create(grant),
     body: grant,
   },
   {
     name: "grants.replace",
     op: "replaceGrant",
+    retried: true,
     params: { grantId: ID },
     call: (c) => grantsCalls(c).replace(ID, { all_columns: true }),
     body: { all_columns: true },
@@ -172,6 +191,7 @@ const rows: Row[] = [
   {
     name: "grants.delete",
     op: "deleteGrant",
+    retried: true,
     params: { grantId: ID },
     call: (c) => grantsCalls(c).delete(ID),
     noContent: true,
@@ -179,6 +199,7 @@ const rows: Row[] = [
   {
     name: "principalLimits.list",
     op: "listPrincipalLimits",
+    retried: true,
     call: (c) =>
       principalLimitsCalls(c).list({ principal_type: "user", cursor: "x" }),
     query: { principal_type: "user", cursor: "x" },
@@ -186,12 +207,14 @@ const rows: Row[] = [
   {
     name: "principalLimits.get",
     op: "getPrincipalLimit",
+    retried: true,
     params: { principalLimitId: ID },
     call: (c) => principalLimitsCalls(c).get(ID),
   },
   {
     name: "principalLimits.create",
     op: "createPrincipalLimit",
+    retried: false,
     call: (c) =>
       principalLimitsCalls(c).create({
         principal_type: "user",
@@ -203,6 +226,7 @@ const rows: Row[] = [
   {
     name: "principalLimits.update",
     op: "updatePrincipalLimit",
+    retried: false,
     params: { principalLimitId: ID },
     call: (c) =>
       principalLimitsCalls(c).update(ID, { export_concurrency: null }),
@@ -211,6 +235,7 @@ const rows: Row[] = [
   {
     name: "principalLimits.delete",
     op: "deletePrincipalLimit",
+    retried: true,
     params: { principalLimitId: ID },
     call: (c) => principalLimitsCalls(c).delete(ID),
     noContent: true,
@@ -287,26 +312,38 @@ describe("admin calls", () => {
     });
   });
 
-  it("grants.create makes one request on a 500", async () => {
-    t.stub.respond(() => ({ status: 500, body: { error: "boom" } }));
-    await expect(grantsCalls(t.ctx("p-1")).create(grant)).rejects.toMatchObject(
-      { status: 500 }
-    );
-    expect(t.stub.requests).toHaveLength(1);
-  });
-
-  it("grants.replace is repeated after a 500", async () => {
-    let n = 0;
-    t.stub.respond(() =>
-      ++n === 1
+  // All rows run at once, so the handler's backoff before a repeat is paid
+  // once rather than per row.
+  it("repeats a 5xx exactly for the calls that are safe to repeat", async () => {
+    const seen = new Map<string, number>();
+    t.stub.respond((req) => {
+      const key = `${req.method} ${req.path}`;
+      const n = (seen.get(key) ?? 0) + 1;
+      seen.set(key, n);
+      return n === 1
         ? { status: 500, body: { error: "boom" } }
-        : { body: { id: ID } }
+        : { status: 200, body: { id: ID } };
+    });
+    const outcomes = await Promise.all(
+      rows.map((row) =>
+        row.call(t.ctx("p-1")).then(
+          () => "success",
+          (error: { status?: number }) => `status ${error.status}`
+        )
+      )
     );
-    expect(
-      await grantsCalls(t.ctx("p-1")).replace(ID, { all_columns: true })
-    ).toEqual({ id: ID });
-    expect(t.stub.requests).toHaveLength(2);
-  });
+    rows.forEach((row, i) => {
+      const key = `${OPERATIONS[row.op].method} ${expectedPath(row)}`;
+      expect(
+        { name: row.name, outcome: outcomes[i], requests: seen.get(key) },
+        row.name
+      ).toEqual(
+        row.retried
+          ? { name: row.name, outcome: "success", requests: 2 }
+          : { name: row.name, outcome: "status 500", requests: 1 }
+      );
+    });
+  }, 30_000);
 
   const bad = "a/b";
   it.each([
@@ -326,6 +363,11 @@ describe("admin calls", () => {
     [
       "tables.get table",
       (c: CallContext) => sourcesCalls(c).tables.get(ID, bad),
+    ],
+    [
+      "tables.update source",
+      (c: CallContext) =>
+        sourcesCalls(c).tables.update(bad, ID2, { description: null }),
     ],
     [
       "tables.update table",

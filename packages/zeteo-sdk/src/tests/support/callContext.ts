@@ -1,8 +1,12 @@
-import { createZeteoClient, type ZeteoClient } from "../../client.js";
 import { startStub, testHandler, type Stub } from "./stub.js";
 import type { CallContext } from "../../send.js";
 import type RequestHandler from "@dianemo/core";
 import { afterEach, beforeEach } from "vitest";
+import {
+  createZeteoClient,
+  transportOf,
+  type ZeteoClient,
+} from "../../client.js";
 
 export interface StubbedClient {
   stub: Stub;
@@ -33,6 +37,6 @@ export function useStubbedClient(): StubbedClient {
     await state.stub.close();
   });
 
-  state.ctx = (token) => ({ transport: state.client.transport, token });
+  state.ctx = (token) => ({ transport: transportOf(state.client), token });
   return state;
 }

@@ -1,6 +1,6 @@
+import { createZeteoClient, transportOf, type ZeteoClient } from "../client.js";
 import { startStub, testHandler, type Stub } from "./support/stub.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createZeteoClient, type ZeteoClient } from "../client.js";
 import { QueryRefusedError, ZeteoError } from "../errors.js";
 import { send, sendRaw, type CallContext } from "../send.js";
 import type RequestHandler from "@dianemo/core";
@@ -21,7 +21,7 @@ describe("send", () => {
   let requestId: string | undefined;
 
   const ctx = (token?: string): CallContext => ({
-    transport: client.transport,
+    transport: transportOf(client),
     token,
   });
 
@@ -83,7 +83,7 @@ describe("send", () => {
         seen.push(`${config.clientName}|${config.requestName}`);
         return real(config as never);
       };
-    const { names } = client.transport;
+    const { names } = transportOf(client);
     await send(ctx(), { op: "getCatalog" });
     await send(ctx(), { op: "getCatalog", once: true });
     await send(ctx("p"), { op: "getCatalog" });
@@ -272,7 +272,7 @@ describe("send", () => {
   it("throws the original 401 when purging the token fails", async () => {
     stub.respond(() => ({ status: 401, body: { error: "invalid_token" } }));
     const transport = {
-      ...client.transport,
+      ...transportOf(client),
       purgeServiceToken: () => Promise.reject(new Error("redis down")),
     };
     const err = await catchError(send({ transport }, { op: "getCatalog" }));
