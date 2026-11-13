@@ -5,6 +5,7 @@ Users query sources through one JSON language, over only the tables and columns 
 
 | Route | Permission | Result |
 |-------|------------|--------|
+| `GET /v1/catalog` (`source`) | `zeteo.data.read` | `{ sources }`: what the caller may query, and the language schema |
 | `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
 | `GET /v1/runs` (`user_id`, `source_id`, `outcome`, `limit`, `cursor`) | `zeteo.runs.read` | `{ data, next_cursor }`, newest first |
 
@@ -96,6 +97,53 @@ collation too.
 A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
 grouped, deduplicated (`distinct`, `countDistinct`) or sorted (`invalid_operator`). A query whose
 select items are all json has no default order on Postgres.
+
+## Discovering what you can query
+
+`GET /v1/catalog` (`zeteo.data.read`) answers what the caller may query, so a person or an AI
+can write a query without being told the schema. It shows exactly the caller's grants (their own
+and their groups') and nothing else: no ids, no native types, no connection settings, and no
+trace of a table, column, relation or source they are not granted.
+
+```json
+{
+  "sources": [
+    {
+      "slug": "sales-db",
+      "name": "Sales",
+      "type": "postgres",
+      "language": { "id": "sql", "schema": { "type": "object", "properties": { "select": {} } } },
+      "limits": { "default_rows": 1000, "max_rows": 50000, "timeout_ms": 30000 },
+      "tables": [
+        {
+          "name": "orders",
+          "schema_name": "sales",
+          "kind": "table",
+          "description": null,
+          "missing": false,
+          "columns": [{ "name": "id", "type": "number", "nullable": false, "description": null, "missing": false }],
+          "relations": [{ "name": "customer", "to": "customers", "to_many": false, "missing": false }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- Without `?source=<slug>`, every source the caller has a grant on, ordered by slug; archived
+  sources never appear. A `source` that is unknown, archived or not granted gives `sources: []`,
+  exactly as a caller with no grants gets.
+- Tables are ordered by schema, then name; columns in the table's own order, only those granted.
+- A table's `name` is what a query writes in `from`: the bare name when no other table the caller
+  can see in that source has it, else `schema.table`.
+- A relation is listed under the table it starts from. Its `name` is what a query's `join`
+  names (through a joined relation, `customer.account`); `to` is the target table as `from` would
+  write it. A relation appears only when every key column on both sides is granted.
+- `limits` are those of `POST /v1/query`: `default_rows` and `max_rows` are lowered to the
+  source's `row_cap`, `timeout_ms` is the source's time limit.
+- `language.schema` is the JSON Schema of the query body.
+- `missing` marks a table, column or relation the last refresh did not find; a query that uses
+  one fails with `missing_in_source`.
 
 ## Worked examples
 

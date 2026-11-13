@@ -1,4 +1,5 @@
 import { authenticate } from "../../middleware/auth.js";
+import catalogRouter from "./catalog/index.js";
 import sourcesRouter from "./sources/index.js";
 import grantsRouter from "./grants/index.js";
 import queryRouter from "./query/index.js";
@@ -8,6 +9,7 @@ import { Router } from "express";
 const v1Router = Router();
 
 v1Router.use(authenticate);
+v1Router.use("/catalog", catalogRouter);
 v1Router.use("/grants", grantsRouter);
 v1Router.use("/query", queryRouter);
 v1Router.use("/runs", runsRouter);

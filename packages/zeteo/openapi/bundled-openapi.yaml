@@ -43,7 +43,8 @@ info:
 
     ## Queries
 
-    `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    `GET /v1/catalog` lists what the caller may query, with the language's JSON Schema, and
+    nothing about what they may not. `POST /v1/query` runs a query in the SQL query language over what the caller is granted
     (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
     Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
     `docs/querying.md`.
@@ -881,6 +882,50 @@ paths:
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/catalog:
+    get:
+      tags:
+        - Queries
+      summary: Discover what you can query
+      description: |
+        The sources, tables, columns and relations the caller may query, and the query language's
+        JSON Schema. It shows exactly what the caller's grants (their own and their groups') allow
+        and nothing more: no ids, no native types, no connection settings, and no hint of a table,
+        column, relation or source they are not granted. A relation is listed only when every key
+        column on both sides is granted.
+
+        Without `source`, every source the caller has a grant on, ordered by slug. A `source` that
+        is unknown, archived, or not granted answers an empty `sources`, as a caller with no grants
+        gets. Names are written as a query would write them.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: getCatalog
+      parameters:
+        - name: source
+          in: query
+          required: false
+          description: The slug of one source
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        '200':
+          description: The caller's visible catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -2292,6 +2337,149 @@ components:
           type:
             - string
             - 'null'
+    DiscoveredColumn:
+      type: object
+      description: A column the caller may query
+      required:
+        - name
+        - type
+        - nullable
+        - description
+        - missing
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ColumnType'
+        nullable:
+          type: boolean
+        description:
+          type:
+            - string
+            - 'null'
+        missing:
+          type: boolean
+          description: The last refresh did not find the column; a query that uses it fails with `missing_in_source`
+    DiscoveredRelation:
+      type: object
+      description: A join the caller may use from the table it is listed under; every key column on both sides is granted
+      required:
+        - name
+        - to
+        - to_many
+        - missing
+      properties:
+        name:
+          type: string
+          description: What a query's `join` names
+        to:
+          type: string
+          description: The target table as a query writes it in `from`
+        to_many:
+          type: boolean
+          description: One row can match several, so aggregates over the join may count a row more than once
+        missing:
+          type: boolean
+    DiscoveredTable:
+      type: object
+      description: A table the caller may query
+      required:
+        - name
+        - schema_name
+        - kind
+        - description
+        - missing
+        - columns
+        - relations
+      properties:
+        name:
+          type: string
+          description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`'
+        schema_name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - table
+            - view
+        description:
+          type:
+            - string
+            - 'null'
+        missing:
+          type: boolean
+          description: The last refresh did not find the table
+        columns:
+          type: array
+          description: Only the granted columns, in the table's order
+          items:
+            $ref: '#/components/schemas/DiscoveredColumn'
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveredRelation'
+    DiscoveredSource:
+      type: object
+      required:
+        - slug
+        - name
+        - type
+        - language
+        - limits
+        - tables
+      properties:
+        slug:
+          type: string
+          description: What a query's `source` names
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/SourceType'
+        language:
+          type: object
+          required:
+            - id
+            - schema
+          properties:
+            id:
+              type: string
+              enum:
+                - sql
+            schema:
+              type: object
+              description: The JSON Schema of the query language, which a query's body must satisfy
+              additionalProperties: true
+        limits:
+          type: object
+          description: What one query on this source may return and take
+          required:
+            - default_rows
+            - max_rows
+            - timeout_ms
+          properties:
+            default_rows:
+              type: integer
+              description: Rows when the query sets no `limit`
+            max_rows:
+              type: integer
+              description: The most a `limit` may ask for
+            timeout_ms:
+              type: integer
+        tables:
+          type: array
+          description: Ordered by schema, then name
+          items:
+            $ref: '#/components/schemas/DiscoveredTable'
+    CatalogResponse:
+      type: object
+      required:
+        - sources
+      properties:
+        sources:
+          type: array
+          description: Ordered by slug
+          items:
+            $ref: '#/components/schemas/DiscoveredSource'
     GrantColumnIds:
       type: array
       minItems: 1

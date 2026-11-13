@@ -228,3 +228,77 @@ ListRunsResponse:
       type: array
       items: { $ref: '#/Run' }
     next_cursor: { type: [string, 'null'] }
+
+DiscoveredColumn:
+  type: object
+  description: A column the caller may query
+  required: [name, type, nullable, description, missing]
+  properties:
+    name: { type: string }
+    type: { $ref: '../catalog/schemas.yaml#/ColumnType' }
+    nullable: { type: boolean }
+    description: { type: [string, 'null'] }
+    missing: { type: boolean, description: 'The last refresh did not find the column; a query that uses it fails with `missing_in_source`' }
+
+DiscoveredRelation:
+  type: object
+  description: A join the caller may use from the table it is listed under; every key column on both sides is granted
+  required: [name, to, to_many, missing]
+  properties:
+    name: { type: string, description: What a query's `join` names }
+    to: { type: string, description: The target table as a query writes it in `from` }
+    to_many: { type: boolean, description: 'One row can match several, so aggregates over the join may count a row more than once' }
+    missing: { type: boolean }
+
+DiscoveredTable:
+  type: object
+  description: A table the caller may query
+  required: [name, schema_name, kind, description, missing, columns, relations]
+  properties:
+    name: { type: string, description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`' }
+    schema_name: { type: string }
+    kind: { type: string, enum: [table, view] }
+    description: { type: [string, 'null'] }
+    missing: { type: boolean, description: The last refresh did not find the table }
+    columns:
+      type: array
+      description: Only the granted columns, in the table's order
+      items: { $ref: '#/DiscoveredColumn' }
+    relations:
+      type: array
+      items: { $ref: '#/DiscoveredRelation' }
+
+DiscoveredSource:
+  type: object
+  required: [slug, name, type, language, limits, tables]
+  properties:
+    slug: { type: string, description: What a query's `source` names }
+    name: { type: string }
+    type: { $ref: '../sources/schemas.yaml#/SourceType' }
+    language:
+      type: object
+      required: [id, schema]
+      properties:
+        id: { type: string, enum: [sql] }
+        schema: { type: object, description: "The JSON Schema of the query language, which a query's body must satisfy", additionalProperties: true }
+    limits:
+      type: object
+      description: What one query on this source may return and take
+      required: [default_rows, max_rows, timeout_ms]
+      properties:
+        default_rows: { type: integer, description: Rows when the query sets no `limit` }
+        max_rows: { type: integer, description: The most a `limit` may ask for }
+        timeout_ms: { type: integer }
+    tables:
+      type: array
+      description: Ordered by schema, then name
+      items: { $ref: '#/DiscoveredTable' }
+
+CatalogResponse:
+  type: object
+  required: [sources]
+  properties:
+    sources:
+      type: array
+      description: Ordered by slug
+      items: { $ref: '#/DiscoveredSource' }

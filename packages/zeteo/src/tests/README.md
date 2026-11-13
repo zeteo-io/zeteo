@@ -43,6 +43,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `errors`      | error mapping and failure paths                                       |
   | `leak`        | that what a caller may not see fails exactly like what does not exist |
   | `injection`   | that hostile names and values stay identifiers and parameters         |
+  | `property`    | generated inputs checked against an invariant (fast-check)            |
   | `postgres`    | behaviour specific to the Postgres dialect                            |
   | `mssql`       | behaviour specific to the SQL Server dialect                          |
 

@@ -12,6 +12,7 @@ export const ASPECTS = [
   "errors",
   "leak",
   "injection",
+  "property",
   "postgres",
   "mssql",
 ] as const;

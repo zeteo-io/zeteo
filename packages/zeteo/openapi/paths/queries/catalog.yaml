@@ -1,0 +1,35 @@
+/v1/catalog:
+  get:
+    tags: [Queries]
+    summary: Discover what you can query
+    description: |
+      The sources, tables, columns and relations the caller may query, and the query language's
+      JSON Schema. It shows exactly what the caller's grants (their own and their groups') allow
+      and nothing more: no ids, no native types, no connection settings, and no hint of a table,
+      column, relation or source they are not granted. A relation is listed only when every key
+      column on both sides is granted.
+
+      Without `source`, every source the caller has a grant on, ordered by slug. A `source` that
+      is unknown, archived, or not granted answers an empty `sources`, as a caller with no grants
+      gets. Names are written as a query would write them.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: getCatalog
+    parameters:
+      - name: source
+        in: query
+        required: false
+        description: The slug of one source
+        schema: { type: string, minLength: 1, maxLength: 200 }
+    responses:
+      '200':
+        description: The caller's visible catalogue
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/CatalogResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

@@ -102,6 +102,12 @@ export interface ShopOptions {
   absent?: string[];
   /** Table keys, column ids or relation ids the last refresh did not find. */
   missing?: string[];
+  /**
+   * Names each column `<table key>_<column>`, so no two columns share a name
+   * and a name found in text is one column's. Ids, `hidden`, `absent` and
+   * `missing` keep the plain names.
+   */
+  uniqueNames?: boolean;
 }
 
 const SOURCE = {
@@ -122,6 +128,8 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
   const absent = new Set(options.absent);
   const missing = new Set(options.missing);
   const since = (id: string) => (missing.has(id) ? new Date(0) : null);
+  const columnName = (key: string, name: string) =>
+    options.uniqueNames ? `${key}_${name}` : name;
 
   const tables: SourceTable[] = [];
   const columns: SourceColumn[] = [];
@@ -142,7 +150,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
       columns.push({
         id,
         tableId: key,
-        name,
+        name: columnName(key, name),
         type,
         nativeType,
         nullable: true,
@@ -164,9 +172,9 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
         sourceId: SOURCE.id,
         name,
         fromTableId: from,
-        fromColumns: [fromCol],
+        fromColumns: [columnName(from, fromCol)],
         toTableId: to,
-        toColumns: [toCol],
+        toColumns: [columnName(to, toCol)],
         toMany,
         missingSince: since(`${from}.${name}`),
       }) as Relation

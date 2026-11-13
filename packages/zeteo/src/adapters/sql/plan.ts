@@ -169,6 +169,19 @@ const fail = (
   path: QueryPath
 ): QueryError => new QueryError(code, message, path);
 
+/**
+ * A table as a query writes it in `from`: the bare name when no other table
+ * of `tables` shares it, else `schema.table`. `resolveFrom` accepts exactly
+ * these, and the catalogue prints them.
+ */
+export const queryNameOf = (
+  tables: readonly Pick<VisibleTable, "schemaName" | "name">[],
+  table: Pick<VisibleTable, "schemaName" | "name">
+): string =>
+  tables.filter((t) => t.name === table.name).length === 1
+    ? table.name
+    : `${table.schemaName}.${table.name}`;
+
 class Planner {
   private readonly scopes = new Map<string, Scope>();
   private readonly references = new Map<string, Reference>();
@@ -183,13 +196,7 @@ class Planner {
   }
 
   private displayNames(): string[] {
-    const counts = new Map<string, number>();
-    for (const t of this.catalog.tables) {
-      counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
-    }
-    return this.catalog.tables.map((t) =>
-      counts.get(t.name) === 1 ? t.name : `${t.schemaName}.${t.name}`
-    );
+    return this.catalog.tables.map((t) => queryNameOf(this.catalog.tables, t));
   }
 
   resolveFrom(name: string): Scope {

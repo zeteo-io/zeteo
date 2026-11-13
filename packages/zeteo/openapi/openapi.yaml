@@ -43,7 +43,8 @@ info:
 
     ## Queries
 
-    `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    `GET /v1/catalog` lists what the caller may query, with the language's JSON Schema, and
+    nothing about what they may not. `POST /v1/query` runs a query in the SQL query language over what the caller is granted
     (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
     Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
     `docs/querying.md`.
@@ -111,6 +112,8 @@ paths:
     $ref: './paths/grants/grants.yaml#/~1v1~1grants'
   /v1/grants/{grantId}:
     $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
+  /v1/catalog:
+    $ref: './paths/queries/catalog.yaml#/~1v1~1catalog'
   /v1/query:
     $ref: './paths/queries/query.yaml#/~1v1~1query'
   /v1/runs:
@@ -216,3 +219,13 @@ components:
       $ref: './components/queries/schemas.yaml#/Run'
     ListRunsResponse:
       $ref: './components/queries/schemas.yaml#/ListRunsResponse'
+    DiscoveredColumn:
+      $ref: './components/queries/schemas.yaml#/DiscoveredColumn'
+    DiscoveredRelation:
+      $ref: './components/queries/schemas.yaml#/DiscoveredRelation'
+    DiscoveredTable:
+      $ref: './components/queries/schemas.yaml#/DiscoveredTable'
+    DiscoveredSource:
+      $ref: './components/queries/schemas.yaml#/DiscoveredSource'
+    CatalogResponse:
+      $ref: './components/queries/schemas.yaml#/CatalogResponse'
