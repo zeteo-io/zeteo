@@ -1,8 +1,12 @@
 // @module-tag unit
 // @module-tag platform
-import { acquireRunLeases, runLimits } from "../../engine/limits.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acquireLease } from "../../engine/leases.js";
+import {
+  acquireExportLeases,
+  acquireRunLeases,
+  runLimits,
+} from "../../engine/limits.js";
 import {
   ServiceUnavailableError,
   TooManyRequestsError,
@@ -14,6 +18,11 @@ vi.mock(import("../../engine/leases.js"), () => ({
 }));
 
 const lease = vi.mocked(acquireLease);
+/** A lease whose release is `release`. */
+const held = (release: () => Promise<void>) => ({
+  release,
+  renew: vi.fn().mockResolvedValue(undefined),
+});
 
 afterEach(() => {
   lease.mockReset();
@@ -24,8 +33,8 @@ describe("acquireRunLeases", () => {
     const releaseUser = vi.fn().mockResolvedValue(undefined);
     const releaseSource = vi.fn().mockRejectedValue(new Error("redis down"));
     lease
-      .mockResolvedValueOnce(releaseUser)
-      .mockResolvedValueOnce(releaseSource);
+      .mockResolvedValueOnce(held(releaseUser))
+      .mockResolvedValueOnce(held(releaseSource));
     const release = await acquireRunLeases("u", "s", 1000);
     await expect(release()).resolves.toBeUndefined();
     expect(releaseSource).toHaveBeenCalledOnce();
@@ -34,7 +43,7 @@ describe("acquireRunLeases", () => {
 
   it("releases the user's lease when the source refuses, and answers source_busy", async () => {
     const releaseUser = vi.fn().mockRejectedValue(new Error("redis down"));
-    lease.mockResolvedValueOnce(releaseUser).mockResolvedValueOnce(null);
+    lease.mockResolvedValueOnce(held(releaseUser)).mockResolvedValueOnce(null);
     const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
     expect(err).toBeInstanceOf(TooManyRequestsError);
     expect(err.code).toBe("source_busy");
@@ -43,7 +52,7 @@ describe("acquireRunLeases", () => {
 
   it("does not wait for the user's release when the source refuses", async () => {
     const releaseUser = vi.fn(() => new Promise<void>(() => undefined));
-    lease.mockResolvedValueOnce(releaseUser).mockResolvedValueOnce(null);
+    lease.mockResolvedValueOnce(held(releaseUser)).mockResolvedValueOnce(null);
     const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
     expect(err.code).toBe("source_busy");
     expect(releaseUser).toHaveBeenCalledOnce();
@@ -52,7 +61,7 @@ describe("acquireRunLeases", () => {
   it("does not wait for the user's release when the source's lease fails", async () => {
     const releaseUser = vi.fn(() => new Promise<void>(() => undefined));
     lease
-      .mockResolvedValueOnce(releaseUser)
+      .mockResolvedValueOnce(held(releaseUser))
       .mockRejectedValueOnce(new ServiceUnavailableError("redis down"));
     const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
     expect(err).toBeInstanceOf(ServiceUnavailableError);
@@ -64,6 +73,48 @@ describe("acquireRunLeases", () => {
     const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
     expect(err.code).toBe("too_many_queries");
     expect(lease).toHaveBeenCalledOnce();
+  });
+});
+
+describe("acquireExportLeases", () => {
+  it("takes one of a user's export slots and one of the source's, under keys of their own", async () => {
+    lease
+      .mockResolvedValueOnce(held(vi.fn()))
+      .mockResolvedValueOnce(held(vi.fn()));
+    await acquireExportLeases("u", "s", 30_000);
+    expect(lease.mock.calls).toEqual([
+      ["export:user:u", 1, 30_000],
+      ["export:source:s", 2, 30_000],
+    ]);
+  });
+
+  it("refuses with too_many_exports when the user's slot is taken", async () => {
+    lease.mockResolvedValueOnce(null);
+    const err = await acquireExportLeases("u", "s", 1000).catch((e) => e);
+    expect(err).toBeInstanceOf(TooManyRequestsError);
+    expect(err.code).toBe("too_many_exports");
+    expect(lease).toHaveBeenCalledOnce();
+  });
+
+  it("refuses with source_busy when the source's slots are taken, releasing the user's", async () => {
+    const releaseUser = vi.fn().mockResolvedValue(undefined);
+    lease.mockResolvedValueOnce(held(releaseUser)).mockResolvedValueOnce(null);
+    const err = await acquireExportLeases("u", "s", 1000).catch((e) => e);
+    expect(err.code).toBe("source_busy");
+    expect(releaseUser).toHaveBeenCalledOnce();
+  });
+
+  it("renews and releases both leases", async () => {
+    const user = held(vi.fn().mockResolvedValue(undefined));
+    const source = held(vi.fn().mockResolvedValue(undefined));
+    lease.mockResolvedValueOnce(user).mockResolvedValueOnce(source);
+    const leases = await acquireExportLeases("u", "s", 1000);
+    await leases.renew(5000);
+    expect(user.renew).toHaveBeenCalledWith(5000);
+    expect(source.renew).toHaveBeenCalledWith(5000);
+    await leases.release();
+    expect(user.release).toHaveBeenCalledOnce();
+    expect(source.release).toHaveBeenCalledOnce();
   });
 });
 

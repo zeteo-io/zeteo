@@ -213,6 +213,8 @@ enum RunOutcome {
   refused
   failed
   timeout
+  // An export that has started and not yet ended.
+  running
 
   @@map("run_outcome")
   @@schema("zeteo")

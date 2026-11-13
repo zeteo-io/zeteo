@@ -33,6 +33,9 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.grantUpdated]: "UPDATE",
   [AUDIT_EVENTS.grantRemoved]: "DELETE",
   [AUDIT_EVENTS.queryRun]: "CREATE",
+  [AUDIT_EVENTS.exportStarted]: "CREATE",
+  // Usually closes the run its start created; a refused export has no start.
+  [AUDIT_EVENTS.exportRun]: "UPDATE",
 };
 
 export interface WithAuditOptions {

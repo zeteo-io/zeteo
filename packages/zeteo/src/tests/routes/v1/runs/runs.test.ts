@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BASE_URL, fetchJson } from "../../../support/http.js";
 import { removeSources } from "../../../support/sources.js";
+import { prisma } from "../../../../utils/db/prisma.js";
 import { ENGINES } from "../../../support/engines.js";
 import { tokenFor } from "../../../support/tokens.js";
 import { randomUUID } from "crypto";
@@ -124,6 +125,34 @@ describe("GET /v1/runs", () => {
       }),
     ]);
     expect((await list({ user_id: randomUUID() })).body.data).toEqual([]);
+  });
+
+  it("lists an export still running under the running filter", async () => {
+    const running = newQueryUser();
+    const row = await prisma.queryRun.create({
+      data: {
+        userId: running.id,
+        sourceId: source.id,
+        entryPoint: "export",
+        query: { source: source.slug, from: "accounts", select: ["id"] },
+        durationMs: 0,
+        outcome: "running",
+      },
+    });
+    try {
+      const res = await list({ user_id: running.id, outcome: "running" });
+      expect(res.status).toBe(200);
+      expect(res.body.data).toEqual([
+        expect.objectContaining({
+          id: row.id,
+          entry_point: "export",
+          outcome: "running",
+          row_count: null,
+        }),
+      ]);
+    } finally {
+      await removeRunsOf([running.id]);
+    }
   });
 
   it("refuses a bad filter or cursor with 400 invalid_request", async () => {

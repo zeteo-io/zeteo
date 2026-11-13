@@ -21,6 +21,12 @@ export const GRANTS_WRITE = "zeteo.grants.write";
 /** Runs queries over the tables and columns the caller is granted. */
 export const DATA_READ = "zeteo.data.read";
 
+/**
+ * Exports what a query over the caller's grants returns, up to the source's
+ * export cap; the caller also needs `zeteo.data.read`.
+ */
+export const DATA_EXPORT = "zeteo.data.export";
+
 /** Reads the record of query runs. */
 export const RUNS_READ = "zeteo.runs.read";
 
@@ -36,6 +42,8 @@ export const AUDIT_EVENTS = {
   grantUpdated: "zeteo.grant.updated",
   grantRemoved: "zeteo.grant.removed",
   queryRun: "zeteo.query.run",
+  exportStarted: "zeteo.export.started",
+  exportRun: "zeteo.export.run",
 } as const;
 
 export type AuditEvent = (typeof AUDIT_EVENTS)[keyof typeof AUDIT_EVENTS];
@@ -52,6 +60,8 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.grantUpdated]: "A grant's columns were changed",
   [AUDIT_EVENTS.grantRemoved]: "A grant was removed",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
+  [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
+  [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
 };
 
 const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
@@ -65,6 +75,8 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.grantUpdated]: GRANTS_READ,
   [AUDIT_EVENTS.grantRemoved]: GRANTS_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
+  [AUDIT_EVENTS.exportStarted]: RUNS_READ,
+  [AUDIT_EVENTS.exportRun]: RUNS_READ,
 };
 
 /**
@@ -115,6 +127,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         orgAssignable: false,
       },
       {
+        name: DATA_EXPORT,
+        displayName: "Export data",
+        description:
+          "Export query results over the tables and columns one is granted, from sources that allow it",
+        orgAssignable: false,
+      },
+      {
         name: RUNS_READ,
         displayName: "Read query runs",
         description: "List the record of queries that were run",
@@ -133,6 +152,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           GRANTS_READ,
           GRANTS_WRITE,
           DATA_READ,
+          DATA_EXPORT,
           RUNS_READ,
         ],
       },

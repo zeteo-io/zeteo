@@ -4,7 +4,7 @@ import { z } from "zod";
 export const ListRunsQuerySchema = z.strictObject({
   user_id: IdSchema.optional(),
   source_id: IdSchema.optional(),
-  outcome: z.enum(["ok", "refused", "failed", "timeout"]).optional(),
+  outcome: z.enum(["ok", "refused", "failed", "timeout", "running"]).optional(),
   cursor: z.string().max(512).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

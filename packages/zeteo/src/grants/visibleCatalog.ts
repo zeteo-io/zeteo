@@ -49,6 +49,8 @@ export interface VisibleCatalog {
     type: SourceType;
     timeoutMs: number;
     rowCap: number;
+    exportEnabled: boolean;
+    exportRowCap: number;
   };
   tables: VisibleTable[];
   relations: VisibleRelation[];
@@ -135,6 +137,8 @@ export const buildVisibleCatalog = (
       type: typeOf(source),
       timeoutMs: source.timeoutMs,
       rowCap: source.rowCap,
+      exportEnabled: source.exportEnabled,
+      exportRowCap: source.exportRowCap,
     },
     tables: visibleTables,
     relations: visibleRelations,

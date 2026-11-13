@@ -201,6 +201,8 @@ describe("error codes", () => {
       "temporarily_unavailable",
       "not_found_or_not_accessible",
       "invalid_operator",
+      "export_not_enabled",
+      "too_many_exports",
     ]) {
       expect(codes).toContain(code);
     }

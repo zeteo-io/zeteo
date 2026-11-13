@@ -34,9 +34,25 @@ describe("acquireLease when Redis fails", () => {
   it("ends a release within its bound when Redis never answers", async () => {
     redis.eval.mockResolvedValue(1);
     redis.zrem.mockImplementation(never);
-    const release = await acquireLease("k", 2, 10_000);
+    const lease = await acquireLease("k", 2, 10_000);
     const started = Date.now();
-    await expect(release!()).resolves.toBeUndefined();
+    await expect(lease!.release()).resolves.toBeUndefined();
     expect(Date.now() - started).toBeLessThan(WITHIN_MS);
+  });
+
+  it("ends a renewal within its bound, without throwing, when Redis never answers", async () => {
+    redis.eval.mockResolvedValueOnce(1).mockImplementation(never);
+    const lease = await acquireLease("k", 2, 10_000);
+    const started = Date.now();
+    await expect(lease!.renew(10_000)).resolves.toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(WITHIN_MS);
+  });
+
+  it("does not throw when Redis refuses a renewal", async () => {
+    redis.eval
+      .mockResolvedValueOnce(1)
+      .mockRejectedValue(new Error("Connection is closed"));
+    const lease = await acquireLease("k", 2, 10_000);
+    await expect(lease!.renew(10_000)).resolves.toBeUndefined();
   });
 });

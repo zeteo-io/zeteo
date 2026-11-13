@@ -88,6 +88,14 @@ export class ForbiddenError extends AppError {
   }
 }
 
+/** An export from a source whose exports are off, or capped at no rows. */
+export class ExportNotEnabledError extends AppError {
+  constructor() {
+    super(403, "export_not_enabled", "Exports are not enabled for this source");
+    this.name = "ExportNotEnabledError";
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = "Not found") {
     super(404, "not_found", message);

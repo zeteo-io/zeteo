@@ -17,6 +17,8 @@ const source = {
   type: "azure_sql",
   timeoutMs: 1000,
   rowCap: 50,
+  exportEnabled: true,
+  exportRowCap: 1000,
 } as Source;
 
 const table = (id: string, name: string, missing = false): SourceTable =>
@@ -111,6 +113,8 @@ describe("buildVisibleCatalog", () => {
       type: "azure-sql",
       timeoutMs: 1000,
       rowCap: 50,
+      exportEnabled: true,
+      exportRowCap: 1000,
     });
   });
 

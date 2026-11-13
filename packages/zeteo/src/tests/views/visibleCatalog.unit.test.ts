@@ -36,6 +36,8 @@ const catalog = (over: Partial<VisibleCatalog> = {}): VisibleCatalog => ({
     type: "postgres",
     timeoutMs: 1000,
     rowCap: 50,
+    exportEnabled: false,
+    exportRowCap: 0,
   },
   tables: [
     table("orders", "public", "orders"),

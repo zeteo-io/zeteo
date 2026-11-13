@@ -1,7 +1,7 @@
 import { TooManyRequestsError } from "../utils/errors.js";
+import { acquireLease, type Lease } from "./leases.js";
 import type { RunLimits } from "../adapters/types.js";
 import { logger } from "../utils/logger.js";
-import { acquireLease } from "./leases.js";
 
 /** What one run may return, by entry point. */
 export const LIMIT_PROFILES = {
@@ -9,7 +9,11 @@ export const LIMIT_PROFILES = {
   mcp: { defaultRows: 100, maxRows: 5000, maxBytes: 1024 * 1024 },
 } as const;
 
-export type EntryPoint = keyof typeof LIMIT_PROFILES;
+/** Where a run came from: a query over the API or MCP, or an export. */
+export type EntryPoint = "api" | "mcp" | "export";
+
+/** The entry points that run a query and return its rows at once. */
+export type QueryEntryPoint = keyof typeof LIMIT_PROFILES;
 
 /** Queries one user may have running at once, across every replica. */
 export const USER_CONCURRENCY = 2;
@@ -19,6 +23,17 @@ export const SOURCE_CONCURRENCY = 5;
 export const LEASE_GRACE_MS = 5000;
 const RETRY_AFTER_SECONDS = 1;
 
+/** How long an export may run, from its start to its last row, time waiting on its reader included. */
+export const EXPORT_TIMEOUT_MS = 600_000;
+/** Exports one user may have running at once, across every replica. */
+export const EXPORT_USER_CONCURRENCY = 1;
+/** Exports one source may be running at once, across every replica. */
+export const EXPORT_SOURCE_CONCURRENCY = 2;
+/** How long an export's lease lasts unless renewed: one whose process died frees its slot this soon. */
+export const EXPORT_LEASE_MS = 30_000;
+/** How often a running export renews its leases. */
+export const EXPORT_LEASE_RENEW_MS = 10_000;
+
 /**
  * The run's limits but its deadline, which is set when the run is about to
  * start: the rows the query asked for (or the profile's default), never more
@@ -26,7 +41,7 @@ const RETRY_AFTER_SECONDS = 1;
  * source's time limit.
  */
 export const runLimits = (
-  entryPoint: EntryPoint,
+  entryPoint: QueryEntryPoint,
   requestedRows: number | undefined,
   source: { rowCap: number; timeoutMs: number }
 ): Omit<RunLimits, "deadlineAt"> => {
@@ -42,60 +57,128 @@ export const runLimits = (
   };
 };
 
-type Release = () => Promise<void>;
-
 /**
  * Releases every lease, each whatever the others do. A release that fails is
  * logged, not thrown: its lease lapses at its expiry, and the run it guarded
  * has already ended.
  */
-const releaseAll = async (...releases: Release[]): Promise<void> => {
-  const results = await Promise.allSettled(releases.map((r) => r()));
+const releaseAll = async (...leases: Lease[]): Promise<void> => {
+  const results = await Promise.allSettled(leases.map((l) => l.release()));
   for (const result of results) {
     if (result.status === "rejected") {
-      logger.error({ err: result.reason }, "releasing a query lease failed");
+      logger.error({ err: result.reason }, "releasing a run lease failed");
     }
   }
 };
 
+/** One of the two slots a run takes: under which key, how many, and the refusal when all are taken. */
+interface Slot {
+  key: string;
+  limit: number;
+  refuse: () => TooManyRequestsError;
+}
+
 /**
- * Takes a slot for the user, then one for the source, each for `ttlMs`, and
- * returns their release, which never throws. Refuses with 429
+ * Takes the user's slot, then the source's, each for `ttlMs`, and returns
+ * both as one lease. Refuses with the slot's 429, or 503 when Redis fails,
+ * holding neither: a lease already taken is released without waiting for
+ * Redis.
+ */
+const acquirePair = async (
+  user: Slot,
+  source: Slot,
+  ttlMs: number
+): Promise<Lease> => {
+  const userLease = await acquireLease(user.key, user.limit, ttlMs);
+  if (!userLease) throw user.refuse();
+  let sourceLease: Lease | null;
+  try {
+    sourceLease = await acquireLease(source.key, source.limit, ttlMs);
+  } catch (err) {
+    void releaseAll(userLease);
+    throw err;
+  }
+  if (!sourceLease) {
+    void releaseAll(userLease);
+    throw source.refuse();
+  }
+  const held = sourceLease;
+  return {
+    release: () => releaseAll(held, userLease),
+    renew: async (renewTtlMs) => {
+      await Promise.all([held.renew(renewTtlMs), userLease.renew(renewTtlMs)]);
+    },
+  };
+};
+
+/**
+ * Takes a query slot for the user, then one for the source, each for
+ * `ttlMs`, and returns their release, which never throws. Refuses with 429
  * `too_many_queries` or `source_busy`, or 503 when Redis fails, holding
- * neither: a lease already taken is released without waiting for Redis.
+ * neither.
  */
 export const acquireRunLeases = async (
   userId: string,
   sourceId: string,
   ttlMs: number
-): Promise<Release> => {
-  const user = await acquireLease(`user:${userId}`, USER_CONCURRENCY, ttlMs);
-  if (!user) {
-    throw new TooManyRequestsError(
-      RETRY_AFTER_SECONDS,
-      `At most ${USER_CONCURRENCY} queries may run at once for one user`,
-      "too_many_queries"
-    );
-  }
-  let source: Release | null;
-  try {
-    source = await acquireLease(
-      `source:${sourceId}`,
-      SOURCE_CONCURRENCY,
-      ttlMs
-    );
-  } catch (err) {
-    void releaseAll(user);
-    throw err;
-  }
-  if (!source) {
-    void releaseAll(user);
-    throw new TooManyRequestsError(
-      RETRY_AFTER_SECONDS,
-      "The source is running as many queries as it allows; retry shortly",
-      "source_busy"
-    );
-  }
-  const held = source;
-  return () => releaseAll(held, user);
+): Promise<() => Promise<void>> => {
+  const lease = await acquirePair(
+    {
+      key: `user:${userId}`,
+      limit: USER_CONCURRENCY,
+      refuse: () =>
+        new TooManyRequestsError(
+          RETRY_AFTER_SECONDS,
+          `At most ${USER_CONCURRENCY} queries may run at once for one user`,
+          "too_many_queries"
+        ),
+    },
+    {
+      key: `source:${sourceId}`,
+      limit: SOURCE_CONCURRENCY,
+      refuse: () =>
+        new TooManyRequestsError(
+          RETRY_AFTER_SECONDS,
+          "The source is running as many queries as it allows; retry shortly",
+          "source_busy"
+        ),
+    },
+    ttlMs
+  );
+  return lease.release;
 };
+
+/**
+ * Takes an export slot for the user, then one for the source, each for
+ * `ttlMs` and counted apart from queries; the export renews them while it
+ * runs. Refuses with 429 `too_many_exports` or `source_busy`, or 503 when
+ * Redis fails, holding neither.
+ */
+export const acquireExportLeases = (
+  userId: string,
+  sourceId: string,
+  ttlMs: number
+): Promise<Lease> =>
+  acquirePair(
+    {
+      key: `export:user:${userId}`,
+      limit: EXPORT_USER_CONCURRENCY,
+      refuse: () =>
+        new TooManyRequestsError(
+          RETRY_AFTER_SECONDS,
+          `At most ${EXPORT_USER_CONCURRENCY} export may run at once for one user`,
+          "too_many_exports"
+        ),
+    },
+    {
+      key: `export:source:${sourceId}`,
+      limit: EXPORT_SOURCE_CONCURRENCY,
+      refuse: () =>
+        new TooManyRequestsError(
+          RETRY_AFTER_SECONDS,
+          "The source is running as many exports as it allows; retry shortly",
+          "source_busy"
+        ),
+    },
+    ttlMs
+  );

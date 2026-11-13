@@ -1,5 +1,4 @@
 import { openSettings } from "../utils/crypto/envelope.js";
-import { SOURCE_CONCURRENCY } from "../engine/limits.js";
 import { resolveAllowed } from "./network.js";
 import { logger } from "../utils/logger.js";
 import env from "../env.js";
@@ -8,13 +7,18 @@ import type {
   SourceAdapter,
   SourceConnection,
 } from "../adapters/types.js";
+import {
+  EXPORT_SOURCE_CONCURRENCY,
+  SOURCE_CONCURRENCY,
+} from "../engine/limits.js";
 
 export const CONNECT_TIMEOUT_MS = 5000;
 /**
- * Every query the source may run at once, plus two: a refresh or login check
- * still gets a connection while user queries hold as many as they may.
+ * Every query and export the source may run at once, plus two: a refresh or
+ * login check still gets a connection while queries and exports hold as many
+ * as they may.
  */
-export const POOL_SIZE = SOURCE_CONCURRENCY + 2;
+export const POOL_SIZE = SOURCE_CONCURRENCY + EXPORT_SOURCE_CONCURRENCY + 2;
 export const QUERY_TIMEOUT_MS = 15_000;
 
 export const CONNECT_OPTIONS: ConnectOptions = {

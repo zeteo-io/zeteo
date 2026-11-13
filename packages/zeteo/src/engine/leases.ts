@@ -21,18 +21,37 @@ redis.call("ZADD", KEYS[1], now + ttl, ARGV[3])
 if redis.call("PTTL", KEYS[1]) < ttl then redis.call("PEXPIRE", KEYS[1], ttl) end
 return 1`;
 
+// Extends the lease's own member only while it is still held: a lease that
+// has lapsed (expired, released, or dropped by a later acquire) is not taken
+// back, so a renewal never pushes the count past the limit.
+const RENEW = `
+local t = redis.call("TIME")
+local now = tonumber(t[1]) * 1000 + math.floor(tonumber(t[2]) / 1000)
+local ttl = tonumber(ARGV[1])
+local expires = redis.call("ZSCORE", KEYS[1], ARGV[2])
+if not expires or tonumber(expires) <= now then return 0 end
+redis.call("ZADD", KEYS[1], "XX", now + ttl, ARGV[2])
+if redis.call("PTTL", KEYS[1]) < ttl then redis.call("PEXPIRE", KEYS[1], ttl) end
+return 1`;
+
+export interface Lease {
+  /** Gives the slot back. Harmless when repeated; never throws. */
+  release(): Promise<void>;
+  /** Holds the slot `ttlMs` from now, if it is still held. Never throws. */
+  renew(ttlMs: number): Promise<void>;
+}
+
 /**
- * Takes one of `limit` slots under `key` for at most `ttlMs`. Returns its
- * release, or null when all `limit` are taken; throws a 503 when Redis fails
- * or does not answer within its bound. Releasing twice is harmless; a release
- * that fails or does not answer in time is logged, and the lease then lapses
- * at its expiry.
+ * Takes one of `limit` slots under `key` for at most `ttlMs`. Returns the
+ * lease, or null when all `limit` are taken; throws a 503 when Redis fails
+ * or does not answer within its bound. A release or renewal that fails or
+ * does not answer in time is logged, and the lease then lapses at its expiry.
  */
 export const acquireLease = async (
   key: string,
   limit: number,
   ttlMs: number
-): Promise<(() => Promise<void>) | null> => {
+): Promise<Lease | null> => {
   const redisKey = leaseKey(key);
   const member = randomUUID();
   let taken: unknown;
@@ -47,11 +66,24 @@ export const acquireLease = async (
     );
   }
   if (taken !== 1) return null;
-  return async () => {
-    try {
-      await withinRedisTimeout(redis.zrem(redisKey, member));
-    } catch (err) {
-      logger.warn({ err, key }, "releasing a lease failed");
-    }
+  return {
+    release: async () => {
+      try {
+        await withinRedisTimeout(redis.zrem(redisKey, member));
+      } catch (err) {
+        logger.warn({ err, key }, "releasing a lease failed");
+      }
+    },
+    renew: async (renewTtlMs) => {
+      try {
+        const renewed = await withinRedisTimeout(
+          redis.eval(RENEW, 1, redisKey, renewTtlMs, member)
+        );
+        if (renewed !== 1)
+          logger.warn({ key }, "a lease lapsed before renewal");
+      } catch (err) {
+        logger.warn({ err, key }, "renewing a lease failed");
+      }
+    },
   };
 };

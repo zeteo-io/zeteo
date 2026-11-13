@@ -7,8 +7,8 @@ import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
 import type { Caller } from "../middleware/auth.js";
 import { notFound, QueryError } from "./errors.js";
+import type { QueryEntryPoint } from "./limits.js";
 import { adapterFor } from "../adapters/index.js";
-import type { EntryPoint } from "./limits.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
@@ -19,17 +19,19 @@ import type {
   QueryPlan,
   QueryResult,
   QueryWarning,
+  SourceAdapter,
 } from "../adapters/types.js";
 import {
   CLIENT_CLOSED,
   failureOf,
   recordRun,
+  type RunRecord,
   UNRECORDABLE_QUERY,
 } from "./record.js";
 
 export interface RunQueryInput {
   caller: Caller;
-  entryPoint: EntryPoint;
+  entryPoint: QueryEntryPoint;
   /** The query as the caller sent it. */
   body: unknown;
   /** Aborts when the caller goes away: the run is stopped on the source. */
@@ -86,7 +88,7 @@ const UNSTORABLE_MESSAGE =
  * ill-formed Unicode, and a stored run cannot hold either, so both are
  * refused here, before anything is recorded.
  */
-const sourceSlugOf = (body: unknown): string => {
+export const sourceSlugOf = (body: unknown): string => {
   const shape = ShapeSchema.safeParse(body);
   if (!shape.success) throw invalidRequest("body", shape.error);
   if (holdsUnstorable(body)) {
@@ -98,7 +100,7 @@ const sourceSlugOf = (body: unknown): string => {
 };
 
 /** What the run has got to, for its record. */
-interface Progress {
+export interface Progress {
   sourceId: string | null;
   /** The source's language refused the body: a 400 that is not recorded. */
   unrecorded: boolean;
@@ -128,39 +130,75 @@ const checkReferences = (
   }
 };
 
+const columnsMatch = (
+  plan: QueryPlan,
+  columns: { name: string; type: ColumnType }[]
+): boolean =>
+  columns.length === plan.columns.length &&
+  columns.every(
+    (c, i) =>
+      c.name === plan.columns[i]!.name && c.type === plan.columns[i]!.type
+  );
+
+const rowsMatch = (plan: QueryPlan, rows: unknown[][]): boolean =>
+  rows.every((row) => Array.isArray(row) && row.length === plan.columns.length);
+
+const resultMismatch = (
+  plan: QueryPlan,
+  columns: { name: string; type: ColumnType }[],
+  sourceId: string
+): QueryFailedError => {
+  logger.error(
+    {
+      source_id: sourceId,
+      expected: plan.columns.map(({ name, type }) => ({ name, type })),
+      received: columns.map(({ name, type }) => ({ name, type })),
+    },
+    "a query result does not match its plan"
+  );
+  return new QueryFailedError();
+};
+
+/** The result's columns must be the plan's, in order. */
+export const checkColumns = (
+  plan: QueryPlan,
+  columns: { name: string; type: ColumnType }[],
+  sourceId: string
+): void => {
+  if (!columnsMatch(plan, columns)) {
+    throw resultMismatch(plan, columns, sourceId);
+  }
+};
+
+/** Every row must be as wide as the plan's columns. */
+export const checkRows = (
+  plan: QueryPlan,
+  columns: { name: string; type: ColumnType }[],
+  rows: unknown[][],
+  sourceId: string
+): void => {
+  if (!rowsMatch(plan, rows)) throw resultMismatch(plan, columns, sourceId);
+};
+
 /** Step 6: the result must be the plan's columns, in order, and every row that wide. */
 const checkResult = (
   plan: QueryPlan,
   result: QueryResult,
   sourceId: string
 ): void => {
-  const expected = plan.columns.map(({ name, type }) => ({ name, type }));
-  const matches =
-    result.columns.length === expected.length &&
-    result.columns.every(
-      (c, i) => c.name === expected[i].name && c.type === expected[i].type
-    ) &&
-    result.rows.every(
-      (row) => Array.isArray(row) && row.length === expected.length
-    );
-  if (matches) return;
-  logger.error(
-    {
-      source_id: sourceId,
-      expected,
-      received: result.columns.map(({ name, type }) => ({ name, type })),
-    },
-    "a query result does not match its plan"
-  );
-  throw new QueryFailedError();
+  checkColumns(plan, result.columns, sourceId);
+  checkRows(plan, result.columns, result.rows, sourceId);
 };
 
-/** Steps 2 to 6. */
-const execute = async (
-  { caller, entryPoint, body, signal }: RunQueryInput,
+/**
+ * Step 2: what the caller is granted, and the source as they may see it. A
+ * source they cannot see is not found, whether or not it exists.
+ */
+export const loadCatalogFor = async (
+  caller: Caller,
   slug: string,
   progress: Progress
-): Promise<{ plan: QueryPlan; result: QueryResult }> => {
+): Promise<{ access: Access; catalog: VisibleCatalog }> => {
   const access = await loadAccess(caller);
   const catalog = await loadVisibleCatalog(slug, access);
   if (!catalog) {
@@ -171,18 +209,60 @@ const execute = async (
       await db.sources.listSlugs(access.sourceIds)
     );
   }
-  const sourceId = catalog.source.id;
-  progress.sourceId = sourceId;
+  progress.sourceId = catalog.source.id;
+  return { access, catalog };
+};
 
+/**
+ * Step 3: the body in the source's language, planned against the visible
+ * catalogue, every reference granted. A body the language refuses is a 400
+ * that is not recorded.
+ */
+export const planFor = (
+  body: unknown,
+  access: Access,
+  catalog: VisibleCatalog,
+  progress: Progress
+): { adapter: SourceAdapter; plan: QueryPlan } => {
   const adapter = adapterFor(catalog.source.type);
-  const { language } = adapter;
-  const parsed = language.schema.safeParse(body);
+  const parsed = adapter.language.schema.safeParse(body);
   if (!parsed.success) {
     progress.unrecorded = true;
     throw invalidRequest("body", parsed.error);
   }
-  const plan = language.plan(parsed.data, catalog);
+  const plan = adapter.language.plan(parsed.data, catalog);
   checkReferences(plan, access, catalog);
+  return { adapter, plan };
+};
+
+/**
+ * Records the run; when the row cannot be stored, records it again with a
+ * placeholder for the query, so the run and its audit entry exist either
+ * way. Throws only when both attempts fail.
+ */
+export const recordRunOrPlaceholder = async (
+  run: RunRecord
+): Promise<string> => {
+  try {
+    return await recordRun(run);
+  } catch (err) {
+    logger.error(
+      { err, source_id: run.sourceId },
+      "recording a query run failed; recording it without its query"
+    );
+    return recordRun({ ...run, query: UNRECORDABLE_QUERY });
+  }
+};
+
+/** Steps 2 to 6. */
+const execute = async (
+  { caller, entryPoint, body, signal }: RunQueryInput,
+  slug: string,
+  progress: Progress
+): Promise<{ plan: QueryPlan; result: QueryResult }> => {
+  const { access, catalog } = await loadCatalogFor(caller, slug, progress);
+  const sourceId = catalog.source.id;
+  const { adapter, plan } = planFor(body, access, catalog, progress);
 
   const limits = runLimits(entryPoint, plan.limit, catalog.source);
   // Compiled before any lease is taken, so a query the source cannot take is
@@ -234,35 +314,17 @@ export const runQuery = async (
   const slug = sourceSlugOf(input.body);
   const started = performance.now();
   const progress: Progress = { sourceId: null, unrecorded: false };
-  /**
-   * Records the run; when the row cannot be stored, records it again with a
-   * placeholder for the query, so the run and its audit entry exist either
-   * way. Throws only when both attempts fail.
-   */
-  const record = async (
-    outcome: Pick<
-      Parameters<typeof recordRun>[0],
-      "outcome" | "errorCode" | "rowCount" | "truncated"
-    >
-  ): Promise<string> => {
-    const run = {
+  const record = (
+    outcome: Pick<RunRecord, "outcome" | "errorCode" | "rowCount" | "truncated">
+  ): Promise<string> =>
+    recordRunOrPlaceholder({
       caller: input.caller,
       sourceId: progress.sourceId,
       entryPoint: input.entryPoint,
       query: input.body,
       durationMs: Math.round(performance.now() - started),
       ...outcome,
-    };
-    try {
-      return await recordRun(run);
-    } catch (err) {
-      logger.error(
-        { err, source_id: progress.sourceId },
-        "recording a query run failed; recording it without its query"
-      );
-      return recordRun({ ...run, query: UNRECORDABLE_QUERY });
-    }
-  };
+    });
 
   let ran: Awaited<ReturnType<typeof execute>>;
   try {

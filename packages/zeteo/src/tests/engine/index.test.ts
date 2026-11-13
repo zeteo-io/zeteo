@@ -192,7 +192,7 @@ describeEachEngine(
           code: "too_many_parameters",
         });
       } finally {
-        await Promise.all(held.map((release) => release()));
+        await Promise.all(held.map((lease) => lease.release()));
       }
     });
 

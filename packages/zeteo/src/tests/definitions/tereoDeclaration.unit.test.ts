@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
 import {
   AUDIT_EVENTS,
+  DATA_EXPORT,
   DATA_READ,
   GRANTS_READ,
   GRANTS_WRITE,
@@ -34,12 +35,13 @@ describe("buildTereoDocument", () => {
     expect(service.access?.roles).toEqual(["audit_writer", "user_resolver"]);
   });
 
-  it("declares exactly the six zeteo permissions", () => {
+  it("declares exactly the seven zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
     expect(GRANTS_READ).toBe("zeteo.grants.read");
     expect(GRANTS_WRITE).toBe("zeteo.grants.write");
     expect(DATA_READ).toBe("zeteo.data.read");
+    expect(DATA_EXPORT).toBe("zeteo.data.export");
     expect(RUNS_READ).toBe("zeteo.runs.read");
     expect(service.permissions!.map((p) => p.name).sort()).toEqual(
       [
@@ -48,6 +50,7 @@ describe("buildTereoDocument", () => {
         GRANTS_READ,
         GRANTS_WRITE,
         DATA_READ,
+        DATA_EXPORT,
         RUNS_READ,
       ].sort()
     );
@@ -66,7 +69,7 @@ describe("buildTereoDocument", () => {
     }
   });
 
-  it("declares zeteo_admin with all six permissions and zeteo_user with data read", () => {
+  it("declares zeteo_admin with all seven permissions and zeteo_user with data read only", () => {
     const roles = Object.fromEntries(
       service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
     );
@@ -78,13 +81,14 @@ describe("buildTereoDocument", () => {
         GRANTS_READ,
         GRANTS_WRITE,
         DATA_READ,
+        DATA_EXPORT,
         RUNS_READ,
       ].sort()
     );
     expect(roles.zeteo_user).toEqual([DATA_READ]);
   });
 
-  it("gates grant events on grants read and query runs on runs read", () => {
+  it("gates grant events on grants read and query and export runs on runs read", () => {
     const read = Object.fromEntries(
       service.eventTypes!.map((e) => [e.eventType, e.readPermission])
     );
@@ -92,11 +96,15 @@ describe("buildTereoDocument", () => {
     expect(read[AUDIT_EVENTS.grantUpdated]).toBe(GRANTS_READ);
     expect(read[AUDIT_EVENTS.grantRemoved]).toBe(GRANTS_READ);
     expect(read[AUDIT_EVENTS.queryRun]).toBe(RUNS_READ);
+    expect(read[AUDIT_EVENTS.exportStarted]).toBe(RUNS_READ);
+    expect(read[AUDIT_EVENTS.exportRun]).toBe(RUNS_READ);
     expect(read[AUDIT_EVENTS.sourceCreated]).toBe(SOURCES_READ);
   });
 
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
+      "zeteo.export.run",
+      "zeteo.export.started",
       "zeteo.grant.created",
       "zeteo.grant.removed",
       "zeteo.grant.updated",

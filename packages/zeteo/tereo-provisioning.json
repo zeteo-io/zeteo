@@ -42,6 +42,12 @@
         "orgAssignable": false
       },
       {
+        "name": "zeteo.data.export",
+        "displayName": "Export data",
+        "description": "Export query results over the tables and columns one is granted, from sources that allow it",
+        "orgAssignable": false
+      },
+      {
         "name": "zeteo.runs.read",
         "displayName": "Read query runs",
         "description": "List the record of queries that were run",
@@ -59,6 +65,7 @@
           "zeteo.grants.read",
           "zeteo.grants.write",
           "zeteo.data.read",
+          "zeteo.data.export",
           "zeteo.runs.read"
         ]
       },
@@ -120,6 +127,16 @@
       {
         "eventType": "zeteo.query.run",
         "description": "A query was run, refused or failed",
+        "readPermission": "zeteo.runs.read"
+      },
+      {
+        "eventType": "zeteo.export.started",
+        "description": "An export started sending rows",
+        "readPermission": "zeteo.runs.read"
+      },
+      {
+        "eventType": "zeteo.export.run",
+        "description": "An export ended, was refused or failed",
         "readPermission": "zeteo.runs.read"
       }
     ]

@@ -166,8 +166,8 @@ controls that name's DNS. Prefer address ranges where that matters.**
 
 ## Connection pools
 
-Each source has one pool per process (7 connections: the 5 queries a source may run at once, plus
-2, so a refresh or login check still gets one; connect timeout 5 s), opened on first use
+Each source has one pool per process (9 connections: the 5 queries and 2 exports a source may run
+at once, plus 2, so a refresh or login check still gets one; connect timeout 5 s), opened on first use
 and closed after 5 idle minutes, on archive, on a settings change and on shutdown. Catalogue reads
 (the login check and schema reads) run under a 15 s query timeout; user queries run under the
 source's own `timeout_ms` ([querying.md](querying.md)). Concurrent first uses open one pool. A call
