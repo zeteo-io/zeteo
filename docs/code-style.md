@@ -128,6 +128,13 @@ To sort on save in VS Code, install *Run on Save* (`emeraldwalk.runonsave`) and 
 A PR that changes the package needs a plan: `npm run version-plan`, then commit the file in
 `.nx/version-plans/`. CI's version-plan check says when one is missing.
 
+Merging a PR into `master` while plans are pending opens (or updates) the release PR,
+`chore(release): bump versions`, from the branch `release/version-bump`: it applies the plans to
+the version and changelog and deletes them (`.github/workflows/create-version-pr.yml`). Merging
+that PR publishes `ghcr.io/zeteo-io/zeteo:<version>` (and `<major>.<minor>`) for amd64 and arm64
+and tags `zeteo@<version>` (`.github/workflows/publish.yml`). The publish workflow can also be
+started by hand, for the first release or to retry one; it skips a version whose tag exists.
+
 Before 1.0, a plan's bump is one step smaller than its name: `major` for a breaking change gives
 0.1 → 0.2, `minor` for a feature and `patch` for a fix both give 0.1.0 → 0.1.1. Plan a breaking
 change as `major`.
