@@ -5,6 +5,7 @@ import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
+import { QueryError } from "../../../engine/errors.js";
 import { describe, expect, it } from "vitest";
 
 const plan = (query: object) =>
@@ -242,6 +243,19 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
     );
   });
 
+  it("sums a real column back into real, as Postgres does", () => {
+    const planned = plan({ select: [{ sum: "total", as: "s" }] });
+    const item = planned.select[0]!;
+    if (item.kind !== "aggregate" || item.column === "*") throw new Error();
+    item.column.nativeType = "real";
+    expect(
+      compileSql(planned, mssqlDialect, { limit: 1001, offset: 0 }).sql
+    ).toBe(
+      "select cast(sum([t0].[total]) as real) as [c0] from [shop].[orders] as [t0]" +
+        ` order by ${by("cast(sum([t0].[total]) as real)")}${tail()}`
+    );
+  });
+
   it("returns money as text with its four decimal places", () => {
     const planned = plan({
       select: ["total", { sum: "total", as: "s" }],
@@ -464,9 +478,13 @@ describe("compileSql on SQL Server: filters", () => {
     );
   });
 
-  it.each(["datetime2(3)", "datetime", "smalldatetime"])(
-    "converts the timestamp to naive UTC on the parameter side for a %s column",
-    (nativeType) => {
+  it.each([
+    ["datetime2(3)", "datetime2(7)"],
+    ["smalldatetime", "datetime2(7)"],
+    ["datetime", "datetime"],
+  ])(
+    "converts the timestamp to naive UTC on the parameter side for a %s column, as %s",
+    (nativeType, target) => {
       const planned = plan({
         where: { created_at: { gte: "2026-01-01T00:00:00+02:00" } },
       });
@@ -476,9 +494,55 @@ describe("compileSql on SQL Server: filters", () => {
       expect(
         compileSql(planned, mssqlDialect, { limit: 1001, offset: 0 })
       ).toEqual({
-        sql: `${base}[t0].[created_at] >= cast(switchoffset(cast(@1 as datetimeoffset), '+00:00') as datetime2(7))${order(1)}`,
+        sql: `${base}[t0].[created_at] >= cast(switchoffset(cast(@1 as datetimeoffset), '+00:00') as ${target})${order(1)}`,
         parameters: [nvarchar("2026-01-01T00:00:00+02:00"), ...PAGE],
       });
+    }
+  );
+
+  it("cuts a timestamp's fraction to SQL Server's seven digits, never rounding it", () => {
+    expect(
+      where({
+        created_at: {
+          between: [
+            "2026-03-31T23:59:59.99999999Z",
+            "2026-04-01T00:00:00.123456789+02:00",
+          ],
+        },
+      }).parameters.slice(0, 2)
+    ).toEqual([
+      nvarchar("2026-03-31T23:59:59.9999999Z"),
+      nvarchar("2026-04-01T00:00:00.1234567+02:00"),
+    ]);
+    expect(
+      where({ created_at: { eq: "2026-03-31T23:59:59.1234567Z" } })
+        .parameters[0]
+    ).toEqual(nvarchar("2026-03-31T23:59:59.1234567Z"));
+  });
+
+  it.each(["text", "ntext", "xml"])(
+    "reads a %s column as nvarchar(max) wherever it is used",
+    (nativeType) => {
+      const planned = plan({
+        from: "customers",
+        select: ["name"],
+        where: { name: { contains: "a" } },
+        orderBy: [{ name: "desc" }],
+      });
+      for (const ref of [
+        planned.select[0]!.kind === "column" ? planned.select[0]!.column : null,
+        planned.where?.kind === "match" ? planned.where.subject : null,
+      ]) {
+        if (ref) ref.nativeType = nativeType;
+      }
+      const name = "cast([t0].[name] as nvarchar(max))";
+      expect(
+        compileSql(planned, mssqlDialect, { limit: 1001, offset: 0 }).sql
+      ).toBe(
+        `select ${name} as [c0] from [shop].[customers] as [t0]` +
+          ` where lower(${name}) like lower(@1) escape '\\'` +
+          ` order by ${by(name, "desc")}${tail(1)}`
+      );
     }
   );
 
@@ -533,5 +597,41 @@ describe("compileSql on SQL Server: filters", () => {
       sql: `select [t0].[id] as [c0] from [shop].[customers] as [t0] where [t0].[vip] = @1${order(1)}`,
       parameters: [{ type: "bit", value: true }, ...PAGE],
     });
+  });
+});
+
+describe("compileSql on SQL Server: the parameter limit", () => {
+  const ids = (from: number) =>
+    Array.from({ length: 1000 }, (_, i) => from + i);
+  const filters = (lists: number, extra: number) => ({
+    or: [
+      ...Array.from({ length: lists }, (_, j) => ({
+        id: { in: ids(j * 1000) },
+      })),
+      ...(extra > 0 ? [{ id: { in: ids(100_000).slice(0, extra) } }] : []),
+    ],
+  });
+
+  it("binds 2,098 parameters, paging included", () => {
+    expect(compile({ where: filters(2, 96) }).parameters).toHaveLength(2098);
+  });
+
+  it("refuses a query that binds more, before it runs, naming the limit", () => {
+    let thrown: unknown;
+    try {
+      compile({ where: filters(2, 97) });
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(QueryError);
+    expect(thrown).toMatchObject({
+      statusCode: 422,
+      code: "too_many_parameters",
+      path: [],
+      suggestions: [],
+    });
+    expect((thrown as Error).message).toBe(
+      "The query binds 2099 values; this source takes at most 2098 in one query, paging included"
+    );
   });
 });

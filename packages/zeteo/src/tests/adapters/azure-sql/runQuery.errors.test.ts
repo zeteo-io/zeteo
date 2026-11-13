@@ -1,11 +1,18 @@
 // @module-tag int
 // @module-tag platform
 import { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
+import { toMssqlConfig } from "../../../adapters/azure-sql/settings.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
+import { QueryError } from "../../../engine/errors.js";
 import { describe, expect, it, vi } from "vitest";
+import type { Socket } from "node:net";
 import sql from "mssql";
+import {
+  mssqlFixtureSettings,
+  mssqlFixtureTarget,
+} from "../../support/mssqlFixture.js";
 import {
   LIMITS,
   OPTIONS,
@@ -18,6 +25,7 @@ import {
 import {
   QueryFailedError,
   QueryTimeoutError,
+  ServiceUnavailableError,
   SourceUnreachableError,
 } from "../../../utils/errors.js";
 
@@ -187,6 +195,150 @@ describe("azure-sql runQuery: safety", () => {
     expect(
       (await run({ from: "accounts", select: ["id"] }, {}, single)).rows
     ).toEqual(accountIds);
+  });
+
+  it("refuses a query with more parameters than SQL Server takes before sending anything", async () => {
+    const query = vi.spyOn(sql.Request.prototype, "query");
+    const list = (from: number) =>
+      Array.from({ length: 800 }, (_, i) => from + i);
+    const err = await failureOf(
+      run({
+        from: "orders",
+        select: ["id"],
+        where: {
+          or: [
+            { id: { in: list(0) } },
+            { id: { in: list(1000) } },
+            { id: { in: list(2000) } },
+          ],
+        },
+      })
+    );
+    expect(err).toBeInstanceOf(QueryError);
+    expect(err).toMatchObject({
+      statusCode: 422,
+      code: "too_many_parameters",
+      path: [],
+    });
+    expect(query).not.toHaveBeenCalled();
+  });
+
+  it("answers 503, busy, when no pool connection frees up in time", async () => {
+    const single = await connectWith({
+      ...OPTIONS,
+      connectTimeoutMs: 1000,
+      poolSize: 1,
+    });
+    const controller = new AbortController();
+    const slow = failureOf(
+      single.runQuery(
+        plan({ from: "slow_orders", select: ["id"] }),
+        { ...LIMITS, timeoutMs: 10_000 },
+        controller.signal
+      )
+    );
+    await waitFor(() => runningOn("slow_orders"));
+    const begun = Date.now();
+    const err = await failureOf(
+      run({ from: "accounts", select: ["id"] }, {}, single)
+    );
+    expect(err).toBeInstanceOf(ServiceUnavailableError);
+    expect(err).toMatchObject({ statusCode: 503 });
+    expect(Date.now() - begun).toBeLessThan(2000);
+    controller.abort(new Error("done"));
+    expect((await slow).message).toBe("done");
+  });
+
+  it.each([
+    [
+      "its request timeout",
+      () =>
+        new sql.RequestError(
+          "Timeout: Request failed to complete in 2300ms",
+          "ETIMEOUT"
+        ),
+    ],
+    [
+      "a cancel the server never acknowledged, which closed the connection",
+      () =>
+        new sql.RequestError(
+          Object.assign(new Error("Failed to cancel request in 2000ms"), {
+            name: "ConnectionError",
+            code: "ETIMEOUT",
+          }),
+          "EREQUEST"
+        ),
+    ],
+  ])("answers query_timeout when the driver reports %s", async (_, error) => {
+    vi.spyOn(sql.Request.prototype, "query").mockImplementation(function (
+      this: sql.Request,
+      _text: unknown,
+      callback?: unknown
+    ) {
+      setImmediate(() => {
+        this.emit("error", error());
+        (callback as () => void)();
+      });
+      return this;
+    } as never);
+    const err = await failureOf(run({ from: "accounts", select: ["id"] }));
+    expect(err).toBeInstanceOf(QueryTimeoutError);
+  });
+
+  it("answers source_unreachable when the pool cannot open a connection in time", async () => {
+    vi.spyOn(sql.Request.prototype, "query").mockImplementation(function (
+      this: sql.Request,
+      _text: unknown,
+      callback?: unknown
+    ) {
+      setImmediate(() => {
+        this.emit(
+          "error",
+          new sql.ConnectionError("Failed to connect in 1000ms", "ETIMEOUT")
+        );
+        (callback as () => void)();
+      });
+      return this;
+    } as never);
+    const err = await failureOf(run({ from: "accounts", select: ["id"] }));
+    expect(err).toBeInstanceOf(SourceUnreachableError);
+  });
+
+  it("times out, and drops the connection, when the server never acknowledges the cancel", async () => {
+    const sockets: Socket[] = [];
+    const config = toMssqlConfig(
+      mssqlFixtureSettings("ro"),
+      await mssqlFixtureTarget(),
+      { ...OPTIONS, poolSize: 1 }
+    );
+    const connector = config.options!.connector as unknown as (
+      ...args: unknown[]
+    ) => Promise<Socket>;
+    const single = (await runs.connectWithDriverOptions(
+      {
+        cancelTimeout: 300,
+        connector: (async (...args: unknown[]) => {
+          const socket = await connector(...args);
+          sockets.push(socket);
+          return socket;
+        }) as never,
+      },
+      { ...OPTIONS, poolSize: 1 }
+    )) as AzureSqlConnection;
+    await single.pool.request().query("SET CONTEXT_INFO 0x7a");
+    const running = failureOf(
+      run({ from: "slow_orders", select: ["id"] }, { timeoutMs: 600 }, single)
+    );
+    await waitFor(() => runningOn("slow_orders"));
+    // Nothing the server sends is read any more, its acknowledgement included.
+    for (const socket of sockets) socket.pause();
+    const begun = Date.now();
+    expect(await running).toBeInstanceOf(QueryTimeoutError);
+    expect(Date.now() - begun).toBeLessThan(1500);
+    const after = await single.pool
+      .request()
+      .query("SELECT CONTEXT_INFO() AS mark");
+    expect(after.recordset).toEqual([{ mark: null }]);
   });
 
   it("answers query_failed, not source_unreachable, for a value the driver cannot bind", async () => {

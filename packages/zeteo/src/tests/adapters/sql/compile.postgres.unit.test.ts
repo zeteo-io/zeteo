@@ -377,3 +377,30 @@ describe("compileSql on Postgres: filters", () => {
     });
   });
 });
+
+describe("compileSql on Postgres: the parameter limit", () => {
+  const lists = (count: number, extra: number) => ({
+    or: [
+      ...Array.from({ length: count }, (_, j) => ({
+        id: { in: Array.from({ length: 1000 }, (_, i) => j * 1000 + i) },
+      })),
+      { id: { in: Array.from({ length: extra }, (_, i) => -1 - i) } },
+    ],
+  });
+
+  it("binds 65,535 parameters, paging included", () => {
+    expect(compile({ where: lists(65, 533) }).parameters).toHaveLength(65_535);
+  });
+
+  it("refuses a query that binds more with too_many_parameters, naming the limit", () => {
+    expect(() => compile({ where: lists(65, 534) })).toThrow(
+      expect.objectContaining({
+        code: "too_many_parameters",
+        statusCode: 422,
+        path: [],
+        message:
+          "The query binds 65536 values; this source takes at most 65535 in one query, paging included",
+      })
+    );
+  });
+});

@@ -2,7 +2,10 @@
 -- Postgres one:
 --   probe.wide_rows  a view of 60,000 rows of 2 KB of text, made on the fly,
 --                    far more than a byte cap, for reading a result in part;
---   probe.typed_values  3 rows of SQL Server's own types, for the wire forms.
+--   probe.typed_values  3 rows of SQL Server's own types, for the wire forms;
+--   probe.legacy_times  datetime values off the millisecond (1/300 s ticks)
+--                       and smalldatetime minutes, to filter on as returned;
+--   probe.legacy_text   text, ntext and xml, which SQL Server cannot sort.
 -- zeteo_ro reads it as a member of db_datareader.
 
 CREATE SCHEMA probe;
@@ -57,4 +60,32 @@ INSERT INTO probe.typed_values VALUES
    '1900-01-01T00:00:00', '2000-01-01T00:00:00-05:00', N'', 'x', NULL),
   (3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
    NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+GO
+
+CREATE TABLE probe.legacy_times (
+  id int NOT NULL PRIMARY KEY,
+  legacy datetime,
+  minute smalldatetime
+);
+GO
+
+INSERT INTO probe.legacy_times VALUES
+  (1, '2026-01-01T00:00:00.000', '2026-01-01T00:00:00'),
+  (2, '2026-01-01T00:00:00.003', '2026-01-01T00:01:00'),
+  (3, '2026-01-01T00:00:00.007', '2026-01-01T00:02:00'),
+  (4, '2026-01-01T00:00:00.010', '2026-01-01T00:03:00');
+GO
+
+CREATE TABLE probe.legacy_text (
+  id int NOT NULL PRIMARY KEY,
+  memo text,
+  wide_memo ntext,
+  doc xml
+);
+GO
+
+INSERT INTO probe.legacy_text VALUES
+  (1, 'Alpha memo', N'Wide ALPHA', N'<a>one</a>'),
+  (2, 'beta memo', N'wide beta', N'<b>two</b>'),
+  (3, NULL, NULL, NULL);
 GO

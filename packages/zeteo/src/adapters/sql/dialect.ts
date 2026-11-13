@@ -32,6 +32,17 @@ export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
   kysely: AnyKysely;
+  /** The most parameters one statement may bind. */
+  maxParameters: number;
+  /**
+   * A catalogue column as every part of the query reads it, given its own
+   * type name: an engine casts what it cannot compare, sort or group as it is.
+   * Join keys are compared as they are.
+   */
+  column(
+    expression: Expression<unknown>,
+    nativeType: string
+  ): Expression<unknown>;
   /**
    * Binds a plan value as a parameter, with whatever cast the engine needs to
    * compare it with the subject. `nativeType` is the column's own type name,

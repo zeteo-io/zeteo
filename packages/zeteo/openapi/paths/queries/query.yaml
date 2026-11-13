@@ -68,7 +68,8 @@
           The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
           for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
           `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-          `duplicate_output_name`, `join_parent_missing`; or `source_type_unavailable`. A plan
+          `duplicate_output_name`, `join_parent_missing`; `too_many_parameters` (at path `[]`: the
+          compiled query binds more values than the source's engine takes). A plan
           that references a column outside the grants (a planner fault, logged) is
           `not_found_or_not_accessible` with a fixed message and path `[]`.
         content:

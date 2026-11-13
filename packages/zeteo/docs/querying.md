@@ -83,10 +83,12 @@ Values are checked against the column: text takes a string; numbers a number or 
 dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
 (`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
 
-On Azure SQL a query binds at most 2,100 values in all (SQL Server's limit on parameters; paging
-takes two), so several long `in` lists in one query can fail with `502 query_failed`. A timestamp
-offset beyond ±14:00 and a date or timestamp before year 1 or after 9999 are refused there the
-same way.
+Every value is bound as a parameter, and an engine takes only so many in one statement: 2,098 on
+Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two
+included. A query that binds more, which takes several long `in` lists, is refused before it
+runs with `422 too_many_parameters` at path `[]`. A timestamp's fraction past 100 ns is cut on
+Azure SQL, its precision. A timestamp offset beyond ±14:00, or a date or timestamp before year 1
+or after 9999, fails there with `502 query_failed`.
 
 **Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
 names cannot be filtered on directly (select it through a view that renames it), and an `as` of
@@ -237,7 +239,7 @@ values in that order. Values arrive in these wire forms on every engine:
 | `avg` | number: over integer and decimal columns the exact sum divided once in floating point |
 | boolean | `true` / `false` |
 | date | `"YYYY-MM-DD"` |
-| timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database; one without (`timestamp`, `datetime2`, `datetime`, `smalldatetime`) is taken as UTC; digits past the millisecond are cut, never rounded |
+| timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database; one without (`timestamp`, `datetime2`, `datetime`, `smalldatetime`) is taken as UTC; digits past the millisecond are cut, never rounded, except for SQL Server's `datetime`, whose 1/300 s ticks (`.003`, `.007`) are rounded to the nearest millisecond, and which a filter with the returned value still matches |
 | json | the JSON value itself (Postgres); text on Azure SQL; an integer inside a document past 2^53 loses precision |
 | anything else (uuid, uniqueidentifier, enums…) | string, as the database prints it |
 | null | `null` |
@@ -294,7 +296,8 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
 - Other `422` codes: `missing_in_source` (the last refresh no longer found a table, column or
   relation the caller is granted), `column_not_queryable` (a column of type `other`),
   `invalid_operator`, `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-  `duplicate_output_name`, `join_parent_missing`.
+  `duplicate_output_name`, `join_parent_missing`, `too_many_parameters` (the query binds more
+  values than the source's engine takes; see *Filters*).
 - From running: `502 query_failed` (the source refused or failed to run the query),
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
   `503 temporarily_unavailable` (group membership or the source pool briefly unavailable).

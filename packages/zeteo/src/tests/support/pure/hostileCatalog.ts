@@ -54,18 +54,26 @@ const table = (id: string, name: string, schemaName: string = HOSTILE.schema) =>
     missingSince: null,
   }) as SourceTable;
 
+// SQL Server's `text` is a large-object type the dialect reads differently:
+// on SQL Server the hostile text columns are nvarchar, as most are there.
+const NATIVE: Record<"postgres" | "mssql", (type: string) => string> = {
+  postgres: (type) => type,
+  mssql: (type) => (type === "text" ? "nvarchar(200)" : type),
+};
+
 const column = (
   tableId: string,
   name: string,
   type: SourceColumn["type"],
-  position: number
+  position: number,
+  engine: "postgres" | "mssql"
 ) =>
   ({
     id: `${tableId}.${name}`,
     tableId,
     name,
     type,
-    nativeType: type,
+    nativeType: NATIVE[engine](type),
     nullable: true,
     position,
     isPrimaryKey: false,
@@ -73,7 +81,10 @@ const column = (
     missingSince: null,
   }) as SourceColumn;
 
-export const hostileCatalog = (): VisibleCatalog => {
+/** `engine` sets whose type names `nativeType` holds; Postgres's by default. */
+export const hostileCatalog = (
+  engine: "postgres" | "mssql" = "postgres"
+): VisibleCatalog => {
   const { columns: c } = HOSTILE;
   const tables = [
     table("dotted", HOSTILE.dotted.table, HOSTILE.dotted.schema),
@@ -82,17 +93,17 @@ export const hostileCatalog = (): VisibleCatalog => {
     table("child", HOSTILE.child),
   ];
   const columns = [
-    column("parent", c.quote, "text", 1),
-    column("parent", c.bracket, "number", 2),
-    column("parent", c.apostrophe, "text", 3),
-    column("parent", c.drop, "timestamp", 4),
-    column("parent", c.backslash, "text", 5),
-    column("parent", c.placeholder, "text", 6),
-    column("parent", c.long, "text", 7),
-    column("dotted", c.quote, "text", 1),
-    column("long", c.quote, "text", 1),
-    column("child", c.quote, "text", 1),
-    column("child", c.bracket, "number", 2),
+    column("parent", c.quote, "text", 1, engine),
+    column("parent", c.bracket, "number", 2, engine),
+    column("parent", c.apostrophe, "text", 3, engine),
+    column("parent", c.drop, "timestamp", 4, engine),
+    column("parent", c.backslash, "text", 5, engine),
+    column("parent", c.placeholder, "text", 6, engine),
+    column("parent", c.long, "text", 7, engine),
+    column("dotted", c.quote, "text", 1, engine),
+    column("long", c.quote, "text", 1, engine),
+    column("child", c.quote, "text", 1, engine),
+    column("child", c.bracket, "number", 2, engine),
   ];
   const relations = [
     {

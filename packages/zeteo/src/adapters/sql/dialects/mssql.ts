@@ -54,6 +54,10 @@ const INT64_MAX = 9_223_372_036_854_775_807n;
 const INTEGER_TEXT = /^-?\d+$/;
 const DECIMAL_TEXT = /^-?(\d+)(?:\.(\d+))?$/;
 const DECIMAL_MAX_DIGITS = 38;
+/** A timestamp's fraction past its seventh digit, SQL Server's precision. */
+const PAST_100_NS = /(\.\d{7})\d+/;
+/** Large-object text SQL Server cannot sort, group or lower; read as nvarchar(max) instead. */
+const LARGE_TEXT = new Set(["text", "ntext", "xml"]);
 
 /**
  * Numbers: an integer in bigint's range binds as bigint, which compares with
@@ -66,7 +70,13 @@ const DECIMAL_MAX_DIGITS = 38;
  * reads the same whatever the session's language and date format. A
  * timestamp compared with a naive column (datetime2, datetime,
  * smalldatetime, read as UTC) is converted to UTC on the parameter side, so
- * the column is compared as it is and its index stays usable.
+ * the column is compared as it is and its index stays usable. For a
+ * `datetime` column it becomes a `datetime`, rounded to the same 1/300 s tick
+ * the column holds, so a value read from the column (rounded by the driver
+ * to the millisecond) finds its row again; any other comparison happens in
+ * `datetime2(7)`, where `smalldatetime`'s whole minutes compare exactly.
+ * Fractions past 100 ns, which SQL Server would round (into the next day,
+ * at worst), are cut first.
  */
 const value = (
   v: PlanValue,
@@ -95,10 +105,13 @@ const value = (
     case "date":
       return sql`cast(${param("nvarchar", String(v))} as date)`;
     case "timestamp": {
-      const instant = sql`cast(${param("nvarchar", String(v))} as datetimeoffset)`;
-      return NAIVE_TIMESTAMPS.has(baseType(nativeType))
-        ? sql`cast(switchoffset(${instant}, '+00:00') as datetime2(7))`
-        : instant;
+      const text = String(v).replace(PAST_100_NS, "$1");
+      const instant = sql`cast(${param("nvarchar", text)} as datetimeoffset)`;
+      const base = baseType(nativeType);
+      if (!NAIVE_TIMESTAMPS.has(base)) return instant;
+      return base === "datetime"
+        ? sql`cast(switchoffset(${instant}, '+00:00') as datetime)`
+        : sql`cast(switchoffset(${instant}, '+00:00') as datetime2(7))`;
     }
     default:
       return param("nvarchar", String(v));
@@ -121,6 +134,8 @@ const sumOf = (arg: Expression<unknown>, nativeType: string | undefined) => {
   const base = baseType(nativeType);
   if (SMALL_INTEGERS.has(base)) return sql`sum(cast(${arg} as bigint))`;
   if (base === "bigint") return sql`sum(cast(${arg} as decimal(38,0)))`;
+  // SQL Server sums a real in float; Postgres keeps it real.
+  if (base === "real") return sql`cast(sum(${arg}) as real)`;
   return sql`sum(${arg})`;
 };
 
@@ -167,6 +182,13 @@ const ESCAPE = "\\";
 
 export const mssqlDialect: SqlDialect = {
   name: "mssql",
+  // SQL Server takes 2,100 parameters per request; sp_executesql, which the
+  // driver calls, uses two for the statement and its declarations.
+  maxParameters: 2098,
+  column: (expression, nativeType) =>
+    LARGE_TEXT.has(baseType(nativeType))
+      ? sql`cast(${expression} as nvarchar(max))`
+      : expression,
   kysely: new Kysely<never>({
     dialect: {
       createAdapter: () => new MssqlAdapter(),

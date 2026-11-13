@@ -128,7 +128,6 @@ const CONNECTION_CODES = new Set([
 const SESSION_FATAL_SEVERITY = 20;
 
 interface DriverError {
-  name?: string;
   code?: string;
   class?: number;
   originalError?: { code?: string };
@@ -148,14 +147,20 @@ const isConnectionFailure = (err: unknown): boolean => {
 const callerError = (err: unknown): AppError => {
   if (err instanceof AppError) return err;
   const e = (err ?? {}) as DriverError;
-  // The pool had no connection free in time: busy, not broken.
-  if (e.name === "TimeoutError") {
+  // The pool had no connection free in time: busy, not broken. The pool's
+  // TimeoutError keeps Error's `name`; its class is what tells it apart.
+  if (err instanceof Error && err.constructor.name === "TimeoutError") {
     logger.warn({ err }, "no connection to the source for a query");
     return new ServiceUnavailableError(
       "The source is busy; retry the request shortly",
       BUSY_RETRY_AFTER_SECONDS
     );
   }
+  // A request that ran past the driver's timeout. Its cancel going
+  // unacknowledged, which closes the connection, comes the same way: a
+  // request error wrapping the connection's ETIMEOUT. The caller's query
+  // timed out either way. A ConnectionError proper is the pool failing to
+  // log in in time: the source is unreachable.
   if (e.code === "ETIMEOUT" && !(err instanceof sql.ConnectionError)) {
     logger.warn({ err }, "source query outlived its deadline in the driver");
     return new QueryTimeoutError();
@@ -195,7 +200,7 @@ const RequestWithTimeout = sql.Request as unknown as new (
  * transaction: the compiled statement is a single SELECT, and the login is
  * checked for write rights when the source is registered.
  */
-export const runAzureSqlQuery = (
+export const runAzureSqlQuery = async (
   pool: ConnectionPool,
   plan: SqlPlan,
   limits: RunLimits,

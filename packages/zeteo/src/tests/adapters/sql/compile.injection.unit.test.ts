@@ -90,7 +90,7 @@ describe.each(ENGINES)("compileSql ($dialect.name)", (engine) => {
           from: `${schema}.${parent}`,
           ...query,
         }),
-        hostileCatalog()
+        hostileCatalog(engine.dialect.name)
       ),
       engine.dialect,
       { limit: 11, offset: 0 }
@@ -246,7 +246,7 @@ describe("compileSql (mssql): brackets in a name", () => {
           from: `${schema}.${child}`,
           select: [columns.bracket],
         }),
-        hostileCatalog()
+        hostileCatalog("mssql")
       ),
       mssqlDialect,
       { limit: 11, offset: 0 }

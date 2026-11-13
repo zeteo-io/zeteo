@@ -141,17 +141,6 @@ export class QueryFailedError extends AppError {
   }
 }
 
-export class SourceTypeUnavailableError extends AppError {
-  constructor(type: string) {
-    super(
-      422,
-      "source_type_unavailable",
-      `Sources of type ${type} are not available yet`
-    );
-    this.name = "SourceTypeUnavailableError";
-  }
-}
-
 /** The most login-check findings a response lists. */
 export const MAX_FINDINGS = 20;
 

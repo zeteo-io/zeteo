@@ -143,8 +143,9 @@ division by zero fails the query instead of yielding `NULL`.
 numbers, so the select list returns them as text, as SQL Server prints them (a `decimal(12,2)` as
 `"250.50"`). Sums run in `bigint` over smaller integers and in `decimal(38,0)` over `bigint`, so
 they do not overflow where Postgres's would not; averages over exact columns divide the exact sum
-once. Timestamps are read as UTC and cut at the millisecond; a `datetimeoffset` is converted to
-UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC.
+once. Timestamps are read as UTC and cut at the millisecond (a `datetime` rounded, see below); a `datetimeoffset` is converted to
+UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC. `sum` of a `real` column is a
+`real`, as on Postgres.
 
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on
 the server with an attention on its own connection (no second connection is needed, so a cancel
@@ -155,10 +156,19 @@ as they arrive: at the row or size limit the request is cancelled and the rest o
 never read.
 
 **Differences from Postgres.** Text comparison, sorting, `distinct` and grouping follow the
-column's collation (case-insensitive by default; see [querying.md](querying.md)). A select item
-whose type SQL Server cannot sort or group (`text`, `ntext`, `xml`) fails a query that sorts or
-deduplicates by it, including by the default order, with `502 query_failed`; select it through a
-view that converts it to `nvarchar(max)`.
+column's collation (case-insensitive by default; see [querying.md](querying.md)). `text`, `ntext`
+and `xml` columns, which SQL Server cannot sort, group or compare, are read as `nvarchar(max)`
+wherever a query uses them, so they behave as any other text column.
+
+**Text parameters and indexes.** Text values bind as `nvarchar`, so no character is lost. On a
+`varchar` column under a `SQL_` collation (the default `SQL_Latin1_General_CP1_CI_AS` among
+them), SQL Server then converts the column side, and an `eq` or `in` on it may scan the index
+instead of seeking it.
+
+**`datetime` columns** hold 1/300 s ticks (`.000`, `.003`, `.007`); results round them to the
+millisecond. A timestamp compared with such a column is rounded to the same tick, so filtering on
+a value a query returned finds its row; a bound between two ticks (`.005`) rounds to one of them.
+`smalldatetime` holds whole minutes and compares exactly.
 
 ## Exports and load
 

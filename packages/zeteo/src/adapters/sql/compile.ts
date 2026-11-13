@@ -1,4 +1,5 @@
 import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
+import { QueryError } from "../../engine/errors.js";
 import type {
   ColumnRef,
   CompareOp,
@@ -40,7 +41,8 @@ const AND = sql` and `;
 const OR = sql` or `;
 
 const table = (t: TableName) => sql.id(t.schemaName, t.name);
-const column = (c: ColumnRef) => sql.id(c.alias, c.name);
+const column = (c: ColumnRef, dialect: SqlDialect) =>
+  dialect.column(sql.id(c.alias, c.name), c.nativeType);
 
 const selectExpression = (
   item: ResolvedSelect,
@@ -48,19 +50,19 @@ const selectExpression = (
 ): Expression<unknown> => {
   switch (item.kind) {
     case "column":
-      return column(item.column);
+      return column(item.column, dialect);
     case "aggregate":
       return item.column === "*"
         ? dialect.aggregate(item.fn, "*")
         : dialect.aggregate(
             item.fn,
-            column(item.column),
+            column(item.column, dialect),
             item.column.nativeType
           );
     case "bucket":
       return dialect.bucket(
         item.unit,
-        column(item.column),
+        column(item.column, dialect),
         item.column.type === "date" ? "date" : "timestamp",
         item.column.nativeType
       );
@@ -117,7 +119,8 @@ const compileFilter = <S>(
  * Compiles a plan to SQL text and bound parameters without touching a
  * database. `fetch` is what the engine asks the database for (the requested
  * limit plus one, to see whether more rows exist); `plan.limit` and
- * `plan.offset` are not read.
+ * `plan.offset` are not read. Throws `QueryError` `too_many_parameters`
+ * when the statement binds more values than the dialect's engine takes.
  */
 export const compileSql = (
   plan: SqlPlan,
@@ -163,7 +166,7 @@ export const compileSql = (
   if (plan.where) {
     qb = qb.where(
       compileFilter(plan.where, dialect, (c) => ({
-        expression: column(c),
+        expression: column(c, dialect),
         type: c.type,
         nativeType: c.nativeType,
       }))
@@ -195,12 +198,19 @@ export const compileSql = (
             expression: selected[target.index]!,
             alias: sql.id(`c${target.index}`),
           }
-        : { expression: column(target.column) },
+        : { expression: column(target.column, dialect) },
       order.direction
     );
   }
 
   qb = dialect.page(qb, fetch.limit, fetch.offset, plan.orderBy.length > 0);
   const { sql: text, parameters } = qb.compile();
+  if (parameters.length > dialect.maxParameters) {
+    throw new QueryError(
+      "too_many_parameters",
+      `The query binds ${parameters.length} values; this source takes at most ${dialect.maxParameters} in one query, paging included`,
+      []
+    );
+  }
   return { sql: text, parameters: [...parameters] };
 };

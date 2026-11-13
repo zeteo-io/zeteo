@@ -10,7 +10,8 @@ export type QueryErrorCode =
   | "invalid_order"
   | "invalid_having"
   | "duplicate_output_name"
-  | "join_parent_missing";
+  | "join_parent_missing"
+  | "too_many_parameters";
 
 /** Where in the query the problem is: keys and array indexes from the root. */
 export type QueryPath = (string | number)[];

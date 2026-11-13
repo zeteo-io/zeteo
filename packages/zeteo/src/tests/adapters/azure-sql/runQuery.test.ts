@@ -300,6 +300,116 @@ describe("azure-sql runQuery", () => {
     expect(result.rows).toEqual([[1]]);
   });
 
+  it("cuts a timestamp's fraction at SQL Server's seven digits instead of rounding into the next day", async () => {
+    const result = await run({
+      from: "typed_values",
+      select: ["id"],
+      where: { naive: { eq: "2026-03-31T23:59:59.99999999Z" } },
+    });
+    expect(result.rows).toEqual([[1]]);
+  });
+
+  it("finds a datetime row again by the value it returned, off the millisecond", async () => {
+    const { rows } = await run({
+      from: "legacy_times",
+      select: ["id", "legacy"],
+      orderBy: [{ id: "asc" }],
+    });
+    expect(rows).toEqual([
+      [1, "2026-01-01T00:00:00.000Z"],
+      [2, "2026-01-01T00:00:00.003Z"],
+      [3, "2026-01-01T00:00:00.007Z"],
+      [4, "2026-01-01T00:00:00.010Z"],
+    ]);
+    for (const [id, legacy] of rows) {
+      const found = await run({
+        from: "legacy_times",
+        select: ["id"],
+        where: { legacy: { eq: legacy } },
+      });
+      expect(found.rows).toEqual([[id]]);
+    }
+    const ids = async (where: object) =>
+      (await run({ from: "legacy_times", select: ["id"], where })).rows;
+    expect(await ids({ legacy: { lte: "2026-01-01T00:00:00.007Z" } })).toEqual([
+      [1],
+      [2],
+      [3],
+    ]);
+    expect(await ids({ legacy: { gt: "2026-01-01T00:00:00.003Z" } })).toEqual([
+      [3],
+      [4],
+    ]);
+  });
+
+  it("finds a smalldatetime row again by the value it returned, and compares between minutes exactly", async () => {
+    const { rows } = await run({
+      from: "legacy_times",
+      select: ["id", "minute"],
+      orderBy: [{ id: "asc" }],
+    });
+    expect(rows.map((r) => r[1])).toEqual([
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:01:00.000Z",
+      "2026-01-01T00:02:00.000Z",
+      "2026-01-01T00:03:00.000Z",
+    ]);
+    for (const [id, minute] of rows) {
+      const found = await run({
+        from: "legacy_times",
+        select: ["id"],
+        where: { minute: { eq: minute } },
+      });
+      expect(found.rows).toEqual([[id]]);
+    }
+    const found = await run({
+      from: "legacy_times",
+      select: ["id"],
+      where: {
+        minute: {
+          between: ["2026-01-01T00:00:30Z", "2026-01-01T00:02:29.999Z"],
+        },
+      },
+    });
+    expect(found.rows).toEqual([[2], [3]]);
+  });
+
+  it("reads text, ntext and xml as text: selected, matched, sorted and deduplicated", async () => {
+    expect(
+      (await run({ from: "legacy_text", select: ["memo", "wide_memo", "doc"] }))
+        .rows
+    ).toEqual([
+      ["Alpha memo", "Wide ALPHA", "<a>one</a>"],
+      ["beta memo", "wide beta", "<b>two</b>"],
+      [null, null, null],
+    ]);
+    const ids = async (query: object) =>
+      (await run({ from: "legacy_text", select: ["id"], ...query })).rows;
+    expect(await ids({ where: { memo: { contains: "ALPHA" } } })).toEqual([
+      [1],
+    ]);
+    expect(
+      await ids({ where: { wide_memo: { startsWith: "wide a" } } })
+    ).toEqual([[1]]);
+    expect(await ids({ where: { doc: { contains: "two" } } })).toEqual([[2]]);
+    expect(await ids({ orderBy: [{ wide_memo: "desc" }] })).toEqual([
+      [3],
+      [2],
+      [1],
+    ]);
+    expect(
+      (await run({ from: "legacy_text", select: ["doc"], distinct: true })).rows
+    ).toEqual([["<a>one</a>"], ["<b>two</b>"], [null]]);
+  });
+
+  it("sums a real column as a real, printed short", async () => {
+    const result = await run({
+      from: "typed_values",
+      select: [{ sum: "narrow_float" }, { sum: "wide_float" }],
+    });
+    expect(result.rows).toEqual([[-3.15, 1e300]]);
+  });
+
   describe("limits", () => {
     it("stops at maxRows and says so", async () => {
       const result = await run(

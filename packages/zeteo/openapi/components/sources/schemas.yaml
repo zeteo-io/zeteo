@@ -1,9 +1,7 @@
 SourceType:
   type: string
   enum: [postgres, azure-sql]
-  description: |
-    The kind of database. Queries on an `azure-sql` source are not available yet: they answer
-    `422 source_type_unavailable`.
+  description: The kind of database.
 
 PostgresSettings:
   type: object

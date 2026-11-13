@@ -66,6 +66,9 @@ const ESCAPE = "\\";
 
 export const postgresDialect: SqlDialect = {
   name: "postgres",
+  // The protocol counts a statement's parameters in 16 bits.
+  maxParameters: 65_535,
+  column: (expression) => expression,
   kysely: new Kysely<never>({
     dialect: {
       createAdapter: () => new PostgresAdapter(),
