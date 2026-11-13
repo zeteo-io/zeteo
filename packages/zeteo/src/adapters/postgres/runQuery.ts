@@ -155,7 +155,8 @@ const readRows = async (
   cursor: Cursor<unknown[]>,
   plan: SqlPlan,
   limits: RunLimits,
-  checkStop: () => void
+  checkStop: () => void,
+  guard: <T>(step: Promise<T>) => Promise<T>
 ): Promise<Pick<QueryResult, "rows" | "truncated">> => {
   const rows: unknown[][] = [];
   let wires: WireKind[] | undefined;
@@ -163,7 +164,7 @@ const readRows = async (
   let bytes = 0;
   for (;;) {
     const want = Math.min(BATCH_ROWS, limits.maxRows + 1 - fetched);
-    const batch = await readBatch(cursor, want);
+    const batch = await guard(readBatch(cursor, want));
     checkStop();
     if (!wires) {
       checkFields(batch.fields, plan);
@@ -236,8 +237,10 @@ const cancelTargetOf = (pool: Pool): CancelTarget => ({
  * deadline of its own that cancels the statement on the server, and the
  * client's read timeout `CLIENT_GRACE_MS` later. An aborted `signal` cancels
  * the same way. A cancel goes on a connection of its own, never one of the
- * pool's; when it cannot be delivered, or the statement outlives it by
+ * pool's; when it is not confirmed, or the statement outlives it by
  * `STOP_GRACE_MS`, the client's connection is cut and the client destroyed.
+ * Every wait on the cursor also ends when the connection is lost, and a
+ * client whose protocol state is unknown is destroyed, never released.
  */
 export const runPostgresQuery = async (
   pool: Pool,
@@ -258,31 +261,60 @@ export const runPostgresQuery = async (
   const client = await checkout(pool);
   const internals = client as unknown as ClientInternals;
   let broken: unknown;
+  /** Set once the run is over and the client is about to be released or destroyed. */
+  let finished = false;
+
+  // pg-cursor ignores an error once it has sent Close and Sync, and then
+  // waits for a ReadyForQuery that a dropped connection never sends; so every
+  // step that waits on the cursor also settles when the connection is lost.
+  let loseConnection!: (err: Error) => void;
+  const lost = new Promise<never>((_, reject) => {
+    loseConnection = reject;
+  });
+  lost.catch(() => undefined);
+  const guard = <T>(step: Promise<T>): Promise<T> => Promise.race([step, lost]);
   // A checked-out client that loses its connection emits `error`; unheard,
   // it would crash the process.
   const onClientError = (err: Error) => {
     broken ??= err;
+    loseConnection(err);
+  };
+  const onClientEnd = () => {
+    if (finished) return;
+    const err = new Error("Connection terminated unexpectedly");
+    broken ??= err;
+    loseConnection(err);
   };
   client.on("error", onClientError);
+  client.on("end", onClientEnd);
 
-  let reading = false;
+  /** From the cursor's submission to the end of the run. */
+  let active = false;
   let timedOut = false;
   let stopping: Promise<void> | undefined;
   let cutTimer: NodeJS.Timeout | undefined;
   const cut = () => {
-    if (!reading) return;
-    broken ??= new Error("connection cut after a cancel");
+    if (finished) return;
+    const err = new Error("Connection terminated");
+    broken ??= err;
     internals.connection.stream.destroy();
+    loseConnection(err);
   };
   const stop = () => {
-    if (!reading || stopping) return;
+    if (!active || finished || stopping) return;
     stopping = sendCancelRequest(
       cancelTargetOf(pool),
       internals.processID,
       internals.secretKey
-    ).then((delivered) => {
-      if (!delivered) cut();
-      else cutTimer = setTimeout(cut, STOP_GRACE_MS);
+    ).then((confirmed) => {
+      // A cancel sent but not confirmed may still land later, on whatever
+      // the backend runs next: the client must never serve anyone again.
+      if (!confirmed) {
+        broken ??= new Error("cancel not confirmed");
+        cut();
+      } else {
+        cutTimer = setTimeout(cut, STOP_GRACE_MS);
+      }
     });
   };
   const onAbort = () => stop();
@@ -300,7 +332,7 @@ export const runPostgresQuery = async (
   try {
     await client.query(sessionSetup(limits.timeoutMs));
     signal?.throwIfAborted();
-    reading = true;
+    active = true;
     deadline = setTimeout(() => {
       timedOut = true;
       stop();
@@ -321,8 +353,8 @@ export const runPostgresQuery = async (
     cursor.once("error", () => {
       cursorOpen = false;
     });
-    const read = await readRows(cursor, plan, limits, checkStop);
-    await cursor.close();
+    const read = await readRows(cursor, plan, limits, checkStop, guard);
+    await guard(cursor.close());
     cursorOpen = false;
     return {
       columns: plan.columns.map(({ name, type }) => ({ name, type })),
@@ -332,21 +364,17 @@ export const runPostgresQuery = async (
     // Left mid-read, the statement is still open on the connection: it is
     // dropped rather than closed and waited for.
     if (cursorOpen) broken ??= err;
+    // A client that timed out on its side is still busy with the statement;
+    // one whose connection failed is gone.
+    if (isClientReadTimeout(err) || isConnectionFailure(err)) broken ??= err;
     if (signal?.aborted) throw signal.reason;
     if (timedOut && !(err instanceof AppError)) {
       logger.info({ err }, "source query stopped at its deadline");
-      broken ??= isConnectionFailure(err) ? err : undefined;
       throw new QueryTimeoutError();
     }
-    const failure = callerError(err);
-    // A client that timed out on its side is still busy with the statement;
-    // one whose connection failed is gone.
-    if (failure instanceof SourceUnreachableError || isClientReadTimeout(err)) {
-      broken ??= err;
-    }
-    throw failure;
+    throw callerError(err);
   } finally {
-    reading = false;
+    finished = true;
     clearTimeout(deadline);
     signal?.removeEventListener("abort", onAbort);
     // The cancel must land while this client is still ours: once released,
@@ -355,5 +383,6 @@ export const runPostgresQuery = async (
     clearTimeout(cutTimer);
     await finish(client, broken);
     client.off("error", onClientError);
+    client.off("end", onClientEnd);
   }
 };
