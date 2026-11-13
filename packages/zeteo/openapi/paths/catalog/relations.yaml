@@ -1,0 +1,71 @@
+/v1/sources/{sourceId}/relations:
+  get:
+    tags: [Catalogue]
+    summary: List a source's relations
+    description: |
+      Lists discovered and declared relations in creation order, including ones a refresh marked
+      missing (`missing_since`).
+
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+    operationId: listRelations
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of relations
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/ListRelationsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Catalogue]
+    summary: Declare a relation
+    description: |
+      Adds a relation the database does not enforce with a foreign key. Both tables must belong to
+      this source; the column lists must have the same length, name present columns, and pair
+      columns of the same normalised type that is not `other` or `json`. The name is unique on
+      the from table, whether the other relation is discovered or declared. An audit entry
+      `zeteo.relation.declared` is written.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found` (the source), `409 relation_name_taken`, `409 source_archived`,
+      `422 invalid_relation`.
+    operationId: declareRelation
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/catalog/schemas.yaml#/DeclareRelationRequest'
+    responses:
+      '201':
+        description: The declared relation
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/Relation'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The relation is not valid - `invalid_relation`; the description says which check failed
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

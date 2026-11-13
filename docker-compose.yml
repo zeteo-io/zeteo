@@ -1,0 +1,113 @@
+# Local backing services for Zeteo.
+#
+#   docker compose up -d postgres redis   # then `npm run dev` in packages/zeteo
+#   docker compose up                     # everything: migrate, then zeteo on 4201;
+#                                         # no .env needed
+#
+# Host ports (5462 / 6409 / 1463) keep clear of 5432/6379/1433 and of the
+# sibling stacks (tereo 5442 / 6389); override with ZETEO_POSTGRES_PORT /
+# ZETEO_REDIS_PORT / ZETEO_MSSQL_PORT. All are published on 127.0.0.1 only:
+# their credentials are the public defaults below.
+name: zeteo
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: zeteo
+      POSTGRES_PASSWORD: zeteo
+      POSTGRES_DB: zeteo
+    ports:
+      - "127.0.0.1:${ZETEO_POSTGRES_PORT:-5462}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zeteo -d zeteo"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${ZETEO_REDIS_PORT:-6409}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # SQL Server, the Azure SQL adapter's test fixture. Not needed to run zeteo,
+  # so a plain `up` leaves it out; naming it starts it:
+  #   docker compose up -d mssql
+  # amd64 only; on Apple Silicon it runs under emulation. The sa password is a
+  # public test default.
+  mssql:
+    profiles: ["mssql"]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Zeteo-test-1
+      MSSQL_PID: Developer
+    ports:
+      - "127.0.0.1:${ZETEO_MSSQL_PORT:-1463}:1433"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
+  # Migrations, once per `up`, before zeteo starts.
+  migrate:
+    image: zeteo:local
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["./migrate.sh"]
+    environment:
+      # The image defaults to production, whose PUBLIC_URL and TRUST_PROXY
+      # checks refuse a localhost stack.
+      NODE_ENV: &node-env development
+      DATABASE_URL: &database-url postgresql://zeteo:zeteo@postgres:5432/zeteo
+      REDIS_URL: &redis-url redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  zeteo:
+    image: zeteo:local
+    env_file:
+      - path: packages/zeteo/.env
+        required: false
+    environment:
+      NODE_ENV: *node-env
+      # Pinned over packages/zeteo/.env, which is written for a service run
+      # with `npm run dev`: inside the container it listens on 4201, and its
+      # public URL is wherever ZETEO_PORT publishes it.
+      PORT: "4201"
+      PUBLIC_URL: http://localhost:${ZETEO_PORT:-4201}
+      DATABASE_URL: *database-url
+      REDIS_URL: *redis-url
+      # A fixed key for this local stack only (32 bytes of 0x07); set
+      # ZETEO_MASTER_KEY to use another. Never reuse it anywhere else.
+      ZETEO_MASTER_KEY: ${ZETEO_MASTER_KEY:-BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc}
+      # No tereo to reach locally: accept the SDK's test tokens.
+      TEREO_TEST_MODE: "true"
+      # Sources may reach this stack's own Postgres by its service name.
+      SOURCE_ALLOWED_HOSTS: ${SOURCE_ALLOWED_HOSTS:-postgres}
+    ports:
+      - "127.0.0.1:${ZETEO_PORT:-4201}:4201"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres:

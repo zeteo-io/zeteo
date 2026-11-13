@@ -1,0 +1,23 @@
+/v1/sources/{sourceId}/archive:
+  post:
+    tags: [Sources]
+    summary: Archive a source
+    description: |
+      Archives the source and closes its connections. Sources are never deleted, and an archived
+      source takes no further change. An audit entry `zeteo.source.archived` is written.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`, `409 source_archived` (already archived).
+    operationId: archiveSource
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

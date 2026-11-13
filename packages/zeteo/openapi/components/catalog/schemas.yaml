@@ -1,0 +1,163 @@
+ColumnType:
+  type: string
+  enum: [text, number, boolean, date, timestamp, json, other]
+  description: The normalised type; `native_type` keeps the database's own name
+
+Table:
+  type: object
+  description: A table or view of a source
+  required: [id, source_id, schema_name, name, kind, description, last_seen_at, missing_since]
+  properties:
+    id: { type: string, format: uuid, description: 'Stable across refreshes' }
+    source_id: { type: string, format: uuid }
+    schema_name: { type: string }
+    name: { type: string }
+    kind: { type: string, enum: [table, view] }
+    description: { type: [string, 'null'], maxLength: 2000 }
+    last_seen_at: { type: string, format: date-time }
+    missing_since:
+      type: [string, 'null']
+      format: date-time
+      description: Set when a refresh no longer finds the table; cleared when it returns
+
+Column:
+  type: object
+  required: [id, name, type, native_type, nullable, position, is_primary_key, description, missing_since]
+  properties:
+    id: { type: string, format: uuid, description: 'Stable across refreshes' }
+    name: { type: string }
+    type: { $ref: '#/ColumnType' }
+    native_type:
+      type: string
+      description: |
+        The type as the database writes it. On Postgres an enum is marked `<name> (enum)` and a
+        domain `<name> (domain over <base type>)`, the base marked `(enum)` too when it is one
+        (`sales.price (domain over money)`); on Azure SQL the type as SQL Server writes it
+        (`nvarchar(100)`, `decimal(12,2)`).
+      examples: ['integer', 'character varying(20)', 'sales.order_status (enum)', 'sales.price (domain over money)']
+    nullable: { type: boolean }
+    position: { type: integer, minimum: 1 }
+    is_primary_key: { type: boolean }
+    description: { type: [string, 'null'], maxLength: 2000 }
+    missing_since: { type: [string, 'null'], format: date-time }
+
+Relation:
+  type: object
+  description: A join from one table to another, in the direction `from` to `to`
+  required: [id, name, from_table_id, from_columns, to_table_id, to_columns, to_many, origin, missing_since]
+  properties:
+    id: { type: string, format: uuid, description: 'Stable across refreshes' }
+    name: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}$', description: 'Unique on the from table. A discovered relation takes its name from the database''s identifiers, which may not follow this pattern.' }
+    from_table_id: { type: string, format: uuid }
+    from_columns: { type: array, minItems: 1, items: { type: string } }
+    to_table_id: { type: string, format: uuid }
+    to_columns:
+      type: array
+      minItems: 1
+      description: Pairs with `from_columns` by position
+      items: { type: string }
+    to_many: { type: boolean }
+    origin:
+      type: string
+      enum: [discovered, declared]
+      description: '`discovered` relations come from foreign keys and a refresh keeps them current; `declared` ones are added by an administrator and a refresh never touches them'
+    missing_since:
+      type: [string, 'null']
+      format: date-time
+      description: Set when a refresh no longer finds the foreign key; always null for a declared relation
+
+TableDetail:
+  description: A table with its columns and the relations that start at it
+  allOf:
+    - $ref: '#/Table'
+    - type: object
+      required: [columns, relations]
+      properties:
+        columns:
+          type: array
+          items: { $ref: '#/Column' }
+        relations:
+          type: array
+          items: { $ref: '#/Relation' }
+
+ListTablesResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Table' }
+    next_cursor:
+      type: [string, 'null']
+      description: The cursor of the next page, `null` on the last
+
+ListRelationsResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Relation' }
+    next_cursor:
+      type: [string, 'null']
+      description: The cursor of the next page, `null` on the last
+
+PatchTableRequest:
+  type: object
+  description: At least one field. What the body leaves out is not changed; `null` clears a description.
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    description: { type: [string, 'null'], maxLength: 2000 }
+    columns:
+      type: array
+      minItems: 1
+      maxItems: 1000
+      description: Column descriptions by column name; a name the table does not have is `400 invalid_request`
+      items:
+        type: object
+        required: [name, description]
+        additionalProperties: false
+        properties:
+          name: { type: string, minLength: 1, maxLength: 128 }
+          description: { type: [string, 'null'], maxLength: 2000 }
+
+DeclareRelationRequest:
+  type: object
+  required: [name, from_table_id, from_columns, to_table_id, to_columns, to_many]
+  additionalProperties: false
+  properties:
+    name: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}$' }
+    from_table_id: { type: string, format: uuid }
+    from_columns: { type: array, minItems: 1, maxItems: 32, items: { type: string, minLength: 1, maxLength: 128 } }
+    to_table_id: { type: string, format: uuid }
+    to_columns: { type: array, minItems: 1, maxItems: 32, items: { type: string, minLength: 1, maxLength: 128 } }
+    to_many: { type: boolean }
+
+RefreshSummary:
+  type: object
+  description: What a refresh changed. `missing` counts things newly marked missing in this refresh.
+  required: [tables, columns, relations]
+  properties:
+    tables:
+      type: object
+      required: [added, missing, restored]
+      properties:
+        added: { type: integer, minimum: 0 }
+        missing: { type: integer, minimum: 0 }
+        restored: { type: integer, minimum: 0 }
+    columns:
+      type: object
+      required: [added, changed, missing, restored]
+      properties:
+        added: { type: integer, minimum: 0 }
+        changed: { type: integer, minimum: 0, description: 'Columns whose type, native type, nullability or primary-key flag changed' }
+        missing: { type: integer, minimum: 0 }
+        restored: { type: integer, minimum: 0 }
+    relations:
+      type: object
+      required: [added, missing, restored]
+      properties:
+        added: { type: integer, minimum: 0 }
+        missing: { type: integer, minimum: 0 }
+        restored: { type: integer, minimum: 0 }

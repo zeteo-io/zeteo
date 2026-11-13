@@ -1,0 +1,217 @@
+SourceType:
+  type: string
+  enum: [postgres, azure-sql]
+  description: The kind of database.
+
+PostgresSettings:
+  type: object
+  description: |
+    The settings of a `postgres` source. Unknown keys are refused. A source's settings are
+    replaced whole by an update. `password` and `ca` are stored encrypted and never returned.
+  required: [host, database, user, password]
+  additionalProperties: false
+  properties:
+    host:
+      type: string
+      description: A hostname or IP address the deploy's network rules permit
+    port: { type: integer, minimum: 1, maximum: 65535, default: 5432 }
+    database: { type: string, minLength: 1 }
+    user: { type: string, minLength: 1 }
+    password: { type: string, minLength: 1, writeOnly: true }
+    tls:
+      type: string
+      enum: [verify, require, off]
+      default: verify
+      description: '`verify` checks the server certificate (against `ca` when given); `require` encrypts without checking it'
+    ca:
+      type: string
+      writeOnly: true
+      description: PEM certificate authority to verify the server against
+
+AzureSqlSettings:
+  type: object
+  description: |
+    The settings of an `azure-sql` source (Azure SQL Database or SQL Server, SQL authentication).
+    Unknown keys are refused. A source's settings are replaced whole by an update. `password` is
+    stored encrypted and never returned. The connection is always encrypted.
+  required: [host, database, user, password]
+  additionalProperties: false
+  properties:
+    host:
+      type: string
+      maxLength: 253
+      description: A hostname or IP address the deploy's network rules permit; no instance name
+    port: { type: integer, minimum: 1, maximum: 65535, default: 1433 }
+    database: { type: string, minLength: 1, maxLength: 128 }
+    user: { type: string, minLength: 1, maxLength: 128 }
+    password: { type: string, minLength: 1, maxLength: 128, writeOnly: true }
+    tls:
+      type: string
+      enum: [verify, trust-server-certificate]
+      default: verify
+      description: '`verify` checks the server certificate against `host`; `trust-server-certificate` encrypts without checking it'
+
+LoginFinding:
+  type: object
+  description: A right the source's login holds that a read-only login would not
+  required: [code, detail]
+  properties:
+    code:
+      type: string
+      enum:
+        - superuser
+        - can_create_roles
+        - can_create_databases
+        - bypasses_row_security
+        - owns_objects
+        - can_write_tables
+        - can_create_in_schema
+        - write_role_member
+        - replication
+        - reads_server_files
+    detail: { type: string }
+
+Source:
+  type: object
+  description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+  required:
+    - id
+    - slug
+    - name
+    - type
+    - settings
+    - schemas
+    - timeout_ms
+    - row_cap
+    - export_enabled
+    - export_row_cap
+    - query_concurrency
+    - export_concurrency
+    - writable_login_allowed
+    - status
+    - last_refreshed_at
+    - created_at
+    - archived_at
+  properties:
+    id: { type: string, format: uuid }
+    slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$' }
+    name: { type: string, minLength: 1, maxLength: 255 }
+    type: { $ref: '#/SourceType' }
+    settings:
+      type: [object, 'null']
+      description: The type's settings without `password` and `ca`
+      additionalProperties: true
+    schemas:
+      type: array
+      description: The database schemas Zeteo exposes
+      items: { type: string }
+    timeout_ms: { type: integer, minimum: 1000, maximum: 120000 }
+    row_cap: { type: integer, minimum: 1, maximum: 50000 }
+    export_enabled: { type: boolean }
+    export_row_cap: { type: integer, minimum: 0, maximum: 1000000 }
+    query_concurrency: { type: integer, minimum: 1, maximum: 50, description: 'The queries the source runs at once across every replica; one more is `429 source_busy`' }
+    export_concurrency: { type: integer, minimum: 1, maximum: 10, description: 'The exports the source runs at once across every replica; one more is `429 source_busy`' }
+    writable_login_allowed:
+      type: boolean
+      description: True when the login check found something and an administrator allowed it
+    status:
+      type: string
+      enum: [active, unreachable]
+    last_refreshed_at: { type: [string, 'null'], format: date-time }
+    created_at: { type: string, format: date-time }
+    archived_at: { type: [string, 'null'], format: date-time }
+
+ListSourcesResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Source' }
+    next_cursor:
+      type: [string, 'null']
+      description: The cursor of the next page, `null` on the last
+
+CreateSourceRequest:
+  type: object
+  required: [slug, name, type, settings, schemas]
+  additionalProperties: false
+  properties:
+    slug:
+      type: string
+      pattern: '^[a-z][a-z0-9-]{1,62}$'
+      description: Unique, lower case letters, digits and hyphens, starting with a letter
+    name: { type: string, minLength: 1, maxLength: 255 }
+    type: { $ref: '#/SourceType' }
+    settings:
+      description: The type's settings, PostgresSettings or AzureSqlSettings
+      anyOf:
+        - $ref: '#/PostgresSettings'
+        - $ref: '#/AzureSqlSettings'
+    schemas:
+      type: array
+      minItems: 1
+      maxItems: 20
+      uniqueItems: true
+      items: { type: string, minLength: 1, maxLength: 63, description: 'At most 63 bytes, no control characters, no leading or trailing whitespace' }
+    allow_writable_login:
+      type: boolean
+      description: Accept a login the check found rights on; ignored when it found none
+    timeout_ms: { type: integer, minimum: 1000, maximum: 120000, default: 30000 }
+    row_cap: { type: integer, minimum: 1, maximum: 50000, default: 50000 }
+    export_enabled: { type: boolean, default: false }
+    export_row_cap: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+    query_concurrency: { type: integer, minimum: 1, maximum: 50, default: 5, description: 'The queries the source runs at once across every replica; one more is `429 source_busy`' }
+    export_concurrency: { type: integer, minimum: 1, maximum: 10, default: 2, description: 'The exports the source runs at once across every replica; one more is `429 source_busy`' }
+
+UpdateSourceRequest:
+  type: object
+  description: |
+    Any of the create fields except `slug` and `type`, at least one. `settings` replaces the whole
+    settings object and runs the same checks as a create; `allow_writable_login` is accepted only
+    together with `settings`.
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name: { type: string, minLength: 1, maxLength: 255 }
+    settings:
+      description: The source type's settings, PostgresSettings or AzureSqlSettings
+      anyOf:
+        - $ref: '#/PostgresSettings'
+        - $ref: '#/AzureSqlSettings'
+    schemas:
+      type: array
+      minItems: 1
+      maxItems: 20
+      uniqueItems: true
+      items: { type: string, minLength: 1, maxLength: 63, description: 'At most 63 bytes, no control characters, no leading or trailing whitespace' }
+    allow_writable_login: { type: boolean }
+    timeout_ms: { type: integer, minimum: 1000, maximum: 120000 }
+    row_cap: { type: integer, minimum: 1, maximum: 50000 }
+    export_enabled: { type: boolean }
+    export_row_cap: { type: integer, minimum: 0, maximum: 1000000 }
+    query_concurrency:
+      type: integer
+      minimum: 1
+      maximum: 50
+      description: Applies to the queries that start after the change; a change of the pool's size closes the source's pool once the calls on it end
+    export_concurrency:
+      type: integer
+      minimum: 1
+      maximum: 10
+      description: As `query_concurrency`, for exports
+
+TestSourceResponse:
+  type: object
+  required: [ok, findings]
+  properties:
+    ok: { type: boolean, const: true }
+    findings:
+      type: array
+      description: What the login check found; at most 20
+      maxItems: 20
+      items: { $ref: '#/LoginFinding' }
+    truncated:
+      type: boolean
+      const: true
+      description: Present when the check found more than the 20 listed

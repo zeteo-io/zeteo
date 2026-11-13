@@ -1,0 +1,176 @@
+{
+  "version": "0.0.0",
+  "service": {
+    "slug": "zeteo",
+    "name": "Zeteo",
+    "secretFrom": "TEREO_CLIENT_SECRET",
+    "access": {
+      "roles": [
+        "audit_writer",
+        "user_resolver",
+        "group_resolver"
+      ]
+    },
+    "permissions": [
+      {
+        "name": "zeteo.sources.read",
+        "displayName": "Read sources",
+        "description": "List and read the sources zeteo knows about",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.sources.write",
+        "displayName": "Manage sources",
+        "description": "Register, change, archive and refresh sources, and declare relations; also grants Read sources",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.grants.read",
+        "displayName": "Read grants",
+        "description": "List and read who may query which tables and columns, and users' and groups' concurrency limits",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.grants.write",
+        "displayName": "Manage grants",
+        "description": "Create, change and remove grants and concurrency limits; also grants Read grants",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.data.read",
+        "displayName": "Query data",
+        "description": "Run queries over the tables and columns one is granted",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.data.export",
+        "displayName": "Export data",
+        "description": "Export query results over the tables and columns one is granted, from sources that allow it",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.runs.read",
+        "displayName": "Read query runs",
+        "description": "List the record of queries that were run",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.mcp.use",
+        "displayName": "Use over MCP",
+        "description": "Use zeteo through an AI connected over MCP",
+        "orgAssignable": false
+      }
+    ],
+    "systemRoles": [
+      {
+        "name": "zeteo_admin",
+        "displayName": "Zeteo administrator",
+        "description": "Manages sources, grants and the record of query runs",
+        "permissions": [
+          "zeteo.sources.read",
+          "zeteo.sources.write",
+          "zeteo.grants.read",
+          "zeteo.grants.write",
+          "zeteo.data.read",
+          "zeteo.data.export",
+          "zeteo.runs.read",
+          "zeteo.mcp.use"
+        ]
+      },
+      {
+        "name": "zeteo_user",
+        "displayName": "Zeteo user",
+        "description": "Queries the data they are granted",
+        "permissions": [
+          "zeteo.data.read"
+        ]
+      },
+      {
+        "name": "zeteo_mcp_user",
+        "displayName": "Zeteo MCP user",
+        "description": "Queries the data they are granted, also through an AI connected over MCP",
+        "permissions": [
+          "zeteo.data.read",
+          "zeteo.mcp.use"
+        ]
+      }
+    ],
+    "eventTypes": [
+      {
+        "eventType": "zeteo.source.created",
+        "description": "A source was registered",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.updated",
+        "description": "A source's settings, limits or descriptions were changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.archived",
+        "description": "A source was archived",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.refreshed",
+        "description": "A source's catalogue was refreshed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.relation.declared",
+        "description": "A relation was declared between two tables",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.relation.removed",
+        "description": "A declared relation was removed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.grant.created",
+        "description": "A grant to a table was created",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.grant.updated",
+        "description": "A grant's columns were changed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.grant.removed",
+        "description": "A grant was removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.created",
+        "description": "A user or group was given its own concurrency limits",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.updated",
+        "description": "A user's or group's concurrency limits were changed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.principal_limit.removed",
+        "description": "A user's or group's own concurrency limits were removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.query.run",
+        "description": "A query was run, refused or failed",
+        "readPermission": "zeteo.runs.read"
+      },
+      {
+        "eventType": "zeteo.export.started",
+        "description": "An export started sending rows",
+        "readPermission": "zeteo.runs.read"
+      },
+      {
+        "eventType": "zeteo.export.run",
+        "description": "An export ended, was refused or failed",
+        "readPermission": "zeteo.runs.read"
+      }
+    ]
+  }
+}

@@ -1,0 +1,142 @@
+import { assertNoTransaction, getTereo } from "../utils/tereo.js";
+import { requests, RequestError } from "@tereo-io/sdk/handler";
+import { withinRedisTimeout } from "../utils/redisTimeout.js";
+import { ServiceUnavailableError } from "../utils/errors.js";
+import type { Caller } from "../middleware/auth.js";
+import { logger } from "../utils/logger.js";
+import { redis } from "../utils/redis.js";
+import env from "../env.js";
+
+export interface GroupRef {
+  id: string;
+  organizationId: string | null;
+}
+
+export type PrincipalStatus = "active" | "orphaned" | "unknown";
+
+export const GROUPS_TTL_SECONDS = 30;
+export const groupsKey = (userId: string) => `zeteo:groups:${userId}`;
+export const testGroupsKey = (userId: string) => `zeteo:test:groups:${userId}`;
+export const TEST_ORPHANED_KEY = "zeteo:test:orphaned";
+
+const unavailable = () =>
+  new ServiceUnavailableError("Group membership is temporarily unavailable");
+
+/** The HTTP status of a failed request to tereo, if it got an answer; the SDK throws only `RequestError`. */
+const httpStatusOf = (err: unknown): number | undefined =>
+  err instanceof RequestError ? err.httpStatus : undefined;
+
+/** A user's groups from tereo; null (a 404: no such user, or a core without groups) is no groups. */
+export const fetchGroupsFromTereo = async (
+  userId: string
+): Promise<GroupRef[]> => {
+  assertNoTransaction("tereo listUserGroups()");
+  const groups = await getTereo().auth.listUserGroups(userId);
+  return (groups ?? []).map(({ id, organizationId }) => ({
+    id,
+    organizationId,
+  }));
+};
+
+/**
+ * The user's groups through `fetch`, cached 30 s in Redis (unfiltered). A
+ * failed fetch is a 503, never an empty list. A cache that fails or does not
+ * answer within its bound is passed over.
+ */
+export const resolveGroupsWith = async (
+  fetch: (userId: string) => Promise<GroupRef[]>,
+  userId: string
+): Promise<GroupRef[]> => {
+  const key = groupsKey(userId);
+  try {
+    const cached = await withinRedisTimeout(redis.get(key));
+    if (cached !== null) return JSON.parse(cached) as GroupRef[];
+  } catch (err) {
+    logger.warn({ err }, "group cache unreadable; asking tereo");
+  }
+  let groups: GroupRef[];
+  try {
+    groups = await fetch(userId);
+  } catch (err) {
+    logger.error({ err, user_id: userId }, "listing a user's groups failed");
+    throw unavailable();
+  }
+  try {
+    await withinRedisTimeout(
+      redis.set(key, JSON.stringify(groups), "EX", GROUPS_TTL_SECONDS)
+    );
+  } catch (err) {
+    logger.warn({ err }, "group cache not written");
+  }
+  return groups;
+};
+
+/** A test-mode seam's Redis read; one that fails or does not answer in time is a 503. */
+const readTestSeam = async <T>(command: Promise<T>): Promise<T> => {
+  try {
+    return await withinRedisTimeout(command);
+  } catch (err) {
+    logger.warn({ err }, "test-mode principal data unreadable");
+    throw unavailable();
+  }
+};
+
+const testGroups = async (userId: string): Promise<GroupRef[]> => {
+  const raw = await readTestSeam(redis.get(testGroupsKey(userId)));
+  return raw === null ? [] : (JSON.parse(raw) as GroupRef[]);
+};
+
+/** Ids of the groups whose grants count for the caller: global ones and those of the token's organization. */
+export const groupIdsOf = async (caller: Caller): Promise<string[]> => {
+  if (caller.isServiceAccount) return [];
+  const groups = env.TEREO_TEST_MODE
+    ? await testGroups(caller.userId)
+    : await resolveGroupsWith(fetchGroupsFromTereo, caller.userId);
+  return groups
+    .filter(
+      (g) =>
+        g.organizationId === null || g.organizationId === caller.organizationId
+    )
+    .map((g) => g.id);
+};
+
+/** `principalStatus` against tereo itself. */
+export const statusFromTereo = async (
+  type: "user" | "group",
+  id: string
+): Promise<PrincipalStatus> => {
+  assertNoTransaction(`tereo ${type === "user" ? "getUser" : "getGroup"}()`);
+  try {
+    if (type === "user") {
+      await requests.auth.getUser(id);
+      return "active";
+    }
+    // Reading a group needs group_resolver; without it tereo answers 403,
+    // which fails here like any other error rather than reading as missing.
+    return (await getTereo().auth.getGroup(id)) === null
+      ? "orphaned"
+      : "active";
+  } catch (err) {
+    if (type === "user" && httpStatusOf(err) === 404) return "orphaned";
+    logger.error({ err, principal_id: id }, "reading a principal failed");
+    throw unavailable();
+  }
+};
+
+/**
+ * Whether a grant's principal still exists in tereo: `orphaned` when tereo
+ * has no such user or group. An archived group still exists, so it is
+ * `active`, though its grants reach no one: tereo lists a user's unarchived
+ * groups only.
+ */
+export const principalStatus = async (
+  type: "user" | "group",
+  id: string
+): Promise<PrincipalStatus> => {
+  if (env.TEREO_TEST_MODE) {
+    return (await readTestSeam(redis.sismember(TEST_ORPHANED_KEY, id))) === 1
+      ? "orphaned"
+      : "active";
+  }
+  return statusFromTereo(type, id);
+};

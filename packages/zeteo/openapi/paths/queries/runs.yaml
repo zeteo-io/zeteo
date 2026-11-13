@@ -1,0 +1,37 @@
+/v1/runs:
+  get:
+    tags: [Queries]
+    summary: List query runs
+    description: |
+      The run log, newest first: every query past the shape check, from any entry point, with
+      its outcome. A run holds the query as sent, never its rows.
+
+      **Required permissions:** `zeteo.runs.read` (`403 forbidden` without).
+    operationId: listRuns
+    parameters:
+      - name: user_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - name: source_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - name: outcome
+        in: query
+        required: false
+        schema: { $ref: '../../components/queries/schemas.yaml#/RunOutcome' }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of runs
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/ListRunsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

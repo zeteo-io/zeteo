@@ -1,0 +1,132 @@
+{
+  "name": "zeteo",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "application",
+  "sourceRoot": "packages/zeteo/src",
+  "targets": {
+    "generate": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "prisma generate",
+        "cwd": "packages/zeteo"
+      },
+      "inputs": [
+        "{projectRoot}/prisma/schema.prisma"
+      ],
+      "outputs": [
+        "{projectRoot}/prisma/generated"
+      ],
+      "cache": true
+    },
+    "build": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build",
+        "generate"
+      ],
+      "options": {
+        "command": "tsc",
+        "cwd": "packages/zeteo"
+      },
+      "outputs": [
+        "{projectRoot}/dist"
+      ]
+    },
+    "check": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build",
+        "generate"
+      ],
+      "options": {
+        "command": "tsc --noEmit",
+        "cwd": "packages/zeteo"
+      }
+    },
+    "openapi:lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "redocly lint",
+        "cwd": "packages/zeteo"
+      },
+      "inputs": [
+        "{projectRoot}/openapi/**/*",
+        "{projectRoot}/redocly.yaml"
+      ],
+      "cache": true
+    },
+    "dev": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build",
+        "generate"
+      ],
+      "options": {
+        "command": "tsx watch ./src/index.ts",
+        "cwd": "packages/zeteo"
+      }
+    },
+    "test": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "vitest run",
+        "cwd": "packages/zeteo"
+      },
+      "dependsOn": [
+        "^build",
+        "generate"
+      ]
+    },
+    "test:unit": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build",
+        "generate"
+      ],
+      "options": {
+        "command": "vitest run --project unit",
+        "cwd": "packages/zeteo"
+      }
+    },
+    "test:int": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "^build",
+        "generate"
+      ],
+      "options": {
+        "command": "vitest run --project int",
+        "cwd": "packages/zeteo"
+      }
+    },
+    "test:docker": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "./docker/test/run.sh",
+        "cwd": "."
+      }
+    },
+    "clean": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "rm -rf dist tsconfig.tsbuildinfo",
+        "cwd": "packages/zeteo"
+      }
+    },
+    "docker": {
+      "executor": "nx:run-commands",
+      "dependsOn": [
+        "build"
+      ],
+      "inputs": [
+        "production",
+        "^production",
+        "{workspaceRoot}/docker/**/*"
+      ],
+      "options": {
+        "command": "docker build -f docker/Dockerfile -t zeteo .",
+        "cwd": "."
+      }
+    }
+  }
+}

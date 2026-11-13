@@ -1,0 +1,10 @@
+BearerAuth:
+  type: http
+  scheme: bearer
+  bearerFormat: JWT
+  description: |
+    A tereo access token. Zeteo verifies it with tereo's SDK and takes the caller's user id and
+    permissions from it.
+
+    Routes ask for `zeteo.sources.read` (the reads) or `zeteo.sources.write` (every change, and
+    the login test). Permissions are tereo's dotted, hierarchical form: `write` covers `read`.

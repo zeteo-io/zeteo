@@ -1,0 +1,3282 @@
+openapi: 3.1.0
+info:
+  title: Zeteo API
+  version: 0.1.0
+  description: |
+    Zeteo is a query service for apps built on tereo. An administrator registers databases as
+    sources and grants tables and columns to users and groups, who query them through a
+    validated JSON query language. This spec covers the HTTP API: sources and their catalogue,
+    grants and concurrency limits, querying, exporting and the run log. Every path in this spec
+    is the full path on the service: the API is versioned under `/v1`, and `GET /health` stays at
+    the root.
+
+    ## MCP
+
+    With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
+    HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
+    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
+    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
+
+    ## Authentication
+
+    Requests carry a tereo access token as `Authorization: Bearer <token>`. Zeteo verifies it with
+    tereo's SDK.
+
+    ## Permissions
+
+    Reading sources, tables and relations needs `zeteo.sources.read`; registering, changing,
+    archiving, testing and refreshing a source, describing a table and declaring or removing a
+    relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
+    `403 forbidden`, before the body is validated or any source is looked up.
+
+    ## Sources
+
+    A source's `settings` depend on its `type` and are write-only in part: the response carries
+    the settings the adapter marks safe (`password` and `ca` are never returned). See
+    `docs/sources.md` for the settings of each type, the login check and its override, and the
+    network rules.
+
+    ## Catalogue
+
+    A refresh reads a source's tables, columns and foreign keys into the catalogue. Ids of tables,
+    columns and relations are stable across refreshes, which never delete a row, change a
+    description or touch a declared relation: what disappears from the source is marked with
+    `missing_since`. See `docs/catalog.md`.
+
+    ## Grants
+
+    A grant gives one user or group the right to query one table: every column (including ones
+    added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
+    replacing and removing them needs `zeteo.grants.write`, which includes read. The same
+    permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
+    many queries and exports it runs at once. See `docs/grants.md`.
+
+    ## Queries
+
+    `GET /v1/catalog` lists what the caller may query, with the language's JSON Schema, and
+    nothing about what they may not. `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
+    Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
+    `docs/querying.md`.
+
+    `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
+    CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
+
+    ## Pagination
+
+    Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
+    `{ data, next_cursor }`, where `next_cursor` is `null` on the last page.
+
+    ## Errors
+
+    An error is `{ "error": "<code>", "error_description": "<text>", ...details, "request_id": "<id>" }`,
+    where `request_id` is the request's `X-Request-ID` (the server's log lines for the request
+    carry it too). A validation failure is `400 invalid_request` with `issues`, a list of
+    `{ path, message }`. The text of a database's own error never appears in a response.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:4201
+    description: Local development server (each app deploys its own Zeteo; substitute its host)
+security:
+  - BearerAuth: []
+tags:
+  - name: Sources
+    description: Databases registered with Zeteo
+  - name: Catalogue
+    description: A source's tables, columns and relations, read from the source by a refresh
+  - name: Grants
+    description: Which users and groups may query which tables and columns, and how much at once
+  - name: Queries
+    description: Running and exporting queries over granted tables and columns, and the record of every run
+  - name: Platform
+    description: Health
+paths:
+  /health:
+    get:
+      tags:
+        - Platform
+      summary: Health check
+      description: |
+        Whether Postgres and Redis answer. Public: it names no version and takes no token.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: A dependency does not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /v1/sources:
+    get:
+      tags:
+        - Sources
+      summary: List sources
+      description: |
+        Lists sources in creation order (`created_at`, then `id`). Archived sources are left out
+        unless `include_archived=true`. A source whose stored settings cannot be decrypted is
+        listed with `settings: null`.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listSources
+      parameters:
+        - name: include_archived
+          in: query
+          required: false
+          description: Also list archived sources
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of sources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSourcesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Sources
+      summary: Register a source
+      description: |
+        Registers a database. Before anything is stored, Zeteo validates `settings` against the
+        type's schema, checks the host against the deploy's network rules, connects with the login
+        and inspects its rights. A login that holds rights a read-only login would not is refused
+        with `422 writable_login` (the body lists the findings) unless `allow_writable_login`
+        is true, in which case the source is stored with `writable_login_allowed: true` and the audit
+        entry records the finding codes. Nothing is stored when any step fails. An audit entry
+        `zeteo.source.created` is written with the slug, the type and the settings without
+        `password` and `ca`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
+        `502 source_unreachable`.
+      operationId: createSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSourceRequest'
+      responses:
+        '201':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}:
+    get:
+      tags:
+        - Sources
+      summary: Get a source
+      description: |
+        Returns one source, archived or not. `settings` is redacted, and null when the stored
+        settings cannot be decrypted.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: getSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Sources
+      summary: Change a source
+      description: |
+        Changes any of the create fields except `slug` and `type`. A request with neither
+        `settings` nor `schemas` never contacts the source. With `settings`, the new object replaces
+        the old one whole and goes through the same checks as a create (the login check included;
+        send `allow_writable_login: true` again to keep an override); the source's open connections
+        are closed so the next use connects with the new settings. After a change to `settings` or
+        `schemas` is committed, the catalogue is refreshed; if that refresh fails, the change stands,
+        `status` is `unreachable` and the answer is still `200`. An audit entry
+        `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
+        the new settings without `password` and `ca`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `422 writable_login`, `502 source_unreachable`.
+      operationId: updateSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSourceRequest'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/archive:
+    post:
+      tags:
+        - Sources
+      summary: Archive a source
+      description: |
+        Archives the source and closes its connections. Sources are never deleted, and an archived
+        source takes no further change. An audit entry `zeteo.source.archived` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived` (already archived).
+      operationId: archiveSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/test:
+    post:
+      tags:
+        - Sources
+      summary: Test a source's login
+      description: |
+        Connects with the stored settings on a fresh connection, re-checks the host against the
+        network rules and runs the login check. Returns the findings (empty for a read-only login);
+        it changes nothing, whatever it finds.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `502 source_unreachable`.
+      operationId: testSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The login check's findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestSourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '422':
+          description: The host is not permitted - `host_not_allowed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/refresh:
+    post:
+      tags:
+        - Catalogue
+      summary: Refresh a source's catalogue
+      description: |
+        Reads the source's tables, views, columns and foreign keys and brings the catalogue up to
+        date. New things are added; things no longer in the source get `missing_since` (and lose it
+        if they return); a column whose type changed is updated in place. A refresh never deletes a
+        row, changes an id or a description, or touches a declared relation. It sets the source's
+        `status` to `active` and `last_refreshed_at`. If the source cannot be read the status
+        becomes `unreachable`, the catalogue is left as it was and the answer is
+        `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
+        See `docs/catalog.md`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `502 source_unreachable`.
+      operationId: refreshSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: What the refresh changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshSummary'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '422':
+          description: The host is not permitted - `host_not_allowed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/tables:
+    get:
+      tags:
+        - Catalogue
+      summary: List a source's tables
+      description: |
+        Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
+        (`missing_since` set) are left out unless `include_missing=true`.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listTables
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - name: include_missing
+          in: query
+          required: false
+          description: Also list tables a refresh no longer finds
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of tables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/tables/{tableId}:
+    get:
+      tags:
+        - Catalogue
+      summary: Get a table
+      description: |
+        A table with its columns (in position order) and the relations that start at it, including
+        declared ones and ones a refresh marked missing.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found` for an unknown table or one of another source.
+      operationId: getTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      responses:
+        '200':
+          description: The table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Catalogue
+      summary: Describe a table and its columns
+      description: |
+        Sets the table's description and the descriptions of named columns. A description is at
+        most 2000 characters; `null` clears it. A refresh never changes a description. An audit
+        entry `zeteo.source.updated` records the table and what changed.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (a description too long, a column the table does not
+        have, an empty body), `404 not_found`, `409 source_archived`.
+      operationId: patchTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTableRequest'
+      responses:
+        '200':
+          description: The table after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/relations:
+    get:
+      tags:
+        - Catalogue
+      summary: List a source's relations
+      description: |
+        Lists discovered and declared relations in creation order, including ones a refresh marked
+        missing (`missing_since`).
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listRelations
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of relations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRelationsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Catalogue
+      summary: Declare a relation
+      description: |
+        Adds a relation the database does not enforce with a foreign key. Both tables must belong to
+        this source; the column lists must have the same length, name present columns, and pair
+        columns of the same normalised type that is not `other` or `json`. The name is unique on
+        the from table, whether the other relation is discovered or declared. An audit entry
+        `zeteo.relation.declared` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (the source), `409 relation_name_taken`, `409 source_archived`,
+        `422 invalid_relation`.
+      operationId: declareRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclareRelationRequest'
+      responses:
+        '201':
+          description: The declared relation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The relation is not valid - `invalid_relation`; the description says which check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/relations/{relationId}:
+    delete:
+      tags:
+        - Catalogue
+      summary: Remove a declared relation
+      description: |
+        Removes a declared relation. A discovered relation comes from a foreign key and cannot be
+        removed. An audit entry `zeteo.relation.removed` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (also a relation of another source), `409 relation_discovered`,
+        `409 source_archived`.
+      operationId: deleteRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/RelationIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/grants:
+    get:
+      tags:
+        - Grants
+      summary: List grants
+      description: |
+        Lists grants in creation order, optionally only those of one principal, table or source.
+        Each grant's `principal_status` is looked up once per distinct principal.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+      operationId: listGrants
+      parameters:
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: table_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: source_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of grants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListGrantsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Grants
+      summary: Create a grant
+      description: |
+        Grants a user or group the right to query a table: every column, or a list of columns of
+        that table. The principal need not exist yet. A principal has one grant per table. An audit
+        entry `zeteo.grant.created` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (the table), `409 source_archived`, `409 grant_exists`,
+        `422 invalid_grant` (a column that is not on the table).
+      operationId: createGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGrantRequest'
+      responses:
+        '201':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The grant is not valid - `invalid_grant`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/grants/{grantId}:
+    get:
+      tags:
+        - Grants
+      summary: Get a grant
+      description: |
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: getGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      responses:
+        '200':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Grants
+      summary: Replace a grant's columns
+      description: |
+        Replaces the grant's columns whole: every column, or exactly the listed ones. The principal
+        and table of a grant never change; remove the grant and create another for that. An audit
+        entry `zeteo.grant.updated` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 invalid_grant`.
+      operationId: replaceGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceGrantRequest'
+      responses:
+        '200':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The grant is not valid - `invalid_grant`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Grants
+      summary: Remove a grant
+      description: |
+        Removes the grant and its columns, also when its source is archived. An audit entry
+        `zeteo.grant.removed` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: deleteGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/principal-limits:
+    get:
+      tags:
+        - Grants
+      summary: List users' and groups' concurrency limits
+      description: |
+        Lists the rows in creation order, optionally only those of one principal type or id. Each
+        row's `principal_status` is looked up once per distinct principal.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+      operationId: listPrincipalLimits
+      parameters:
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of limits rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPrincipalLimitsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Grants
+      summary: Give a user or group its own concurrency limits
+      description: |
+        Gives one user (a service account included) or group its own limits on queries and exports
+        at once, in place of `USER_QUERY_CONCURRENCY` and `USER_EXPORT_CONCURRENCY`. Each limit
+        applies apart, as each run starts: the user's own row if it sets that limit, else the
+        highest among their groups' rows, else the environment's default. The principal need not
+        exist yet. A principal has at most one row. An audit entry `zeteo.principal_limit.created`
+        is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (neither limit, or one out of range), `409 conflict` (the
+        principal already has a row).
+      operationId: createPrincipalLimit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePrincipalLimitRequest'
+            example:
+              principal_type: group
+              principal_id: 0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a
+              query_concurrency: 10
+      responses:
+        '201':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          description: Conflict - `conflict`, the principal already has limits; change them with `PATCH`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/principal-limits/{principalLimitId}:
+    get:
+      tags:
+        - Grants
+      summary: Get a user's or group's concurrency limits
+      description: |
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: getPrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      responses:
+        '200':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Grants
+      summary: Change a user's or group's concurrency limits
+      description: |
+        Changes either limit or both; `null` clears one. A change that would leave neither set is
+        refused: remove the row instead. The principal never changes. The change applies to the
+        runs that start after it. An audit entry `zeteo.principal_limit.updated` is written, with
+        the values before it under `previous`.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request`, `404 not_found`.
+      operationId: updatePrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePrincipalLimitRequest'
+      responses:
+        '200':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Grants
+      summary: Remove a user's or group's concurrency limits
+      description: |
+        Removes the row; the principal falls back to its groups' rows or the environment's
+        defaults for the runs that start after it. An audit entry `zeteo.principal_limit.removed`
+        is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (also for the losers of concurrent removals of one row).
+      operationId: deletePrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/catalog:
+    get:
+      tags:
+        - Queries
+      summary: Discover what you can query
+      description: |
+        The sources, tables, columns and relations the caller may query, and the query language's
+        JSON Schema. It shows exactly what the caller's grants (their own and their groups') allow
+        and nothing more: no ids, no native types, no connection settings, and no hint of a table,
+        column, relation or source they are not granted. A relation is listed only when every key
+        column on both sides is granted.
+
+        Without `source`, every source the caller has a grant on, ordered by slug. A `source` that
+        is unknown, archived, or not granted answers an empty `sources`, as a caller with no grants
+        gets. Names are written as a query would write them.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: getCatalog
+      parameters:
+        - name: source
+          in: query
+          required: false
+          description: The slug of one source
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 200
+      responses:
+        '200':
+          description: The caller's visible catalogue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/query:
+    post:
+      tags:
+        - Queries
+      summary: Run a query
+      description: |
+        Runs a query over the tables and columns the caller is granted, directly or through a
+        group, and answers its rows. A table, column, relation or source the caller is not granted
+        is refused exactly as one that does not exist: `422 not_found_or_not_accessible`, with the
+        same message, path and suggestions, which are drawn only from names the caller can see.
+
+        The body must be an object with a `source`; a source the caller cannot see is refused
+        before the rest of the body is read. Every query past that check is recorded in the run
+        log with a `zeteo.query.run` audit entry, refused and failed ones included; rows are sent
+        only once their run is recorded. A client that disconnects stops its query on the source.
+
+        Limits: 1,000 rows unless `limit` says otherwise, at most 50,000 or the source's row cap;
+        10 MB of rows; the source's time limit; per user `USER_QUERY_CONCURRENCY` queries at once
+        (default 5) unless the user or one of their groups has its own limit
+        (`/v1/principal-limits`), and per source its `query_concurrency` (default 5). The response
+        says when rows were left out. See `docs/querying.md`.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: runQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Query'
+            example:
+              source: sales-db
+              from: orders
+              join:
+                - customer
+              select:
+                - customer.region
+                - bucket: month
+                  column: created_at
+                  as: month
+                - sum: total
+                  as: revenue
+              where:
+                status:
+                  in:
+                    - paid
+                    - shipped
+              groupBy:
+                - customer.region
+                - month
+              having:
+                revenue:
+                  gt: 1000
+              orderBy:
+                - revenue: desc
+              limit: 1000
+      responses:
+        '200':
+          description: The rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResult'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`: the body is not an object with a
+            non-empty string `source`; a string or key anywhere in it holds NUL or ill-formed Unicode
+            (a lone UTF-16 surrogate); or the source's language refuses it. None of these is recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          description: Conflict - `source_archived`, the source was archived while the query ran
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: |
+            The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
+            for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
+            `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
+            `duplicate_output_name`, `join_parent_missing`; `too_many_parameters` (at path `[]`: the
+            compiled query binds more values than the source's engine takes). A plan
+            that references a column outside the grants (a planner fault, logged) is
+            `not_found_or_not_accessible` with a fixed message and path `[]`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: |
+            Too many queries - `too_many_queries` (the caller already runs as many as their limit)
+            or `source_busy` (the source already runs its `query_concurrency`); retry after
+            `Retry-After`. The body's `retry_after` repeats it, and the message states the limit.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: |
+            Bad gateway - `query_failed` (the source could not run the query) or
+            `source_unreachable`. The database's own error text is never returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable (the source busy). Retry, after `Retry-After` when given.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/export:
+    post:
+      tags:
+        - Queries
+      summary: Export a query's result
+      description: |
+        Runs a query, with the same body as `POST /v1/query`, and streams its rows as NDJSON
+        (`?format=ndjson`, the default) or CSV (`?format=csv`), up to the source's
+        `export_row_cap`, from a source whose `export_enabled` is true. The stream is gzipped when
+        `Accept-Encoding` accepts gzip.
+
+        Everything that refuses a query refuses an export the same way, before any byte of the
+        stream: a table, column, relation or source the caller is not granted is
+        `422 not_found_or_not_accessible`, as one that does not exist. Once the status line is sent
+        no error body can follow; a failure then cuts the connection without the stream's last
+        chunk.
+
+        **Ends.** NDJSON's first line is `{ columns, warnings, run_id }`, each row is a JSON array
+        in the order of `columns`, and the last line is `{ "status": "complete" | "truncated",
+        "rows": n }` (`truncated`: more rows existed than the cap). CSV is a header record and
+        CRLF-terminated records, with the same status and count in the HTTP trailers
+        `X-Zeteo-Export-Status` and `X-Zeteo-Export-Rows`. A stream with no last line (NDJSON) or
+        no trailers (CSV) did not end: it was cut. Verify completeness with NDJSON: trailers are
+        invisible to browsers and to HTTP/1.0 clients and may be dropped by proxies.
+
+        **Order.** An export has no default order: without `orderBy` rows come in whatever order
+        the source makes them, and a capped export is an arbitrary subset. `offset` above 0 needs
+        an `orderBy` (`422 invalid_order` at path `["offset"]`).
+
+        **CSV text.** A text, json or `other` cell starting with `=`, `+`, `-`, `@`, tab or CR is written
+        with a leading `'`, so spreadsheets read it as text; CSV is therefore not byte-exact.
+        NDJSON is.
+
+        **Limits.** 10 minutes from the start to the last row, time waiting on the client
+        included; per user `USER_EXPORT_CONCURRENCY` exports at once (default 1, or the user's
+        own limit), per source its `export_concurrency`, counted apart from queries. No byte cap.
+
+        **Record.** A refused export is recorded as a refused query is, with entry point `export`
+        and a `zeteo.export.run` audit entry. One that starts is recorded as `running` with a
+        `zeteo.export.started` entry before its head is sent, and closed with a `zeteo.export.run`
+        entry when it ends. See `docs/export.md`.
+
+        **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
+      operationId: exportQuery
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: The stream's format. Any other query parameter is `400 invalid_request`.
+          schema:
+            type: string
+            enum:
+              - ndjson
+              - csv
+            default: ndjson
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Query'
+            example:
+              source: sales-db
+              from: orders
+              select:
+                - id
+                - status
+                - total
+                - created_at
+              where:
+                status:
+                  eq: paid
+              orderBy:
+                - id: asc
+      responses:
+        '200':
+          description: The stream
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="zeteo-export-<run id>.<format>"`'
+              schema:
+                type: string
+            Cache-Control:
+              description: '`no-store`'
+              schema:
+                type: string
+            X-Zeteo-Run-Id:
+              description: The run's id in the run log
+              schema:
+                type: string
+                format: uuid
+            Vary:
+              description: '`Accept-Encoding`'
+              schema:
+                type: string
+            Content-Encoding:
+              description: '`gzip` when the request accepts gzip (`gzip` or `*` with a q above 0); absent otherwise'
+              schema:
+                type: string
+                enum:
+                  - gzip
+            Trailer:
+              description: 'CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows`, the trailers sent after the last record'
+              schema:
+                type: string
+            X-Zeteo-Warnings:
+              description: 'CSV only, when the query has warnings: their codes, comma separated (`join_multiplies_rows`). NDJSON carries them in its first line.'
+              schema:
+                type: string
+            X-Zeteo-Export-Status:
+              description: 'CSV only, an HTTP trailer: `complete` or `truncated`. Absent when the stream was cut.'
+              schema:
+                type: string
+                enum:
+                  - complete
+                  - truncated
+            X-Zeteo-Export-Rows:
+              description: 'CSV only, an HTTP trailer: the rows sent'
+              schema:
+                type: integer
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: |
+                  Lines of JSON, each ending in `\n`: first `{ "columns": [{ "name", "type" }],
+                  "warnings": [...], "run_id": "<uuid>" }`, then one array per row with its values in
+                  the wire forms of `POST /v1/query`, last `{ "status": "complete" | "truncated",
+                  "rows": <count> }`.
+              example: |
+                {"columns":[{"name":"id","type":"number"},{"name":"status","type":"text"}],"warnings":[],"run_id":"0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a"}
+                [1,"paid"]
+                [2,"paid"]
+                {"status":"complete","rows":2}
+            text/csv:
+              schema:
+                type: string
+                description: |
+                  RFC 4180, UTF-8, CRLF line ends: a header record of the column names, then one record
+                  per row. A null is an empty field and an empty string `""`; numbers, booleans,
+                  dates and timestamps are written as their wire forms; json as its JSON text. Text
+                  and json starting with `=`, `+`, `-`, `@`, tab or CR get a leading `'`.
+              example: "id,status\r\n1,paid\r\n2,paid\r\n"
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`: an unknown `format` or query parameter;
+            the body is not an object with a non-empty string `source`; a string or key in it holds
+            NUL or ill-formed Unicode; or the source's language refuses it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          description: |
+            Forbidden - `forbidden` (the token lacks `zeteo.data.export`) or `export_not_enabled`
+            (the source's exports are off, or its `export_row_cap` is 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `source_archived`, the source was archived as the export started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: |
+            The query cannot be run as written - the codes of `POST /v1/query`, and
+            `invalid_order` at path `["offset"]` for an `offset` above 0 without an `orderBy`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: |
+            Too many exports - `too_many_exports` (the caller's own export limit is reached) or
+            `source_busy` (the source's `export_concurrency` is); retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: |
+            Bad gateway - `query_failed` or `source_unreachable`, before the stream starts (its head). The
+            database's own error text is never returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable, or the service is shutting down (an export refused for that
+            is not recorded). Retry, after `Retry-After` when given.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Gateway timeout - `query_timeout`, the export's time ran out before the stream started (its head)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs:
+    get:
+      tags:
+        - Queries
+      summary: List query runs
+      description: |
+        The run log, newest first: every query past the shape check, from any entry point, with
+        its outcome. A run holds the query as sent, never its rows.
+
+        **Required permissions:** `zeteo.runs.read` (`403 forbidden` without).
+      operationId: listRuns
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: source_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: outcome
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RunOutcome'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRunsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A tereo access token. Zeteo verifies it with tereo's SDK and takes the caller's user id and
+        permissions from it.
+
+        Routes ask for `zeteo.sources.read` (the reads) or `zeteo.sources.write` (every change, and
+        the login test). Permissions are tereo's dotted, hierarchical form: `write` covers `read`.
+  parameters:
+    CursorParam:
+      name: cursor
+      in: query
+      description: |
+        Opaque cursor for keyset pagination: the `next_cursor` of the previous page. Omit it on the
+        first request. A malformed cursor is `400 invalid_request`.
+      required: false
+      schema:
+        type: string
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items per page
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    TableIdParam:
+      name: tableId
+      in: path
+      required: true
+      description: The table's id, in the source named by the path. A table of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    RelationIdParam:
+      name: relationId
+      in: path
+      required: true
+      description: The relation's id, in the source named by the path. A relation of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    GrantIdParam:
+      name: grantId
+      in: path
+      required: true
+      description: The grant's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    PrincipalLimitIdParam:
+      name: principalLimitId
+      in: path
+      required: true
+      description: The limits row's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    SourceIdParam:
+      name: sourceId
+      in: path
+      required: true
+      description: The source's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequestResponse:
+      description: Bad request - `invalid_request`, with `issues`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnauthorizedResponse:
+      description: Unauthorized - the access token is missing, invalid or expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ForbiddenResponse:
+      description: Forbidden - the token lacks the permission the route needs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFoundResponse:
+      description: Not found - nothing has this id
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ConflictResponse:
+      description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLargeResponse:
+      description: Payload too large - `payload_too_large`, the body is over the route's size limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServerErrorResponse:
+      description: Server error - `server_error`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailableResponse:
+      description: |
+        Service unavailable - `temporarily_unavailable`: the database was too busy (a transaction or a
+        lock wait ran out of time, or no connection was free). Nothing was changed; retry, after
+        `Retry-After` when it is given.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NoContentResponse:
+      description: Done; no content
+  schemas:
+    Error:
+      type: object
+      description: Every error body
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          type: string
+          description: A stable, machine-readable code
+        error_description:
+          type: string
+          description: A human-readable explanation
+        request_id:
+          type: string
+          description: The request's id, as in its `X-Request-ID` response header; the server's log lines for the request carry it too
+        retry_after:
+          type: integer
+          description: On a `429`, the seconds to wait, as in the `Retry-After` header
+        issues:
+          type: array
+          description: On `invalid_request`, the failed checks
+          items:
+            type: object
+            required:
+              - path
+              - message
+            properties:
+              path:
+                type: string
+                description: The field, dotted (`settings.port`); empty for the whole value
+              message:
+                type: string
+        findings:
+          type: array
+          description: On `writable_login`, what the login check found; at most 20
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/LoginFinding'
+        truncated:
+          type: boolean
+          const: true
+          description: On `writable_login`, present when the check found more than the 20 listed
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - postgres
+        - redis
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+        postgres:
+          type: string
+          enum:
+            - ok
+            - fail
+        redis:
+          type: string
+          enum:
+            - ok
+            - fail
+    SourceType:
+      type: string
+      enum:
+        - postgres
+        - azure-sql
+      description: The kind of database.
+    PostgresSettings:
+      type: object
+      description: |
+        The settings of a `postgres` source. Unknown keys are refused. A source's settings are
+        replaced whole by an update. `password` and `ca` are stored encrypted and never returned.
+      required:
+        - host
+        - database
+        - user
+        - password
+      additionalProperties: false
+      properties:
+        host:
+          type: string
+          description: A hostname or IP address the deploy's network rules permit
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 5432
+        database:
+          type: string
+          minLength: 1
+        user:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+        tls:
+          type: string
+          enum:
+            - verify
+            - require
+            - 'off'
+          default: verify
+          description: '`verify` checks the server certificate (against `ca` when given); `require` encrypts without checking it'
+        ca:
+          type: string
+          writeOnly: true
+          description: PEM certificate authority to verify the server against
+    AzureSqlSettings:
+      type: object
+      description: |
+        The settings of an `azure-sql` source (Azure SQL Database or SQL Server, SQL authentication).
+        Unknown keys are refused. A source's settings are replaced whole by an update. `password` is
+        stored encrypted and never returned. The connection is always encrypted.
+      required:
+        - host
+        - database
+        - user
+        - password
+      additionalProperties: false
+      properties:
+        host:
+          type: string
+          maxLength: 253
+          description: A hostname or IP address the deploy's network rules permit; no instance name
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 1433
+        database:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        tls:
+          type: string
+          enum:
+            - verify
+            - trust-server-certificate
+          default: verify
+          description: '`verify` checks the server certificate against `host`; `trust-server-certificate` encrypts without checking it'
+    LoginFinding:
+      type: object
+      description: A right the source's login holds that a read-only login would not
+      required:
+        - code
+        - detail
+      properties:
+        code:
+          type: string
+          enum:
+            - superuser
+            - can_create_roles
+            - can_create_databases
+            - bypasses_row_security
+            - owns_objects
+            - can_write_tables
+            - can_create_in_schema
+            - write_role_member
+            - replication
+            - reads_server_files
+        detail:
+          type: string
+    Source:
+      type: object
+      description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+      required:
+        - id
+        - slug
+        - name
+        - type
+        - settings
+        - schemas
+        - timeout_ms
+        - row_cap
+        - export_enabled
+        - export_row_cap
+        - query_concurrency
+        - export_concurrency
+        - writable_login_allowed
+        - status
+        - last_refreshed_at
+        - created_at
+        - archived_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,62}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        type:
+          $ref: '#/components/schemas/SourceType'
+        settings:
+          type:
+            - object
+            - 'null'
+          description: The type's settings without `password` and `ca`
+          additionalProperties: true
+        schemas:
+          type: array
+          description: The database schemas Zeteo exposes
+          items:
+            type: string
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+        export_enabled:
+          type: boolean
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: The queries the source runs at once across every replica; one more is `429 source_busy`
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: The exports the source runs at once across every replica; one more is `429 source_busy`
+        writable_login_allowed:
+          type: boolean
+          description: True when the login check found something and an administrator allowed it
+        status:
+          type: string
+          enum:
+            - active
+            - unreachable
+        last_refreshed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        archived_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    ListSourcesResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Source'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    CreateSourceRequest:
+      type: object
+      required:
+        - slug
+        - name
+        - type
+        - settings
+        - schemas
+      additionalProperties: false
+      properties:
+        slug:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,62}$
+          description: Unique, lower case letters, digits and hyphens, starting with a letter
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        type:
+          $ref: '#/components/schemas/SourceType'
+        settings:
+          description: The type's settings, PostgresSettings or AzureSqlSettings
+          anyOf:
+            - $ref: '#/components/schemas/PostgresSettings'
+            - $ref: '#/components/schemas/AzureSqlSettings'
+        schemas:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 63
+            description: At most 63 bytes, no control characters, no leading or trailing whitespace
+        allow_writable_login:
+          type: boolean
+          description: Accept a login the check found rights on; ignored when it found none
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          default: 30000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+          default: 50000
+        export_enabled:
+          type: boolean
+          default: false
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          default: 0
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+          description: The queries the source runs at once across every replica; one more is `429 source_busy`
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 2
+          description: The exports the source runs at once across every replica; one more is `429 source_busy`
+    UpdateSourceRequest:
+      type: object
+      description: |
+        Any of the create fields except `slug` and `type`, at least one. `settings` replaces the whole
+        settings object and runs the same checks as a create; `allow_writable_login` is accepted only
+        together with `settings`.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        settings:
+          description: The source type's settings, PostgresSettings or AzureSqlSettings
+          anyOf:
+            - $ref: '#/components/schemas/PostgresSettings'
+            - $ref: '#/components/schemas/AzureSqlSettings'
+        schemas:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 63
+            description: At most 63 bytes, no control characters, no leading or trailing whitespace
+        allow_writable_login:
+          type: boolean
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+        export_enabled:
+          type: boolean
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Applies to the queries that start after the change; a change of the pool's size closes the source's pool once the calls on it end
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: As `query_concurrency`, for exports
+    TestSourceResponse:
+      type: object
+      required:
+        - ok
+        - findings
+      properties:
+        ok:
+          type: boolean
+          const: true
+        findings:
+          type: array
+          description: What the login check found; at most 20
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/LoginFinding'
+        truncated:
+          type: boolean
+          const: true
+          description: Present when the check found more than the 20 listed
+    ColumnType:
+      type: string
+      enum:
+        - text
+        - number
+        - boolean
+        - date
+        - timestamp
+        - json
+        - other
+      description: The normalised type; `native_type` keeps the database's own name
+    Table:
+      type: object
+      description: A table or view of a source
+      required:
+        - id
+        - source_id
+        - schema_name
+        - name
+        - kind
+        - description
+        - last_seen_at
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        source_id:
+          type: string
+          format: uuid
+        schema_name:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - table
+            - view
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        last_seen_at:
+          type: string
+          format: date-time
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Set when a refresh no longer finds the table; cleared when it returns
+    Column:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - native_type
+        - nullable
+        - position
+        - is_primary_key
+        - description
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ColumnType'
+        native_type:
+          type: string
+          description: |
+            The type as the database writes it. On Postgres an enum is marked `<name> (enum)` and a
+            domain `<name> (domain over <base type>)`, the base marked `(enum)` too when it is one
+            (`sales.price (domain over money)`); on Azure SQL the type as SQL Server writes it
+            (`nvarchar(100)`, `decimal(12,2)`).
+          examples:
+            - integer
+            - character varying(20)
+            - sales.order_status (enum)
+            - sales.price (domain over money)
+        nullable:
+          type: boolean
+        position:
+          type: integer
+          minimum: 1
+        is_primary_key:
+          type: boolean
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    Relation:
+      type: object
+      description: A join from one table to another, in the direction `from` to `to`
+      required:
+        - id
+        - name
+        - from_table_id
+        - from_columns
+        - to_table_id
+        - to_columns
+        - to_many
+        - origin
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+          description: Unique on the from table. A discovered relation takes its name from the database's identifiers, which may not follow this pattern.
+        from_table_id:
+          type: string
+          format: uuid
+        from_columns:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        to_table_id:
+          type: string
+          format: uuid
+        to_columns:
+          type: array
+          minItems: 1
+          description: Pairs with `from_columns` by position
+          items:
+            type: string
+        to_many:
+          type: boolean
+        origin:
+          type: string
+          enum:
+            - discovered
+            - declared
+          description: '`discovered` relations come from foreign keys and a refresh keeps them current; `declared` ones are added by an administrator and a refresh never touches them'
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Set when a refresh no longer finds the foreign key; always null for a declared relation
+    TableDetail:
+      description: A table with its columns and the relations that start at it
+      allOf:
+        - $ref: '#/components/schemas/Table'
+        - type: object
+          required:
+            - columns
+            - relations
+          properties:
+            columns:
+              type: array
+              items:
+                $ref: '#/components/schemas/Column'
+            relations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Relation'
+    ListTablesResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Table'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    ListRelationsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relation'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    PatchTableRequest:
+      type: object
+      description: At least one field. What the body leaves out is not changed; `null` clears a description.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: Column descriptions by column name; a name the table does not have is `400 invalid_request`
+          items:
+            type: object
+            required:
+              - name
+              - description
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              description:
+                type:
+                  - string
+                  - 'null'
+                maxLength: 2000
+    DeclareRelationRequest:
+      type: object
+      required:
+        - name
+        - from_table_id
+        - from_columns
+        - to_table_id
+        - to_columns
+        - to_many
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+        from_table_id:
+          type: string
+          format: uuid
+        from_columns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        to_table_id:
+          type: string
+          format: uuid
+        to_columns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        to_many:
+          type: boolean
+    RefreshSummary:
+      type: object
+      description: What a refresh changed. `missing` counts things newly marked missing in this refresh.
+      required:
+        - tables
+        - columns
+        - relations
+      properties:
+        tables:
+          type: object
+          required:
+            - added
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
+        columns:
+          type: object
+          required:
+            - added
+            - changed
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            changed:
+              type: integer
+              minimum: 0
+              description: Columns whose type, native type, nullability or primary-key flag changed
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
+        relations:
+          type: object
+          required:
+            - added
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
+    PrincipalType:
+      type: string
+      enum:
+        - user
+        - group
+    PrincipalStatus:
+      type: string
+      enum:
+        - active
+        - orphaned
+        - unknown
+      description: |
+        Whether the principal still exists in tereo, looked up when the grant or limits row is shown.
+        A user or group is `active`, or `orphaned` when tereo has no such user or group; an orphaned
+        row is inert. An archived group is `active`, though its row reaches no one. A lookup that fails
+        is shown as `unknown`.
+    Grant:
+      type: object
+      description: What one user or group may query of one table
+      required:
+        - id
+        - principal_type
+        - principal_id
+        - principal_status
+        - source
+        - table
+        - all_columns
+        - columns
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+          description: The user's or group's tereo id
+        principal_status:
+          $ref: '#/components/schemas/PrincipalStatus'
+        source:
+          type: object
+          required:
+            - id
+            - slug
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+        table:
+          type: object
+          required:
+            - id
+            - schema_name
+            - name
+            - missing
+          properties:
+            id:
+              type: string
+              format: uuid
+            schema_name:
+              type: string
+            name:
+              type: string
+            missing:
+              type: boolean
+              description: The last refresh no longer found the table; the grant is kept
+        all_columns:
+          type: boolean
+          description: When true the grant covers every column of the table, including ones added later, and `columns` is empty
+        columns:
+          type: array
+          description: When `all_columns` is false, the granted columns in table order; columns added to the table later are not included
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - missing
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              missing:
+                type: boolean
+                description: The last refresh no longer found the column; the grant is kept
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ListGrantsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grant'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    CreateGrantRequest:
+      description: A grant of every column, or of a list of columns
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - principal_type
+            - principal_id
+            - table_id
+            - all_columns
+          properties:
+            principal_type:
+              $ref: '#/components/schemas/PrincipalType'
+            principal_id:
+              type: string
+              format: uuid
+            table_id:
+              type: string
+              format: uuid
+            all_columns:
+              type: boolean
+              const: true
+        - type: object
+          additionalProperties: false
+          required:
+            - principal_type
+            - principal_id
+            - table_id
+            - all_columns
+            - column_ids
+          properties:
+            principal_type:
+              $ref: '#/components/schemas/PrincipalType'
+            principal_id:
+              type: string
+              format: uuid
+            table_id:
+              type: string
+              format: uuid
+            all_columns:
+              type: boolean
+              const: false
+            column_ids:
+              $ref: '#/components/schemas/GrantColumnIds'
+    ReplaceGrantRequest:
+      description: The grant's new columns, replacing the old ones whole
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - all_columns
+          properties:
+            all_columns:
+              type: boolean
+              const: true
+        - type: object
+          additionalProperties: false
+          required:
+            - all_columns
+            - column_ids
+          properties:
+            all_columns:
+              type: boolean
+              const: false
+            column_ids:
+              $ref: '#/components/schemas/GrantColumnIds'
+    PrincipalLimit:
+      type: object
+      description: A user's or group's own concurrency limits, in place of the environment's defaults
+      required:
+        - id
+        - principal_type
+        - principal_id
+        - principal_status
+        - query_concurrency
+        - export_concurrency
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+          description: The user's or group's tereo id
+        principal_status:
+          $ref: '#/components/schemas/PrincipalStatus'
+        query_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100
+          description: Queries the principal may run at once; null when this row does not set it
+        export_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10
+          description: Exports the principal may run at once; null when this row does not set it
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ListPrincipalLimitsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrincipalLimit'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    CreatePrincipalLimitRequest:
+      type: object
+      description: At least one of the two limits
+      additionalProperties: false
+      required:
+        - principal_type
+        - principal_id
+      anyOf:
+        - required:
+            - query_concurrency
+        - required:
+            - export_concurrency
+      properties:
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 100
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+    UpdatePrincipalLimitRequest:
+      type: object
+      description: Either limit or both; `null` clears one. A change that would leave neither set is `400 invalid_request`.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        query_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100
+        export_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10
+    Query:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - from
+        - select
+      description: A query in the SQL query language; see `docs/querying.md`
+      properties:
+        source:
+          type: string
+          minLength: 1
+          description: The source's slug
+        from:
+          type: string
+          description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
+        join:
+          type: array
+          maxItems: 4
+          description: Relations to join, by name; one reached through another is written `customer.account`
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/Path'
+              - type: object
+                additionalProperties: false
+                required:
+                  - relation
+                properties:
+                  relation:
+                    $ref: '#/components/schemas/Path'
+                  type:
+                    type: string
+                    enum:
+                      - inner
+                      - left
+                    default: inner
+        select:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/SelectItem'
+        distinct:
+          type: boolean
+        where:
+          $ref: '#/components/schemas/Filter'
+        groupBy:
+          type: array
+          maxItems: 50
+          description: Select items, by output name or column path; a query with an aggregate groups by every other item
+          items:
+            type: string
+        having:
+          $ref: '#/components/schemas/Filter'
+        orderBy:
+          type: array
+          maxItems: 50
+          description: |
+            Each entry one `{ "<name>": "asc" | "desc" }`, naming a select item or (in an ungrouped,
+            non-distinct query) a column. Nulls sort last ascending and first descending. Without
+            `orderBy` the rows are ordered by every select item ascending, so paging is stable.
+          items:
+            type: object
+            minProperties: 1
+            maxProperties: 1
+            additionalProperties:
+              type: string
+              enum:
+                - asc
+                - desc
+        limit:
+          type: integer
+          minimum: 1
+          description: Rows wanted; default 1,000. A value above the maximum (50,000, or the source's row cap when lower) is lowered to it, not refused
+        offset:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          default: 0
+    QueryResult:
+      type: object
+      required:
+        - columns
+        - rows
+        - truncated
+        - warnings
+        - run_id
+      properties:
+        columns:
+          type: array
+          description: The result's columns, in the order of `select`
+          items:
+            type: object
+            required:
+              - name
+              - type
+            properties:
+              name:
+                type: string
+                description: The item's `as`, the column path, or a name made from the aggregate and column (`sum_total`, `count`)
+              type:
+                $ref: '#/components/schemas/ColumnType'
+        rows:
+          type: array
+          description: |
+            Each row an array of values in the order of `columns`, in their wire forms: 32-bit integers
+            and floats as numbers (float `NaN` and infinities as strings); 64-bit integers and decimals
+            as strings; `count` and `countDistinct` as strings, `sum` as a string over integers and
+            decimals and a number over floats, `avg` as a number; dates `YYYY-MM-DD`; timestamps ISO 8601
+            in UTC with milliseconds; json as JSON.
+          items:
+            type: array
+            items: {}
+        truncated:
+          type: boolean
+          description: Rows were left out
+        truncated_by:
+          type: string
+          enum:
+            - rows
+            - bytes
+          description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB; 1 MB through MCP)
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryWarning'
+        run_id:
+          type: string
+          format: uuid
+          description: The run's id in the run log
+    QueryError:
+      type: object
+      description: A query that is well formed but cannot be run as written
+      required:
+        - error
+        - error_description
+        - path
+        - suggestions
+      properties:
+        error:
+          type: string
+          enum:
+            - not_found_or_not_accessible
+            - missing_in_source
+            - column_not_queryable
+            - invalid_operator
+            - invalid_value
+            - invalid_grouping
+            - invalid_order
+            - invalid_having
+            - duplicate_output_name
+            - join_parent_missing
+            - too_many_parameters
+        error_description:
+          type: string
+        path:
+          type: array
+          description: Where in the query the problem is, keys and array indexes from the root
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        suggestions:
+          type: array
+          maxItems: 3
+          description: The closest names the caller can see, closest first
+          items:
+            type: string
+        request_id:
+          type: string
+          description: The request's id, as in its `X-Request-ID` response header
+    QueryWarning:
+      type: object
+      required:
+        - code
+        - message
+        - path
+      properties:
+        code:
+          type: string
+          enum:
+            - join_multiplies_rows
+        message:
+          type: string
+        path:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+    RunOutcome:
+      type: string
+      enum:
+        - ok
+        - refused
+        - failed
+        - timeout
+        - running
+      description: |
+        `refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error, a
+        client that went away (`client_closed`) included; `running` for an export that has started
+        and not yet ended. An export whose process died is closed by the housekeeping job as
+        `failed` with `interrupted`.
+    Run:
+      type: object
+      description: One query or export, as it was recorded
+      required:
+        - id
+        - user_id
+        - source_id
+        - entry_point
+        - query
+        - duration_ms
+        - row_count
+        - outcome
+        - error_code
+        - truncated
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        source_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Null when the query named no source the caller could see
+        entry_point:
+          type: string
+          enum:
+            - api
+            - mcp
+            - export
+          description: '`POST /v1/query`, the MCP `query` tool, or `POST /v1/export`'
+        query:
+          description: The query as it was sent
+        duration_ms:
+          type: integer
+        row_count:
+          type:
+            - integer
+            - 'null'
+          description: Rows returned; null unless the run succeeded. For an export that started, the rows sent to the client (null while `running`)
+        outcome:
+          $ref: '#/components/schemas/RunOutcome'
+        error_code:
+          type:
+            - string
+            - 'null'
+          description: The error answered; `client_closed` when the client went away first; for an export, also `shutting_down` (stopped by the service shutting down) and `interrupted` (its process died)
+        truncated:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    ListRunsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    DiscoveredColumn:
+      type: object
+      description: A column the caller may query
+      required:
+        - name
+        - type
+        - nullable
+        - description
+        - missing
+      properties:
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ColumnType'
+        nullable:
+          type: boolean
+        description:
+          type:
+            - string
+            - 'null'
+        missing:
+          type: boolean
+          description: The last refresh did not find the column; a query that uses it fails with `missing_in_source`
+    DiscoveredRelation:
+      type: object
+      description: A join the caller may use from the table it is listed under; every key column on both sides is granted
+      required:
+        - name
+        - to
+        - to_many
+        - missing
+      properties:
+        name:
+          type: string
+          description: What a query's `join` names
+        to:
+          type: string
+          description: The target table as a query writes it in `from`
+        to_many:
+          type: boolean
+          description: One row can match several, so aggregates over the join may count a row more than once
+        missing:
+          type: boolean
+    DiscoveredTable:
+      type: object
+      description: A table the caller may query
+      required:
+        - name
+        - schema_name
+        - kind
+        - description
+        - missing
+        - columns
+        - relations
+      properties:
+        name:
+          type: string
+          description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`'
+        schema_name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - table
+            - view
+        description:
+          type:
+            - string
+            - 'null'
+        missing:
+          type: boolean
+          description: The last refresh did not find the table
+        columns:
+          type: array
+          description: Only the granted columns, in the table's order
+          items:
+            $ref: '#/components/schemas/DiscoveredColumn'
+        relations:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveredRelation'
+    DiscoveredSource:
+      type: object
+      required:
+        - slug
+        - name
+        - type
+        - language
+        - limits
+        - tables
+      properties:
+        slug:
+          type: string
+          description: What a query's `source` names
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/SourceType'
+        language:
+          type: object
+          required:
+            - id
+            - schema
+          properties:
+            id:
+              type: string
+              enum:
+                - sql
+            schema:
+              type: object
+              description: The JSON Schema of the query language, which a query's body must satisfy
+              additionalProperties: true
+        limits:
+          type: object
+          description: What one query on this source may return and take
+          required:
+            - default_rows
+            - max_rows
+            - timeout_ms
+            - export
+          properties:
+            default_rows:
+              type: integer
+              description: Rows when the query sets no `limit`
+            max_rows:
+              type: integer
+              description: The most a `limit` may ask for
+            timeout_ms:
+              type: integer
+            export:
+              type: object
+              description: What `POST /v1/export` may take from this source; it also needs `zeteo.data.export`
+              required:
+                - enabled
+                - max_rows
+              properties:
+                enabled:
+                  type: boolean
+                  description: The source's exports are on and its export cap is above 0
+                max_rows:
+                  type: integer
+                  description: The source's `export_row_cap`; 0 when exports are off
+        tables:
+          type: array
+          description: Ordered by schema, then name
+          items:
+            $ref: '#/components/schemas/DiscoveredTable'
+    CatalogResponse:
+      type: object
+      required:
+        - sources
+      properties:
+        sources:
+          type: array
+          description: Ordered by slug
+          items:
+            $ref: '#/components/schemas/DiscoveredSource'
+    GrantColumnIds:
+      type: array
+      minItems: 1
+      maxItems: 500
+      uniqueItems: true
+      items:
+        type: string
+        format: uuid
+      description: Columns of the grant's table
+    Path:
+      type: string
+      description: |
+        `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
+        its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+    Alias:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,62}$
+      description: An output name for a select item
+    SelectItem:
+      description: A column path, or one aggregate or date bucket with an optional `as`
+      oneOf:
+        - $ref: '#/components/schemas/Path'
+        - type: object
+          additionalProperties: false
+          required:
+            - count
+          properties:
+            count:
+              type: string
+              description: A path, or `"*"` to count rows
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - countDistinct
+          properties:
+            countDistinct:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - sum
+          properties:
+            sum:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - avg
+          properties:
+            avg:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - min
+          properties:
+            min:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - max
+          properties:
+            max:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - bucket
+            - column
+          properties:
+            bucket:
+              type: string
+              enum:
+                - day
+                - week
+                - month
+                - quarter
+                - year
+              description: Truncated in UTC; weeks start on Monday
+            column:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+    Filter:
+      type: object
+      description: |
+        One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
+        `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
+        `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between` (two values, inclusive), `in` and `notIn`
+        (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
+        `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+        a column with one of those names cannot be filtered on directly. In `having`, the keys are
+        the names of aggregate select items.
+      additionalProperties: true
+x-tagGroups:
+  - name: Sources
+    tags:
+      - Sources
+      - Catalogue
+  - name: Access
+    tags:
+      - Grants
+  - name: Querying
+    tags:
+      - Queries
+  - name: Platform
+    tags:
+      - Platform

@@ -1,0 +1,55 @@
+CursorParam:
+  name: cursor
+  in: query
+  description: |
+    Opaque cursor for keyset pagination: the `next_cursor` of the previous page. Omit it on the
+    first request. A malformed cursor is `400 invalid_request`.
+  required: false
+  schema:
+    type: string
+
+LimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items per page
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 50
+
+SourceIdParam:
+  name: sourceId
+  in: path
+  required: true
+  description: The source's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+TableIdParam:
+  name: tableId
+  in: path
+  required: true
+  description: The table's id, in the source named by the path. A table of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+RelationIdParam:
+  name: relationId
+  in: path
+  required: true
+  description: The relation's id, in the source named by the path. A relation of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+GrantIdParam:
+  name: grantId
+  in: path
+  required: true
+  description: The grant's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+PrincipalLimitIdParam:
+  name: principalLimitId
+  in: path
+  required: true
+  description: The limits row's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

@@ -1,0 +1,38 @@
+{
+  "version": "1.0.0",
+  "clients": [
+    {
+      "clientId": "e2e-web",
+      "name": "E2E web app",
+      "description": "A confidential app client whose users call zeteo's /v1 API",
+      "clientType": "confidential",
+      "secretFrom": "E2E_WEB_CLIENT_SECRET",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": ["http://127.0.0.1/e2e-web/callback"],
+      "scopes": ["openid", "profile", "email"],
+      "audience": ["zeteo"],
+      "consentRequired": false
+    },
+    {
+      "clientId": "e2e-mcp",
+      "name": "E2E MCP connector",
+      "description": "A public login client for an MCP client, as a connector would have",
+      "clientType": "public",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": ["http://127.0.0.1/e2e-mcp/callback"],
+      "scopes": ["openid", "profile", "email"],
+      "audience": ["zeteo"],
+      "consentRequired": true
+    },
+    {
+      "clientId": "e2e-other",
+      "name": "E2E other app",
+      "description": "A login client whose tokens are not for zeteo",
+      "clientType": "public",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": ["http://127.0.0.1/e2e-other/callback"],
+      "scopes": ["openid", "profile", "email"],
+      "consentRequired": false
+    }
+  ]
+}

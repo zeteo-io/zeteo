@@ -1,0 +1,263 @@
+openapi: 3.1.0
+info:
+  title: Zeteo API
+  version: 0.1.0
+  description: |
+    Zeteo is a query service for apps built on tereo. An administrator registers databases as
+    sources and grants tables and columns to users and groups, who query them through a
+    validated JSON query language. This spec covers the HTTP API: sources and their catalogue,
+    grants and concurrency limits, querying, exporting and the run log. Every path in this spec
+    is the full path on the service: the API is versioned under `/v1`, and `GET /health` stays at
+    the root.
+
+    ## MCP
+
+    With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
+    HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
+    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
+    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
+
+    ## Authentication
+
+    Requests carry a tereo access token as `Authorization: Bearer <token>`. Zeteo verifies it with
+    tereo's SDK.
+
+    ## Permissions
+
+    Reading sources, tables and relations needs `zeteo.sources.read`; registering, changing,
+    archiving, testing and refreshing a source, describing a table and declaring or removing a
+    relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
+    `403 forbidden`, before the body is validated or any source is looked up.
+
+    ## Sources
+
+    A source's `settings` depend on its `type` and are write-only in part: the response carries
+    the settings the adapter marks safe (`password` and `ca` are never returned). See
+    `docs/sources.md` for the settings of each type, the login check and its override, and the
+    network rules.
+
+    ## Catalogue
+
+    A refresh reads a source's tables, columns and foreign keys into the catalogue. Ids of tables,
+    columns and relations are stable across refreshes, which never delete a row, change a
+    description or touch a declared relation: what disappears from the source is marked with
+    `missing_since`. See `docs/catalog.md`.
+
+    ## Grants
+
+    A grant gives one user or group the right to query one table: every column (including ones
+    added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
+    replacing and removing them needs `zeteo.grants.write`, which includes read. The same
+    permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
+    many queries and exports it runs at once. See `docs/grants.md`.
+
+    ## Queries
+
+    `GET /v1/catalog` lists what the caller may query, with the language's JSON Schema, and
+    nothing about what they may not. `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
+    Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
+    `docs/querying.md`.
+
+    `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
+    CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
+
+    ## Pagination
+
+    Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
+    `{ data, next_cursor }`, where `next_cursor` is `null` on the last page.
+
+    ## Errors
+
+    An error is `{ "error": "<code>", "error_description": "<text>", ...details, "request_id": "<id>" }`,
+    where `request_id` is the request's `X-Request-ID` (the server's log lines for the request
+    carry it too). A validation failure is `400 invalid_request` with `issues`, a list of
+    `{ path, message }`. The text of a database's own error never appears in a response.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:4201
+    description: Local development server (each app deploys its own Zeteo; substitute its host)
+security:
+  - BearerAuth: []
+tags:
+  - name: Sources
+    description: Databases registered with Zeteo
+  - name: Catalogue
+    description: A source's tables, columns and relations, read from the source by a refresh
+  - name: Grants
+    description: Which users and groups may query which tables and columns, and how much at once
+  - name: Queries
+    description: Running and exporting queries over granted tables and columns, and the record of every run
+  - name: Platform
+    description: Health
+x-tagGroups:
+  - name: Sources
+    tags: [Sources, Catalogue]
+  - name: Access
+    tags: [Grants]
+  - name: Querying
+    tags: [Queries]
+  - name: Platform
+    tags: [Platform]
+paths:
+  /health:
+    $ref: './paths/platform/health.yaml#/~1health'
+  /v1/sources:
+    $ref: './paths/sources/sources.yaml#/~1v1~1sources'
+  /v1/sources/{sourceId}:
+    $ref: './paths/sources/source.yaml#/~1v1~1sources~1{sourceId}'
+  /v1/sources/{sourceId}/archive:
+    $ref: './paths/sources/archive.yaml#/~1v1~1sources~1{sourceId}~1archive'
+  /v1/sources/{sourceId}/test:
+    $ref: './paths/sources/test.yaml#/~1v1~1sources~1{sourceId}~1test'
+  /v1/sources/{sourceId}/refresh:
+    $ref: './paths/catalog/refresh.yaml#/~1v1~1sources~1{sourceId}~1refresh'
+  /v1/sources/{sourceId}/tables:
+    $ref: './paths/catalog/tables.yaml#/~1v1~1sources~1{sourceId}~1tables'
+  /v1/sources/{sourceId}/tables/{tableId}:
+    $ref: './paths/catalog/table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}'
+  /v1/sources/{sourceId}/relations:
+    $ref: './paths/catalog/relations.yaml#/~1v1~1sources~1{sourceId}~1relations'
+  /v1/sources/{sourceId}/relations/{relationId}:
+    $ref: './paths/catalog/relation.yaml#/~1v1~1sources~1{sourceId}~1relations~1{relationId}'
+  /v1/grants:
+    $ref: './paths/grants/grants.yaml#/~1v1~1grants'
+  /v1/grants/{grantId}:
+    $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
+  /v1/principal-limits:
+    $ref: './paths/grants/principal-limits.yaml#/~1v1~1principal-limits'
+  /v1/principal-limits/{principalLimitId}:
+    $ref: './paths/grants/principal-limit.yaml#/~1v1~1principal-limits~1{principalLimitId}'
+  /v1/catalog:
+    $ref: './paths/queries/catalog.yaml#/~1v1~1catalog'
+  /v1/query:
+    $ref: './paths/queries/query.yaml#/~1v1~1query'
+  /v1/export:
+    $ref: './paths/queries/export.yaml#/~1v1~1export'
+  /v1/runs:
+    $ref: './paths/queries/runs.yaml#/~1v1~1runs'
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: './components/security.yaml#/BearerAuth'
+  parameters:
+    CursorParam:
+      $ref: './components/parameters.yaml#/CursorParam'
+    LimitParam:
+      $ref: './components/parameters.yaml#/LimitParam'
+    TableIdParam:
+      $ref: './components/parameters.yaml#/TableIdParam'
+    RelationIdParam:
+      $ref: './components/parameters.yaml#/RelationIdParam'
+    GrantIdParam:
+      $ref: './components/parameters.yaml#/GrantIdParam'
+    PrincipalLimitIdParam:
+      $ref: './components/parameters.yaml#/PrincipalLimitIdParam'
+  responses:
+    BadRequestResponse:
+      $ref: './components/responses.yaml#/BadRequestResponse'
+    UnauthorizedResponse:
+      $ref: './components/responses.yaml#/UnauthorizedResponse'
+    ForbiddenResponse:
+      $ref: './components/responses.yaml#/ForbiddenResponse'
+    NotFoundResponse:
+      $ref: './components/responses.yaml#/NotFoundResponse'
+    ConflictResponse:
+      $ref: './components/responses.yaml#/ConflictResponse'
+    PayloadTooLargeResponse:
+      $ref: './components/responses.yaml#/PayloadTooLargeResponse'
+    ServerErrorResponse:
+      $ref: './components/responses.yaml#/ServerErrorResponse'
+    ServiceUnavailableResponse:
+      $ref: './components/responses.yaml#/ServiceUnavailableResponse'
+    NoContentResponse:
+      $ref: './components/responses.yaml#/NoContentResponse'
+  schemas:
+    Error:
+      $ref: './components/responses.yaml#/Error'
+    HealthStatus:
+      $ref: './components/platform/schemas.yaml#/HealthStatus'
+    SourceType:
+      $ref: './components/sources/schemas.yaml#/SourceType'
+    PostgresSettings:
+      $ref: './components/sources/schemas.yaml#/PostgresSettings'
+    AzureSqlSettings:
+      $ref: './components/sources/schemas.yaml#/AzureSqlSettings'
+    LoginFinding:
+      $ref: './components/sources/schemas.yaml#/LoginFinding'
+    Source:
+      $ref: './components/sources/schemas.yaml#/Source'
+    ListSourcesResponse:
+      $ref: './components/sources/schemas.yaml#/ListSourcesResponse'
+    CreateSourceRequest:
+      $ref: './components/sources/schemas.yaml#/CreateSourceRequest'
+    UpdateSourceRequest:
+      $ref: './components/sources/schemas.yaml#/UpdateSourceRequest'
+    TestSourceResponse:
+      $ref: './components/sources/schemas.yaml#/TestSourceResponse'
+    ColumnType:
+      $ref: './components/catalog/schemas.yaml#/ColumnType'
+    Table:
+      $ref: './components/catalog/schemas.yaml#/Table'
+    Column:
+      $ref: './components/catalog/schemas.yaml#/Column'
+    Relation:
+      $ref: './components/catalog/schemas.yaml#/Relation'
+    TableDetail:
+      $ref: './components/catalog/schemas.yaml#/TableDetail'
+    ListTablesResponse:
+      $ref: './components/catalog/schemas.yaml#/ListTablesResponse'
+    ListRelationsResponse:
+      $ref: './components/catalog/schemas.yaml#/ListRelationsResponse'
+    PatchTableRequest:
+      $ref: './components/catalog/schemas.yaml#/PatchTableRequest'
+    DeclareRelationRequest:
+      $ref: './components/catalog/schemas.yaml#/DeclareRelationRequest'
+    RefreshSummary:
+      $ref: './components/catalog/schemas.yaml#/RefreshSummary'
+    PrincipalType:
+      $ref: './components/grants/schemas.yaml#/PrincipalType'
+    PrincipalStatus:
+      $ref: './components/grants/schemas.yaml#/PrincipalStatus'
+    Grant:
+      $ref: './components/grants/schemas.yaml#/Grant'
+    ListGrantsResponse:
+      $ref: './components/grants/schemas.yaml#/ListGrantsResponse'
+    CreateGrantRequest:
+      $ref: './components/grants/schemas.yaml#/CreateGrantRequest'
+    ReplaceGrantRequest:
+      $ref: './components/grants/schemas.yaml#/ReplaceGrantRequest'
+    PrincipalLimit:
+      $ref: './components/grants/schemas.yaml#/PrincipalLimit'
+    ListPrincipalLimitsResponse:
+      $ref: './components/grants/schemas.yaml#/ListPrincipalLimitsResponse'
+    CreatePrincipalLimitRequest:
+      $ref: './components/grants/schemas.yaml#/CreatePrincipalLimitRequest'
+    UpdatePrincipalLimitRequest:
+      $ref: './components/grants/schemas.yaml#/UpdatePrincipalLimitRequest'
+    Query:
+      $ref: './components/queries/schemas.yaml#/Query'
+    QueryResult:
+      $ref: './components/queries/schemas.yaml#/QueryResult'
+    QueryError:
+      $ref: './components/queries/schemas.yaml#/QueryError'
+    QueryWarning:
+      $ref: './components/queries/schemas.yaml#/QueryWarning'
+    RunOutcome:
+      $ref: './components/queries/schemas.yaml#/RunOutcome'
+    Run:
+      $ref: './components/queries/schemas.yaml#/Run'
+    ListRunsResponse:
+      $ref: './components/queries/schemas.yaml#/ListRunsResponse'
+    DiscoveredColumn:
+      $ref: './components/queries/schemas.yaml#/DiscoveredColumn'
+    DiscoveredRelation:
+      $ref: './components/queries/schemas.yaml#/DiscoveredRelation'
+    DiscoveredTable:
+      $ref: './components/queries/schemas.yaml#/DiscoveredTable'
+    DiscoveredSource:
+      $ref: './components/queries/schemas.yaml#/DiscoveredSource'
+    CatalogResponse:
+      $ref: './components/queries/schemas.yaml#/CatalogResponse'

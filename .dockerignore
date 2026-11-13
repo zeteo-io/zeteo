@@ -1,0 +1,15 @@
+node_modules
+**/node_modules
+# Images build from source; host-built output never goes in.
+**/dist
+**/.tsbuildinfo
+**/tsconfig.tsbuildinfo
+.git
+.claude
+.nx
+*.log
+**/.env
+**/.env.*
+**/coverage
+**/.vitest
+**/prisma/generated

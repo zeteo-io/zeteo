@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  # Started by hand on a branch with no earlier run to compare with.
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # nx-set-shas looks up this workflow's last successful run on master.
+  actions: read
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    env:
+      # A PR or a push to master runs only the projects it affects (NX_BASE and
+      # NX_HEAD come from nx-set-shas). A run started by hand has no earlier
+      # run to compare with and runs every project.
+      NX_SCOPE: ${{ github.event_name == 'workflow_dispatch' && 'run-many' || 'affected' }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          # The runner's cached 22.x can lag; dependencies need >= 22.22.2.
+          check-latest: true
+
+      - run: npm ci
+
+      # A PR's base is where it branched from master; a push's is the last
+      # commit whose CI passed on master, so a failed or cancelled run's
+      # changes are tested again by the next one.
+      - uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1
+        with:
+          main-branch-name: master
+
+      - name: Generate Prisma client
+        run: npx nx run-many -t generate --parallel=4
+
+      - name: Check formatting
+        run: npm run format:check
+
+      - name: Check import order
+        run: npm run sort-imports:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Lint OpenAPI
+        run: npx nx $NX_SCOPE -t openapi:lint --parallel=4
+
+      - name: Type check
+        run: npx nx $NX_SCOPE -t check --parallel=4
+
+      - name: Build
+        run: npx nx $NX_SCOPE -t build --parallel=4
+
+      # Zeteo's unit tests need no database, Redis or server.
+      - name: Unit tests
+        run: npx nx $NX_SCOPE -t test:unit --parallel=4
+
+      # The server's suite runs in TEST_SHARDS isolated stacks at once
+      # (docker/test/run.sh). Each stack has its own SQL Server, which wants
+      # about 2 GB, so on this runner (4 CPUs, 16 GB) two shards leave room for
+      # Postgres, Redis, the test runners and the OS; four would be tight.
+      - name: Test
+        run: npx nx $NX_SCOPE -t test:docker --parallel=4
+        env:
+          TEST_SHARDS: 2
+
+      # The release image, built and started on this x86 runner: migrate a
+      # fresh database, then wait for zeteo's health check, so a broken
+      # Dockerfile or image fails here rather than at release.
+      - name: Smoke-test Docker image
+        run: |
+          docker compose -p smoke up -d --build --wait --wait-timeout 300 zeteo
+          curl -sf http://localhost:4201/health
+
+      - name: Show smoke-test logs
+        if: failure()
+        run: docker compose -p smoke logs --no-color migrate zeteo || true
+
+      - name: Tear down test stack
+        if: always()
+        run: |
+          docker/test/run.sh down -v --remove-orphans || true
+          docker compose -p smoke down -v --remove-orphans || true

@@ -1,0 +1,175 @@
+# The end-to-end stack: a real Tereo (with its Postgres and Redis), zeteo from
+# this checkout's image (with its own Postgres and Redis), and a source
+# Postgres that serves TLS with a certificate from a CA made for the run.
+#
+# Started and torn down by e2e/run.sh, which generates every secret and
+# certificate and picks the host ports; not meant to be brought up by hand.
+# Only Tereo and the two zeteo replicas are published, on 127.0.0.1.
+name: zeteo-e2e
+
+x-healthcheck: &fast-healthcheck
+  interval: 2s
+  timeout: 3s
+  retries: 60
+
+services:
+  tereo-postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: tereo
+      POSTGRES_PASSWORD: tereo-e2e-only
+      POSTGRES_DB: tereo
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tereo -d tereo"]
+
+  tereo-redis:
+    image: redis:7-alpine
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  tereo-migrate:
+    image: ${TEREO_IMAGE:?}
+    command: ["./migrate-and-seed.sh"]
+    environment:
+      NODE_ENV: &tereo-node-env development
+      DATABASE_URL: &tereo-database-url postgresql://tereo:tereo-e2e-only@tereo-postgres:5432/tereo
+      REDIS_URL: &tereo-redis-url redis://tereo-redis:6379
+      UI_BASE_URL: &tereo-public-url http://127.0.0.1:${E2E_TEREO_PORT:?}
+    depends_on:
+      tereo-postgres:
+        condition: service_healthy
+
+  tereo:
+    image: ${TEREO_IMAGE:?}
+    environment:
+      # Development: production refuses an http PUBLIC_URL and a loopback
+      # issuer, which a local run has to use.
+      NODE_ENV: *tereo-node-env
+      ROLE: all
+      PORT: "4001"
+      PUBLIC_URL: *tereo-public-url
+      UI_BASE_URL: *tereo-public-url
+      DATABASE_URL: *tereo-database-url
+      REDIS_URL: *tereo-redis-url
+      SETUP_TOKEN: ${E2E_SETUP_TOKEN:?}
+      PROVISIONING_PATH: /etc/tereo/provisioning
+      TEREO_CLIENT_SECRET: ${E2E_ZETEO_CLIENT_SECRET:?}
+      E2E_WEB_CLIENT_SECRET: ${E2E_WEB_CLIENT_SECRET:?}
+    volumes:
+      - ../packages/zeteo/tereo-provisioning.json:/etc/tereo/provisioning/zeteo.json:ro
+      - ./provisioning/e2e-clients.json:/etc/tereo/provisioning/e2e-clients.json:ro
+      - tereo-storage:/app/storage
+    ports:
+      - "127.0.0.1:${E2E_TEREO_PORT:?}:4001"
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4001/health"]
+    depends_on:
+      tereo-migrate:
+        condition: service_completed_successfully
+      tereo-redis:
+        condition: service_healthy
+
+  zeteo-postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: zeteo
+      POSTGRES_PASSWORD: zeteo-e2e-only
+      POSTGRES_DB: zeteo
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U zeteo -d zeteo"]
+
+  zeteo-redis:
+    image: redis:7-alpine
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  zeteo-migrate:
+    image: ${ZETEO_IMAGE:?}
+    command: ["./migrate.sh"]
+    environment:
+      DATABASE_URL: &zeteo-database-url postgresql://zeteo:zeteo-e2e-only@zeteo-postgres:5432/zeteo
+    depends_on:
+      zeteo-postgres:
+        condition: service_healthy
+
+  # zeteo as deployed: production mode, signed in to the Tereo above with the
+  # credentials its provisioning document names, MCP on for the e2e-mcp client.
+  zeteo:
+    image: ${ZETEO_IMAGE:?}
+    environment: &zeteo-environment
+      NODE_ENV: production
+      PORT: "4201"
+      PUBLIC_URL: http://127.0.0.1:${E2E_ZETEO_PORT:?}
+      DATABASE_URL: *zeteo-database-url
+      REDIS_URL: redis://zeteo-redis:6379
+      ZETEO_MASTER_KEY: ${E2E_ZETEO_MASTER_KEY:?}
+      TEREO_URL: http://tereo:4001
+      TEREO_CLIENT_ID: zeteo
+      TEREO_CLIENT_SECRET: ${E2E_ZETEO_CLIENT_SECRET:?}
+      REQUEST_HANDLER_KEY: ${E2E_REQUEST_HANDLER_KEY:?}
+      SOURCE_ALLOWED_HOSTS: source-pg
+      MCP_ALLOWED_CLIENTS: e2e-mcp
+    ports:
+      - "127.0.0.1:${E2E_ZETEO_PORT:?}:4201"
+    healthcheck: &zeteo-healthcheck
+      <<: *fast-healthcheck
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4201/health"]
+    depends_on: &zeteo-depends-on
+      zeteo-migrate:
+        condition: service_completed_successfully
+      zeteo-redis:
+        condition: service_healthy
+      tereo:
+        condition: service_healthy
+      source-pg:
+        condition: service_healthy
+
+  # A second replica of the same deploy (same database and Redis) whose
+  # process trusts the run's CA through NODE_EXTRA_CA_CERTS.
+  zeteo-ca:
+    image: ${ZETEO_IMAGE:?}
+    environment:
+      <<: *zeteo-environment
+      PUBLIC_URL: http://127.0.0.1:${E2E_ZETEO_CA_PORT:?}
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    volumes:
+      - ./certs/ca.crt:/certs/ca.crt:ro
+    ports:
+      - "127.0.0.1:${E2E_ZETEO_CA_PORT:?}:4201"
+    healthcheck: *zeteo-healthcheck
+    depends_on: *zeteo-depends-on
+
+  # The source. Its key has to be owned by the server's user with mode 0600,
+  # which a bind mount from the host cannot promise, so it is copied first.
+  source-pg:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: source_owner
+      POSTGRES_PASSWORD: source-owner-e2e-only
+      POSTGRES_DB: source
+      SOURCE_READER_PASSWORD: ${E2E_SOURCE_READER_PASSWORD:?}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -o postgres -g postgres -m 0600 /certs/server.key /var/lib/postgresql/server.key &&
+        install -o postgres -g postgres -m 0644 /certs/server.crt /var/lib/postgresql/server.crt &&
+        exec docker-entrypoint.sh postgres
+        -c ssl=on
+        -c ssl_cert_file=/var/lib/postgresql/server.crt
+        -c ssl_key_file=/var/lib/postgresql/server.key
+    volumes:
+      - ./certs/server.crt:/certs/server.crt:ro
+      - ./certs/server.key:/certs/server.key:ro
+      - ./source/init.sh:/docker-entrypoint-initdb.d/init.sh:ro
+      - ./source/init.sql:/e2e-source/init.sql:ro
+    healthcheck:
+      <<: *fast-healthcheck
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U source_owner -d source"]
+
+volumes:
+  tereo-storage:

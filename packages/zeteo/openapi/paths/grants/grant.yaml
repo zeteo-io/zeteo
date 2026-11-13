@@ -1,0 +1,86 @@
+/v1/grants/{grantId}:
+  get:
+    tags: [Grants]
+    summary: Get a grant
+    description: |
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+      **Errors:** `404 not_found`.
+    operationId: getGrant
+    parameters:
+      - $ref: '../../components/parameters.yaml#/GrantIdParam'
+    responses:
+      '200':
+        description: The grant
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/Grant'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Grants]
+    summary: Replace a grant's columns
+    description: |
+      Replaces the grant's columns whole: every column, or exactly the listed ones. The principal
+      and table of a grant never change; remove the grant and create another for that. An audit
+      entry `zeteo.grant.updated` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`, `409 source_archived`, `422 invalid_grant`.
+    operationId: replaceGrant
+    parameters:
+      - $ref: '../../components/parameters.yaml#/GrantIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/ReplaceGrantRequest'
+    responses:
+      '200':
+        description: The grant
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/Grant'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The grant is not valid - `invalid_grant`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Grants]
+    summary: Remove a grant
+    description: |
+      Removes the grant and its columns, also when its source is archived. An audit entry
+      `zeteo.grant.removed` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`.
+    operationId: deleteGrant
+    parameters:
+      - $ref: '../../components/parameters.yaml#/GrantIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

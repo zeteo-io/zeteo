@@ -1,0 +1,47 @@
+/v1/sources/{sourceId}/refresh:
+  post:
+    tags: [Catalogue]
+    summary: Refresh a source's catalogue
+    description: |
+      Reads the source's tables, views, columns and foreign keys and brings the catalogue up to
+      date. New things are added; things no longer in the source get `missing_since` (and lose it
+      if they return); a column whose type changed is updated in place. A refresh never deletes a
+      row, changes an id or a description, or touches a declared relation. It sets the source's
+      `status` to `active` and `last_refreshed_at`. If the source cannot be read the status
+      becomes `unreachable`, the catalogue is left as it was and the answer is
+      `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
+      See `docs/catalog.md`.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+      `502 source_unreachable`.
+    operationId: refreshSource
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '200':
+        description: What the refresh changed
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/RefreshSummary'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '422':
+        description: The host is not permitted - `host_not_allowed`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '502':
+        description: Bad gateway - `source_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

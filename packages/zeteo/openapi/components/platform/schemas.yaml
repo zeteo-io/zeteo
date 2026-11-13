@@ -1,0 +1,13 @@
+HealthStatus:
+  type: object
+  required: [status, postgres, redis]
+  properties:
+    status:
+      type: string
+      enum: [ok, degraded]
+    postgres:
+      type: string
+      enum: [ok, fail]
+    redis:
+      type: string
+      enum: [ok, fail]
