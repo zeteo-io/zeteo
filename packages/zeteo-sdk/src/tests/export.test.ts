@@ -2,6 +2,7 @@ import { useStubbedClient } from "./support/callContext.js";
 import { exportCalls } from "../calls/export.js";
 import type { Query } from "../types/query.js";
 import { describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import {
   ExportInterruptedError,
@@ -63,7 +64,10 @@ describe("export", () => {
     });
 
     it("resolves done with a truncated end", async () => {
-      t.stub.respond(() => ({ chunks: [head, "[1]\n", end("truncated", 1)] }));
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, "[1]\n", end("truncated", 1)],
+      }));
       const result = await exportCalls(t.ctx()).rows(query);
       expect(await readAll(result.rows)).toEqual([[1]]);
       expect(await result.done).toEqual({ status: "truncated", rows: 1 });
@@ -73,7 +77,7 @@ describe("export", () => {
       const body = gzipSync(head + "[1]\n[2]\n" + end("complete", 2));
       const mid = Math.floor(body.length / 2);
       t.stub.respond(() => ({
-        headers: { "content-encoding": "gzip" },
+        headers: { ...runHeader, "content-encoding": "gzip" },
         chunks: [body.subarray(0, mid), body.subarray(mid)],
       }));
       const result = await exportCalls(t.ctx()).rows(query);
@@ -101,7 +105,7 @@ describe("export", () => {
     });
 
     it("throws ExportInterruptedError when the stream ends without its end line", async () => {
-      t.stub.respond(() => ({ chunks: [head, "[1]\n"] }));
+      t.stub.respond(() => ({ headers: runHeader, chunks: [head, "[1]\n"] }));
       const result = await exportCalls(t.ctx()).rows(query);
       const error = await caught(readAll(result.rows));
       expect(error).toBeInstanceOf(ExportInterruptedError);
@@ -110,18 +114,23 @@ describe("export", () => {
     });
 
     it("throws ExportInterruptedError on a line that is not JSON", async () => {
-      t.stub.respond(() => ({ chunks: [head, "[1]\n", "nope\n"] }));
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, "[1]\n", "nope\n"],
+      }));
       const result = await exportCalls(t.ctx()).rows(query);
       const error = await caught(readAll(result.rows));
       expect(error).toMatchObject({
         name: "ExportInterruptedError",
         rowsRead: 1,
+        message: expect.stringMatching(/not valid JSON/),
       });
       expect(await caught(result.done)).toBe(error);
     });
 
     it("closes the connection when the reader stops early, without throwing", async () => {
       t.stub.respond(() => ({
+        headers: runHeader,
         chunks: [head, ...Array.from({ length: 50 }, (_, i) => `[${i}]\n`)],
       }));
       const result = await exportCalls(t.ctx()).rows(query);
@@ -139,6 +148,7 @@ describe("export", () => {
 
     it("throws when the signal aborts mid-stream", async () => {
       t.stub.respond(() => ({
+        headers: runHeader,
         chunks: [head, ...Array.from({ length: 50 }, (_, i) => `[${i}]\n`)],
       }));
       const controller = new AbortController();
@@ -210,7 +220,7 @@ describe("export", () => {
       t.stub.respond((req) =>
         req.headers.authorization === "Bearer svc-1"
           ? { status: 401, body: { error: "invalid_token" } }
-          : { chunks: [head, end("complete", 0)] }
+          : { headers: runHeader, chunks: [head, end("complete", 0)] }
       );
       const result = await exportCalls(t.ctx()).rows(query);
       expect(await readAll(result.rows)).toEqual([]);
@@ -221,13 +231,190 @@ describe("export", () => {
     });
 
     it("can be read only once", async () => {
-      t.stub.respond(() => ({ chunks: [head, end("complete", 0)] }));
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, end("complete", 0)],
+      }));
       const result = await exportCalls(t.ctx()).rows(query);
       await readAll(result.rows);
       expect(() => result.rows[Symbol.asyncIterator]()).toThrow(
         "@zeteo-io/sdk: export rows can be read only once"
       );
     });
+  });
+
+  describe("rows, once the stream has failed", () => {
+    const manyRows = (n: number) =>
+      Array.from(
+        { length: n },
+        (_, i) => `[${i},"${randomBytes(16).toString("hex")}"]\n`
+      ).join("");
+
+    it("yields no row decoded after an abort, even with the end line in the same chunk", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head + "[1]\n[2]\n[3]\n" + end("complete", 3)],
+      }));
+      const controller = new AbortController();
+      const result = await exportCalls(t.ctx()).rows(query, {
+        signal: controller.signal,
+      });
+      const seen: unknown[] = [];
+      const error = await caught(
+        (async () => {
+          for await (const row of result.rows) {
+            seen.push(row);
+            controller.abort();
+          }
+        })()
+      );
+      expect(seen).toEqual([[1]]);
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({
+        rowsRead: 1,
+        message: expect.stringMatching(/aborted by the caller/),
+      });
+      expect(await caught(result.done)).toBe(error);
+    });
+
+    it("yields no row decoded after the connection is cut", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head + "[1]\n[2]\n[3]\n"],
+        cutAfterChunks: true,
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      const seen: unknown[] = [];
+      const error = await caught(
+        (async () => {
+          for await (const row of result.rows) {
+            seen.push(row);
+            await new Promise((ok) => setTimeout(ok, 100));
+          }
+        })()
+      );
+      expect(seen).toEqual([[1]]);
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({
+        rowsRead: 1,
+        message: expect.stringMatching(/connection was cut/),
+      });
+      expect(await caught(result.done)).toBe(error);
+    });
+
+    it("throws when the end line's count differs from the rows read", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, "[1]\n", end("complete", 2)],
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      const error = await caught(readAll(result.rows));
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({ rowsRead: 1 });
+      expect(await caught(result.done)).toBe(error);
+    });
+
+    it("ends promptly after the end line when the server holds the response open", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, "[1]\n", end("complete", 1)],
+        holdOpen: true,
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      const started = Date.now();
+      expect(await readAll(result.rows)).toEqual([[1]]);
+      expect(Date.now() - started).toBeLessThan(1000);
+      expect(await result.done).toEqual({ status: "complete", rows: 1 });
+      await expect
+        .poll(() => t.stub.cutByClient, { timeout: 1000 })
+        .toEqual(["/v1/export"]);
+    });
+
+    it("releases the connection on return() before the first row", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, ...Array.from({ length: 50 }, (_, i) => `[${i}]\n`)],
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      await result.rows[Symbol.asyncIterator]().return!();
+      const error = await caught(result.done);
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({ rowsRead: 0 });
+      await expect
+        .poll(() => t.stub.cutByClient, { timeout: 1000 })
+        .toEqual(["/v1/export"]);
+    });
+
+    it("throws on a line over the size limit", async () => {
+      t.stub.respond(() => ({
+        headers: runHeader,
+        chunks: [head, "[1]\n", `["${"x".repeat(300)}"]\n`, end("complete", 2)],
+      }));
+      const result = await exportCalls(t.ctx(), { maxLineBytes: 200 }).rows(
+        query
+      );
+      const error = await caught(readAll(result.rows));
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({
+        rowsRead: 1,
+        message: expect.stringMatching(/exceeded the size limit/),
+      });
+      expect(await caught(result.done)).toBe(error);
+    });
+
+    it("throws when a gzipped stream is cut", async () => {
+      const body = gzipSync(head + manyRows(2000));
+      const third = Math.floor(body.length / 3);
+      t.stub.respond(() => ({
+        headers: { ...runHeader, "content-encoding": "gzip" },
+        chunks: [body.subarray(0, third), body.subarray(third, 2 * third)],
+        cutAfterChunks: true,
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      const error = await caught(readAll(result.rows));
+      expect(error).toBeInstanceOf(ExportInterruptedError);
+      expect(error).toMatchObject({
+        message: expect.stringMatching(/connection was cut/),
+      });
+      expect(await caught(result.done)).toBe(error);
+    });
+
+    it("closes the connection when the reader leaves a gzipped stream early", async () => {
+      const body = gzipSync(head + manyRows(2000) + end("complete", 2000));
+      const size = Math.ceil(body.length / 50);
+      t.stub.respond(() => ({
+        headers: { ...runHeader, "content-encoding": "gzip" },
+        chunks: Array.from({ length: 50 }, (_, i) =>
+          body.subarray(i * size, (i + 1) * size)
+        ),
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      for await (const row of result.rows) {
+        expect((row as unknown[])[0]).toBe(0);
+        break;
+      }
+      expect(await caught(result.done)).toBeInstanceOf(ExportInterruptedError);
+      await expect
+        .poll(() => t.stub.cutByClient, { timeout: 1000 })
+        .toEqual(["/v1/export"]);
+    });
+  });
+
+  describe("without X-Zeteo-Run-Id", () => {
+    it.each(["rows", "stream"] as const)(
+      "%s throws invalid_response and closes the connection",
+      async (call) => {
+        t.stub.respond(() => ({
+          chunks: [head, ...Array.from({ length: 50 }, (_, i) => `[${i}]\n`)],
+        }));
+        const error = await caught(exportCalls(t.ctx())[call](query));
+        expect(error).toBeInstanceOf(ZeteoError);
+        expect(error).toMatchObject({ status: 200, code: "invalid_response" });
+        await expect
+          .poll(() => t.stub.cutByClient, { timeout: 1000 })
+          .toEqual(["/v1/export"]);
+      }
+    );
   });
 
   describe("stream", () => {

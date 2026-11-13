@@ -1,4 +1,4 @@
-import { lines, MAX_LINE_BYTES } from "../ndjson.js";
+import { LineTooLongError, lines, MAX_LINE_BYTES } from "../ndjson.js";
 import { describe, expect, it } from "vitest";
 
 async function* from(chunks: (Buffer | string)[]) {
@@ -43,14 +43,18 @@ describe("lines", () => {
   });
 
   it("throws on a line over the cap", async () => {
-    const big = Buffer.alloc(1024 * 1024, 0x20);
-    const chunks = Array.from(
-      { length: MAX_LINE_BYTES / big.length + 1 },
-      () => big
+    expect(MAX_LINE_BYTES).toBe(32 * 1024 * 1024);
+    const collectCapped = async (chunks: string[]) => {
+      for await (const _ of lines(from(chunks), 16));
+    };
+    await expect(
+      collectCapped(["[1]\n", " ".repeat(10), " ".repeat(10)])
+    ).rejects.toThrow(LineTooLongError);
+    await expect(collectCapped([" ".repeat(16) + "1\n"])).rejects.toThrow(
+      LineTooLongError
     );
-    await expect(collect(chunks)).rejects.toThrow(/longer than/);
-    await expect(collect([" ".repeat(MAX_LINE_BYTES) + "1\n"])).rejects.toThrow(
-      /longer than/
-    );
+    await expect(
+      collectCapped([" ".repeat(15) + "1\n"])
+    ).resolves.toBeUndefined();
   });
 });

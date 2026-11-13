@@ -20,6 +20,8 @@ export type StubResponse = {
   body?: unknown;
   chunks?: (string | Buffer)[];
   cutAfterChunks?: boolean;
+  /** Neither end nor cut the response after its chunks. */
+  holdOpen?: boolean;
 };
 
 export type Stub = {
@@ -67,7 +69,7 @@ async function send(
       await tick();
     }
     if (out.cutAfterChunks) res.destroy();
-    else res.end();
+    else if (!out.holdOpen) res.end();
     return;
   }
   res.writeHead(status, { "content-type": "application/json", ...out.headers });
