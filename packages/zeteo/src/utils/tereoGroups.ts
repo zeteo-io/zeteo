@@ -1,9 +1,12 @@
-import type { RequestConfig } from "@dianemo/core";
 import {
   CORE_CLIENT,
   getHandler,
   purgeServiceToken,
 } from "@tereo-io/sdk/handler";
+
+type RequestConfig = Parameters<
+  ReturnType<typeof getHandler>["handleRequest"]
+>[0];
 
 export interface TereoGroup {
   id: string;
@@ -26,7 +29,7 @@ const statusOf = (err: unknown): unknown =>
 // a non-2xx answer, and a 401 (a service token core no longer accepts) gets
 // one retry with a fresh token.
 const send = async <T>(requestName: string, url: string): Promise<T> => {
-  const config: RequestConfig<unknown> = {
+  const config: RequestConfig = {
     clientName: CORE_CLIENT,
     requestName,
     method: "GET",
