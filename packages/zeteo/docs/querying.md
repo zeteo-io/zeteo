@@ -111,9 +111,28 @@ names cannot be filtered on directly (select it through a view that renames it),
 compares exactly, case and accents included, unless the column has a case-insensitive collation;
 Azure SQL's default collations ignore case, so `{ "eq": "paid" }` also matches `PAID` there. Use
 `contains` or `startsWith` for a match that ignores case on every engine. Sorting text follows the
-collation too, and so does what `distinct` and `groupBy` count as the same text. Besides
-collation, the engines agree on every result: the same rows, in the same order, in the same wire
-forms.
+collation too, and so does what `distinct` and `groupBy` count as the same text.
+
+**Where the engines differ.** Over the types both have, the engines return the same rows, in the
+same order, in the same wire forms, except:
+
+- text compared, sorted, deduplicated or grouped follows each database's collation (above);
+- money prints with four decimal places on Azure SQL (`"640.1000"`) and two on Postgres
+  (`"640.10"`);
+- a uuid prints in lower case on Postgres and a uniqueidentifier in upper case on Azure SQL, and
+  they sort differently: Postgres in the order of their text, SQL Server in its own byte order
+  (which `min` and `max` follow too; on Postgres they compare the text);
+- json is the JSON value on Postgres and text on Azure SQL;
+- a timestamp's fraction past 100 ns is cut on Azure SQL, and its `datetime` holds 1/300 s ticks
+  (see *Results*);
+- a value one engine cannot convert fails there as `422 invalid_value` (see *Filters*): a timestamp
+  offset beyond ±14:00 on Azure SQL but only beyond ±15:59 on Postgres, and a bound outside
+  1753-01-01 to 9999-12-31 compared with a `datetime` column on Azure SQL, which Postgres has no
+  counterpart of.
+
+Types only one engine has behave as that engine's section says: on Postgres, an enum sorts as its
+text and a money column computes as numeric (see *Postgres's own types*); float `NaN` and
+`Infinity` are Postgres's alone.
 
 ### Json columns
 
