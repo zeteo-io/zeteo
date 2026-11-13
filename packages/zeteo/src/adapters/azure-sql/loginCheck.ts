@@ -23,6 +23,12 @@ const MINE = (principalId: string) => `
 // rights (HAS_PERMS_BY_NAME, fn_my_permissions, IS_MEMBER), which follow role
 // membership and DENY, rather than reading grants the login may not be
 // allowed to see.
+//
+// HAS_PERMS_BY_NAME parses its securable as an identifier, for every class
+// (database, schema, object, user, role, login): a name holding `.`, `]` or a
+// space is misread, answering 0 or NULL, which would pass as safe. Every name
+// it is given goes through QUOTENAME. IS_MEMBER, IS_ROLEMEMBER and
+// IS_SRVROLEMEMBER take a plain name, and QUOTENAME would break them.
 
 // Anything that hands over the whole server or the whole database. The
 // database owner and sysadmin both run as `dbo`.
@@ -31,7 +37,7 @@ const SUPERUSER = `
          HAS_PERMS_BY_NAME(NULL, NULL, N'CONTROL SERVER') AS control_server,
          HAS_PERMS_BY_NAME(NULL, NULL, N'IMPERSONATE ANY LOGIN') AS impersonate_any_login,
          IS_ROLEMEMBER(N'db_owner') AS db_owner,
-         HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'CONTROL') AS control_database,
+         HAS_PERMS_BY_NAME(QUOTENAME(DB_NAME()), N'DATABASE', N'CONTROL') AS control_database,
          CAST(CASE WHEN USER_NAME() = N'dbo' THEN 1 ELSE 0 END AS int) AS is_dbo,
          DB_NAME() AS database_name`;
 
@@ -155,7 +161,7 @@ const PRINCIPAL_RIGHTS = `
      AND p.principal_id <> DATABASE_PRINCIPAL_ID()
      AND p.type IN ('S', 'U', 'E', 'X', 'G', 'C', 'K', 'R', 'A')
      AND HAS_PERMS_BY_NAME(
-           p.name,
+           QUOTENAME(p.name),
            CASE p.type WHEN 'R' THEN N'ROLE'
                        WHEN 'A' THEN N'APPLICATION ROLE'
                        ELSE N'USER' END,
@@ -171,7 +177,7 @@ const LOGIN_RIGHTS = `
    CROSS JOIN (VALUES (N'IMPERSONATE'), (N'ALTER'), (N'CONTROL')) r(name)
    WHERE p.type IN ('S', 'U', 'G', 'E', 'X', 'C', 'K')
      AND p.sid <> SUSER_SID()
-     AND HAS_PERMS_BY_NAME(p.name, N'LOGIN', r.name) = 1
+     AND HAS_PERMS_BY_NAME(QUOTENAME(p.name), N'LOGIN', r.name) = 1
    ORDER BY p.name, r.name`;
 
 const OWNED_ROLES = `
@@ -202,6 +208,18 @@ const READ_ONLY_DATABASE = new Set([
 ]);
 
 type Code = LoginFinding["code"];
+
+/**
+ * SQL Server errors that mean the login may not read a catalog view, or the
+ * platform has none: 208 invalid object name, 229/230 SELECT denied on the
+ * view or a column, 297/300 a permission the view needs, 40515 not supported
+ * (Azure SQL Database).
+ */
+const REFUSALS = new Set([208, 229, 230, 297, 300, 40515]);
+
+export const isRefusal = (err: unknown): boolean =>
+  err instanceof sql.RequestError &&
+  REFUSALS.has((err as { number?: unknown }).number as number);
 
 const databasePermissionCode = (name: string): Code => {
   if (
@@ -478,9 +496,8 @@ export const checkLogin = async (
       );
     }
   } catch (err) {
-    // Only a refusal is skipped; a timeout or a lost connection fails the check.
-    if (!(err instanceof sql.RequestError) || err.code !== "EREQUEST")
-      throw err;
+    // Only a refusal to show the view is skipped; any other error fails the check.
+    if (!isRefusal(err)) throw err;
     logger.debug({ err }, "server principals cannot be read on this source");
   }
 

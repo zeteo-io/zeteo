@@ -4,6 +4,8 @@ import type { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js"
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import type { SourceConnection } from "../../../adapters/types.js";
+import { SourceUnreachableError } from "../../../utils/errors.js";
+import sql from "mssql";
 import {
   asMssqlAdmin,
   dropLoginSql,
@@ -40,6 +42,7 @@ const LOGINS = {
   roleOwner: "zeteo_role_owner",
   appRoleAlterer: "zeteo_app_role_alterer",
   loginImpersonator: "zeteo_login_impersonator",
+  serverViewDenied: "zeteo_server_view_denied",
 } as const;
 
 const connectAs = async (settings: ReturnType<typeof mssqlFixtureSettings>) => {
@@ -84,6 +87,10 @@ beforeAll(async () => {
       `ALTER SERVER ROLE bulkadmin ADD MEMBER ${LOGINS.bulkAdmin}`,
       `ALTER SERVER ROLE processadmin ADD MEMBER ${LOGINS.processAdmin}`,
       `GRANT IMPERSONATE ON LOGIN::${LOGINS.dbOwner} TO ${LOGINS.loginImpersonator}`,
+      // The view is refused to this login (error 229), as a platform may.
+      `DROP USER IF EXISTS ${LOGINS.serverViewDenied}`,
+      `CREATE USER ${LOGINS.serverViewDenied} FOR LOGIN ${LOGINS.serverViewDenied}`,
+      `DENY SELECT ON sys.server_principals TO ${LOGINS.serverViewDenied}`,
     ],
     "master"
   );
@@ -108,6 +115,7 @@ beforeAll(async () => {
     `GRANT SELECT, INSERT ON hr.salaries TO ${LOGINS.hrWriter}`,
     `GRANT ALTER ANY USER TO ${LOGINS.userAdmin}`,
     `GRANT IMPERSONATE ON USER::dbo TO ${LOGINS.impersonator}`,
+    `GRANT IMPERSONATE ON USER::dbo TO ${LOGINS.serverViewDenied}`,
     `GRANT ALTER ON ROLE::zeteo_inner_writer TO ${LOGINS.roleAlterer}`,
     `CREATE ROLE zeteo_owned_role AUTHORIZATION ${LOGINS.roleOwner}`,
     `CREATE APPLICATION ROLE zeteo_app_role WITH PASSWORD = 'App-role-pw-1'`,
@@ -119,6 +127,7 @@ beforeAll(async () => {
       LOGINS.roleOwner,
       LOGINS.appRoleAlterer,
       LOGINS.loginImpersonator,
+      LOGINS.serverViewDenied,
     ].map((user) => `ALTER ROLE db_datareader ADD MEMBER ${user}`),
     ...[
       LOGINS.securityAdmin,
@@ -132,6 +141,10 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all(open.map((c) => c.close()));
   await asMssqlAdmin(cleanDatabase);
+  await asMssqlAdmin(
+    [`DROP USER IF EXISTS ${LOGINS.serverViewDenied}`],
+    "master"
+  );
   // A login is the grantor of IMPERSONATE on itself: its grantee goes first.
   const logins = Object.values(LOGINS);
   await asMssqlAdmin(
@@ -294,6 +307,48 @@ describe("azure-sql checkLogin", () => {
         detail: `The login can IMPERSONATE login ${LOGINS.dbOwner}`,
       },
     ]);
+  });
+
+  it("skips the logins when the server refuses to show them, and still judges the rest", async () => {
+    expect(await findingsOf(await as("serverViewDenied"))).toEqual([
+      {
+        code: "write_role_member",
+        detail: "The login can IMPERSONATE user dbo",
+      },
+    ]);
+  });
+
+  /** A connection whose query reading the logins fails with this SQL error. */
+  const failingLogins = async (number: number) => {
+    const connection = (await connectAs(
+      mssqlFixtureSettings("ro")
+    )) as AzureSqlConnection;
+    const request = connection.pool.request.bind(connection.pool);
+    vi.spyOn(connection.pool, "request").mockImplementation(() => {
+      const made = request();
+      const query = made.query.bind(made) as (text: string) => unknown;
+      made.query = ((text: string) =>
+        text.includes("sys.server_principals")
+          ? Promise.reject(
+              Object.assign(
+                new sql.RequestError("injected failure", "EREQUEST"),
+                { number }
+              )
+            )
+          : query(text)) as typeof made.query;
+      return made;
+    });
+    return connection;
+  };
+
+  it("skips the logins on a refusal error", async () => {
+    expect(await findingsOf(await failingLogins(229))).toEqual([]);
+  });
+
+  it("fails the check on any other error reading the logins, a deadlock among them", async () => {
+    await expect(findingsOf(await failingLogins(1205))).rejects.toBeInstanceOf(
+      SourceUnreachableError
+    );
   });
 
   it.each([

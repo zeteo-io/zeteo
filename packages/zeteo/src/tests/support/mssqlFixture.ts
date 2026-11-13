@@ -148,12 +148,24 @@ export const ensureLoginSql = (user: string, password: string) => `
     ALTER LOGIN ${quoteMssqlIdent(user)} WITH PASSWORD = ${quoteMssqlLiteral(password)}, CHECK_POLICY = OFF;
   ALTER LOGIN ${quoteMssqlIdent(user)} ENABLE;`;
 
-/** Ends the login's sessions, then drops it, if it exists. */
+/**
+ * Ends the login's sessions, then drops it, if it exists. KILL returns before
+ * the session is gone, and DROP LOGIN refuses a login still logged in: it
+ * waits for them, up to 10 s, killing any that appear meanwhile.
+ */
 export const dropLoginSql = (user: string) => `
-  DECLARE @kill nvarchar(max) = N'';
-  SELECT @kill += N'KILL ' + CAST(session_id AS nvarchar(12)) + N';'
-    FROM sys.dm_exec_sessions WHERE login_name = ${quoteMssqlLiteral(user)};
-  EXEC (@kill);
+  DECLARE @kill nvarchar(max), @tries int = 0;
+  WHILE EXISTS (SELECT 1 FROM sys.dm_exec_sessions
+                 WHERE login_name = ${quoteMssqlLiteral(user)}) AND @tries < 100
+  BEGIN
+    SET @kill = N'';
+    SELECT @kill += N'KILL ' + CAST(session_id AS nvarchar(12)) + N';'
+      FROM sys.dm_exec_sessions
+     WHERE login_name = ${quoteMssqlLiteral(user)} AND session_id <> @@SPID;
+    BEGIN TRY EXEC (@kill); END TRY BEGIN CATCH END CATCH;
+    WAITFOR DELAY '00:00:00.100';
+    SET @tries += 1;
+  END
   IF SUSER_ID(${quoteMssqlLiteral(user)}) IS NOT NULL
     DROP LOGIN ${quoteMssqlIdent(user)};`;
 
