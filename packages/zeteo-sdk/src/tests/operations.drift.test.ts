@@ -9,11 +9,15 @@ const SPEC = new URL(
   import.meta.url
 );
 
-function operationsInSpec(): Record<string, { method: string; path: string }> {
+function operationsInSpec(): {
+  found: Record<string, { method: string; path: string }>;
+  blocks: number;
+} {
   const found: Record<string, { method: string; path: string }> = {};
   let path: string | undefined;
   let method: string | undefined;
   let inPaths = false;
+  let blocks = 0;
   for (const line of readFileSync(SPEC, "utf8").split("\n")) {
     if (/^\S/.test(line)) inPaths = line === "paths:";
     if (!inPaths) continue;
@@ -26,6 +30,7 @@ function operationsInSpec(): Record<string, { method: string; path: string }> {
     const m = /^ {4}(get|post|put|patch|delete):$/.exec(line);
     if (m) {
       method = m[1];
+      blocks += 1;
       continue;
     }
     const id = /^ {6}operationId: (\w+)$/.exec(line);
@@ -33,7 +38,7 @@ function operationsInSpec(): Record<string, { method: string; path: string }> {
       found[id[1]] = { method: method.toUpperCase(), path };
     }
   }
-  return found;
+  return { found, blocks };
 }
 
 const ID = "11111111-1111-4111-8111-111111111111";
@@ -42,7 +47,9 @@ const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
   it("lists the same 28 operations as the description", () => {
-    const found = operationsInSpec();
+    const { found, blocks } = operationsInSpec();
+    // A method block without an operationId would otherwise go unnoticed.
+    expect(blocks).toBe(28);
     expect(Object.keys(found)).toHaveLength(28);
     expect(found).toEqual(OPERATIONS);
   });
@@ -138,6 +145,20 @@ describe("operations against the API description", () => {
       ],
       ["principalLimits.delete", (c) => c.principalLimits.delete(ID)],
     ];
+
+    it("has a fixture entry for every function on the client", () => {
+      const collect = (value: object, prefix: string): string[] =>
+        Object.entries(value).flatMap(([key, member]) => {
+          const name = prefix + key;
+          if (typeof member === "function") return [name];
+          return typeof member === "object" && member !== null
+            ? collect(member, `${name}.`)
+            : [];
+        });
+      const own = new Set(["withToken", "start", "stop"]);
+      const methods = collect(t.client, "").filter((name) => !own.has(name));
+      expect(methods.sort()).toEqual(calls.map(([name]) => name).sort());
+    });
 
     it("reaches every operation once, and exportQuery twice", async () => {
       const run = "0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a";

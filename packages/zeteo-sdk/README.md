@@ -165,7 +165,8 @@ if (health.status === "degraded") console.warn(health);
 ```
 
 `health.get()` resolves a degraded (503) status instead of throwing, so you can read which
-dependency failed. It throws only when zeteo cannot be reached.
+dependency failed. Any other failure throws a `ZeteoError`: another error status, a 503 without a health body, or no
+response at all.
 
 ## Export
 
@@ -249,7 +250,8 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 | `grants` | `list`, `get`, `create`, `replace`, `delete` |
 | `principalLimits` | `list`, `get`, `create`, `update`, `delete` |
 
-`get` calls resolve `null` on a 404; every other call throws on it. An id that is empty or
+`sources.get`, `sources.tables.get`, `grants.get` and `principalLimits.get` resolve `null` on a
+404; every other call, `catalog.get` included, throws on it. An id that is empty or
 contains `/`, `?`, `#` or `..` throws `ZeteoError` with code `invalid_id` before any request is
 made.
 
@@ -260,8 +262,8 @@ Every failure of a call is a `ZeteoError`, except an interrupted export:
 | Field | Meaning |
 |---|---|
 | `status` | HTTP status, or `null` when there was no response |
-| `code` | The API's `error` code, or `unreachable`, `aborted`, `invalid_id`, `invalid_token`, `invalid_response` raised by the package |
-| `message` | The API's `error_description` |
+| `code` | The API's `error` code; `http_<status>` (for example `http_502`) when the body has none; or one the package raises itself: `unreachable`, `aborted`, `invalid_id`, `invalid_token`, `invalid_response`, `pagination_stuck` |
+| `message` | The API's `error_description`, else the HTTP status text |
 | `requestId` | zeteo's request id, when it sent one |
 | `issues`, `findings` | Validation issues, or the findings of a source login check, when present |
 | `retryAfter` | Seconds, on a 429 or 503 |
@@ -281,7 +283,7 @@ plain `Error` holding only the underlying message.
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |
 | Export | Not repeated once the response has started |
 | 429 (`too_many_queries`, `source_busy`) | Thrown with `retryAfter`; not repeated, and other calls are not held back |
-| 503 `temporarily_unavailable` | Repeated like a 5xx, after `Retry-After` when given |
+| 503 `temporarily_unavailable` | Repeated like any other 5xx; the handler (`@dianemo/core` 2.1 and later) waits at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date |
 | Other 4xx | Thrown |
 
 A 429 means one person or one source is at its concurrency limit, not that your service is over a
