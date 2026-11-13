@@ -161,10 +161,11 @@ controls that name's DNS. Prefer address ranges where that matters.**
 
 ## Connection pools
 
-Each source has one pool per process (5 connections, connect timeout 5 s, query timeout 15 s),
-opened on first use and closed after 5 idle minutes, on archive, on a settings change and on
-shutdown. Concurrent first uses open one pool. A call running when its pool is closed finishes
-first.
+Each source has one pool per process (5 connections, connect timeout 5 s), opened on first use
+and closed after 5 idle minutes, on archive, on a settings change and on shutdown. Catalogue reads
+(the login check and schema reads) run under a 15 s query timeout; user queries run under the
+source's own `timeout_ms` ([querying.md](querying.md)). Concurrent first uses open one pool. A call
+running when its pool is closed finishes first.
 
 Every use reads the source's row (one indexed read), so a change made through another replica
 reaches this one at its next use: a pool opened with other sealed settings than the row now holds

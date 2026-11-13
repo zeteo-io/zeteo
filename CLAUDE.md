@@ -9,13 +9,14 @@ Guidance for Claude Code when working in this repository.
 and columns to tereo users and groups; people query through a validated JSON query language over
 HTTP or through an AI connected over MCP.
 
-That is the design; the code is only part of the way there. Today: **one service**,
-`packages/zeteo` (port 4201), with one Postgres database (schemas `zeteo` and `core`) and Redis.
-Sign-in through tereo, permissions and the audit outbox exist, and so does the sources admin API
-(`/v1/sources`: register, list, change, archive and test a Postgres source, with encrypted
-settings, a network allowlist, a login check and per-source connection pools) and the catalogue
-of each source (a refresh reads tables, columns and foreign keys; descriptions; discovered and
-declared relations). There is no grant or query yet. Do not describe or rely on those as existing.
+**One service**, `packages/zeteo` (port 4201), with one Postgres database (schemas `zeteo` and
+`core`) and Redis. Sign-in through tereo, permissions and the audit outbox exist, and so do the
+sources admin API (`/v1/sources`: register, list, change, archive and test a Postgres or Azure SQL
+source, with encrypted settings, a network allowlist, a login check and per-source connection
+pools), the catalogue of each source (a refresh reads tables, columns and foreign keys;
+descriptions; discovered and declared relations), grants of tables and columns to users and groups
+(`/v1/grants`), and querying (`GET /v1/catalog`, `POST /v1/query`, `GET /v1/runs`). There is no MCP
+connection, export or row filter yet. Do not describe or rely on those as existing.
 
 Read [README.md](README.md) first. The design and the plans are in `docs/superpowers/` (kept out of
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the
@@ -29,16 +30,18 @@ One ordinary package:
 |------|-------|
 | `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop) and the Express app |
 | `src/env.ts` | The one env schema. `src/preload.ts` must be the first import of every entry point |
-| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read`, `zeteo.sources.write`; not organization-assignable, as sources are not organization-scoped), the `zeteo_admin` role, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
+| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.runs.read`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin` and `zeteo_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
 | `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |
 | `src/sources/network.ts` | The one decision whether zeteo may connect to a host: `SOURCE_ALLOWED_HOSTS` rules (`parseAllowedHosts`, parsed at start by `env.ts`) and `resolveAllowed`, which resolves once and returns the address to dial. Link-local, metadata (including Azure's, Alibaba's and Oracle's outside link-local), unspecified and multicast addresses are refused whatever the rules say |
-| `src/adapters/` | `SourceAdapter` (settings schema, redaction, connect, login check, schema read) per source type; `adapterFor`. Postgres is the only one |
+| `src/adapters/` | `SourceAdapter` (settings schema, redaction, connect, login check, schema read, query language, `runQuery`) per source type, `postgres/` and `azure-sql/`; `adapterFor`. `sql/` is the SQL query language shared by both: `language.ts` (the JSON Schema and parsing), `plan.ts` (the planner over a visible catalogue), `compile.ts` and `dialect.ts` with `dialects/` (the Postgres and SQL Server SQL), `values.ts` (wire forms) |
 | `src/sources/` | `service.ts` (create, update, archive, test: the checks, sealing and audit), `pools.ts` (`withSourceConnection`: one pool per source per process, checked against the source's row on every call, retired on a settings change, archive, `source_unreachable` or idle; `stopSourcePools` at shutdown), `connect.ts` (reads settings, `connectChecked`), `network.ts` |
 | `src/catalog/` | `refresh.ts` (`refreshSource`: reads the snapshot outside any transaction, then applies it under a per-source advisory lock, batched, in a transaction of up to 120 s; re-reads when the source changed during the read; marks missing, never deletes; `refreshAfterChange` after a create or a settings/schemas change), `relationNames.ts` (naming of discovered relations), `service.ts` (describe a table, declare and remove a relation, each audited) |
+| `src/grants/` | `service.ts` (create, replace, remove, read grants, each audited), `access.ts` (`loadAccess`: what a caller's user and groups are granted), `principals.ts` (group membership from tereo, cached 30 s per user) and `principalStatuses.ts`, `visibleCatalog.ts` (`buildVisibleCatalog`/`loadVisibleCatalog`: granted columns only, relations whose keys are all granted; the only view of a source the planner gets) |
+| `src/engine/` | `index.ts` (`runQuery`: shape check, plan, concurrency leases, run on the adapter, record), `limits.ts` (profiles, row caps, Redis leases: 2 per user, 5 per source), `record.ts` (the `query_runs` log), `errors.ts` |
 | `src/jobs/` | `refreshSources.ts`: the check (30-60 s after start, then hourly) that refreshes sources not refreshed in 24 hours, under a Redis lock per source, re-reading each under the lock; started by `index.ts` (not in the test suite's shared server) |
-| `src/views/` | Response shapes (`source.ts`, `catalog.ts`); never carry secrets |
-| `src/routes/` | Mirrors the URL. `index.ts` is the root; `health/` at the root, the API under `v1/` (`sources/`, `sources/source/`, with `archive/`, `test/`, `refresh/`, `tables/` (and `table/`) and `relations/` (and `relation/`)) |
-| `openapi/`, `docs/` | The OpenAPI spec (`npm run openapi:lint` / `openapi:build` in `packages/zeteo`) and per-area notes (`docs/sources.md`, `docs/catalog.md`) |
+| `src/views/` | Response shapes (`source.ts`, `catalog.ts`, `grant.ts`, `run.ts`, `visibleCatalog.ts`); never carry secrets, and the caller's catalogue view carries no ids |
+| `src/routes/` | Mirrors the URL. `index.ts` is the root; `health/` at the root, the API under `v1/` (`sources/`, `sources/source/`, with `archive/`, `test/`, `refresh/`, `tables/` (and `table/`) and `relations/` (and `relation/`); `grants/` (and `grant/`); `catalog/`; `query/`; `runs/`) |
+| `openapi/`, `docs/` | The OpenAPI spec (`npm run openapi:lint` / `openapi:build` in `packages/zeteo`) and per-area notes (`docs/sources.md`, `catalog.md`, `grants.md`, `querying.md`, `azure-sql.md`) |
 | `src/utils/`, `src/utils/db/` | Shared: `errors.ts`, `cursor.ts`, `crypto/envelope.ts`, `validateReq.ts`, `logger.ts`, `redis.ts`, `requestId.ts`, `httpServer.ts`, `prismaErrors.ts`, `idSchema.ts`, `tereo.ts` (the one SDK client), `transaction.ts` (`withAudit`: a transaction that writes its audit entries to `core.outbox`; optional `timeoutMs`), `outboxCollector.ts`, `text.ts` (`noNul` for request strings); `db/prisma.ts` is the Prisma client and the health probe |
 | `src/tests/` | Mirrors `src/`: `<base>[.<aspect>][.unit].test.ts`, `flows/`, `conventions/`; `setup/`, `support/`, `fixtures/` are not tests. Two projects, `unit` (no server) and `int` (one real server). Rules: [src/tests/README.md](packages/zeteo/src/tests/README.md) |
 | `prisma/` | The one schema and migrations |
@@ -64,10 +67,15 @@ One ordinary package:
   route. `TEREO_TEST_MODE` (refused in production) accepts the SDK's `test-token-…` tokens; tests
   build them with `tests/support/tokens.ts`. A change that must be audited runs in `withAudit`, and
   nothing calls tereo over the network inside it.
-- **Catalogue ids are stable**: grants will reference table, column and relation ids, so a refresh
+- **Catalogue ids are stable**: grants reference table, column and relation ids, so a refresh
   never deletes a row or changes an id, description or declared relation; what disappears gets
   `missing_since` ([docs/catalog.md](packages/zeteo/docs/catalog.md)). Reading from a source happens
   outside any transaction.
+- **Queries**: identifiers in SQL come only from catalogue rows and values are always bound
+  parameters; a user query on Postgres runs in `BEGIN TRANSACTION READ ONLY` on its own client; an
+  ungranted table or column and a nonexistent one are indistinguishable to a caller
+  (`not_found_or_not_accessible`); database error text never reaches a caller
+  ([docs/querying.md](packages/zeteo/docs/querying.md)).
 - **Migrations**: generated by Prisma (`migrate dev --create-only`), with raw SQL appended only for
   what Prisma cannot express — partial indexes, CHECK constraints.
 - **Raw SQL** names tables with their schema (`"core"."core_outbox"`) — there is no `public` schema.
@@ -80,6 +88,7 @@ One ordinary package:
 ```sh
 npm install
 docker compose up -d postgres redis                      # host ports 5462 / 6409
+docker compose up -d mssql                               # SQL Server for the Azure SQL tests, host port 1463
 cp packages/zeteo/.env.example packages/zeteo/.env   # then set ZETEO_MASTER_KEY (generator in the file)
 cd packages/zeteo
 npx prisma generate && npx prisma migrate deploy
@@ -87,11 +96,14 @@ npm run dev                                              # http://localhost:4201
 npm run test:unit                                        # no database or Redis needed
 npm run test:int                                         # uses <db>_test and Redis db 1 (TEST_DATABASE_URL overrides)
 npm run test:local -- --tags-filter "platform"           # a tag expression; npx vitest --list-tags
+npx vitest run --project int -t "(azure-sql)"            # one engine's part of the query suite; `(postgres)` for the other
 ```
 
 `docker compose up` builds the image from source, runs `migrate`, then Zeteo on
 http://localhost:4201. `docker/test/run.sh` runs the suite in isolated stacks, one per shard
-(`TEST_SHARDS`, default 4). Neither needs a `.env`.
+(`TEST_SHARDS`, default 4), each with its own SQL Server (amd64 only, about 2 GB; emulated on
+Apple Silicon). Neither needs a `.env`. The int suite needs SQL Server: `globalSetup` recreates the
+`zeteo_fixture` database on it (`TEST_MSSQL_URL` points elsewhere).
 
 ## What not to do
 

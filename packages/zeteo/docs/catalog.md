@@ -1,9 +1,10 @@
 # Catalogue
 
 The catalogue is what Zeteo knows about a source's tables, columns and the relations between
-tables. It is read from the source by a refresh and described by an administrator. Later
-features (grants, queries) refer to catalogue rows by id, so **ids are stable**: a refresh never
-changes the id of a table, column or relation.
+tables. It is read from the source by a refresh and described by an administrator. Grants
+([grants.md](grants.md)) refer to its tables and columns by id and queries ([querying.md](querying.md))
+run over the part a caller is granted, so **ids are stable**: a refresh never changes the id of a
+table, column or relation.
 
 | Route | Permission | Result |
 |-------|------------|--------|

@@ -43,6 +43,18 @@
         "cwd": "packages/zeteo"
       }
     },
+    "openapi:lint": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "redocly lint",
+        "cwd": "packages/zeteo"
+      },
+      "inputs": [
+        "{projectRoot}/openapi/**/*",
+        "{projectRoot}/redocly.yaml"
+      ],
+      "cache": true
+    },
     "dev": {
       "executor": "nx:run-commands",
       "dependsOn": [

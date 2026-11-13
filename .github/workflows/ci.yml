@@ -59,6 +59,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Lint OpenAPI
+        run: npx nx $NX_SCOPE -t openapi:lint --parallel=4
+
       - name: Type check
         run: npx nx $NX_SCOPE -t check --parallel=4
 
@@ -70,11 +73,13 @@ jobs:
         run: npx nx $NX_SCOPE -t test:unit --parallel=4
 
       # The server's suite runs in TEST_SHARDS isolated stacks at once
-      # (docker/test/run.sh), one per core of the runner.
+      # (docker/test/run.sh). Each stack has its own SQL Server, which wants
+      # about 2 GB, so on this runner (4 CPUs, 16 GB) two shards leave room for
+      # Postgres, Redis, the test runners and the OS; four would be tight.
       - name: Test
         run: npx nx $NX_SCOPE -t test:docker --parallel=4
         env:
-          TEST_SHARDS: 4
+          TEST_SHARDS: 2
 
       # The release image, built and started on this x86 runner: migrate a
       # fresh database, then wait for zeteo's health check, so a broken

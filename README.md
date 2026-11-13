@@ -4,11 +4,14 @@
 
 zeteo (Greek zēteō, 'to seek') is a query service for apps built on tereo: admins register databases as sources and grant tables and columns to tereo users and groups; people query through a validated JSON query language over HTTP or through an AI connected over MCP.
 
-That is the plan. The repository is part of the way there: a service with sign-in through
-[tereo](https://github.com/tereo-io/tereo), the sources admin API (register a Postgres database,
-see [docs/sources.md](packages/zeteo/docs/sources.md)) and the catalogue of each source's tables,
-columns and relations (see [docs/catalog.md](packages/zeteo/docs/catalog.md)). Grants and the query
-language are the next steps, in the design spec and its plans under `docs/superpowers/` (kept out of version
+The repository has all of it except the MCP connection: a service with sign-in through
+[tereo](https://github.com/tereo-io/tereo), the sources admin API (register a Postgres or Azure SQL
+database, see [docs/sources.md](packages/zeteo/docs/sources.md)), the catalogue of each source's
+tables, columns and relations ([docs/catalog.md](packages/zeteo/docs/catalog.md)), grants
+([docs/grants.md](packages/zeteo/docs/grants.md)), and querying: the catalogue of what a caller may
+query, the query language, `POST /v1/query` and the run log
+([docs/querying.md](packages/zeteo/docs/querying.md)). Azure SQL's particulars are in
+[docs/azure-sql.md](packages/zeteo/docs/azure-sql.md). The design spec and its plans are under `docs/superpowers/` (kept out of version
 control).
 
 Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRIBUTING.md) and
@@ -25,6 +28,7 @@ Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRI
 ```sh
 npm install
 docker compose up -d postgres redis                      # host ports 5462 / 6409
+docker compose up -d mssql                               # only for the Azure SQL tests: host port 1463
 cp packages/zeteo/.env.example packages/zeteo/.env     # then set ZETEO_MASTER_KEY (generator in the file)
 cd packages/zeteo
 npx prisma generate && npx prisma migrate deploy
@@ -42,11 +46,19 @@ npm run format && npm run sort-imports && npm run lint && npm run check
 Works today: the service starts, connects to Postgres and Redis, and `GET /health` answers `200`
 with `{"status":"ok", ...}` when both respond (`503` otherwise). Requests sign in with a tereo token
 (`authenticate`, `requirePermission`; `TEREO_TEST_MODE=true` accepts the SDK's test tokens locally),
-and changes can write audit entries to tereo's outbox. Administrators can register, list, change,
-archive and test Postgres sources under `/v1/sources` (settings encrypted at rest, hosts limited by
-`SOURCE_ALLOWED_HOSTS`, a login check that refuses writable logins unless overridden). Each source's
-tables, views, columns and foreign keys are read into a catalogue when it is created, when its
-settings or schemas change, on `POST /v1/sources/:sourceId/refresh` and by a daily job; a refresh marks what disappeared instead of
-deleting it and never changes ids or descriptions. Administrators describe tables and columns,
-read the discovered relations (one pair per foreign key) and declare their own, under
-`/v1/sources/:sourceId/tables` and `/relations`. Nothing else exists yet: no grants, no queries.
+and changes write audit entries to tereo's outbox.
+
+- **Sources.** Administrators register, list, change, archive and test Postgres and Azure SQL
+  sources under `/v1/sources` (settings encrypted at rest, hosts limited by
+  `SOURCE_ALLOWED_HOSTS`, a login check that refuses writable logins unless overridden).
+- **Catalogue.** Each source's tables, views, columns and foreign keys are read when it is created,
+  when its settings or schemas change, on `POST /v1/sources/:sourceId/refresh` and by a daily job;
+  a refresh marks what disappeared instead of deleting it and never changes ids or descriptions.
+  Administrators describe tables and columns, read the discovered relations and declare their own,
+  under `/v1/sources/:sourceId/tables` and `/relations`.
+- **Grants.** `/v1/grants` gives a user or group one table, all its columns or a list. Default deny.
+- **Querying.** `GET /v1/catalog` lists what the caller may query, with the query language's JSON
+  Schema; `POST /v1/query` runs a validated query, read-only and within limits, with the same
+  language and results on both engines; `GET /v1/runs` reads the record of every query.
+
+Not there yet: the MCP connection, export and row filters on grants.
