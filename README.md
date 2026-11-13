@@ -63,8 +63,10 @@ and changes write audit entries to tereo's outbox.
 - **Export.** `POST /v1/export?format=ndjson|csv` streams the result of the same query, up to the
   source's export cap, from sources whose exports are on; gzipped when the client accepts it.
 
-- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves an AI signed in through tereo three
-  read-only tools: `list_sources`, `list_tables` and `describe_table`. A user sees them only with
+- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves an AI signed in through tereo four
+  read-only tools: `list_sources`, `list_tables` and `describe_table` to discover what it may
+  query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
+  5,000 or 1 MB), with instructions that teach the model the language. A user sees them only with
   `zeteo.mcp.use`, and each needs `zeteo.data.read` too.
 
-Not there yet: a query tool over MCP and row filters on grants.
+Not there yet: row filters on grants.

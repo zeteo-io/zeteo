@@ -1,9 +1,12 @@
 import { buildTereoDocument } from "../definitions/tereoDeclaration.js";
+import { MCP_INSTRUCTIONS } from "./instructions.js";
 import { defineDiscoveryTools } from "./tools.js";
+import { defineQueryTool } from "./queryTool.js";
 import { getTereo } from "../utils/tereo.js";
 import { rateLimitRedis } from "./redis.js";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
+import { MCP_PATH } from "./paths.js";
 import type { Router } from "express";
 import { readFileSync } from "fs";
 import env from "../env.js";
@@ -12,9 +15,6 @@ import {
   type RateLimitRedis,
   type TereoMcp,
 } from "@tereo-io/mcp";
-
-/** Where the MCP endpoint is served; its metadata is under `/.well-known/oauth-protected-resource/mcp`. */
-export const MCP_PATH = "/mcp";
 
 /** The most a tool result may carry: above the MCP limit profile's 1 MB of rows, with room for the rest of a result. */
 const MAX_RESULT_BYTES = 2 * 1024 * 1024;
@@ -36,6 +36,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   const mcp = createTereoMcp({
     name: "zeteo",
     version,
+    instructions: MCP_INSTRUCTIONS,
     core: getTereo(),
     publicUrl: env.PUBLIC_URL,
     path: MCP_PATH,
@@ -49,6 +50,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
     logger: logger.child({ component: "mcp" }),
   });
   defineDiscoveryTools(mcp);
+  defineQueryTool(mcp);
   return mcp;
 };
 

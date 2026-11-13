@@ -3,7 +3,7 @@
 // @module-tag security
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { TEST_MCP_CLIENT, TEST_MCP_ORIGIN } from "../setup/testEnv.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BASE_URL, fetchJson } from "../support/http.js";
 import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "crypto";
@@ -17,7 +17,7 @@ import {
   rawRequest,
 } from "../support/mcp.js";
 
-const TOOLS = ["describe_table", "list_sources", "list_tables"];
+const TOOLS = ["describe_table", "list_sources", "list_tables", "query"];
 const RESOURCE_METADATA = `${BASE_URL}/.well-known/oauth-protected-resource/mcp`;
 
 describe("MCP endpoint", () => {
@@ -94,10 +94,11 @@ describe("MCP endpoint", () => {
       for (const tool of tools) {
         expect(tool.annotations?.readOnlyHint).toBe(true);
       }
-      const args: Record<string, Record<string, string>> = {
+      const args: Record<string, Record<string, unknown>> = {
         list_sources: {},
         list_tables: { source: "anything" },
         describe_table: { source: "anything", table: "anything" },
+        query: { source: "anything", from: "anything", select: ["x"] },
       };
       for (const name of TOOLS) {
         const call = await callTool(session.client, name, args[name]);
@@ -132,6 +133,15 @@ describe("MCP endpoint", () => {
       Host: "evil.example.com",
     });
     expect(health.status).toBe(200);
+  });
+
+  it("does not apply the Host check to /v1", async () => {
+    const res = await rawRequest("GET", "/v1/catalog", {
+      Authorization: `Bearer ${tokenFor({ permissions: [DATA_READ] })}`,
+      Host: "evil.example.com",
+    });
+    expect(res.status).toBe(200);
+    expect(JSON.parse(res.body)).toEqual({ sources: [] });
   });
 
   it("refuses an Origin not in MCP_ALLOWED_ORIGINS, and accepts a listed one", async () => {
@@ -174,6 +184,26 @@ describe("MCP endpoint", () => {
     );
     expect(res.status).toBe(400);
     expect(JSON.parse(res.body)).toMatchObject({ error: "invalid_request" });
+  });
+});
+
+describe("createMcpRouter", () => {
+  it("returns null and says MCP is off when MCP_ALLOWED_CLIENTS is empty", async () => {
+    const { createMcpRouter } = await import("../../mcp/index.js");
+    const { logger } = await import("../../utils/logger.js");
+    const { default: env } = await import("../../env.js");
+    const info = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const allowed = env.MCP_ALLOWED_CLIENTS;
+    env.MCP_ALLOWED_CLIENTS = [];
+    try {
+      expect(await createMcpRouter()).toBeNull();
+      expect(info).toHaveBeenCalledWith(
+        "MCP is off: MCP_ALLOWED_CLIENTS is empty"
+      );
+    } finally {
+      env.MCP_ALLOWED_CLIENTS = allowed;
+      info.mockRestore();
+    }
   });
 });
 

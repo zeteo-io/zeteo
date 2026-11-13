@@ -1,7 +1,7 @@
 import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
+import { MCP_PATH, MCP_PATHS } from "./mcp/paths.js";
 import express, { type Router } from "express";
-import { MCP_PATH } from "./mcp/index.js";
 import routes from "./routes/index.js";
 import helmet from "helmet";
 import env from "./env.js";
@@ -22,13 +22,6 @@ const trustProxy = /^\d+$/.test(env.TRUST_PROXY)
     : env.TRUST_PROXY === "false"
       ? false
       : env.TRUST_PROXY;
-
-/** What the MCP router serves: the endpoint and its two discovery documents. */
-const MCP_PATHS = [
-  MCP_PATH,
-  `/.well-known/oauth-protected-resource${MCP_PATH}`,
-  "/.well-known/oauth-authorization-server",
-];
 
 /** The app, serving MCP through `mcpRouter` unless it is null (MCP off). */
 export const createApp = (mcpRouter: Router | null) => {

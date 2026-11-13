@@ -6,7 +6,7 @@ import type { TereoMcp, ToolContext } from "@tereo-io/mcp";
 import { notFound } from "../engine/errors.js";
 import { requireDataRead } from "./caller.js";
 import { db } from "../utils/db/index.js";
-import { asToolError } from "./errors.js";
+import { inToolCall } from "./errors.js";
 import { z } from "zod";
 
 const SourceInput = z.object({
@@ -44,14 +44,10 @@ const sourceView = async (access: Access, slug: string) => {
 /** Runs `handler` for a caller with `zeteo.data.read`; zeteo's errors become tool errors. */
 const handled =
   <I, R>(handler: (input: I, access: Access) => Promise<R>) =>
-  async (input: I, ctx: ToolContext): Promise<R> => {
-    try {
-      const access = await loadAccess(requireDataRead(ctx.auth));
-      return await handler(input, access);
-    } catch (err) {
-      return asToolError(err, ctx.requestId);
-    }
-  };
+  (input: I, ctx: ToolContext): Promise<R> =>
+    inToolCall(ctx, async () =>
+      handler(input, await loadAccess(requireDataRead(ctx.auth)))
+    );
 
 /** The read-only tools that show a caller what they may query: the names, never ids or native types. */
 export const defineDiscoveryTools = (mcp: TereoMcp): void => {
