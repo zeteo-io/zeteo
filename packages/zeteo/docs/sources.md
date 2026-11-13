@@ -12,6 +12,7 @@ never deleted.
 | `PATCH /v1/sources/:sourceId` | `zeteo.sources.write` | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
 | `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings }` |
+| `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md) | |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
 validated.
@@ -68,6 +69,10 @@ Reserved. Creating one answers `422 source_type_unavailable`.
 5. refuse a login with findings (`422 writable_login`) unless `allow_writable_login` is true;
 6. encrypt the settings and write the row and its audit entry in one transaction.
 
+After a create is committed, Zeteo reads the source's schema into the catalogue
+([catalog.md](catalog.md)). If that read fails the source stays, `status` is `unreachable`, and the
+answer is still `201`.
+
 A `PATCH` without `settings` never contacts the source; `allow_writable_login` is accepted only with
 `settings`, and an override has to be sent again on each settings change. A settings change closes
 the source's open pool. Any change to an archived source is `409 source_archived`.
@@ -77,11 +82,31 @@ connection and returns the findings. It changes nothing.
 
 ## The login check and its override
 
-The check inspects the login across the whole connected database, not just the listed schemas, and
-returns `{ code, detail }` findings for rights a read-only login would not have:
-`superuser`, `can_create_roles`, `can_create_databases`, `bypasses_row_security`, `owns_objects`,
-`can_write_tables`, `can_create_in_schema`, `write_role_member`, `replication`,
-`reads_server_files`.
+The check runs on every create, on every settings change and on `POST /v1/sources/:sourceId/test`.
+It covers the whole connected database, not just the listed `schemas`: the list can change later
+without the login being checked again. It reads the catalogs only, counts every role the login is a
+member of (it can `SET ROLE` to them), and returns `{ code, detail }` findings for rights a
+read-only login would not have. Each code means:
+
+| Code | Meaning |
+|------|---------|
+| `superuser` | the login, or a role it belongs to, is a superuser |
+| `can_create_roles` | it may create roles |
+| `can_create_databases` | it may create databases |
+| `bypasses_row_security` | it ignores row-level security policies |
+| `owns_objects` | it owns a table, view, schema or the database, so it can change or grant on them |
+| `can_write_tables` | it holds INSERT, UPDATE, DELETE or TRUNCATE on a table (also through PUBLIC or a default privilege for tables created later) |
+| `can_create_in_schema` | it may create objects in a schema, or schemas in the database |
+| `write_role_member` | it belongs to `pg_write_all_data`, `pg_write_server_files` or `pg_execute_server_program` |
+| `replication` | it has the replication attribute |
+| `reads_server_files` | it belongs to `pg_read_server_files` |
+
+**PostgreSQL 14 and older, and databases upgraded from them.** There, every login may create
+objects in schema `public` (PUBLIC holds `CREATE` on it). An otherwise read-only login is then
+refused with `can_create_in_schema` until the database administrator runs
+`REVOKE CREATE ON SCHEMA public FROM PUBLIC`, or the zeteo admin accepts the finding with the
+audited `allow_writable_login` override. A database created on PostgreSQL 15 or newer does not
+have this grant.
 
 With findings, create and settings change answer `422 writable_login` and the body lists the codes
 under `findings`. With `allow_writable_login: true` the source is stored with
@@ -111,7 +136,8 @@ first uses open one pool. A call running when its pool is closed finishes first.
 ## Audit
 
 `zeteo.source.created`, `zeteo.source.updated` and `zeteo.source.archived` are written to the outbox
-in the change's transaction. Metadata holds the slug and type, for an update the names of the fields
+in the change's transaction. A refresh, a table description change and a relation declared or
+removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an update the names of the fields
 changed, and for an override the finding codes. It never holds settings.
 
 ## Error codes

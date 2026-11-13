@@ -5,9 +5,10 @@
 zeteo (Greek zēteō, 'to seek') is a query service for apps built on tereo: admins register databases as sources and grant tables and columns to tereo users and groups; people query through a validated JSON query language over HTTP or through an AI connected over MCP.
 
 That is the plan. The repository is part of the way there: a service with sign-in through
-[tereo](https://github.com/tereo-io/tereo), and the sources admin API (register a Postgres database,
-see [docs/sources.md](packages/zeteo/docs/sources.md)). The catalogue, grants and the query language
-are the next steps, in the design spec and its plans under `docs/superpowers/` (kept out of version
+[tereo](https://github.com/tereo-io/tereo), the sources admin API (register a Postgres database,
+see [docs/sources.md](packages/zeteo/docs/sources.md)) and the catalogue of each source's tables,
+columns and relations (see [docs/catalog.md](packages/zeteo/docs/catalog.md)). Grants and the query
+language are the next steps, in the design spec and its plans under `docs/superpowers/` (kept out of version
 control).
 
 Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRIBUTING.md) and
@@ -43,5 +44,9 @@ with `{"status":"ok", ...}` when both respond (`503` otherwise). Requests sign i
 (`authenticate`, `requirePermission`; `TEREO_TEST_MODE=true` accepts the SDK's test tokens locally),
 and changes can write audit entries to tereo's outbox. Administrators can register, list, change,
 archive and test Postgres sources under `/v1/sources` (settings encrypted at rest, hosts limited by
-`SOURCE_ALLOWED_HOSTS`, a login check that refuses writable logins unless overridden). Nothing else
-exists yet: no catalogue refresh, no grants, no queries.
+`SOURCE_ALLOWED_HOSTS`, a login check that refuses writable logins unless overridden). Each source's
+tables, views, columns and foreign keys are read into a catalogue when it is created, on
+`POST /v1/sources/:sourceId/refresh` and by a daily job; a refresh marks what disappeared instead of
+deleting it and never changes ids or descriptions. Administrators describe tables and columns,
+read the discovered relations (one pair per foreign key) and declare their own, under
+`/v1/sources/:sourceId/tables` and `/relations`. Nothing else exists yet: no grants, no queries.

@@ -1,0 +1,32 @@
+/v1/sources/{sourceId}/tables:
+  get:
+    tags: [Catalogue]
+    summary: List a source's tables
+    description: |
+      Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
+      (`missing_since` set) are left out unless `include_missing=true`.
+
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+    operationId: listTables
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - name: include_missing
+        in: query
+        required: false
+        description: Also list tables a refresh no longer finds
+        schema: { type: boolean, default: false }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of tables
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/ListTablesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

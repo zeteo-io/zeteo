@@ -125,7 +125,7 @@ CreateSourceRequest:
       minItems: 1
       maxItems: 20
       uniqueItems: true
-      items: { type: string, minLength: 1, maxLength: 128 }
+      items: { type: string, minLength: 1, maxLength: 63, description: 'At most 63 bytes, no control characters, no leading or trailing whitespace' }
     allow_writable_login:
       type: boolean
       description: Accept a login the check found rights on; ignored when it found none
@@ -150,7 +150,7 @@ UpdateSourceRequest:
       minItems: 1
       maxItems: 20
       uniqueItems: true
-      items: { type: string, minLength: 1, maxLength: 128 }
+      items: { type: string, minLength: 1, maxLength: 63, description: 'At most 63 bytes, no control characters, no leading or trailing whitespace' }
     allow_writable_login: { type: boolean }
     timeout_ms: { type: integer, minimum: 1000, maximum: 120000 }
     row_cap: { type: integer, minimum: 1, maximum: 50000 }

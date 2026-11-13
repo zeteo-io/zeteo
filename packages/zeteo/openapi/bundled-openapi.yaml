@@ -14,8 +14,9 @@ info:
 
     ## Permissions
 
-    Reading sources needs `zeteo.sources.read`; registering, changing, archiving and testing a
-    source needs `zeteo.sources.write`, which includes read. Without the permission the answer is
+    Reading sources, tables and relations needs `zeteo.sources.read`; registering, changing,
+    archiving, testing and refreshing a source, describing a table and declaring or removing a
+    relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
     `403 forbidden`, before the body is validated or any source is looked up.
 
     ## Sources
@@ -24,6 +25,13 @@ info:
     the settings the adapter marks safe (`password` and `ca` are never returned). See
     `docs/sources.md` for the settings of each type, the login check and its override, and the
     network rules.
+
+    ## Catalogue
+
+    A refresh reads a source's tables, columns and foreign keys into the catalogue. Ids of tables,
+    columns and relations are stable across refreshes, which never delete a row, change a
+    description or touch a declared relation: what disappears from the source is marked with
+    `missing_since`. See `docs/catalog.md`.
 
     ## Pagination
 
@@ -46,6 +54,8 @@ security:
 tags:
   - name: Sources
     description: Databases registered with Zeteo
+  - name: Catalogue
+    description: A source's tables, columns and relations, read from the source by a refresh
   - name: Platform
     description: Health
 paths:
@@ -341,6 +351,304 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/refresh:
+    post:
+      tags:
+        - Catalogue
+      summary: Refresh a source's catalogue
+      description: |
+        Reads the source's tables, views, columns and foreign keys and brings the catalogue up to
+        date. New things are added; things no longer in the source get `missing_since` (and lose it
+        if they return); a column whose type changed is updated in place. A refresh never deletes a
+        row, changes an id or a description, or touches a declared relation. It sets the source's
+        `status` to `active` and `last_refreshed_at`. If the source cannot be read the status
+        becomes `unreachable`, the catalogue is left as it was and the answer is
+        `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
+        See `docs/catalog.md`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `502 source_unreachable`.
+      operationId: refreshSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: What the refresh changed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshSummary'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '422':
+          description: The host is not permitted - `host_not_allowed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/tables:
+    get:
+      tags:
+        - Catalogue
+      summary: List a source's tables
+      description: |
+        Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
+        (`missing_since` set) are left out unless `include_missing=true`.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listTables
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - name: include_missing
+          in: query
+          required: false
+          description: Also list tables a refresh no longer finds
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of tables
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListTablesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/tables/{tableId}:
+    get:
+      tags:
+        - Catalogue
+      summary: Get a table
+      description: |
+        A table with its columns (in position order) and the relations that start at it, including
+        declared ones and ones a refresh marked missing.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found` for an unknown table or one of another source.
+      operationId: getTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      responses:
+        '200':
+          description: The table
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Catalogue
+      summary: Describe a table and its columns
+      description: |
+        Sets the table's description and the descriptions of named columns. A description is at
+        most 2000 characters; `null` clears it. A refresh never changes a description. An audit
+        entry `zeteo.source.updated` records the table and what changed.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (a description too long, a column the table does not
+        have, an empty body), `404 not_found`, `409 source_archived`.
+      operationId: patchTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchTableRequest'
+      responses:
+        '200':
+          description: The table after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TableDetail'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/relations:
+    get:
+      tags:
+        - Catalogue
+      summary: List a source's relations
+      description: |
+        Lists discovered and declared relations in creation order, including ones a refresh marked
+        missing (`missing_since`).
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listRelations
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of relations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRelationsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Catalogue
+      summary: Declare a relation
+      description: |
+        Adds a relation the database does not enforce with a foreign key. Both tables must belong to
+        this source; the column lists must have the same length, name present columns, and pair
+        columns of the same normalised type that is not `other` or `json`. The name is unique on
+        the from table, whether the other relation is discovered or declared. An audit entry
+        `zeteo.relation.declared` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (the source), `409 relation_name_taken`, `409 source_archived`,
+        `422 invalid_relation`.
+      operationId: declareRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeclareRelationRequest'
+      responses:
+        '201':
+          description: The declared relation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The relation is not valid - `invalid_relation`; the description says which check failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/relations/{relationId}:
+    delete:
+      tags:
+        - Catalogue
+      summary: Remove a declared relation
+      description: |
+        Removes a declared relation. A discovered relation comes from a foreign key and cannot be
+        removed. An audit entry `zeteo.relation.removed` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (also a relation of another source), `409 relation_discovered`,
+        `409 source_archived`.
+      operationId: deleteRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/RelationIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
 components:
   securitySchemes:
     BearerAuth:
@@ -373,6 +681,22 @@ components:
         minimum: 1
         maximum: 100
         default: 50
+    TableIdParam:
+      name: tableId
+      in: path
+      required: true
+      description: The table's id, in the source named by the path. A table of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    RelationIdParam:
+      name: relationId
+      in: path
+      required: true
+      description: The relation's id, in the source named by the path. A relation of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
     SourceIdParam:
       name: sourceId
       in: path
@@ -690,7 +1014,8 @@ components:
           items:
             type: string
             minLength: 1
-            maxLength: 128
+            maxLength: 63
+            description: At most 63 bytes, no control characters, no leading or trailing whitespace
         allow_writable_login:
           type: boolean
           description: Accept a login the check found rights on; ignored when it found none
@@ -735,7 +1060,8 @@ components:
           items:
             type: string
             minLength: 1
-            maxLength: 128
+            maxLength: 63
+            description: At most 63 bytes, no control characters, no leading or trailing whitespace
         allow_writable_login:
           type: boolean
         timeout_ms:
@@ -765,10 +1091,339 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LoginFinding'
+    ColumnType:
+      type: string
+      enum:
+        - text
+        - number
+        - boolean
+        - date
+        - timestamp
+        - json
+        - other
+      description: The normalised type; `native_type` keeps the database's own name
+    Table:
+      type: object
+      description: A table or view of a source
+      required:
+        - id
+        - source_id
+        - schema_name
+        - name
+        - kind
+        - description
+        - last_seen_at
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        source_id:
+          type: string
+          format: uuid
+        schema_name:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - table
+            - view
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        last_seen_at:
+          type: string
+          format: date-time
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Set when a refresh no longer finds the table; cleared when it returns
+    Column:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - native_type
+        - nullable
+        - position
+        - is_primary_key
+        - description
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        name:
+          type: string
+        type:
+          $ref: '#/components/schemas/ColumnType'
+        native_type:
+          type: string
+          examples:
+            - integer
+            - character varying(20)
+        nullable:
+          type: boolean
+        position:
+          type: integer
+          minimum: 1
+        is_primary_key:
+          type: boolean
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    Relation:
+      type: object
+      description: A join from one table to another, in the direction `from` to `to`
+      required:
+        - id
+        - name
+        - from_table_id
+        - from_columns
+        - to_table_id
+        - to_columns
+        - to_many
+        - origin
+        - missing_since
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable across refreshes
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+          description: Unique on the from table. A discovered relation takes its name from the database's identifiers, which may not follow this pattern.
+        from_table_id:
+          type: string
+          format: uuid
+        from_columns:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        to_table_id:
+          type: string
+          format: uuid
+        to_columns:
+          type: array
+          minItems: 1
+          description: Pairs with `from_columns` by position
+          items:
+            type: string
+        to_many:
+          type: boolean
+        origin:
+          type: string
+          enum:
+            - discovered
+            - declared
+          description: '`discovered` relations come from foreign keys and a refresh keeps them current; `declared` ones are added by an administrator and a refresh never touches them'
+        missing_since:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Set when a refresh no longer finds the foreign key; always null for a declared relation
+    TableDetail:
+      description: A table with its columns and the relations that start at it
+      allOf:
+        - $ref: '#/components/schemas/Table'
+        - type: object
+          required:
+            - columns
+            - relations
+          properties:
+            columns:
+              type: array
+              items:
+                $ref: '#/components/schemas/Column'
+            relations:
+              type: array
+              items:
+                $ref: '#/components/schemas/Relation'
+    ListTablesResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Table'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    ListRelationsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Relation'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    PatchTableRequest:
+      type: object
+      description: At least one field. What the body leaves out is not changed; `null` clears a description.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        description:
+          type:
+            - string
+            - 'null'
+          maxLength: 2000
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          description: Column descriptions by column name; a name the table does not have is `400 invalid_request`
+          items:
+            type: object
+            required:
+              - name
+              - description
+            additionalProperties: false
+            properties:
+              name:
+                type: string
+                minLength: 1
+                maxLength: 128
+              description:
+                type:
+                  - string
+                  - 'null'
+                maxLength: 2000
+    DeclareRelationRequest:
+      type: object
+      required:
+        - name
+        - from_table_id
+        - from_columns
+        - to_table_id
+        - to_columns
+        - to_many
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+        from_table_id:
+          type: string
+          format: uuid
+        from_columns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        to_table_id:
+          type: string
+          format: uuid
+        to_columns:
+          type: array
+          minItems: 1
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        to_many:
+          type: boolean
+    RefreshSummary:
+      type: object
+      description: What a refresh changed. `missing` counts things newly marked missing in this refresh.
+      required:
+        - tables
+        - columns
+        - relations
+      properties:
+        tables:
+          type: object
+          required:
+            - added
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
+        columns:
+          type: object
+          required:
+            - added
+            - changed
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            changed:
+              type: integer
+              minimum: 0
+              description: Columns whose type, native type, nullability or primary-key flag changed
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
+        relations:
+          type: object
+          required:
+            - added
+            - missing
+            - restored
+          properties:
+            added:
+              type: integer
+              minimum: 0
+            missing:
+              type: integer
+              minimum: 0
+            restored:
+              type: integer
+              minimum: 0
 x-tagGroups:
   - name: Sources
     tags:
       - Sources
+      - Catalogue
   - name: Platform
     tags:
       - Platform

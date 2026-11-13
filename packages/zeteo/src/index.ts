@@ -2,6 +2,7 @@ import "./preload.js";
 import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
+import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { closeAllSourcePools } from "./sources/pools.js";
 import { createServer, type Server } from "http";
@@ -23,6 +24,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
   let server: Server | null = null;
   let running = false;
   let stopping: Promise<void> | null = null;
+  let stopRefreshJob: (() => Promise<void>) | null = null;
 
   return {
     start: async () => {
@@ -48,6 +50,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
           resolve();
         });
       });
+      stopRefreshJob = startRefreshJob();
     },
 
     stop: () => {
@@ -77,6 +80,10 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
             logger.info("HTTP server closed");
           });
         }
+        await step("refresh job", async () => {
+          await stopRefreshJob?.();
+          stopRefreshJob = null;
+        });
         await step("source pools", closeAllSourcePools);
         await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);

@@ -14,8 +14,9 @@ info:
 
     ## Permissions
 
-    Reading sources needs `zeteo.sources.read`; registering, changing, archiving and testing a
-    source needs `zeteo.sources.write`, which includes read. Without the permission the answer is
+    Reading sources, tables and relations needs `zeteo.sources.read`; registering, changing,
+    archiving, testing and refreshing a source, describing a table and declaring or removing a
+    relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
     `403 forbidden`, before the body is validated or any source is looked up.
 
     ## Sources
@@ -24,6 +25,13 @@ info:
     the settings the adapter marks safe (`password` and `ca` are never returned). See
     `docs/sources.md` for the settings of each type, the login check and its override, and the
     network rules.
+
+    ## Catalogue
+
+    A refresh reads a source's tables, columns and foreign keys into the catalogue. Ids of tables,
+    columns and relations are stable across refreshes, which never delete a row, change a
+    description or touch a declared relation: what disappears from the source is marked with
+    `missing_since`. See `docs/catalog.md`.
 
     ## Pagination
 
@@ -46,11 +54,13 @@ security:
 tags:
   - name: Sources
     description: Databases registered with Zeteo
+  - name: Catalogue
+    description: A source's tables, columns and relations, read from the source by a refresh
   - name: Platform
     description: Health
 x-tagGroups:
   - name: Sources
-    tags: [Sources]
+    tags: [Sources, Catalogue]
   - name: Platform
     tags: [Platform]
 paths:
@@ -64,6 +74,16 @@ paths:
     $ref: './paths/sources/archive.yaml#/~1v1~1sources~1{sourceId}~1archive'
   /v1/sources/{sourceId}/test:
     $ref: './paths/sources/test.yaml#/~1v1~1sources~1{sourceId}~1test'
+  /v1/sources/{sourceId}/refresh:
+    $ref: './paths/catalog/refresh.yaml#/~1v1~1sources~1{sourceId}~1refresh'
+  /v1/sources/{sourceId}/tables:
+    $ref: './paths/catalog/tables.yaml#/~1v1~1sources~1{sourceId}~1tables'
+  /v1/sources/{sourceId}/tables/{tableId}:
+    $ref: './paths/catalog/table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}'
+  /v1/sources/{sourceId}/relations:
+    $ref: './paths/catalog/relations.yaml#/~1v1~1sources~1{sourceId}~1relations'
+  /v1/sources/{sourceId}/relations/{relationId}:
+    $ref: './paths/catalog/relation.yaml#/~1v1~1sources~1{sourceId}~1relations~1{relationId}'
 components:
   securitySchemes:
     BearerAuth:
@@ -73,6 +93,10 @@ components:
       $ref: './components/parameters.yaml#/CursorParam'
     LimitParam:
       $ref: './components/parameters.yaml#/LimitParam'
+    TableIdParam:
+      $ref: './components/parameters.yaml#/TableIdParam'
+    RelationIdParam:
+      $ref: './components/parameters.yaml#/RelationIdParam'
   responses:
     BadRequestResponse:
       $ref: './components/responses.yaml#/BadRequestResponse'
@@ -113,3 +137,23 @@ components:
       $ref: './components/sources/schemas.yaml#/UpdateSourceRequest'
     TestSourceResponse:
       $ref: './components/sources/schemas.yaml#/TestSourceResponse'
+    ColumnType:
+      $ref: './components/catalog/schemas.yaml#/ColumnType'
+    Table:
+      $ref: './components/catalog/schemas.yaml#/Table'
+    Column:
+      $ref: './components/catalog/schemas.yaml#/Column'
+    Relation:
+      $ref: './components/catalog/schemas.yaml#/Relation'
+    TableDetail:
+      $ref: './components/catalog/schemas.yaml#/TableDetail'
+    ListTablesResponse:
+      $ref: './components/catalog/schemas.yaml#/ListTablesResponse'
+    ListRelationsResponse:
+      $ref: './components/catalog/schemas.yaml#/ListRelationsResponse'
+    PatchTableRequest:
+      $ref: './components/catalog/schemas.yaml#/PatchTableRequest'
+    DeclareRelationRequest:
+      $ref: './components/catalog/schemas.yaml#/DeclareRelationRequest'
+    RefreshSummary:
+      $ref: './components/catalog/schemas.yaml#/RefreshSummary'

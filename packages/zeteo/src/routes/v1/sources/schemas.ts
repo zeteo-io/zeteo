@@ -5,13 +5,33 @@ import { z } from "zod";
 /** The database CHECK on `sources.slug`. */
 export const SLUG_PATTERN = /^[a-z][a-z0-9-]{1,62}$/;
 
+/**
+ * A database schema name as Zeteo accepts it: 1 to 63 bytes (Postgres's limit),
+ * no control characters, no leading or trailing whitespace. Names reach the
+ * source only as bound parameters; this keeps stray input out of the catalogue.
+ */
+const SchemaNameSchema = z
+  .string()
+  .refine((name) => Buffer.byteLength(name) >= 1, {
+    message: "A schema name cannot be empty",
+  })
+  .refine((name) => Buffer.byteLength(name) <= 63, {
+    message: "A schema name is at most 63 bytes",
+  })
+  .refine((name) => !/\p{Cc}/u.test(name), {
+    message: "A schema name has no control characters",
+  })
+  .refine((name) => name === name.trim(), {
+    message: "A schema name has no leading or trailing whitespace",
+  });
+
 /** The fields a create sets and an update may change, other than `slug` and `type`. */
 export const SourceFieldsShape = {
   name: z.string().trim().min(1).max(255),
   // The adapter of the source's type validates the contents.
   settings: z.record(z.string(), z.unknown()),
   schemas: z
-    .array(z.string().min(1).max(128))
+    .array(SchemaNameSchema)
     .min(1)
     .max(20)
     .refine((names) => new Set(names).size === names.length, {

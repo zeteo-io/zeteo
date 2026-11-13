@@ -48,3 +48,16 @@ export const listPage = async (options: {
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
+
+/** Unarchived sources never refreshed or last refreshed before `olderThan`, the longest-waiting first. */
+export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
+  prisma.source.findMany({
+    where: {
+      archivedAt: null,
+      OR: [{ lastRefreshedAt: null }, { lastRefreshedAt: { lt: olderThan } }],
+    },
+    orderBy: [
+      { lastRefreshedAt: { sort: "asc", nulls: "first" } },
+      { id: "asc" },
+    ],
+  });

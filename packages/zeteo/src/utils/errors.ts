@@ -157,6 +157,14 @@ export class SourceArchivedError extends AppError {
   }
 }
 
+/** A declared relation the catalogue cannot hold; the message says which check failed. */
+export class InvalidRelationError extends AppError {
+  constructor(message: string) {
+    super(422, "invalid_relation", message);
+    this.name = "InvalidRelationError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

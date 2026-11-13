@@ -1,6 +1,8 @@
 // @module-tag int
 // @module-tag platform
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { postgresAdapter } from "../../../../adapters/postgres/index.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { SourceUnreachableError } from "../../../../utils/errors.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../support/http.js";
@@ -45,7 +47,7 @@ describe("/v1/sources", () => {
       schemas: ["public"],
       writable_login_allowed: false,
       status: "active",
-      last_refreshed_at: null,
+      last_refreshed_at: expect.any(String),
       archived_at: null,
     });
     expect(res.body.settings).toMatchObject({
@@ -71,7 +73,9 @@ describe("/v1/sources", () => {
 
   it("records zeteo.source.created in the outbox without settings", async () => {
     const res = await create();
-    const rows = await auditRows(res.body.id);
+    const rows = (await auditRows(res.body.id)).filter(
+      (r) => r.payload.metadata.event === "zeteo.source.created"
+    );
     expect(rows).toHaveLength(1);
     expect(rows[0].payload).toMatchObject({
       action: "CREATE",
@@ -84,6 +88,40 @@ describe("/v1/sources", () => {
     });
     expect(JSON.stringify(rows[0].payload)).not.toContain("ro-test-password");
     expect(JSON.stringify(rows[0].payload)).not.toContain("zeteo_ro");
+  });
+
+  it("reads the schema after the row is committed, so the catalogue is filled when the 201 arrives", async () => {
+    const res = await create({ schemas: ["sales"] });
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe("active");
+    const tables = await get(`/${res.body.id}/tables`);
+    expect(tables.body.data).toHaveLength(5);
+    const events = (await auditRows(res.body.id)).map(
+      (r) => r.payload.metadata.event
+    );
+    expect(events).toEqual(["zeteo.source.created", "zeteo.source.refreshed"]);
+  });
+
+  it("answers 201 with status unreachable when the first refresh fails", async () => {
+    // The login check connects first and passes; the pool the refresh opens is refused.
+    const original = postgresAdapter.connect.bind(postgresAdapter);
+    let calls = 0;
+    const connect = vi
+      .spyOn(postgresAdapter, "connect")
+      .mockImplementation((...args) =>
+        ++calls === 1
+          ? original(...args)
+          : Promise.reject(new SourceUnreachableError())
+      );
+    try {
+      const res = await create({ schemas: ["sales"] });
+      expect(res.status).toBe(201);
+      expect(res.body.status).toBe("unreachable");
+      expect(res.body.last_refreshed_at).toBeNull();
+      expect((await get(`/${res.body.id}/tables`)).body.data).toEqual([]);
+    } finally {
+      connect.mockRestore();
+    }
   });
 
   it("answers 409 slug_taken for a duplicate slug", async () => {

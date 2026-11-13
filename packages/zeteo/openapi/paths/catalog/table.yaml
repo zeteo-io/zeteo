@@ -1,0 +1,65 @@
+/v1/sources/{sourceId}/tables/{tableId}:
+  get:
+    tags: [Catalogue]
+    summary: Get a table
+    description: |
+      A table with its columns (in position order) and the relations that start at it, including
+      declared ones and ones a refresh marked missing.
+
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+
+      **Errors:** `404 not_found` for an unknown table or one of another source.
+    operationId: getTable
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/TableIdParam'
+    responses:
+      '200':
+        description: The table
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/TableDetail'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Catalogue]
+    summary: Describe a table and its columns
+    description: |
+      Sets the table's description and the descriptions of named columns. A description is at
+      most 2000 characters; `null` clears it. A refresh never changes a description. An audit
+      entry `zeteo.source.updated` records the table and what changed.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request` (a description too long, a column the table does not
+      have, an empty body), `404 not_found`, `409 source_archived`.
+    operationId: patchTable
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/TableIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/catalog/schemas.yaml#/PatchTableRequest'
+    responses:
+      '200':
+        description: The table after the change
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/TableDetail'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }

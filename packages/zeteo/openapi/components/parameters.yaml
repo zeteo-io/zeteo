@@ -25,3 +25,17 @@ SourceIdParam:
   required: true
   description: The source's id. A value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
+
+TableIdParam:
+  name: tableId
+  in: path
+  required: true
+  description: The table's id, in the source named by the path. A table of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+RelationIdParam:
+  name: relationId
+  in: path
+  required: true
+  description: The relation's id, in the source named by the path. A relation of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

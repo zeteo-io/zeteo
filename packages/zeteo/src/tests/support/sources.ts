@@ -45,10 +45,24 @@ export const removeSources = async (ids: string[]) => {
 /**
  * Fixture settings the service can dial: `localhost` may resolve to ::1 first,
  * where the test server is not listening, and the service takes the first
- * allowed address.
+ * allowed address. Any other host (the compose service's name in Docker) is
+ * used as it is.
  */
 export const sourceSettings = (
   role: "ro" | "rw" | "owner" | "dbOwner",
   overrides: Partial<PostgresSettings> = {}
-): PostgresSettings =>
-  fixtureSettings(role, { host: "127.0.0.1", ...overrides });
+): PostgresSettings => {
+  const base = fixtureSettings(role);
+  return {
+    ...base,
+    host: base.host === "localhost" ? "127.0.0.1" : base.host,
+    ...overrides,
+  };
+};
+
+/** The audit rows of the relations with these ids, for cleanup. */
+export const removeAuditRows = async (ids: string[]) => {
+  for (const id of ids) {
+    await prisma.$executeRaw`DELETE FROM "core"."core_outbox" WHERE payload->>'entityId' = ${id}`;
+  }
+};
