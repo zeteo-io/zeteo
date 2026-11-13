@@ -57,9 +57,11 @@ services:
       PROVISIONING_PATH: /etc/tereo/provisioning
       TEREO_CLIENT_SECRET: ${E2E_ZETEO_CLIENT_SECRET:?}
       E2E_WEB_CLIENT_SECRET: ${E2E_WEB_CLIENT_SECRET:?}
+      E2E_APP_CLIENT_SECRET: ${E2E_APP_CLIENT_SECRET:?}
     volumes:
       - ../packages/zeteo/tereo-provisioning.json:/etc/tereo/provisioning/zeteo.json:ro
       - ./provisioning/e2e-clients.json:/etc/tereo/provisioning/e2e-clients.json:ro
+      - ./provisioning/e2e-app.json:/etc/tereo/provisioning/e2e-app.json:ro
       - tereo-storage:/app/storage
     ports:
       - "127.0.0.1:${E2E_TEREO_PORT:?}:4001"

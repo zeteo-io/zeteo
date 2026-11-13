@@ -1,0 +1,12 @@
+{
+  "version": "1.0.0",
+  "service": {
+    "slug": "e2e-app",
+    "name": "E2E app service",
+    "secretFrom": "E2E_APP_CLIENT_SECRET",
+    "access": {
+      "roles": ["zeteo/zeteo_admin"],
+      "audiences": ["zeteo"]
+    }
+  }
+}

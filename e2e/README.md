@@ -22,7 +22,7 @@ which waits out zeteo's 30 s group cache twice.
 
 | Service | What |
 |---------|------|
-| `tereo`, with `tereo-postgres`, `tereo-redis`, `tereo-migrate` | Tereo in development mode (its production mode refuses a loopback `http` issuer), set up unattended with `SETUP_TOKEN`, provisioned with `packages/zeteo/tereo-provisioning.json` and `e2e/provisioning/e2e-clients.json` |
+| `tereo`, with `tereo-postgres`, `tereo-redis`, `tereo-migrate` | Tereo in development mode (its production mode refuses a loopback `http` issuer), set up unattended with `SETUP_TOKEN`, provisioned with `packages/zeteo/tereo-provisioning.json`, `e2e/provisioning/e2e-clients.json` and `e2e/provisioning/e2e-app.json` |
 | `zeteo`, with `zeteo-postgres`, `zeteo-redis`, `zeteo-migrate` | zeteo's image in production mode, signed in to Tereo as the `zeteo` service, MCP on for `e2e-mcp`, `SOURCE_ALLOWED_HOSTS=source-pg` |
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
@@ -48,6 +48,8 @@ which waits out zeteo's 30 s group cache twice.
   `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
   them with `docker image rm ghcr.io/tereo-io/tereo:0.8.1 zeteo:e2e`, adding the base images only if
   nothing else uses them; `docker builder prune` drops the build cache of `zeteo:e2e`.
+- **The SDK**: before the tests start, the script builds `@zeteo-io/sdk`
+  (`npx nx run @zeteo-io/sdk:build`), which `sdk.e2e.test.ts` imports through the workspace link.
 
 Sign-in is scripted over HTTP, as Tereo's own tests do it: `GET /oauth/authorize`, the password
 step the login page posts, consent when the client asks for it, and the code exchange with PKCE
@@ -65,11 +67,18 @@ client, `zeteo`, with the run's `TEREO_CLIENT_SECRET`):
 | `e2e-other` | public | none | a token for another audience |
 | `tereo-ui` | Tereo's own | Tereo | the admin's calls to Tereo's admin API |
 
+## The calling app service
+
+`e2e/provisioning/e2e-app.json` provisions a second service, `e2e-app`, as an app that calls
+zeteo through `@zeteo-io/sdk` would be: `access.audiences: ["zeteo"]`, so zeteo accepts its token,
+and `access.roles: ["zeteo/zeteo_admin"]`. Its client id is its slug, its secret the run's
+`E2E_APP_CLIENT_SECRET`. It signs in with client credentials, as the SDK does.
+
 ## What it checks
 
 Users are created through Tereo's admin API: `alice` (role `zeteo_mcp_user`, granted tables
 herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) and `dave`
-(`zeteo_user`), plus the admin from setup.
+(`zeteo_user`), plus the admin from setup. `sdk.e2e.test.ts` adds `erin` (`zeteo_user`, no grant).
 
 | File | Case |
 |------|------|
@@ -78,6 +87,7 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 | `serviceToken.e2e.test.ts` | Tereo revokes zeteo's service token (revoking and re-approving one of its access rows); the next query's group lookup gets the 401, the SDK retries it with a new token and the query answers 200 |
 | `tls.e2e.test.ts` | `tls: verify` against the untrusted certificate is `502 source_unreachable`; the replica with `NODE_EXTRA_CA_CERTS` registers and queries the same source; `verify` with the CA in the source's `ca` setting works; `tls: require` works without trusting the CA |
 | `audit.e2e.test.ts` | A query's `zeteo.query.run` and an export's `zeteo.export.started` and `zeteo.export.run` reach Tereo's audit log through the outbox |
+| `sdk.e2e.test.ts` | `@zeteo-io/sdk` as `e2e-app` (a `@dianemo/core` handler on a memory backend): refused before any grant; with `zeteo_admin` grants its own account `orders` (the id from Tereo's `GET /v1/account/me` with the service's token), reads the grant, queries, deletes it; `withToken` queries as alice and is refused for erin, and the run log names each as the caller; `export.rows` read to the end agrees with its end line, `export.stream` as CSV starts with its header; `paginate` over the source's tables one per page finds all of them; `withToken` of an `e2e-other` token is a `ZeteoError` with status 401 |
 | `mcp.e2e.test.ts` | An unauthenticated `initialize` gets the 401 challenge naming the resource metadata, which names Tereo; a token from a client not in `MCP_ALLOWED_CLIENTS` is refused; a user signed in through `e2e-mcp`, found from the challenge as an MCP client finds it, lists the four tools and runs `query` |
 
 Some checks read the stack directly with `docker compose` (`e2e/support/compose.ts`): zeteo's log,

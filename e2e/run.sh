@@ -131,6 +131,7 @@ E2E_ZETEO_CA_PORT=$ZETEO_CA_PORT
 E2E_SETUP_TOKEN=$(hex 16)
 E2E_ZETEO_CLIENT_SECRET=tereo_sk_$(b64url 32)
 E2E_WEB_CLIENT_SECRET=tereo_sk_$(b64url 32)
+E2E_APP_CLIENT_SECRET=tereo_sk_$(b64url 32)
 E2E_ZETEO_MASTER_KEY=$(b64url 32)
 E2E_REQUEST_HANDLER_KEY=$(hex 32)
 E2E_SOURCE_READER_PASSWORD=$(hex 16)
@@ -159,6 +160,9 @@ export E2E_CA_CERT_PATH="$CERTS/ca.crt"
 E2E_COMPOSE_ARGS="$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- \
   -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")"
 export E2E_COMPOSE_ARGS
+
+log "Building @zeteo-io/sdk for the SDK's cases"
+(cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
 
 log "Running the tests"
 status=0
