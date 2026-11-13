@@ -1,0 +1,230 @@
+Path:
+  type: string
+  description: |
+    `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
+    its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+
+Alias:
+  type: string
+  pattern: '^[a-z][a-z0-9_]{0,62}$'
+  description: An output name for a select item
+
+Scalar:
+  oneOf:
+    - { type: string }
+    - { type: number }
+    - { type: boolean }
+  description: |
+    A value, checked against the column it is compared with: text a string; numbers a number or a
+    decimal string (`"9007199254740993"`, so 64-bit values lose nothing); booleans true or false;
+    dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`.
+
+SelectItem:
+  description: A column path, or one aggregate or date bucket with an optional `as`
+  oneOf:
+    - { $ref: '#/Path' }
+    - type: object
+      additionalProperties: false
+      required: [count]
+      properties:
+        count: { type: string, description: 'A path, or `"*"` to count rows' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [countDistinct]
+      properties:
+        countDistinct: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [sum]
+      properties:
+        sum: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [avg]
+      properties:
+        avg: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [min]
+      properties:
+        min: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [max]
+      properties:
+        max: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [bucket, column]
+      properties:
+        bucket: { type: string, enum: [day, week, month, quarter, year], description: Truncated in UTC; weeks start on Monday }
+        column: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+
+Filter:
+  type: object
+  description: |
+    One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
+    `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
+    `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between` (two values, inclusive), `in` and `notIn`
+    (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
+    `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+    a column with one of those names cannot be filtered on directly. In `having`, the keys are
+    the names of aggregate select items.
+  additionalProperties: true
+
+Query:
+  type: object
+  additionalProperties: false
+  required: [source, from, select]
+  description: A query in the SQL query language; see `docs/querying.md`
+  properties:
+    source: { type: string, minLength: 1, description: The source's slug }
+    from:
+      type: string
+      description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
+    join:
+      type: array
+      maxItems: 4
+      description: Relations to join, by name; one reached through another is written `customer.account`
+      items:
+        oneOf:
+          - { $ref: '#/Path' }
+          - type: object
+            additionalProperties: false
+            required: [relation]
+            properties:
+              relation: { $ref: '#/Path' }
+              type: { type: string, enum: [inner, left], default: inner }
+    select:
+      type: array
+      minItems: 1
+      maxItems: 50
+      items: { $ref: '#/SelectItem' }
+    distinct: { type: boolean }
+    where: { $ref: '#/Filter' }
+    groupBy:
+      type: array
+      maxItems: 50
+      description: Select items, by output name or column path; a query with an aggregate groups by every other item
+      items: { type: string }
+    having: { $ref: '#/Filter' }
+    orderBy:
+      type: array
+      maxItems: 50
+      description: |
+        Each entry one `{ "<name>": "asc" | "desc" }`, naming a select item or (in an ungrouped,
+        non-distinct query) a column. Nulls sort last ascending and first descending. Without
+        `orderBy` the rows are ordered by every select item ascending, so paging is stable.
+      items:
+        type: object
+        minProperties: 1
+        maxProperties: 1
+        additionalProperties: { type: string, enum: [asc, desc] }
+    limit:
+      type: integer
+      minimum: 1
+      description: Rows wanted; default 1,000. A value above the maximum (50,000, or the source's row cap when lower) is lowered to it, not refused
+    offset: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+
+QueryWarning:
+  type: object
+  required: [code, message, path]
+  properties:
+    code: { type: string, enum: [join_multiplies_rows] }
+    message: { type: string }
+    path:
+      type: array
+      items: { oneOf: [{ type: string }, { type: integer }] }
+
+QueryResult:
+  type: object
+  required: [columns, rows, truncated, warnings, run_id]
+  properties:
+    columns:
+      type: array
+      description: The result's columns, in the order of `select`
+      items:
+        type: object
+        required: [name, type]
+        properties:
+          name:
+            type: string
+            description: The item's `as`, the column path, or a name made from the aggregate and column (`sum_total`, `count`)
+          type: { $ref: '../catalog/schemas.yaml#/ColumnType' }
+    rows:
+      type: array
+      description: |
+        Each row an array of values in the order of `columns`, in their wire forms: 32-bit integers
+        and floats as numbers (float `NaN` and infinities as strings); 64-bit integers and decimals
+        as strings; `count` and `countDistinct` as strings, `sum` as a string over integers and
+        decimals and a number over floats, `avg` as a number; dates `YYYY-MM-DD`; timestamps ISO 8601
+        in UTC with milliseconds; json as JSON.
+      items:
+        type: array
+        items: {}
+    truncated: { type: boolean, description: Rows were left out }
+    truncated_by:
+      type: string
+      enum: [rows, bytes]
+      description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB)
+    warnings:
+      type: array
+      items: { $ref: '#/QueryWarning' }
+    run_id: { type: string, format: uuid, description: The run's id in the run log }
+
+QueryError:
+  type: object
+  description: A query that is well formed but cannot be run as written
+  required: [error, error_description, path, suggestions]
+  properties:
+    error:
+      type: string
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing]
+    error_description: { type: string }
+    path:
+      type: array
+      description: Where in the query the problem is, keys and array indexes from the root
+      items: { oneOf: [{ type: string }, { type: integer }] }
+    suggestions:
+      type: array
+      maxItems: 3
+      description: The closest names the caller can see, closest first
+      items: { type: string }
+
+RunOutcome:
+  type: string
+  enum: [ok, refused, failed, timeout]
+  description: '`refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error'
+
+Run:
+  type: object
+  description: One query, as it was recorded
+  required: [id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code, truncated, created_at]
+  properties:
+    id: { type: string, format: uuid }
+    user_id: { type: string, format: uuid }
+    source_id: { type: [string, 'null'], format: uuid, description: Null when the query named no source the caller could see }
+    entry_point: { type: string, enum: [api, mcp, export] }
+    query: { description: The query as it was sent }
+    duration_ms: { type: integer }
+    row_count: { type: [integer, 'null'], description: Rows returned; null unless the run succeeded }
+    outcome: { $ref: '#/RunOutcome' }
+    error_code: { type: [string, 'null'], description: 'The error answered; `client_closed` when the client went away first' }
+    truncated: { type: boolean }
+    created_at: { type: string, format: date-time }
+
+ListRunsResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Run' }
+    next_cursor: { type: [string, 'null'] }

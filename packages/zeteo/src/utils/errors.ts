@@ -214,15 +214,17 @@ export class ConflictError extends AppError {
 }
 
 /**
- * Every rate-limit refusal: `too_many_requests`, with the seconds to wait in
- * both the `Retry-After` header and the body's `retry_after`.
+ * Every rate-limit refusal, `too_many_requests` unless a narrower code says
+ * which limit, with the seconds to wait in both the `Retry-After` header and
+ * the body's `retry_after`.
  */
 export class TooManyRequestsError extends AppError {
   constructor(
     public retryAfter: number,
-    message = "Rate limit exceeded. Please try again later."
+    message = "Rate limit exceeded. Please try again later.",
+    code = "too_many_requests"
   ) {
-    super(429, "too_many_requests", message, {
+    super(429, code, message, {
       details: { retry_after: retryAfter },
       headers: { "Retry-After": retryAfter },
     });

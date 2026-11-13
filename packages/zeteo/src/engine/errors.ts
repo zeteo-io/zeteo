@@ -71,6 +71,7 @@ const closest = (name: string, candidates: readonly string[]): string[] => {
 };
 
 const KIND_LABEL = {
+  source: "Source",
   table: "Table",
   relation: "Relation",
   column: "Column",

@@ -41,6 +41,13 @@ info:
     replacing and removing them needs `zeteo.grants.write`, which includes read. See
     `docs/grants.md`.
 
+    ## Queries
+
+    `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
+    Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
+    `docs/querying.md`.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -66,6 +73,8 @@ tags:
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
     description: Which users and groups may query which tables and columns
+  - name: Queries
+    description: Running queries over granted tables and columns, and the record of every run
   - name: Platform
     description: Health
 paths:
@@ -872,6 +881,170 @@ paths:
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/query:
+    post:
+      tags:
+        - Queries
+      summary: Run a query
+      description: |
+        Runs a query over the tables and columns the caller is granted, directly or through a
+        group, and answers its rows. A table, column, relation or source the caller is not granted
+        is refused exactly as one that does not exist: `422 not_found_or_not_accessible`, with the
+        same message, path and suggestions, which are drawn only from names the caller can see.
+
+        The body must be an object with a `source`; a source the caller cannot see is refused
+        before the rest of the body is read. Every query past that check is recorded in the run
+        log with a `zeteo.query.run` audit entry, refused and failed ones included; rows are sent
+        only once their run is recorded. A client that disconnects stops its query on the source.
+
+        Limits: 1,000 rows unless `limit` says otherwise, at most 50,000 or the source's row cap;
+        10 MB of rows; the source's time limit; two queries at once per user and five per source.
+        The response says when rows were left out. See `docs/querying.md`.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: runQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Query'
+            example:
+              source: sales-db
+              from: orders
+              join:
+                - customer
+              select:
+                - customer.region
+                - bucket: month
+                  column: created_at
+                  as: month
+                - sum: total
+                  as: revenue
+              where:
+                status:
+                  in:
+                    - paid
+                    - shipped
+              groupBy:
+                - customer.region
+                - month
+              having:
+                revenue:
+                  gt: 1000
+              orderBy:
+                - revenue: desc
+              limit: 1000
+      responses:
+        '200':
+          description: The rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResult'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          description: Conflict - `source_archived`, the source was archived while the query ran
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: |
+            The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
+            for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
+            `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
+            `duplicate_output_name`, `join_parent_missing`; or `source_type_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: |
+            Too many queries - `too_many_queries` (the caller already has two running) or
+            `source_busy` (the source already has five); retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: |
+            Bad gateway - `query_failed` (the source could not run the query) or
+            `source_unreachable`. The database's own error text is never returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+        '504':
+          description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/runs:
+    get:
+      tags:
+        - Queries
+      summary: List query runs
+      description: |
+        The run log, newest first: every query past the shape check, from any entry point, with
+        its outcome. A run holds the query as sent, never its rows.
+
+        **Required permissions:** `zeteo.runs.read` (`403 forbidden` without).
+      operationId: listRuns
+      parameters:
+        - name: user_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: source_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: outcome
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RunOutcome'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRunsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -1847,6 +2020,269 @@ components:
               const: false
             column_ids:
               $ref: '#/components/schemas/GrantColumnIds'
+    Query:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - from
+        - select
+      description: A query in the SQL query language; see `docs/querying.md`
+      properties:
+        source:
+          type: string
+          minLength: 1
+          description: The source's slug
+        from:
+          type: string
+          description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
+        join:
+          type: array
+          maxItems: 4
+          description: Relations to join, by name; one reached through another is written `customer.account`
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/Path'
+              - type: object
+                additionalProperties: false
+                required:
+                  - relation
+                properties:
+                  relation:
+                    $ref: '#/components/schemas/Path'
+                  type:
+                    type: string
+                    enum:
+                      - inner
+                      - left
+                    default: inner
+        select:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/SelectItem'
+        distinct:
+          type: boolean
+        where:
+          $ref: '#/components/schemas/Filter'
+        groupBy:
+          type: array
+          maxItems: 50
+          description: Select items, by output name or column path; a query with an aggregate groups by every other item
+          items:
+            type: string
+        having:
+          $ref: '#/components/schemas/Filter'
+        orderBy:
+          type: array
+          maxItems: 50
+          description: |
+            Each entry one `{ "<name>": "asc" | "desc" }`, naming a select item or (in an ungrouped,
+            non-distinct query) a column. Nulls sort last ascending and first descending. Without
+            `orderBy` the rows are ordered by every select item ascending, so paging is stable.
+          items:
+            type: object
+            minProperties: 1
+            maxProperties: 1
+            additionalProperties:
+              type: string
+              enum:
+                - asc
+                - desc
+        limit:
+          type: integer
+          minimum: 1
+          description: Rows wanted; default 1,000. A value above the maximum (50,000, or the source's row cap when lower) is lowered to it, not refused
+        offset:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          default: 0
+    QueryResult:
+      type: object
+      required:
+        - columns
+        - rows
+        - truncated
+        - warnings
+        - run_id
+      properties:
+        columns:
+          type: array
+          description: The result's columns, in the order of `select`
+          items:
+            type: object
+            required:
+              - name
+              - type
+            properties:
+              name:
+                type: string
+                description: The item's `as`, the column path, or a name made from the aggregate and column (`sum_total`, `count`)
+              type:
+                $ref: '#/components/schemas/ColumnType'
+        rows:
+          type: array
+          description: |
+            Each row an array of values in the order of `columns`, in their wire forms: 32-bit integers
+            and floats as numbers (float `NaN` and infinities as strings); 64-bit integers and decimals
+            as strings; `count` and `countDistinct` as strings, `sum` as a string over integers and
+            decimals and a number over floats, `avg` as a number; dates `YYYY-MM-DD`; timestamps ISO 8601
+            in UTC with milliseconds; json as JSON.
+          items:
+            type: array
+            items: {}
+        truncated:
+          type: boolean
+          description: Rows were left out
+        truncated_by:
+          type: string
+          enum:
+            - rows
+            - bytes
+          description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB)
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryWarning'
+        run_id:
+          type: string
+          format: uuid
+          description: The run's id in the run log
+    QueryError:
+      type: object
+      description: A query that is well formed but cannot be run as written
+      required:
+        - error
+        - error_description
+        - path
+        - suggestions
+      properties:
+        error:
+          type: string
+          enum:
+            - not_found_or_not_accessible
+            - missing_in_source
+            - column_not_queryable
+            - invalid_operator
+            - invalid_value
+            - invalid_grouping
+            - invalid_order
+            - invalid_having
+            - duplicate_output_name
+            - join_parent_missing
+        error_description:
+          type: string
+        path:
+          type: array
+          description: Where in the query the problem is, keys and array indexes from the root
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+        suggestions:
+          type: array
+          maxItems: 3
+          description: The closest names the caller can see, closest first
+          items:
+            type: string
+    QueryWarning:
+      type: object
+      required:
+        - code
+        - message
+        - path
+      properties:
+        code:
+          type: string
+          enum:
+            - join_multiplies_rows
+        message:
+          type: string
+        path:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: integer
+    RunOutcome:
+      type: string
+      enum:
+        - ok
+        - refused
+        - failed
+        - timeout
+      description: '`refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error'
+    Run:
+      type: object
+      description: One query, as it was recorded
+      required:
+        - id
+        - user_id
+        - source_id
+        - entry_point
+        - query
+        - duration_ms
+        - row_count
+        - outcome
+        - error_code
+        - truncated
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        user_id:
+          type: string
+          format: uuid
+        source_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: Null when the query named no source the caller could see
+        entry_point:
+          type: string
+          enum:
+            - api
+            - mcp
+            - export
+        query:
+          description: The query as it was sent
+        duration_ms:
+          type: integer
+        row_count:
+          type:
+            - integer
+            - 'null'
+          description: Rows returned; null unless the run succeeded
+        outcome:
+          $ref: '#/components/schemas/RunOutcome'
+        error_code:
+          type:
+            - string
+            - 'null'
+          description: The error answered; `client_closed` when the client went away first
+        truncated:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    ListRunsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+        next_cursor:
+          type:
+            - string
+            - 'null'
     GrantColumnIds:
       type: array
       minItems: 1
@@ -1856,6 +2292,104 @@ components:
         type: string
         format: uuid
       description: Columns of the grant's table
+    Path:
+      type: string
+      description: |
+        `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
+        its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+    Alias:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,62}$
+      description: An output name for a select item
+    SelectItem:
+      description: A column path, or one aggregate or date bucket with an optional `as`
+      oneOf:
+        - $ref: '#/components/schemas/Path'
+        - type: object
+          additionalProperties: false
+          required:
+            - count
+          properties:
+            count:
+              type: string
+              description: A path, or `"*"` to count rows
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - countDistinct
+          properties:
+            countDistinct:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - sum
+          properties:
+            sum:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - avg
+          properties:
+            avg:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - min
+          properties:
+            min:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - max
+          properties:
+            max:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - bucket
+            - column
+          properties:
+            bucket:
+              type: string
+              enum:
+                - day
+                - week
+                - month
+                - quarter
+                - year
+              description: Truncated in UTC; weeks start on Monday
+            column:
+              $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+    Filter:
+      type: object
+      description: |
+        One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
+        `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
+        `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between` (two values, inclusive), `in` and `notIn`
+        (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
+        `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+        a column with one of those names cannot be filtered on directly. In `having`, the keys are
+        the names of aggregate select items.
+      additionalProperties: true
 x-tagGroups:
   - name: Sources
     tags:
@@ -1864,6 +2398,9 @@ x-tagGroups:
   - name: Access
     tags:
       - Grants
+  - name: Querying
+    tags:
+      - Queries
   - name: Platform
     tags:
       - Platform

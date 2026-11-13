@@ -4,7 +4,7 @@ import type {
   RunOutcome,
 } from "../../../prisma/generated/client/index.js";
 
-/** One page in `id` order (creation order), starting after the `cursor` id; `hasMore` says whether another page follows. */
+/** One page newest first (ids are time-ordered), starting after the `cursor` id; `hasMore` says whether another page follows. */
 export const listPage = async (options: {
   userId?: string;
   sourceId?: string;
@@ -18,9 +18,9 @@ export const listPage = async (options: {
       ...(userId && { userId }),
       ...(sourceId && { sourceId }),
       ...(outcome && { outcome }),
-      ...(cursor && { id: { gt: cursor } }),
+      ...(cursor && { id: { lt: cursor } }),
     },
-    orderBy: { id: "asc" },
+    orderBy: { id: "desc" },
     take: limit + 1,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };

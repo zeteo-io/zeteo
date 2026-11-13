@@ -172,11 +172,12 @@ describe("grants and query runs", () => {
           outcome,
         },
       });
-    await run("ok");
-    await run("refused");
+    const older = await run("ok");
+    const newer = await run("refused");
     await run("ok", randomUUID());
     const mine = await db.queryRuns.listPage({ userId, limit: 10 });
-    expect(mine.rows).toHaveLength(2);
+    // Newest first.
+    expect(mine.rows.map((r) => r.id)).toEqual([newer.id, older.id]);
     const refused = await db.queryRuns.listPage({
       sourceId,
       outcome: "refused",
@@ -190,7 +191,7 @@ describe("grants and query runs", () => {
       limit: 5,
       cursor: first.rows[0]!.id,
     });
-    expect(next.rows).toHaveLength(2);
+    expect(next.rows.map((r) => r.id)).toEqual([newer.id, older.id]);
     expect(mine.rows[0]!.truncated).toBe(false);
   });
 });

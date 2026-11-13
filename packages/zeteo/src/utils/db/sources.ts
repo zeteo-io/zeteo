@@ -42,3 +42,12 @@ export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
       { id: "asc" },
     ],
   });
+
+/** The slugs of the unarchived sources among `ids`. */
+export const listSlugs = async (ids: Iterable<string>): Promise<string[]> =>
+  (
+    await prisma.source.findMany({
+      where: { id: { in: [...ids] }, archivedAt: null },
+      select: { slug: true },
+    })
+  ).map((s) => s.slug);

@@ -1,0 +1,95 @@
+/v1/query:
+  post:
+    tags: [Queries]
+    summary: Run a query
+    description: |
+      Runs a query over the tables and columns the caller is granted, directly or through a
+      group, and answers its rows. A table, column, relation or source the caller is not granted
+      is refused exactly as one that does not exist: `422 not_found_or_not_accessible`, with the
+      same message, path and suggestions, which are drawn only from names the caller can see.
+
+      The body must be an object with a `source`; a source the caller cannot see is refused
+      before the rest of the body is read. Every query past that check is recorded in the run
+      log with a `zeteo.query.run` audit entry, refused and failed ones included; rows are sent
+      only once their run is recorded. A client that disconnects stops its query on the source.
+
+      Limits: 1,000 rows unless `limit` says otherwise, at most 50,000 or the source's row cap;
+      10 MB of rows; the source's time limit; two queries at once per user and five per source.
+      The response says when rows were left out. See `docs/querying.md`.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: runQuery
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/queries/schemas.yaml#/Query'
+          example:
+            source: sales-db
+            from: orders
+            join: [customer]
+            select:
+              - customer.region
+              - { bucket: month, column: created_at, as: month }
+              - { sum: total, as: revenue }
+            where: { status: { in: [paid, shipped] } }
+            groupBy: [customer.region, month]
+            having: { revenue: { gt: 1000 } }
+            orderBy: [{ revenue: desc }]
+            limit: 1000
+    responses:
+      '200':
+        description: The rows
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryResult'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '409':
+        description: Conflict - `source_archived`, the source was archived while the query ran
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: |
+          The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
+          for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
+          `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
+          `duplicate_output_name`, `join_parent_missing`; or `source_type_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '429':
+        description: |
+          Too many queries - `too_many_queries` (the caller already has two running) or
+          `source_busy` (the source already has five); retry after `Retry-After`
+        headers:
+          Retry-After:
+            description: Seconds to wait before retrying
+            schema: { type: integer }
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: |
+          Bad gateway - `query_failed` (the source could not run the query) or
+          `source_unreachable`. The database's own error text is never returned.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '504':
+        description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

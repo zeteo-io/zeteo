@@ -41,6 +41,13 @@ info:
     replacing and removing them needs `zeteo.grants.write`, which includes read. See
     `docs/grants.md`.
 
+    ## Queries
+
+    `POST /v1/query` runs a query in the SQL query language over what the caller is granted
+    (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
+    Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
+    `docs/querying.md`.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -66,6 +73,8 @@ tags:
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
     description: Which users and groups may query which tables and columns
+  - name: Queries
+    description: Running queries over granted tables and columns, and the record of every run
   - name: Platform
     description: Health
 x-tagGroups:
@@ -73,6 +82,8 @@ x-tagGroups:
     tags: [Sources, Catalogue]
   - name: Access
     tags: [Grants]
+  - name: Querying
+    tags: [Queries]
   - name: Platform
     tags: [Platform]
 paths:
@@ -100,6 +111,10 @@ paths:
     $ref: './paths/grants/grants.yaml#/~1v1~1grants'
   /v1/grants/{grantId}:
     $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
+  /v1/query:
+    $ref: './paths/queries/query.yaml#/~1v1~1query'
+  /v1/runs:
+    $ref: './paths/queries/runs.yaml#/~1v1~1runs'
 components:
   securitySchemes:
     BearerAuth:
@@ -187,3 +202,17 @@ components:
       $ref: './components/grants/schemas.yaml#/CreateGrantRequest'
     ReplaceGrantRequest:
       $ref: './components/grants/schemas.yaml#/ReplaceGrantRequest'
+    Query:
+      $ref: './components/queries/schemas.yaml#/Query'
+    QueryResult:
+      $ref: './components/queries/schemas.yaml#/QueryResult'
+    QueryError:
+      $ref: './components/queries/schemas.yaml#/QueryError'
+    QueryWarning:
+      $ref: './components/queries/schemas.yaml#/QueryWarning'
+    RunOutcome:
+      $ref: './components/queries/schemas.yaml#/RunOutcome'
+    Run:
+      $ref: './components/queries/schemas.yaml#/Run'
+    ListRunsResponse:
+      $ref: './components/queries/schemas.yaml#/ListRunsResponse'
