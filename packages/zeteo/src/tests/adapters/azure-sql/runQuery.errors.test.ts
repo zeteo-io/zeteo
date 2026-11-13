@@ -7,6 +7,7 @@ import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { QueryError } from "../../../engine/errors.js";
+import { logger } from "../../../utils/logger.js";
 import { runPlan } from "../../support/runPlan.js";
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
@@ -355,6 +356,42 @@ describe("azure-sql runQuery: safety", () => {
     } as never);
     const err = await failureOf(run({ from: "accounts", select: ["id"] }));
     expect(err).toBeInstanceOf(SourceUnreachableError);
+  });
+
+  it("logs once, at warn, a driver error that came just before the run was stopped", async () => {
+    const controller = new AbortController();
+    const reason = new Error("client went away");
+    const driverError = new sql.RequestError("Deadlock victim", "EREQUEST");
+    vi.spyOn(sql.Request.prototype, "cancel").mockReturnValue(true);
+    vi.spyOn(sql.Request.prototype, "query").mockImplementation(function (
+      this: sql.Request,
+      _text: unknown,
+      callback?: unknown
+    ) {
+      setImmediate(() => {
+        this.emit("error", driverError);
+        controller.abort(reason);
+        (callback as () => void)();
+      });
+      return this;
+    } as never);
+    const warn = vi.spyOn(logger, "warn");
+    const err = await failureOf(
+      runPlan(
+        "azure-sql",
+        runs.connection(),
+        plan({ from: "accounts", select: ["id"] }),
+        LIMITS,
+        controller.signal
+      )
+    );
+    expect(err).toBe(reason);
+    const logged = warn.mock.calls.filter(
+      ([context]) => (context as { err?: unknown }).err === driverError
+    );
+    expect(logged).toEqual([
+      [{ err: driverError }, "source query failed just before it was stopped"],
+    ]);
   });
 
   it("times out, and drops the connection, when the server never acknowledges the cancel", async () => {

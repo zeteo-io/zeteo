@@ -435,7 +435,17 @@ export const openAzureSqlQuery = async (
   // request and has released its connection; errors come as events.
   request.query(text, () => {
     settled = true;
-    if (stop) endError = stopError(stop);
+    if (stop) {
+      // The run ends as it was stopped; a failure that came first is only
+      // logged, as it would otherwise go nowhere.
+      if (driverError !== undefined) {
+        logger.warn(
+          { err: driverError },
+          "source query failed just before it was stopped"
+        );
+      }
+      endError = stopError(stop);
+    }
     // A run whose time ran out while it waited for a connection timed out,
     // however the pool reports it.
     else if (
