@@ -19,6 +19,34 @@ const DRAIN_TIMEOUT_MS = env.SHUTDOWN_TIMEOUT_SECONDS * 1000;
 // cut off, so they get only a moment more within what is left of the grace.
 const SOURCE_POOL_DRAIN_MS = 2_000;
 
+/** Runs one named shutdown step, logging and keeping its failure rather than throwing it. */
+export type ShutdownStep = (
+  name: string,
+  run: () => Promise<void>
+) => Promise<void>;
+
+/**
+ * The first steps of a shutdown, in this order: every running export is
+ * stopped at once, recorded as shutting down and its connection cut; then
+ * HTTP drains within `drainMs`. An export may stream for ten minutes, which
+ * no drain fits, so stopping exports first is what lets the drain end in
+ * time. Draining before anything is torn down keeps handlers from failing
+ * with "pool ended" or "client closed" mid-flight.
+ */
+export const drainRequests = async (
+  step: ShutdownStep,
+  server: Server | null,
+  drainMs: number
+): Promise<void> => {
+  await step("exports", async () => abortExports());
+  if (server) {
+    await step("http", async () => {
+      await closeHttpServer(server, drainMs);
+      logger.info("HTTP server closed");
+    });
+  }
+};
+
 export interface ServerInstance {
   start: () => Promise<void>;
   stop: () => Promise<void>;
@@ -82,7 +110,7 @@ export function createAppServer(
         // Every step runs even if an earlier one fails, so a failed start
         // or a broken step still releases Redis and the database.
         const failures: unknown[] = [];
-        const step = async (name: string, run: () => Promise<void>) => {
+        const step: ShutdownStep = async (name, run) => {
           try {
             await run();
           } catch (err) {
@@ -91,20 +119,9 @@ export function createAppServer(
           }
         };
 
-        // Running exports would hold the drain for up to their time limit:
-        // each is stopped at once, recorded as shutting down, and its
-        // connection cut.
-        await step("exports", async () => abortExports());
-        // Drain HTTP before tearing anything down: handlers would otherwise
-        // throw "pool ended" / "client closed" mid-flight.
-        if (server) {
-          const closing = server;
-          server = null;
-          await step("http", async () => {
-            await closeHttpServer(closing, DRAIN_TIMEOUT_MS);
-            logger.info("HTTP server closed");
-          });
-        }
+        const closing = server;
+        server = null;
+        await drainRequests(step, closing, DRAIN_TIMEOUT_MS);
         await step("refresh job", async () => {
           await stopRefreshJob?.();
           stopRefreshJob = null;

@@ -201,13 +201,14 @@ const recordEnd = async (
  * refusal is. After it, a rejection means the stream must be cut: the export
  * is recorded as failed (`client_closed`, `shutting_down` or the error's
  * code) or as a timeout. The time limit covers the whole export, time the
- * sink takes to accept rows included. `options.timeoutMs` shortens it, for
+ * sink takes to accept rows included. `options.timeoutMs` shortens it, and
+ * `options.leaseMs` the leases' period (renewed a third of it apart), for
  * tests.
  */
 export const runExport = async (
   input: RunExportInput,
   sink: ExportSink,
-  options: { timeoutMs?: number } = {}
+  options: { timeoutMs?: number; leaseMs?: number } = {}
 ): Promise<void> => {
   const slug = sourceSlugOf(input.body);
   // Not recorded: the service is stopping, not refusing the export.
@@ -215,6 +216,8 @@ export const runExport = async (
   const began = performance.now();
   const elapsed = () => Math.round(performance.now() - began);
   const timeoutMs = options.timeoutMs ?? EXPORT_TIMEOUT_MS;
+  const leaseMs = options.leaseMs ?? EXPORT_LEASE_MS;
+  const renewMs = (leaseMs * EXPORT_LEASE_RENEW_MS) / EXPORT_LEASE_MS;
   const progress: Progress = { sourceId: null, unrecorded: false };
 
   // The run's own signal: the caller's, the deadline and shutdown each abort
@@ -311,13 +314,10 @@ export const runExport = async (
     const leases = await acquireExportLeases(
       input.caller.userId,
       source,
-      EXPORT_LEASE_MS,
+      leaseMs,
       ownLimits
     );
-    const renewal = setInterval(
-      () => void leases.renew(EXPORT_LEASE_MS),
-      EXPORT_LEASE_RENEW_MS
-    );
+    const renewal = setInterval(() => void leases.renew(leaseMs), renewMs);
     let tail: Parameters<ExportSink["end"]>[0];
     try {
       tail = await withSourceConnection(source.id, async (conn) => {

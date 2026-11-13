@@ -4,13 +4,13 @@
 import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { constants, gunzipSync } from "node:zlib";
 import type { IncomingMessage } from "node:http";
 import {
   endSessionsReading,
   eventually,
   newExportUser,
   openExport,
-  readExport,
 } from "../../../support/exports.js";
 import {
   grantTo,
@@ -28,6 +28,18 @@ const firstChunk = (res: IncomingMessage) =>
       res.pause();
       resolve(chunk);
     });
+  });
+
+/** Reads `res` (after `first`, when given) until it ends or fails, keeping what came. */
+const readUntilCut = (res: IncomingMessage, first: Buffer | null) =>
+  new Promise<{ raw: Buffer; err: unknown }>((resolve) => {
+    const chunks: Buffer[] = first ? [first] : [];
+    const done = (err?: unknown) =>
+      resolve({ raw: Buffer.concat(chunks), err });
+    res.on("data", (chunk: Buffer) => chunks.push(chunk));
+    res.once("error", done);
+    res.once("end", () => done());
+    res.resume();
   });
 
 describeEachEngine("POST /v1/export", (engine) => {
@@ -102,27 +114,40 @@ describeEachEngine("POST /v1/export", (engine) => {
   });
 
   it.each([
-    ["without gzip", undefined],
-    ["with gzip", "gzip"],
+    ["csv", "without gzip", undefined],
+    ["csv", "with gzip", "gzip"],
+    ["ndjson", "without gzip", undefined],
+    ["ndjson", "with gzip", "gzip"],
   ])(
-    "fails the client's read, with no final chunk, when the source drops the connection mid-stream (%s)",
-    async (_, acceptEncoding) => {
+    "fails the client's read, with no final chunk, tail line or trailers, when the source drops the connection mid-stream (%s, %s)",
+    async (format, _, acceptEncoding) => {
       const user = await exportUser();
       const res = await openExport({
         token: user.token,
         body: trickle(),
-        search: "format=csv",
+        search: `format=${format}`,
         acceptEncoding,
       });
       expect(res.statusCode).toBe(200);
       expect(res.headers["content-encoding"]).toBe(acceptEncoding);
       // Unflushed, a gzip stream has sent nothing yet but its headers.
-      if (acceptEncoding === undefined) await firstChunk(res);
+      const first = acceptEncoding === undefined ? await firstChunk(res) : null;
       await statementRunning();
       expect(await endSessionsReading(engine, "trickle")).toBeGreaterThan(0);
-      res.resume();
-      await expect(readExport(res)).rejects.toThrow();
+      const { raw, err } = await readUntilCut(res, first);
+      expect(err).toBeInstanceOf(Error);
       expect(res.trailers).toEqual({});
+      // What arrived before the cut, decoded as far as it goes.
+      const text = (
+        acceptEncoding === "gzip"
+          ? gunzipSync(raw, { finishFlush: constants.Z_SYNC_FLUSH })
+          : raw
+      ).toString("utf8");
+      if (format === "ndjson" && acceptEncoding === undefined) {
+        expect(text).toContain('"columns"');
+      }
+      expect(text).not.toContain('"status"');
+      expect(text).not.toContain("complete");
 
       const run = await endedRun(user.id);
       expect(run.outcome).toBe("failed");

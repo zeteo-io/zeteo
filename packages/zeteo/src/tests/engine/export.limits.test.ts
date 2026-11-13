@@ -41,6 +41,13 @@ describeEachEngine("runExport", (engine) => {
       "export"
     );
   });
+  const callerOf = (userId: string) => ({
+    userId,
+    organizationId: null,
+    permissions: [DATA_READ, DATA_EXPORT],
+    isServiceAccount: false,
+  });
+
   afterAll(async () => {
     await closeAllSourcePools();
     await removeRunsOf(users);
@@ -74,12 +81,7 @@ describeEachEngine("runExport", (engine) => {
     };
     await runExport(
       {
-        caller: {
-          userId: user.id,
-          organizationId: null,
-          permissions: [DATA_READ, DATA_EXPORT],
-          isServiceAccount: false,
-        },
+        caller: callerOf(user.id),
         body: {
           source: source.slug,
           from: "huge_rows",
@@ -100,6 +102,54 @@ describeEachEngine("runExport", (engine) => {
       expect(queuedBytes.highWater()).toBeLessThanOrEqual(
         HIGH_WATER_BYTES + ROW
       );
+    }
+  });
+
+  it("still holds its slots past its first lease period, renewing them while it runs", async () => {
+    const user = newQueryUser();
+    users.push(user.id);
+    await grantTo(user.principal, source.tables.customers!, "all");
+    const caller = callerOf(user.id);
+    const userLimits = { queryConcurrency: 5, exportConcurrency: 1 };
+    const body = { source: source.slug, from: "customers", select: ["id"] };
+    const LEASE_MS = 600;
+    let reached!: () => void;
+    const inRows = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = runExport(
+      { caller, body, signal: new AbortController().signal, userLimits },
+      {
+        start: async () => undefined,
+        rows: async () => {
+          reached();
+          await released;
+        },
+        end: async () => undefined,
+      },
+      { leaseMs: LEASE_MS }
+    );
+    try {
+      await inRows;
+      // Three lease periods: a lease not renewed would have lapsed twice.
+      await new Promise((resolve) => setTimeout(resolve, 3 * LEASE_MS));
+      await expect(
+        runExport(
+          { caller, body, signal: new AbortController().signal, userLimits },
+          {
+            start: async () => undefined,
+            rows: async () => undefined,
+            end: async () => undefined,
+          }
+        )
+      ).rejects.toMatchObject({ statusCode: 429, code: "too_many_exports" });
+    } finally {
+      release();
+      await first;
     }
   });
 });

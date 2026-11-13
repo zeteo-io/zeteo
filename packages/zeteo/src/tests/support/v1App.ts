@@ -17,6 +17,7 @@ export const startV1App = async (v1Router: Router) => {
   const url = `http://localhost:${(server.address() as { port: number }).port}`;
   return {
     url,
+    server,
     close: () =>
       new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
@@ -35,6 +36,7 @@ export const startV1Routes = async () => {
   const app = await startV1App(v1Router);
   return {
     url: app.url,
+    server: app.server,
     close: async () => {
       await app.close();
       await stopTereo();
