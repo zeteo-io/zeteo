@@ -24,6 +24,8 @@ export const azureSqlSettingsSchema = z.strictObject({
 export type AzureSqlSettings = z.infer<typeof azureSqlSettingsSchema>;
 
 export const APPLICATION_NAME = "zeteo";
+/** How long a cancelled request waits for the server's acknowledgement before its connection is closed. */
+export const CANCEL_TIMEOUT_MS = 2000;
 
 /** What tedious passes its `connector`: the server and port it means to reach. */
 interface ConnectorOptions {
@@ -110,7 +112,12 @@ export const toMssqlConfig = (
   password: settings.password,
   connectionTimeout: options.connectTimeoutMs,
   requestTimeout: options.queryTimeoutMs,
-  pool: { max: options.poolSize, min: 0 },
+  // Waiting for a free connection is bounded like connecting.
+  pool: {
+    max: options.poolSize,
+    min: 0,
+    acquireTimeoutMillis: options.connectTimeoutMs,
+  },
   options: {
     // The pool copies these into tedious's options: an explicit port, so the
     // driver never looks an instance up, and encryption always on.
@@ -118,6 +125,17 @@ export const toMssqlConfig = (
     encrypt: true,
     trustServerCertificate: settings.tls === "trust-server-certificate",
     appName: APPLICATION_NAME,
+    // Dates and times read as UTC, never in the process's zone.
+    useUTC: true,
+    // A cancel the server does not acknowledge in time closes the connection,
+    // which the pool then discards, rather than leave it mid-result.
+    cancelTimeout: CANCEL_TIMEOUT_MS,
+    // Set on every new connection, whatever the server's or login's defaults:
+    // without them an overflow or a division by zero yields NULL instead of
+    // failing, and `= NULL` matches.
+    enableAnsiNull: true,
+    enableAnsiWarnings: true,
+    enableArithAbort: true,
     connector: connectorTo(
       target,
       settings.port

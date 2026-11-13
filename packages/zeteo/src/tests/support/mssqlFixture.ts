@@ -17,10 +17,11 @@ export const MSSQL_FIXTURE_LOGINS = {
 
 export const DEFAULT_TEST_MSSQL_URL = "mssql://sa:Zeteo-test-1@localhost:1463";
 
-const FIXTURE_SQL = path.resolve(
+const FIXTURES = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
-  "../fixtures/mssql/sales.sql"
+  "../fixtures/mssql"
 );
+const FIXTURE_FILES = ["sales.sql", "probe.sql"];
 
 /** The test SQL Server, from `TEST_MSSQL_URL`. */
 export const mssqlServer = () => {
@@ -106,6 +107,21 @@ const adminPool = async (database: string) => {
   return pool.connect();
 };
 
+/** The rows of one query run as the server's administrator in the fixture database, with `@p0`, `@p1`… bound to `values`. */
+export const queryMssqlAdmin = async <T>(
+  text: string,
+  values: (string | number)[] = []
+): Promise<T[]> => {
+  const pool = await adminPool(MSSQL_FIXTURE_DATABASE);
+  try {
+    const request = pool.request();
+    values.forEach((value, i) => request.input(`p${i}`, value));
+    return (await request.query<T>(text)).recordset;
+  } finally {
+    await pool.close();
+  }
+};
+
 /** Runs each batch as the server's administrator, in `database` (default the fixture's). */
 export const asMssqlAdmin = async (
   batches: string[],
@@ -170,13 +186,23 @@ export const recreateMssqlFixture = async (): Promise<void> => {
     for (const { user, password } of Object.values(MSSQL_FIXTURE_LOGINS)) {
       await master.request().batch(ensureLoginSql(user, password));
     }
+    // A login default a user query must not depend on: day-first dates,
+    // weeks from Monday and German month names. The driver sets its own
+    // language at connect; this proves nothing reads the login's.
+    await master
+      .request()
+      .batch(
+        `ALTER LOGIN ${quoteMssqlIdent(MSSQL_FIXTURE_LOGINS.ro.user)} WITH DEFAULT_LANGUAGE = Deutsch`
+      );
     await master.request().batch(`CREATE DATABASE ${name}`);
   } finally {
     await master.close();
   }
-  const batches = (await readFile(FIXTURE_SQL, "utf8"))
-    .split(/^GO\s*$/m)
-    .map((batch) => batch.trim())
-    .filter(Boolean);
-  await asMssqlAdmin(batches);
+  for (const file of FIXTURE_FILES) {
+    const batches = (await readFile(path.join(FIXTURES, file), "utf8"))
+      .split(/^GO\s*$/m)
+      .map((batch) => batch.trim())
+      .filter(Boolean);
+    await asMssqlAdmin(batches);
+  }
 };

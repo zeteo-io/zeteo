@@ -103,7 +103,7 @@ describe("toMssqlConfig", () => {
       password: "s3cret",
       connectionTimeout: 4000,
       requestTimeout: 7000,
-      pool: { max: 3, min: 0 },
+      pool: { max: 3, min: 0, acquireTimeoutMillis: 4000 },
     });
     expect(config).not.toHaveProperty("connectionString");
     expect(config).not.toHaveProperty("domain");
@@ -112,6 +112,11 @@ describe("toMssqlConfig", () => {
       trustServerCertificate: false,
       appName: "zeteo",
       port: 1433,
+      useUTC: true,
+      cancelTimeout: 2000,
+      enableAnsiNull: true,
+      enableAnsiWarnings: true,
+      enableArithAbort: true,
     });
     expect(config.options).not.toHaveProperty("instanceName");
     expect(typeof config.options?.connector).toBe("function");

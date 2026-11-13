@@ -1,9 +1,10 @@
 # Azure SQL sources
 
 A source of type `azure-sql` is an Azure SQL Database, or any SQL Server 2017 or newer reached over
-TCP. Zeteo connects, checks that the login is read-only, and reads the listed schemas into the
-catalogue ([catalog.md](catalog.md)). Running queries on it is not available yet: a query against an
-`azure-sql` source answers `422 source_type_unavailable`.
+TCP. Zeteo connects, checks that the login is read-only, reads the listed schemas into the
+catalogue ([catalog.md](catalog.md)), and runs queries in the same language, with the same results,
+as on Postgres ([querying.md](querying.md)). Buckets use `DATETRUNC`, so the server must be SQL
+Server 2022 or Azure SQL Database (or Managed Instance) for bucketed queries.
 
 Everything in [sources.md](sources.md) (creating, changing, the override, pools, the network rules,
 audit) applies; this page covers what is particular to this type.
@@ -112,6 +113,44 @@ writes it: `nvarchar(100)`, `nvarchar(max)`, `decimal(12,2)`, `datetime2(3)`.
 Schema names match exactly, whatever the database's collation: list `Sales`, not `sales`, for a
 schema created as `Sales`. `sys`, `INFORMATION_SCHEMA`, `guest` and the fixed-role schemas
 (`db_owner`, …) are never read.
+
+## Queries
+
+A query runs as one request: the compiled `SELECT`, with every value a typed parameter. There is
+nothing else in the request: no `SET`, no transaction.
+
+**What keeps it read-only.** SQL Server has no read-only transaction. A query cannot write
+because the statement zeteo sends is always a single `SELECT` built from the catalogue (no text
+from the request reaches it, and identifiers are bracketed with `]` doubled), and because the
+login is checked when the source is registered and refreshed (above): a login that can write is
+refused. Keep the login read-only; it is the boundary.
+
+**Session settings.** Results do not depend on the session's language, date format or first day
+of the week: values are bound as ISO text cast to their type, buckets use `iso_week` (Monday), and
+dates and times are read in binary. Every connection sets `ANSI_NULLS`, `ANSI_WARNINGS` and
+`ARITHABORT` on when it opens, whatever the server's or login's defaults, so an overflow or a
+division by zero fails the query instead of yielding `NULL`.
+
+**Exact values.** The driver would read `decimal`, `numeric` and `money` as floating-point
+numbers, so the select list returns them as text, as SQL Server prints them (a `decimal(12,2)` as
+`"250.50"`). Sums run in `bigint` over smaller integers and in `decimal(38,0)` over `bigint`, so
+they do not overflow where Postgres's would not; averages over exact columns divide the exact sum
+once. Timestamps are read as UTC and cut at the millisecond; a `datetimeoffset` is converted to
+UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC.
+
+**Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on
+the server with an attention on its own connection (no second connection is needed, so a cancel
+never waits for a busy pool); the driver's own request timeout, two seconds later, is the
+backstop. Once the server acknowledges the cancel the connection goes back to the pool clean; if
+it does not within two seconds, the connection is closed and the pool replaces it. Rows are read
+as they arrive: at the row or size limit the request is cancelled and the rest of the result is
+never read.
+
+**Differences from Postgres.** Text comparison, sorting, `distinct` and grouping follow the
+column's collation (case-insensitive by default; see [querying.md](querying.md)). A select item
+whose type SQL Server cannot sort or group (`text`, `ntext`, `xml`) fails a query that sorts or
+deduplicates by it, including by the default order, with `502 query_failed`; select it through a
+view that converts it to `nvarchar(max)`.
 
 ## Exports and load
 

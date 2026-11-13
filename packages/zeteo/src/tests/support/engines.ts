@@ -1,3 +1,4 @@
+import { mssqlSourceSettings, queryMssqlAdmin } from "./mssqlFixture.js";
 import type { SourceType } from "../../adapters/types.js";
 import { fixtureAdminSettings } from "./fixtureDb.js";
 import { sourceSettings } from "./sources.js";
@@ -41,7 +42,24 @@ const postgres: EngineFixture = {
   },
 };
 
-export const ENGINES: EngineFixture[] = [postgres];
+const azureSql: EngineFixture = {
+  name: "azure-sql",
+  type: "azure-sql",
+  sourceSettings: () => mssqlSourceSettings("ro"),
+  schemas: ["sales"],
+  runningOn: async (view) => {
+    const [{ n }] = await queryMssqlAdmin<{ n: number }>(
+      `SELECT COUNT(*) AS n FROM sys.dm_exec_requests r
+        CROSS APPLY sys.dm_exec_input_buffer(r.session_id, r.request_id) b
+        WHERE r.database_id = DB_ID() AND r.session_id <> @@SPID
+          AND b.event_info LIKE @p0`,
+      [`%${view}%`]
+    );
+    return n;
+  },
+};
+
+export const ENGINES: EngineFixture[] = [postgres, azureSql];
 
 /** A `describe` per engine, named `<name> (<engine>)`. */
 export const describeEachEngine = (

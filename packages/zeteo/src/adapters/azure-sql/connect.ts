@@ -1,14 +1,13 @@
 import { type AzureSqlSettings, toMssqlConfig } from "./settings.js";
 import type { ResolvedTarget } from "../../sources/network.js";
+import { SourceUnreachableError } from "../../utils/errors.js";
+import { runAzureSqlQuery } from "./runQuery.js";
 import { logger } from "../../utils/logger.js";
+import type { SqlPlan } from "../sql/types.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
 import type { ConnectionPool } from "mssql";
 import sql from "mssql";
-import {
-  SourceTypeUnavailableError,
-  SourceUnreachableError,
-} from "../../utils/errors.js";
 import type {
   ConnectOptions,
   LoginFinding,
@@ -30,13 +29,13 @@ export class AzureSqlConnection implements SourceConnection {
     return this.guarded((pool) => readSchema(pool, schemas));
   }
 
-  /** Queries on Azure SQL are not supported yet. */
+  /** The plan comes from this adapter's own language, so it is a SQL plan. */
   runQuery(
-    _plan: QueryPlan,
-    _limits: RunLimits,
-    _signal?: AbortSignal
+    plan: QueryPlan,
+    limits: RunLimits,
+    signal?: AbortSignal
   ): Promise<QueryResult> {
-    return Promise.reject(new SourceTypeUnavailableError("azure-sql"));
+    return runAzureSqlQuery(this.pool, plan as SqlPlan, limits, signal);
   }
 
   /** Any driver failure, a timeout included, surfaces as the fixed error; the driver's is logged. */

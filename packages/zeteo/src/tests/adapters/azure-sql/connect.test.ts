@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { startSilentServer } from "../../support/silentServer.js";
+import { SourceUnreachableError } from "../../../utils/errors.js";
 import dns from "node:dns";
 import {
   asMssqlAdmin,
@@ -16,10 +17,6 @@ import {
   mssqlFixtureTarget,
   quoteMssqlIdent,
 } from "../../support/mssqlFixture.js";
-import {
-  SourceTypeUnavailableError,
-  SourceUnreachableError,
-} from "../../../utils/errors.js";
 
 const options = { connectTimeoutMs: 5000, poolSize: 2, queryTimeoutMs: 5000 };
 const ODD_LOGIN = "zeteo_odd_password";
@@ -157,22 +154,6 @@ describe("azure-sql connect", () => {
         "SELECT c.encrypt_option, APP_NAME() AS app FROM sys.dm_exec_connections c WHERE c.session_id = @@SPID"
       );
     expect(recordset[0]).toEqual({ encrypt_option: "TRUE", app: "zeteo" });
-  });
-
-  it("refuses to run queries until the adapter supports them", async () => {
-    const connection = await connect(mssqlFixtureSettings("ro"));
-    await expect(
-      connection.runQuery(
-        {
-          references: [],
-          columns: [],
-          warnings: [],
-          limit: undefined,
-          offset: 0,
-        },
-        { maxRows: 1, maxBytes: 1, timeoutMs: 1000 }
-      )
-    ).rejects.toBeInstanceOf(SourceTypeUnavailableError);
   });
 
   it("turns a catalog query that outlasts the query timeout into SourceUnreachableError", async () => {

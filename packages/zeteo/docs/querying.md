@@ -11,7 +11,8 @@ Users query sources through one JSON language, over only the tables and columns 
 
 ## The SQL query language
 
-Every SQL source (Postgres today, Azure SQL next) takes the same language:
+Every SQL source, Postgres and Azure SQL alike, takes the same language and returns the same
+results for the same data:
 
 ```json
 {
@@ -74,13 +75,18 @@ A filter is one of:
 | `eq`, `ne`, `gt`, `gte`, `lt`, `lte` | a value | text, number, date, timestamp; `eq`/`ne` also boolean |
 | `between` | `[low, high]`, inclusive | text, number, date, timestamp |
 | `in`, `notIn` | 1 to 1,000 values | text, number, date, timestamp, boolean |
-| `contains`, `startsWith` | a string | text: case-insensitive, `%` and `_` match themselves |
+| `contains`, `startsWith` | a string | text: case-insensitive whatever the collation, `%`, `_` and `[` match themselves |
 | `isNull` | `true` or `false` | every type, json included |
 
 Values are checked against the column: text takes a string; numbers a number or a decimal string
 (`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
 dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
 (`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
+
+On Azure SQL a query binds at most 2,100 values in all (SQL Server's limit on parameters; paging
+takes two), so several long `in` lists in one query can fail with `502 query_failed`. A timestamp
+offset beyond ±14:00 and a date or timestamp before year 1 or after 9999 are refused there the
+same way.
 
 **Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
 names cannot be filtered on directly (select it through a view that renames it), and an `as` of
@@ -90,13 +96,16 @@ names cannot be filtered on directly (select it through a view that renames it),
 compares exactly, case and accents included, unless the column has a case-insensitive collation;
 Azure SQL's default collations ignore case, so `{ "eq": "paid" }` also matches `PAID` there. Use
 `contains` or `startsWith` for a match that ignores case on every engine. Sorting text follows the
-collation too.
+collation too, and so does what `distinct` and `groupBy` count as the same text. Besides
+collation, the engines agree on every result: the same rows, in the same order, in the same wire
+forms.
 
 ### Json columns
 
 A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
 grouped, deduplicated (`distinct`, `countDistinct`) or sorted (`invalid_operator`). A query whose
-select items are all json has no default order on Postgres.
+select items are all json has no default order. On Azure SQL json is stored as text (`nvarchar`):
+its columns are text columns there.
 
 ## Discovering what you can query
 
@@ -220,16 +229,17 @@ values in that order. Values arrive in these wire forms on every engine:
 
 | Value | Form |
 |-------|------|
-| 16- and 32-bit integers, floats | JSON number; float `NaN`, `Infinity` and `-Infinity` as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` |
-| 64-bit integers, decimals | string (`"9007199254740993"`, `"250.50"`) |
+| 8-, 16- and 32-bit integers, floats | JSON number; a 32-bit float (`real`) as its shortest decimal (`0.1`); Postgres's float `NaN`, `Infinity` and `-Infinity` as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` |
+| 64-bit integers, decimals | string (`"9007199254740993"`, `"250.50"`, with the column's scale) |
+| money | string: on Azure SQL with four decimal places (`"640.1000"`); on Postgres as the database prints it |
 | `count`, `countDistinct` | string |
 | `sum` | string over integer and decimal columns, number over float columns |
-| `avg` | number |
+| `avg` | number: over integer and decimal columns the exact sum divided once in floating point |
 | boolean | `true` / `false` |
 | date | `"YYYY-MM-DD"` |
-| timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database |
-| json | the JSON value itself; an integer inside a document past 2^53 loses precision |
-| anything else (uuid, enums…) | string |
+| timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database; one without (`timestamp`, `datetime2`, `datetime`, `smalldatetime`) is taken as UTC; digits past the millisecond are cut, never rounded |
+| json | the JSON value itself (Postgres); text on Azure SQL; an integer inside a document past 2^53 loses precision |
+| anything else (uuid, uniqueidentifier, enums…) | string, as the database prints it |
 | null | `null` |
 
 `warnings` holds `join_multiplies_rows` (with the join's `path`) when a relation that can match

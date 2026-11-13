@@ -70,9 +70,9 @@ zeteo sends the startup option `default_transaction_read_only=on` as a backstop,
 
 `port` defaults to 1433 and `tls` to `verify`; `tls` is `verify` or `trust-server-certificate`, and
 the connection is always encrypted. `password` is encrypted at rest and never returned. Sources of
-this type are created, checked and read into the catalogue; queries on them are not available yet.
-The settings, the read-only login to create, what its login check refuses and the type mapping are
-in [azure-sql.md](azure-sql.md).
+this type are created, checked, read into the catalogue and queried like Postgres sources. The
+settings, the read-only login to create, what its login check refuses, the type mapping and how
+queries run there are in [azure-sql.md](azure-sql.md).
 
 ## Creating and changing
 
@@ -200,5 +200,4 @@ record. The password and `ca` are never in an audit entry.
 | 409 | `source_archived` | any change to, or test of, an archived source |
 | 422 | `host_not_allowed` | the host is not permitted |
 | 422 | `writable_login` | the login check found something and the override was not given |
-| 422 | `source_type_unavailable` | a query on a source whose type cannot run queries yet (`azure-sql`) |
 | 502 | `source_unreachable` | the source could not be reached or refused the login; the driver's text is logged, never returned |
