@@ -22,6 +22,8 @@ export type ZeteoClientOptions = {
   | { redis: Redis; requestHandlerKey: string; production?: boolean }
 );
 
+type OwnHandlerOptions = Extract<ZeteoClientOptions, { redis: Redis }>;
+
 export interface Transport {
   handler: RequestHandler;
   names: ClientNames;
@@ -54,12 +56,12 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
 
   const ownsHandler = !hasHandler;
   const handler: RequestHandler =
-    "handler" in options
+    "handler" in options && options.handler
       ? options.handler
       : new RequestHandler({
-          key: options.requestHandlerKey,
-          backend: redisBackend(options.redis),
-          priority: options.production ? 2 : 1,
+          key: (options as OwnHandlerOptions).requestHandlerKey,
+          backend: redisBackend((options as OwnHandlerOptions).redis),
+          priority: (options as OwnHandlerOptions).production ? 2 : 1,
           // Tokens and rate-limit state live in Redis under client names that
           // are the same for every service; the client id keeps two services
           // on one Redis apart while replicas of one still share.
@@ -88,8 +90,9 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
   // A hook only runs on a start still to come; a handler that is already
   // started needs the client added now.
   handler.registerStartupHook(addClient);
-  const status = (handler as unknown as { status: string }).status;
-  const added = status === "started" ? addClient(handler) : undefined;
+  const added =
+    handler.getMetadata().status === "started" ? addClient(handler) : undefined;
+  // Surfaces from start(), which awaits it; no one is awaiting it yet.
   added?.catch(() => undefined);
 
   const getRequestId = options.getRequestId ?? (() => undefined);
@@ -98,6 +101,11 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
     async start() {
       await added;
       await handler.start();
+      // A hook registered while the handler was mid-start never runs.
+      const names = clientNames();
+      if (!handler.getMetadata().registeredClients.includes(names.service)) {
+        await addClient(handler);
+      }
     },
     async stop() {
       if (ownsHandler) await handler.stop();

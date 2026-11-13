@@ -93,6 +93,17 @@ describe("zeteo template", () => {
     expect(stub.tokensIssued).toBe(0);
   });
 
+  it("sends no Authorization from person:once, and never repeats a 429 or 500", async () => {
+    await handler.handleRequest(req(names.personOnce));
+    expect(stub.requests[0].headers.authorization).toBeUndefined();
+    for (const status of [429, 500]) {
+      const before = stub.requests.length;
+      stub.respond(() => ({ status, body: {} }));
+      await handler.handleRequest(req(names.personOnce)).catch(() => undefined);
+      expect(stub.requests.length - before).toBe(1);
+    }
+  }, 30_000);
+
   it("classifies errors", () => {
     expect(classifyZeteoError(httpError(429))).toEqual({ action: "fail" });
     expect(classifyZeteoError(httpError(500))).toBeUndefined();
