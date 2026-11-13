@@ -23,6 +23,8 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
   let source: SeededSource;
   let quick: SeededSource;
   let capped: SeededSource;
+  /** Over the portable tables and the probe schema's wide rows. */
+  let wide: SeededSource;
   const users: string[] = [];
   const errorBodies: unknown[] = [];
 
@@ -50,10 +52,13 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     source = await seedQuerySource(engine);
     quick = await seedQuerySource(engine, { timeout_ms: 1000 });
     capped = await seedQuerySource(engine, { row_cap: 3 });
+    wide = await seedQuerySource(engine, {
+      schemas: [...engine.schemas, "probe"],
+    });
   });
   afterAll(async () => {
     await removeRunsOf(users);
-    await removeSources([source.id, quick.id, capped.id]);
+    await removeSources([source.id, quick.id, capped.id, wide.id]);
   });
 
   it("stops a query past the source's time limit with 504 query_timeout", async () => {
@@ -199,6 +204,31 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
         })
       ).status
     ).toBe(200);
+  });
+
+  it("stops at the 10 MB size limit with truncated_by bytes, the body under it", async () => {
+    const user = newQueryUser();
+    users.push(user.id);
+    await grantTo(user.principal, wide.tables.wide_rows!, "all");
+    const res = await ask(user.token, wide, {
+      from: "wide_rows",
+      select: ["id", "filler"],
+      orderBy: [{ id: "asc" }],
+      limit: 50_000,
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.truncated).toBe(true);
+    expect(res.body.truncated_by).toBe("bytes");
+    const rows = res.body.rows as [number, string][];
+    // 2 KB rows: about 5,000 fit 10 MB, far fewer than the 60,000 there are.
+    expect(rows.length).toBeGreaterThan(4000);
+    expect(rows.length).toBeLessThan(6000);
+    expect(rows.map(([id]) => id)).toEqual(
+      Array.from({ length: rows.length }, (_, i) => i + 1)
+    );
+    expect(Buffer.byteLength(JSON.stringify(rows))).toBeLessThanOrEqual(
+      10 * 1024 * 1024
+    );
   });
 
   it("refuses a body over 64 KB with 413 payload_too_large", async () => {
