@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import type { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
 import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -185,6 +186,66 @@ describe("azure-sql readSchema foreign keys", () => {
       ]);
     } finally {
       await asMssqlAdmin(["REVOKE SELECT ON sales.customers FROM zeteo_ro"]);
+    }
+  });
+});
+
+describe("azure-sql readSchema types", () => {
+  const drop = [
+    "DROP TABLE IF EXISTS type_probe.named",
+    "DROP TYPE IF EXISTS type_probe.sku_code",
+    "DROP SCHEMA IF EXISTS type_probe",
+  ];
+  beforeAll(async () => {
+    await asMssqlAdmin([
+      ...drop,
+      "CREATE SCHEMA type_probe",
+      "CREATE TYPE type_probe.sku_code FROM varchar(12) NOT NULL",
+      `CREATE TABLE type_probe.named (
+         owner sysname NOT NULL,
+         sku type_probe.sku_code,
+         place geography NULL
+       )`,
+    ]);
+  });
+  afterAll(async () => {
+    await asMssqlAdmin(drop);
+  });
+
+  it("maps sysname and alias types through their base type, CLR types by name", async () => {
+    const result = await connection.readSchema(["type_probe"]);
+    const columns = result.tables[0]!.columns.map(
+      ({ name, type, nativeType }) => ({ name, type, nativeType })
+    );
+    expect(columns).toEqual([
+      { name: "owner", type: "text", nativeType: "nvarchar(128)" },
+      { name: "sku", type: "text", nativeType: "varchar(12)" },
+      { name: "place", type: "other", nativeType: "geography" },
+    ]);
+  });
+});
+
+describe("azure-sql readSchema on a reused connection", () => {
+  it("is not disturbed by a #visible table an earlier batch left on the session", async () => {
+    const single = (await azureSqlAdapter.connect(
+      mssqlFixtureSettings("ro"),
+      await mssqlFixtureTarget(),
+      { ...options, poolSize: 1 }
+    )) as AzureSqlConnection;
+    try {
+      // A plain batch, not sp_executesql: the table outlives it on the
+      // session, as one left by a cancelled batch would.
+      await single.pool.request().batch("SELECT 1 AS object_id INTO #visible");
+      const first = await single.readSchema(["sales"]);
+      const second = await single.readSchema(["sales"]);
+      expect(first.tables).toHaveLength(7);
+      expect(second).toEqual(first);
+      const left = await single.pool
+        .request()
+        .query("SELECT OBJECT_ID('tempdb..#visible') AS id");
+      expect(left.recordset[0].id).not.toBeNull();
+    } finally {
+      await single.close();
     }
   });
 });

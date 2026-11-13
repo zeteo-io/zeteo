@@ -7,6 +7,7 @@ import { azureSqlAdapter } from "../../../adapters/azure-sql/index.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { startSilentServer } from "../../support/silentServer.js";
 import { SourceUnreachableError } from "../../../utils/errors.js";
+import { logger } from "../../../utils/logger.js";
 import dns from "node:dns";
 import {
   asMssqlAdmin,
@@ -137,13 +138,26 @@ describe("azure-sql connect", () => {
   });
 
   it("verifies the certificate under tls verify: the fixture's self-signed one is refused", async () => {
-    await expect(
-      azureSqlAdapter.connect(
-        mssqlFixtureSettings("ro", { tls: "verify" }),
-        await mssqlFixtureTarget(),
-        options
-      )
-    ).rejects.toBeInstanceOf(SourceUnreachableError);
+    const warn = vi.spyOn(logger, "warn");
+    try {
+      await expect(
+        azureSqlAdapter.connect(
+          mssqlFixtureSettings("ro", { tls: "verify" }),
+          await mssqlFixtureTarget(),
+          options
+        )
+      ).rejects.toBeInstanceOf(SourceUnreachableError);
+      const logged = warn.mock.calls.find(
+        ([, message]) => message === "source connection failed"
+      );
+      const err = (logged?.[0] as { err?: Error & { cause?: unknown } }).err;
+      // The TLS error itself, not a refused login or a timeout.
+      expect(`${err?.message} ${String(err?.cause)}`).toMatch(
+        /self[- ]signed certificate/i
+      );
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("encrypts the connection and names the application", async () => {

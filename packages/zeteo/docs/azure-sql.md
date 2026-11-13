@@ -44,8 +44,9 @@ client on to another host and port, which no rule has checked. Zeteo refuses the
 source fails as `source_unreachable`. Use the `Proxy` policy on the logical server (the default for
 connections from outside Azure; `Default` means `Redirect` for connections from inside Azure).
 
-Catalogue reads and the login check are bounded by the source's query timeout; a request that runs
-past it is cancelled on the server.
+Each request zeteo sends for a catalogue read or the login check is bounded by the query timeout
+(15 s) and cancelled on the server when it runs past it. A catalogue read is one request; the login
+check is several in turn, each with the full timeout, so the whole check can take longer.
 
 ## The read-only login
 
@@ -79,19 +80,25 @@ server-level rights are probed one by one.
 | Code | Found when the login (or a role it belongs to) |
 |------|-------------|
 | `superuser` | is in `sysadmin` or `db_owner`, or holds `CONTROL SERVER`, `IMPERSONATE ANY LOGIN` or `CONTROL` on the database. The check stops there. |
-| `owns_objects` | is the database owner (it runs as `dbo`), owns a schema, or was made owner of a table, view or procedure |
+| `owns_objects` | is the database owner (it runs as `dbo`), owns a schema, a role or an application role, or was made owner of a table, view or procedure |
 | `can_write_tables` | holds `INSERT`, `UPDATE`, `DELETE`, `ALTER`, `CONTROL` or `TAKE OWNERSHIP` on a table, view or schema, `UPDATE` on some columns, `EXECUTE` on a procedure or schema, or any other database permission that changes the database (`db_datawriter` and `db_ddladmin` among them) |
 | `can_create_in_schema` | may create objects (`CREATE TABLE`, `CREATE VIEW`, `CREATE PROCEDURE`, …) or schemas, or holds `ALTER ANY SCHEMA` |
-| `can_create_roles` | may manage principals: `ALTER ANY USER`, `ALTER ANY ROLE`, `ALTER ANY APPLICATION ROLE`, `CREATE USER`/`ROLE`, `ALTER ANY LOGIN`, `ALTER ANY SERVER ROLE`, or `securityadmin` / `##MS_LoginManager##` |
+| `can_create_roles` | may manage principals: `ALTER ANY USER`, `ALTER ANY ROLE`, `ALTER ANY APPLICATION ROLE`, `CREATE USER`/`ROLE`, `ALTER ANY LOGIN`, `ALTER ANY SERVER ROLE`, or `securityadmin` / `##MS_LoginManager##`; or holds `ALTER`, `CONTROL` or `TAKE OWNERSHIP` on a role or application role (it could add itself to the role, or activate it), or `ALTER`/`CONTROL` on another user or login |
 | `can_create_databases` | holds `CREATE ANY DATABASE` or `ALTER ANY DATABASE`, or is in `dbcreator` / `##MS_DatabaseManager##` |
 | `bypasses_row_security` | holds `ALTER ANY SECURITY POLICY` or `ALTER ANY MASK` |
 | `reads_server_files` | holds `ADMINISTER BULK OPERATIONS` or `ADMINISTER DATABASE BULK OPERATIONS`, or is in `bulkadmin` |
 | `replication` | holds `CONNECT REPLICATION` |
-| `write_role_member` | is in a fixed database role that writes (`db_owner`, `db_datawriter`, `db_ddladmin`, `db_securityadmin`, `db_accessadmin`, `db_backupoperator`) or a role holding a write right (the detail names it); is in `serveradmin`, `setupadmin`, `processadmin`, `diskadmin` or `##MS_ServerStateManager##`; or holds another server permission that changes the server (`ALTER ANY CONNECTION`, `SHUTDOWN`, `ALTER SETTINGS`, …) |
+| `write_role_member` | is in a fixed database role that writes (`db_owner`, `db_datawriter`, `db_ddladmin`, `db_securityadmin`, `db_accessadmin`, `db_backupoperator`) or a role holding a write right (the detail names it); is in `serveradmin`, `setupadmin`, `processadmin`, `diskadmin` or `##MS_ServerStateManager##`; holds another server permission that changes the server (`ALTER ANY CONNECTION`, `SHUTDOWN`, `ALTER SETTINGS`, …); or may `IMPERSONATE` another database user (`dbo` included) or login, and so act with its rights |
 
 Connecting and viewing never count: `CONNECT`, `SELECT`, `REFERENCES`, `SHOWPLAN`, `UNMASK`,
 `VIEW DEFINITION`, the `VIEW … STATE` permissions and the like. A database-wide right is reported
 once for the database, not again for every schema and object.
+
+Rights over principals are found although a low-privilege login sees few principals: SQL Server
+shows a login the users, roles and logins it holds a permission on or owns (checked against SQL
+Server 2022 for `IMPERSONATE` on a user and on a login, `ALTER` on a role and on an application
+role, and an owned role). Logins are read from `sys.server_principals`; where a source does not let
+the login read it, that part is skipped and the database-level checks stand.
 
 A login that can create databases through the `dbmanager` role of Azure SQL's `master` database is
 not seen from the source database. Do not give the reader login that role.
@@ -107,7 +114,8 @@ not seen from the source database. Do not give the reader login that role.
 | `datetime`, `datetime2`, `smalldatetime`, `datetimeoffset` | `timestamp` |
 | `time` and anything else (`binary`, `varbinary`, `rowversion`, `sql_variant`, `geography`, `hierarchyid`, …) | `other` |
 
-An alias type maps through its base type. The catalogue's `native_type` is the type as SQL Server
+An alias type maps through its base type (`sysname` is `nvarchar(128)`), including one the login
+has no right on. The catalogue's `native_type` is the type as SQL Server
 writes it: `nvarchar(100)`, `nvarchar(max)`, `decimal(12,2)`, `datetime2(3)`.
 
 Schema names match exactly, whatever the database's collation: list `Sales`, not `sales`, for a

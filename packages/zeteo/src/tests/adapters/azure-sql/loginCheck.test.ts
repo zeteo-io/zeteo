@@ -35,6 +35,11 @@ const LOGINS = {
   dbCreator: "zeteo_dbcreator",
   bulkAdmin: "zeteo_bulkadmin",
   processAdmin: "zeteo_processadmin",
+  impersonator: "zeteo_impersonator",
+  roleAlterer: "zeteo_role_alterer",
+  roleOwner: "zeteo_role_owner",
+  appRoleAlterer: "zeteo_app_role_alterer",
+  loginImpersonator: "zeteo_login_impersonator",
 } as const;
 
 const connectAs = async (settings: ReturnType<typeof mssqlFixtureSettings>) => {
@@ -57,7 +62,11 @@ const as = (login: keyof typeof LOGINS) =>
 const cleanDatabase = [
   "DROP PROCEDURE IF EXISTS sales.touch_order",
   "DROP SCHEMA IF EXISTS scratch",
+  "IF DATABASE_PRINCIPAL_ID('zeteo_owned_role') IS NOT NULL DROP ROLE zeteo_owned_role",
   ...Object.values(LOGINS).map((user) => `DROP USER IF EXISTS [${user}]`),
+  // An application role is the grantor of rights on itself: dropped after
+  // the user it granted to.
+  "IF DATABASE_PRINCIPAL_ID('zeteo_app_role') IS NOT NULL DROP APPLICATION ROLE zeteo_app_role",
   "IF DATABASE_PRINCIPAL_ID('zeteo_outer_role') IS NOT NULL DROP ROLE zeteo_outer_role",
   "IF DATABASE_PRINCIPAL_ID('zeteo_inner_writer') IS NOT NULL DROP ROLE zeteo_inner_writer",
 ];
@@ -74,6 +83,7 @@ beforeAll(async () => {
       `ALTER SERVER ROLE dbcreator ADD MEMBER ${LOGINS.dbCreator}`,
       `ALTER SERVER ROLE bulkadmin ADD MEMBER ${LOGINS.bulkAdmin}`,
       `ALTER SERVER ROLE processadmin ADD MEMBER ${LOGINS.processAdmin}`,
+      `GRANT IMPERSONATE ON LOGIN::${LOGINS.dbOwner} TO ${LOGINS.loginImpersonator}`,
     ],
     "master"
   );
@@ -97,6 +107,19 @@ beforeAll(async () => {
     `GRANT UPDATE (notes) ON sales.orders TO ${LOGINS.columnUpdate}`,
     `GRANT SELECT, INSERT ON hr.salaries TO ${LOGINS.hrWriter}`,
     `GRANT ALTER ANY USER TO ${LOGINS.userAdmin}`,
+    `GRANT IMPERSONATE ON USER::dbo TO ${LOGINS.impersonator}`,
+    `GRANT ALTER ON ROLE::zeteo_inner_writer TO ${LOGINS.roleAlterer}`,
+    `CREATE ROLE zeteo_owned_role AUTHORIZATION ${LOGINS.roleOwner}`,
+    `CREATE APPLICATION ROLE zeteo_app_role WITH PASSWORD = 'App-role-pw-1'`,
+    `GRANT ALTER ON APPLICATION ROLE::zeteo_app_role TO ${LOGINS.appRoleAlterer}`,
+    // Read-only otherwise, so only the principal right can be found.
+    ...[
+      LOGINS.impersonator,
+      LOGINS.roleAlterer,
+      LOGINS.roleOwner,
+      LOGINS.appRoleAlterer,
+      LOGINS.loginImpersonator,
+    ].map((user) => `ALTER ROLE db_datareader ADD MEMBER ${user}`),
     ...[
       LOGINS.securityAdmin,
       LOGINS.dbCreator,
@@ -109,7 +132,15 @@ beforeAll(async () => {
 afterAll(async () => {
   await Promise.all(open.map((c) => c.close()));
   await asMssqlAdmin(cleanDatabase);
-  await asMssqlAdmin(Object.values(LOGINS).map(dropLoginSql), "master");
+  // A login is the grantor of IMPERSONATE on itself: its grantee goes first.
+  const logins = Object.values(LOGINS);
+  await asMssqlAdmin(
+    [
+      LOGINS.loginImpersonator,
+      ...logins.filter((l) => l !== LOGINS.loginImpersonator),
+    ].map(dropLoginSql),
+    "master"
+  );
 });
 
 const findingsOf = async (connection: SourceConnection) =>
@@ -217,6 +248,52 @@ describe("azure-sql checkLogin", () => {
   it("finds ALTER ANY USER as managing principals", async () => {
     const findings = await findingsOf(await as("userAdmin"));
     expect(has(findings, "can_create_roles", "ALTER ANY USER")).toBe(true);
+  });
+
+  it("finds IMPERSONATE on the dbo user", async () => {
+    const findings = await findingsOf(await as("impersonator"));
+    expect(findings).toEqual([
+      {
+        code: "write_role_member",
+        detail: "The login can IMPERSONATE user dbo",
+      },
+    ]);
+  });
+
+  it("finds ALTER on a role that writes, so the login could join it", async () => {
+    const findings = await findingsOf(await as("roleAlterer"));
+    expect(findings).toEqual([
+      {
+        code: "can_create_roles",
+        detail: "The login can ALTER role zeteo_inner_writer",
+      },
+    ]);
+  });
+
+  it("finds a login that owns a role", async () => {
+    const findings = await findingsOf(await as("roleOwner"));
+    expect(has(findings, "owns_objects", "role zeteo_owned_role")).toBe(true);
+    expect(has(findings, "can_create_roles", "zeteo_owned_role")).toBe(true);
+  });
+
+  it("finds ALTER on an application role", async () => {
+    const findings = await findingsOf(await as("appRoleAlterer"));
+    expect(findings).toEqual([
+      {
+        code: "can_create_roles",
+        detail: "The login can ALTER application role zeteo_app_role",
+      },
+    ]);
+  });
+
+  it("finds IMPERSONATE on another login", async () => {
+    const findings = await findingsOf(await as("loginImpersonator"));
+    expect(findings).toEqual([
+      {
+        code: "write_role_member",
+        detail: `The login can IMPERSONATE login ${LOGINS.dbOwner}`,
+      },
+    ]);
   });
 
   it.each([

@@ -40,11 +40,19 @@ const listedSchemas = (count: number) => `
      AND s.schema_id NOT IN (2, 3, 4)
      AND s.schema_id NOT BETWEEN 16384 AND 16399`;
 
-// Tables and views in the listed schemas that the login can select from.
+// Tables and views in the listed schemas that the login can select from,
+// into a table variable: it lives for the batch only, so a batch cancelled or
+// failed half-way leaves nothing on the pooled connection.
 const visible = (count: number) => `
+  DECLARE @visible TABLE (
+    object_id int PRIMARY KEY,
+    schema_name sysname NOT NULL,
+    name sysname NOT NULL,
+    type char(2) NOT NULL
+  );
   WITH listed AS (${listedSchemas(count)})
-  SELECT o.object_id, l.name AS schema_name, o.name, o.type
-    INTO #visible
+  INSERT INTO @visible (object_id, schema_name, name, type)
+  SELECT o.object_id, l.name, o.name, o.type
     FROM sys.objects o
     JOIN listed l ON l.schema_id = o.schema_id
    WHERE o.type IN ('U', 'V')
@@ -53,23 +61,26 @@ const visible = (count: number) => `
 
 const RELATIONS = `
   SELECT object_id, schema_name, name, RTRIM(type) AS type
-    FROM #visible ORDER BY schema_name, name`;
+    FROM @visible ORDER BY schema_name, name`;
 
-// Alias types report their base type; CLR types (geography, hierarchyid, …)
-// their own name.
+// Alias types (`sysname` among them) report their base type; CLR types
+// (geography, hierarchyid, …) their own name. A user-defined type the login
+// has no right on is not in its sys.types, so the join is outer: such a column
+// still appears, by its base type (a CLR one it cannot name as `unknown`).
 const COLUMNS = `
   SELECT c.object_id, c.name,
          CAST(ROW_NUMBER() OVER (PARTITION BY c.object_id ORDER BY c.column_id) AS int) AS position,
-         CASE WHEN t.is_user_defined = 1 AND t.is_assembly_type = 0
-              THEN TYPE_NAME(c.system_type_id) ELSE t.name END AS type_name,
+         COALESCE(CASE WHEN t.is_assembly_type = 1 THEN t.name
+                       ELSE TYPE_NAME(c.system_type_id) END,
+                  N'unknown') AS type_name,
          CAST(c.max_length AS int) AS max_length,
          CAST(c.precision AS int) AS precision,
          CAST(c.scale AS int) AS scale,
          c.is_nullable,
          CAST(CASE WHEN pk.column_id IS NULL THEN 0 ELSE 1 END AS bit) AS is_primary_key
-    FROM #visible v
+    FROM @visible v
     JOIN sys.columns c ON c.object_id = v.object_id
-    JOIN sys.types t ON t.user_type_id = c.user_type_id
+    LEFT JOIN sys.types t ON t.user_type_id = c.user_type_id
     LEFT JOIN (
       SELECT ic.object_id, ic.column_id
         FROM sys.indexes i
@@ -85,18 +96,14 @@ const FOREIGN_KEYS = `
          t.schema_name AS to_schema, t.name AS to_table,
          fc.name AS from_column, tc.name AS to_column
     FROM sys.foreign_keys fk
-    JOIN #visible f ON f.object_id = fk.parent_object_id
-    JOIN #visible t ON t.object_id = fk.referenced_object_id
+    JOIN @visible f ON f.object_id = fk.parent_object_id
+    JOIN @visible t ON t.object_id = fk.referenced_object_id
     JOIN sys.foreign_key_columns k ON k.constraint_object_id = fk.object_id
     JOIN sys.columns fc ON fc.object_id = k.parent_object_id AND fc.column_id = k.parent_column_id
     JOIN sys.columns tc ON tc.object_id = k.referenced_object_id AND tc.column_id = k.referenced_column_id
    ORDER BY f.schema_name, f.name, fk.name, k.constraint_column_id`;
 
-/**
- * Reads the listed schemas in one batch on one connection: the temporary
- * table of visible relations is the connection's own and is dropped with the
- * batch's last statement.
- */
+/** Reads the listed schemas in one batch, on one connection. */
 export const readSchema = async (
   pool: ConnectionPool,
   schemas: string[]
@@ -111,8 +118,7 @@ export const readSchema = async (
     ${visible(listed.length)};
     ${RELATIONS};
     ${COLUMNS};
-    ${FOREIGN_KEYS};
-    DROP TABLE #visible;`);
+    ${FOREIGN_KEYS};`);
   const [relations, columns, keys] = result.recordsets as unknown as [
     { object_id: number; schema_name: string; name: string; type: string }[],
     {

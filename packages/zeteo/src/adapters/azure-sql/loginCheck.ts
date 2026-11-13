@@ -1,5 +1,7 @@
 import type { LoginFinding } from "../types.js";
+import { logger } from "../../utils/logger.js";
 import type { ConnectionPool } from "mssql";
+import sql from "mssql";
 
 /**
  * The schemas SQL Server ships: guest, INFORMATION_SCHEMA, sys and one per
@@ -137,6 +139,45 @@ const OWNED_OBJECTS = `
      AND o.principal_id IS NOT NULL
      AND ${MINE("o.principal_id")}
    ORDER BY s.name, o.name`;
+
+// Database principals: impersonating a user acts with its rights, and
+// altering or controlling a role or application role lets the login add
+// itself to it or activate it. A principal is visible to a login that holds a
+// permission on it or owns it, so a low-privilege login still finds these.
+// `sys` and `INFORMATION_SCHEMA` (ids 3, 4) cannot be impersonated; the
+// login's own user and `public` are left out.
+const PRINCIPAL_RIGHTS = `
+  SELECT p.name, p.type, r.name AS privilege
+    FROM sys.database_principals p
+   CROSS JOIN (VALUES (N'IMPERSONATE'), (N'ALTER'), (N'CONTROL'),
+                      (N'TAKE OWNERSHIP')) r(name)
+   WHERE p.principal_id NOT IN (0, 3, 4)
+     AND p.principal_id <> DATABASE_PRINCIPAL_ID()
+     AND p.type IN ('S', 'U', 'E', 'X', 'G', 'C', 'K', 'R', 'A')
+     AND HAS_PERMS_BY_NAME(
+           p.name,
+           CASE p.type WHEN 'R' THEN N'ROLE'
+                       WHEN 'A' THEN N'APPLICATION ROLE'
+                       ELSE N'USER' END,
+           r.name) = 1
+   ORDER BY p.name, r.name`;
+
+// Logins the login may impersonate or change. Only those it can see; an Azure
+// SQL Database login may see none, or the view may be refused, and then the
+// database-level checks stand alone.
+const LOGIN_RIGHTS = `
+  SELECT p.name, r.name AS privilege
+    FROM sys.server_principals p
+   CROSS JOIN (VALUES (N'IMPERSONATE'), (N'ALTER'), (N'CONTROL')) r(name)
+   WHERE p.type IN ('S', 'U', 'G', 'E', 'X', 'C', 'K')
+     AND p.sid <> SUSER_SID()
+     AND HAS_PERMS_BY_NAME(p.name, N'LOGIN', r.name) = 1
+   ORDER BY p.name, r.name`;
+
+const OWNED_ROLES = `
+  SELECT p.name, p.type FROM sys.database_principals p
+   WHERE p.type IN ('R', 'A') AND ${MINE("p.owning_principal_id")}
+   ORDER BY p.name`;
 
 /** Database permissions that only connect or read. */
 const READ_ONLY_DATABASE = new Set([
@@ -388,6 +429,61 @@ export const checkLogin = async (
     );
   }
 
+  // A right held over every principal of a kind is already reported.
+  const coveredBy: Record<string, string> = {
+    R: "ALTER ANY ROLE",
+    A: "ALTER ANY APPLICATION ROLE",
+  };
+  const principals = new Map<string, { kind: string; privileges: string[] }>();
+  for (const row of await rows<{
+    name: string;
+    type: string;
+    privilege: string;
+  }>(PRINCIPAL_RIGHTS)) {
+    const type = row.type.trim();
+    const anyRight = coveredBy[type] ?? "ALTER ANY USER";
+    if (row.privilege === "ALTER" && databaseWide.has(anyRight)) continue;
+    const kind =
+      type === "R" ? "role" : type === "A" ? "application role" : "user";
+    const entry = principals.get(row.name) ?? { kind, privileges: [] };
+    entry.privileges.push(row.privilege);
+    principals.set(row.name, entry);
+  }
+  for (const [name, { kind, privileges }] of principals) {
+    const detail = `The login can ${privileges.join(", ")} ${kind} ${name}`;
+    // Impersonating acts with the other principal's rights; the rest change
+    // who belongs to what.
+    add(
+      privileges.includes("IMPERSONATE")
+        ? "write_role_member"
+        : "can_create_roles",
+      detail
+    );
+  }
+
+  try {
+    const logins = new Map<string, string[]>();
+    for (const { name, privilege } of await rows<{
+      name: string;
+      privilege: string;
+    }>(LOGIN_RIGHTS)) {
+      logins.set(name, [...(logins.get(name) ?? []), privilege]);
+    }
+    for (const [name, privileges] of logins) {
+      add(
+        privileges.includes("IMPERSONATE")
+          ? "write_role_member"
+          : "can_create_roles",
+        `The login can ${privileges.join(", ")} login ${name}`
+      );
+    }
+  } catch (err) {
+    // Only a refusal is skipped; a timeout or a lost connection fails the check.
+    if (!(err instanceof sql.RequestError) || err.code !== "EREQUEST")
+      throw err;
+    logger.debug({ err }, "server principals cannot be read on this source");
+  }
+
   for (const { name } of await rows<{ name: string }>(OWNED_SCHEMAS)) {
     add("owns_objects", `The login owns schema ${name}`);
   }
@@ -396,6 +492,14 @@ export const checkLogin = async (
     name: string;
   }>(OWNED_OBJECTS)) {
     add("owns_objects", `The login owns ${qualified(schema_name, name)}`);
+  }
+  for (const { name, type } of await rows<{ name: string; type: string }>(
+    OWNED_ROLES
+  )) {
+    add(
+      "owns_objects",
+      `The login owns ${type.trim() === "A" ? "application role" : "role"} ${name}`
+    );
   }
 
   return findings;

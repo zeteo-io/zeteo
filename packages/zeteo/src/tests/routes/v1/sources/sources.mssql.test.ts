@@ -1,10 +1,15 @@
 // @module-tag int
 // @module-tag platform
-import { mssqlSourceSettings } from "../../../support/mssqlFixture.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../support/http.js";
+import {
+  asMssqlAdmin,
+  dropLoginSql,
+  ensureLoginSql,
+  mssqlSourceSettings,
+} from "../../../support/mssqlFixture.js";
 import {
   auditRows,
   removeSources,
@@ -17,12 +22,26 @@ describe("/v1/sources with azure-sql", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   const created: string[] = [];
 
+  // A second read-only login, to change an audited setting to.
+  const READER = { user: "zeteo_ro_second", password: "Ro-second-password-1" };
+
   beforeAll(async () => {
+    await asMssqlAdmin(
+      [ensureLoginSql(READER.user, READER.password)],
+      "master"
+    );
+    await asMssqlAdmin([
+      `DROP USER IF EXISTS ${READER.user}`,
+      `CREATE USER ${READER.user} FOR LOGIN ${READER.user}`,
+      `ALTER ROLE db_datareader ADD MEMBER ${READER.user}`,
+    ]);
     app = await startV1Routes();
   });
   afterAll(async () => {
     await removeSources(created);
     await app.close();
+    await asMssqlAdmin([`DROP USER IF EXISTS ${READER.user}`]);
+    await asMssqlAdmin([dropLoginSql(READER.user)], "master");
   });
 
   const call = (method: string, path: string, body?: unknown) =>
@@ -120,11 +139,15 @@ describe("/v1/sources with azure-sql", () => {
     expect(res.body.error).toBe("invalid_request");
   });
 
-  it("records the relaxed TLS mode in the audit entries, with no password", async () => {
+  // The fixture's certificate is self-signed, so a source on it cannot start
+  // from `verify` (the connection is refused, see connect.test.ts): the
+  // relaxed mode is on record from the create, and a settings change records
+  // it again beside the setting that changed.
+  it("records the TLS mode and every settings change in the audit entries, with no password", async () => {
     const res = await create();
     const settings = mssqlSourceSettings("ro");
     const changed = await call("PATCH", `/${res.body.id}`, {
-      settings: { ...settings, tls: "trust-server-certificate" },
+      settings: { ...settings, ...READER, tls: "trust-server-certificate" },
     });
     expect(changed.status).toBe(200);
     const rows = await auditRows(res.body.id);
@@ -147,7 +170,11 @@ describe("/v1/sources with azure-sql", () => {
         r.payload.metadata.event === "zeteo.source.updated" &&
         r.payload.metadata.changed.includes("settings")
     );
-    expect(updated?.payload.metadata.settings).toEqual(redacted);
+    expect(updated?.payload.metadata.settings).toEqual({
+      ...redacted,
+      user: READER.user,
+    });
     expect(JSON.stringify(rows)).not.toContain(settings.password);
+    expect(JSON.stringify(rows)).not.toContain(READER.password);
   });
 });
