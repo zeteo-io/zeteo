@@ -98,7 +98,8 @@ Rights over principals are found although a low-privilege login sees few princip
 shows a login the users, roles and logins it holds a permission on or owns (checked against SQL
 Server 2022 for `IMPERSONATE` on a user and on a login, `ALTER` on a role and on an application
 role, and an owned role). Logins are read from `sys.server_principals`; where a source does not let
-the login read it, that part is skipped and the database-level checks stand.
+the login read it, that part is skipped and the database-level checks stand: `IMPERSONATE ANY
+LOGIN` and `CONTROL SERVER` are still found, but `IMPERSONATE` on one specific login is not.
 
 A login that can create databases through the `dbmanager` role of Azure SQL's `master` database is
 not seen from the source database. Do not give the reader login that role.

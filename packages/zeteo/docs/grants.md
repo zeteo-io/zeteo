@@ -66,3 +66,7 @@ shown (once per distinct principal in a list), never stored.
 
 A failed lookup is logged and shown as `unknown`; it never fails the request, since the grant itself
 was read or changed.
+
+With today's Tereo a service cannot read groups at all, so in production a group grant's
+`principal_status` is always `unknown`, never `active`. It only reports; a group grant counts for its
+members whatever its status.
