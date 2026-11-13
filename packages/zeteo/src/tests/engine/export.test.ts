@@ -125,6 +125,8 @@ describeEachEngine("runExport", (engine) => {
   let capped: SeededSource;
   let off: SeededSource;
   let zeroCap: SeededSource;
+  /** Runs one export at a time. */
+  let single: SeededSource;
   const users: string[] = [];
 
   const callerOf = (userId: string): Caller => ({
@@ -140,7 +142,7 @@ describeEachEngine("runExport", (engine) => {
   ): Promise<Caller> => {
     const user = newQueryUser();
     users.push(user.id);
-    for (const on of [source, capped, off, zeroCap]) {
+    for (const on of [source, capped, off, zeroCap, single]) {
       await grantTo(user.principal, on.tables.customers!, columns);
       await grantTo(user.principal, on.tables.slow_orders!, "all");
     }
@@ -195,7 +197,16 @@ describeEachEngine("runExport", (engine) => {
   beforeAll(async () => {
     await initializeTereo();
     const exportable = { export_enabled: true, export_row_cap: 1_000_000 };
-    source = await seedQuerySource(engine, exportable, "export");
+    source = await seedQuerySource(
+      engine,
+      { ...exportable, export_concurrency: 2 },
+      "export"
+    );
+    single = await seedQuerySource(
+      engine,
+      { ...exportable, export_concurrency: 1 },
+      "export"
+    );
     capped = await seedQuerySource(
       engine,
       { export_enabled: true, export_row_cap: 2 },
@@ -215,7 +226,7 @@ describeEachEngine("runExport", (engine) => {
   afterAll(async () => {
     await closeAllSourcePools();
     await removeRunsOf(users);
-    await removeSources([source.id, capped.id, off.id, zeroCap.id]);
+    await removeSources([source.id, capped.id, off.id, zeroCap.id, single.id]);
     await stopTereo();
   });
 
@@ -397,11 +408,17 @@ describeEachEngine("runExport", (engine) => {
     });
   });
 
-  it("refuses a second export by the same user with 429 too_many_exports while the first runs", async () => {
+  it("refuses a second export by the same user with 429 too_many_exports while the first runs, when their limit is 1", async () => {
     const caller = await grantedCaller();
+    const userLimits = { queryConcurrency: 5, exportConcurrency: 1 };
     const held = gate();
     const first = runExport(
-      { caller, body: customers(source), signal: new AbortController().signal },
+      {
+        caller,
+        body: customers(source),
+        signal: new AbortController().signal,
+        userLimits,
+      },
       recorder({ rows: held.wait }).sink
     );
     try {
@@ -412,11 +429,16 @@ describeEachEngine("runExport", (engine) => {
             caller,
             body: customers(source),
             signal: new AbortController().signal,
+            userLimits,
           },
           recorder().sink
         )
       );
-      expect(err).toMatchObject({ statusCode: 429, code: "too_many_exports" });
+      expect(err).toMatchObject({
+        statusCode: 429,
+        code: "too_many_exports",
+        message: "At most 1 export may run at once for one user",
+      });
     } finally {
       held.open();
       await first;
@@ -428,7 +450,64 @@ describeEachEngine("runExport", (engine) => {
     ]);
   });
 
-  it("refuses a third export on one source with 429 source_busy while two run", async () => {
+  it("runs two exports by one user at once when their limit is 2", async () => {
+    const caller = await grantedCaller();
+    const userLimits = { queryConcurrency: 5, exportConcurrency: 2 };
+    const gates = [gate(), gate()];
+    const running = gates.map((g) =>
+      runExport(
+        {
+          caller,
+          body: customers(source),
+          signal: new AbortController().signal,
+          userLimits,
+        },
+        recorder({ rows: g.wait }).sink
+      )
+    );
+    await Promise.all(gates.map((g) => g.reached));
+    for (const g of gates) g.open();
+    await Promise.all(running);
+    const runs = await runsOf([caller.userId]);
+    expect(runs.map((r) => r.outcome)).toEqual(["ok", "ok"]);
+  });
+
+  it("refuses a second export by another user with 429 source_busy on a source with export_concurrency 1", async () => {
+    const holder = await grantedCaller();
+    const held = gate();
+    const first = runExport(
+      {
+        caller: holder,
+        body: customers(single),
+        signal: new AbortController().signal,
+      },
+      recorder({ rows: held.wait }).sink
+    );
+    try {
+      await held.reached;
+      const other = await grantedCaller();
+      const err = await rejectionOf(
+        runExport(
+          {
+            caller: other,
+            body: customers(single),
+            signal: new AbortController().signal,
+          },
+          recorder().sink
+        )
+      );
+      expect(err).toMatchObject({
+        statusCode: 429,
+        code: "source_busy",
+        message: "The source runs at most 1 export at once; retry shortly",
+      });
+    } finally {
+      held.open();
+      await first;
+    }
+  });
+
+  it("refuses a third export on a source with export_concurrency 2 with 429 source_busy while two run", async () => {
     const holders = [await grantedCaller(), await grantedCaller()];
     const gates = holders.map(() => gate());
     const running = holders.map((caller, i) =>

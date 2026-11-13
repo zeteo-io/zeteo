@@ -7,25 +7,22 @@ import type {
   SourceAdapter,
   SourceConnection,
 } from "../adapters/types.js";
-import {
-  EXPORT_SOURCE_CONCURRENCY,
-  SOURCE_CONCURRENCY,
-} from "../engine/limits.js";
 
 export const CONNECT_TIMEOUT_MS = 5000;
-/**
- * Every query and export the source may run at once, plus two: a refresh or
- * login check still gets a connection while queries and exports hold as many
- * as they may.
- */
-export const POOL_SIZE = SOURCE_CONCURRENCY + EXPORT_SOURCE_CONCURRENCY + 2;
 export const QUERY_TIMEOUT_MS = 15_000;
 
-export const CONNECT_OPTIONS: ConnectOptions = {
-  connectTimeoutMs: CONNECT_TIMEOUT_MS,
-  poolSize: POOL_SIZE,
-  queryTimeoutMs: QUERY_TIMEOUT_MS,
-};
+/**
+ * A source pool's connections: every query and export the source may run at
+ * once, plus two, so a refresh still gets a connection while queries and
+ * exports hold as many as they may.
+ */
+export const poolSizeFor = (source: {
+  queryConcurrency: number;
+  exportConcurrency: number;
+}): number => source.queryConcurrency + source.exportConcurrency + 2;
+
+/** A login check's own connection, which runs one statement at a time. */
+export const CHECK_POOL_SIZE = 1;
 
 /**
  * A source's settings, parsed by its adapter. A stored value that cannot be
@@ -49,15 +46,22 @@ export const readSettings = (
 
 /**
  * Checks the destination against the network rules, then connects to the
- * address that passed them. Never dials the host from the settings itself.
+ * address that passed them, with a pool of at most `poolSize` connections.
+ * Never dials the host from the settings itself.
  */
 export const connectChecked = async (
   adapter: SourceAdapter,
-  settings: unknown
+  settings: unknown,
+  poolSize: number
 ): Promise<SourceConnection> => {
   const target = await resolveAllowed(
     adapter.hostOf(settings),
     env.SOURCE_ALLOWED_HOSTS
   );
-  return adapter.connect(settings, target, CONNECT_OPTIONS);
+  const options: ConnectOptions = {
+    connectTimeoutMs: CONNECT_TIMEOUT_MS,
+    poolSize,
+    queryTimeoutMs: QUERY_TIMEOUT_MS,
+  };
+  return adapter.connect(settings, target, options);
 };

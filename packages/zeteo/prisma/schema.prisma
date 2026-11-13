@@ -91,7 +91,8 @@ enum RelationOrigin {
 }
 
 // A registered database. Archived, never deleted. CHECK constraints in the
-// migration: slug format, timeout_ms, row_cap and export_row_cap ranges.
+// migrations: slug format, timeout_ms, row_cap, export_row_cap,
+// query_concurrency and export_concurrency ranges.
 model Source {
   id                   String       @id @default(uuid(7)) @db.Uuid
   slug                 String       @unique
@@ -103,6 +104,8 @@ model Source {
   rowCap               Int          @default(50000) @map("row_cap")
   exportEnabled        Boolean      @default(false) @map("export_enabled")
   exportRowCap         Int          @default(0) @map("export_row_cap")
+  queryConcurrency     Int          @default(5) @map("query_concurrency")
+  exportConcurrency    Int          @default(2) @map("export_concurrency")
   writableLoginAllowed Boolean      @default(false) @map("writable_login_allowed")
   status               SourceStatus @default(active)
   lastRefreshedAt      DateTime?    @map("last_refreshed_at") @db.Timestamp(3)

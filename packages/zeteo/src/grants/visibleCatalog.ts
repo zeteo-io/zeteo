@@ -51,6 +51,8 @@ export interface VisibleCatalog {
     rowCap: number;
     exportEnabled: boolean;
     exportRowCap: number;
+    queryConcurrency: number;
+    exportConcurrency: number;
   };
   tables: VisibleTable[];
   relations: VisibleRelation[];
@@ -139,6 +141,8 @@ export const buildVisibleCatalog = (
       rowCap: source.rowCap,
       exportEnabled: source.exportEnabled,
       exportRowCap: source.exportRowCap,
+      queryConcurrency: source.queryConcurrency,
+      exportConcurrency: source.exportConcurrency,
     },
     tables: visibleTables,
     relations: visibleRelations,

@@ -12,7 +12,6 @@ import { DATA_READ } from "../../definitions/tereoDeclaration.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
 import { QueryTimeoutError } from "../../utils/errors.js";
-import { USER_CONCURRENCY } from "../../engine/limits.js";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
 import { acquireLease } from "../../engine/leases.js";
@@ -23,6 +22,7 @@ import { runPrepared } from "../support/runPlan.js";
 import { runQuery } from "../../engine/index.js";
 import { performance } from "node:perf_hooks";
 import { Connection as Tds } from "tedious";
+import env from "../../env.js";
 import { Client } from "pg";
 import {
   mssqlFixtureSettings,
@@ -154,12 +154,11 @@ describeEachEngine(
       await stopTereo();
     });
 
-    it("refuses a query over the parameter limit with too_many_parameters while both of the user's slots are held", async () => {
+    it("refuses a query over the parameter limit with too_many_parameters while every one of the user's slots is held", async () => {
       const held = [];
-      for (let i = 0; i < USER_CONCURRENCY; i++) {
-        held.push(
-          (await acquireLease(`user:${user.id}`, USER_CONCURRENCY, 60_000))!
-        );
+      const perUser = env.USER_QUERY_CONCURRENCY;
+      for (let i = 0; i < perUser; i++) {
+        held.push((await acquireLease(`user:${user.id}`, perUser, 60_000))!);
       }
       try {
         const values = MAX_PARAMETERS[engine.type] + 1;

@@ -16,6 +16,8 @@ const row = (overrides: Partial<Source>): Source => ({
   rowCap: 50_000,
   exportEnabled: false,
   exportRowCap: 0,
+  queryConcurrency: 5,
+  exportConcurrency: 2,
   writableLoginAllowed: false,
   status: "active",
   lastRefreshedAt: null,
@@ -51,4 +53,15 @@ describe("sourceView", () => {
       }
     }
   );
+
+  it("shows the source's query and export concurrency", () => {
+    vi.spyOn(logger, "error").mockImplementation(() => {});
+    try {
+      expect(
+        sourceView(row({ queryConcurrency: 12, exportConcurrency: 4 }))
+      ).toMatchObject({ query_concurrency: 12, export_concurrency: 4 });
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });

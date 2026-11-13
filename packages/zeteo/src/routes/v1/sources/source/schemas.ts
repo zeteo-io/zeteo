@@ -15,6 +15,8 @@ export const UpdateSourceSchema = z
     row_cap: SourceFieldsShape.row_cap.optional(),
     export_enabled: SourceFieldsShape.export_enabled.optional(),
     export_row_cap: SourceFieldsShape.export_row_cap.optional(),
+    query_concurrency: SourceFieldsShape.query_concurrency.optional(),
+    export_concurrency: SourceFieldsShape.export_concurrency.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message: "Give at least one field to change",

@@ -10,7 +10,7 @@ import { sealSettings } from "../../utils/crypto/envelope.js";
 import { describeEachEngine } from "../support/engines.js";
 import type { SourceType } from "../../adapters/types.js";
 import { refreshSource } from "../../catalog/refresh.js";
-import { POOL_SIZE } from "../../sources/connect.js";
+import { poolSizeFor } from "../../sources/connect.js";
 import { storedType } from "../../sources/types.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -101,11 +101,14 @@ const holdEveryConnection = async (
   const held = new Promise<void>((resolve) => {
     allHeld = resolve;
   });
+  const size = poolSizeFor(
+    await prisma.source.findUniqueOrThrow({ where: { id: sourceId } })
+  );
   const holding = withSourceConnection(sourceId, async (conn) => {
     if (type === "postgres") {
       const { pool } = conn as PostgresConnection;
       const clients = await Promise.all(
-        Array.from({ length: POOL_SIZE }, () => pool.connect())
+        Array.from({ length: size }, () => pool.connect())
       );
       allHeld();
       await gate;
@@ -116,7 +119,7 @@ const holdEveryConnection = async (
         release(connection: object): void;
       };
       const connections = await Promise.all(
-        Array.from({ length: POOL_SIZE }, () => pool.acquire({}))
+        Array.from({ length: size }, () => pool.acquire({}))
       );
       allHeld();
       await gate;

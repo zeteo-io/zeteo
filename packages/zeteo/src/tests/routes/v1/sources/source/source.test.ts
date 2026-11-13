@@ -71,6 +71,69 @@ describe("/v1/sources/:sourceId", () => {
     });
   });
 
+  it("PATCH changes query_concurrency and export_concurrency without contacting the source, records the limits, and retires the open pool", async () => {
+    const source = await create();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+    const connect = vi.spyOn(postgresAdapter, "connect");
+    let res;
+    try {
+      res = await call("PATCH", `/${source.id}`, {
+        query_concurrency: 1,
+        export_concurrency: 10,
+      });
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+    }
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      query_concurrency: 1,
+      export_concurrency: 10,
+    });
+    expect(isSourcePoolOpen(source.id)).toBe(false);
+    const entry = (await auditRows(source.id)).at(-1)?.payload;
+    expect(entry?.metadata).toMatchObject({
+      event: "zeteo.source.updated",
+      changed: ["query_concurrency", "export_concurrency"],
+      limits: {
+        timeout_ms: 30_000,
+        row_cap: 50_000,
+        export_enabled: false,
+        export_row_cap: 0,
+        query_concurrency: 1,
+        export_concurrency: 10,
+      },
+    });
+  });
+
+  it("PATCH keeps the open pool when no concurrency setting changed", async () => {
+    const source = await create();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    const res = await call("PATCH", `/${source.id}`, {
+      name: "Renamed",
+      query_concurrency: 5,
+    });
+    expect(res.status).toBe(200);
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+  });
+
+  it.each([
+    { query_concurrency: 0 },
+    { query_concurrency: 51 },
+    { export_concurrency: 0 },
+    { export_concurrency: 11 },
+  ])("PATCH refuses %o with 400 invalid_request", async (limit) => {
+    const source = await create();
+    const res = await call("PATCH", `/${source.id}`, limit);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_request");
+    expect((await call("GET", `/${source.id}`)).body).toMatchObject({
+      query_concurrency: 5,
+      export_concurrency: 2,
+    });
+  });
+
   it("PATCH with settings re-runs the login check and replaces the settings", async () => {
     const source = await create();
     const refused = await call("PATCH", `/${source.id}`, {

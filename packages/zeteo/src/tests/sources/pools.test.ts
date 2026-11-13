@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import type { PostgresConnection } from "../../adapters/postgres/connect.js";
 import { postgresAdapter } from "../../adapters/postgres/index.js";
 import { startV1App, startV1Routes } from "../support/v1App.js";
 import { SourceUnreachableError } from "../../utils/errors.js";
@@ -37,7 +38,8 @@ const created: string[] = [];
 /** A source row sealed for its own id; `sealed` replaces the sealed value. */
 const newSource = async (
   settings = sourceSettings("ro"),
-  sealed?: (id: string) => unknown
+  sealed?: (id: string) => unknown,
+  limits: { queryConcurrency?: number; exportConcurrency?: number } = {}
 ) => {
   const id = randomUUID();
   const row = await prisma.source.create({
@@ -51,6 +53,7 @@ const newSource = async (
         : sealSettings(settings, id)) as object,
       schemas: ["public"],
       createdBy: randomUUID(),
+      ...limits,
     },
   });
   created.push(row.id);
@@ -177,6 +180,39 @@ describe("withSourceConnection", () => {
     expect(findings.map((f) => f.code)).toContain("can_write_tables");
     expect(closes[0]).toHaveBeenCalledTimes(1);
   });
+
+  /** The most connections the pool `fn` runs on may open. */
+  const poolMax = (sourceId: string) =>
+    withSourceConnection(
+      sourceId,
+      async (conn) => (conn as PostgresConnection).pool.options.max
+    );
+
+  it("opens a source's pool with its query and export concurrency plus two connections at most", async () => {
+    const source = await newSource(undefined, undefined, {
+      queryConcurrency: 3,
+      exportConcurrency: 1,
+    });
+    const { connect } = watchConnections();
+    expect(await poolMax(source.id)).toBe(6);
+    expect(connect.mock.calls[0]![2]).toMatchObject({ poolSize: 6 });
+  });
+
+  it.each([
+    ["query", { queryConcurrency: 7 }, 11],
+    ["export", { exportConcurrency: 4 }, 11],
+  ])(
+    "replaces the pool with one of the new size when the %s concurrency changed elsewhere",
+    async (_name, change, size) => {
+      const source = await newSource();
+      const { closes, connect } = watchConnections();
+      expect(await poolMax(source.id)).toBe(9);
+      await prisma.source.update({ where: { id: source.id }, data: change });
+      expect(await poolMax(source.id)).toBe(size);
+      expect(connect).toHaveBeenCalledTimes(2);
+      expect(closes[0]).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it("keeps a newer pool when a call holds a row read before the settings changed", async () => {
     const source = await newSource();

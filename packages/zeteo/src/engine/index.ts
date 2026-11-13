@@ -1,4 +1,3 @@
-import { acquireRunLeases, LEASE_GRACE_MS, runLimits } from "./limits.js";
 import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
@@ -22,6 +21,13 @@ import type {
   SourceAdapter,
 } from "../adapters/types.js";
 import {
+  acquireRunLeases,
+  defaultUserLimits,
+  LEASE_GRACE_MS,
+  runLimits,
+  type UserLimits,
+} from "./limits.js";
+import {
   CLIENT_CLOSED,
   failureOf,
   recordRun,
@@ -36,6 +42,8 @@ export interface RunQueryInput {
   body: unknown;
   /** Aborts when the caller goes away: the run is stopped on the source. */
   signal?: AbortSignal;
+  /** The caller's concurrency limits; every user's defaults when absent. */
+  userLimits?: UserLimits;
 }
 
 export interface RunQueryResult {
@@ -256,7 +264,7 @@ export const recordRunOrPlaceholder = async (
 
 /** Steps 2 to 6. */
 const execute = async (
-  { caller, entryPoint, body, signal }: RunQueryInput,
+  { caller, entryPoint, body, signal, userLimits }: RunQueryInput,
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
@@ -274,10 +282,12 @@ const execute = async (
   // One deadline for the whole run, pool wait included.
   const deadlineAt = performance.now() + limits.timeoutMs;
   signal?.throwIfAborted();
+  // The source's limit as this run's catalogue read it.
   const release = await acquireRunLeases(
     caller.userId,
-    sourceId,
-    limits.timeoutMs + LEASE_GRACE_MS
+    catalog.source,
+    limits.timeoutMs + LEASE_GRACE_MS,
+    userLimits ?? defaultUserLimits()
   );
   let result: QueryResult;
   try {

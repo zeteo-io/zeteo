@@ -20,7 +20,8 @@ validated.
 ## The source
 
 `{ id, slug, name, type, settings, schemas, timeout_ms, row_cap, export_enabled, export_row_cap,
-writable_login_allowed, status, last_refreshed_at, created_at, archived_at }`.
+query_concurrency, export_concurrency, writable_login_allowed, status, last_refreshed_at,
+created_at, archived_at }`.
 
 - `slug`: `^[a-z][a-z0-9-]{1,62}$`, unique, fixed after create. `type` is fixed too.
 - `schemas`: 1 to 20 database schema names Zeteo exposes.
@@ -29,6 +30,13 @@ writable_login_allowed, status, last_refreshed_at, created_at, archived_at }`.
   work, and using the source fails as a `500 server_error` with the generic body.
 - Limits: `timeout_ms` 1000 to 120000 (default 30000), `row_cap` 1 to 50000 (default 50000),
   `export_row_cap` 0 to 1000000 (default 0), `export_enabled` (default false).
+- Concurrency: `query_concurrency` 1 to 50 (default 5), the queries the source runs at once
+  across every replica, and `export_concurrency` 1 to 10 (default 2), its exports at once. One more is `429 source_busy` ([querying.md](querying.md#limits)). A change
+  applies to the runs that start after it; running ones go on. Each replica opens up to
+  `query_concurrency + export_concurrency + 2` connections to the source
+  ([connection pools](#connection-pools)), so the database's own limit (Postgres
+  `max_connections`, the concurrent requests or workers of an Azure SQL tier) must allow the number
+  of Zeteo replicas times that, on top of its other clients.
 
 ## Settings per type
 
@@ -96,7 +104,8 @@ answer is still `201`.
 
 A `PATCH` with neither `settings` nor `schemas` never contacts the source; `allow_writable_login`
 is accepted only with `settings`, and an override has to be sent again on each settings change. A
-settings change closes the source's open pool. After a `PATCH` that carries `settings` or `schemas`
+settings change, and a change to `query_concurrency` or `export_concurrency`, closes the source's
+open pool once the calls running on it end. After a `PATCH` that carries `settings` or `schemas`
 is committed, Zeteo refreshes the catalogue, so it describes the new target at once (and a source
 fixed by new settings is `active` again). If that refresh fails the change stands and the answer is
 still `200`; `status` becomes `unreachable` only when the refresh failed with `source_unreachable`
@@ -166,16 +175,19 @@ controls that name's DNS. Prefer address ranges where that matters.**
 
 ## Connection pools
 
-Each source has one pool per process (9 connections: the 5 queries and 2 exports a source may run
-at once, plus 2, so a refresh or login check still gets one; connect timeout 5 s), opened on first use
-and closed after 5 idle minutes, on archive, on a settings change and on shutdown. Catalogue reads
+Each source has one pool per process of at most `query_concurrency + export_concurrency + 2`
+connections (9 with the defaults): the queries and exports the source may run at once, plus 2, so a
+refresh still gets one. The size is read from the source's row when the pool opens; connect timeout
+5 s. A login check (on create, on a settings change and on `test`) uses a connection of its own, not
+the pool. A pool is opened on first use and closed after 5 idle minutes, on archive, on a change to
+the settings or to either concurrency setting, and on shutdown. Catalogue reads
 (the login check and schema reads) run under a 15 s query timeout; user queries run under the
 source's own `timeout_ms` ([querying.md](querying.md)). Concurrent first uses open one pool. A call
 running when its pool is closed finishes first.
 
 Every use reads the source's row (one indexed read), so a change made through another replica
-reaches this one at its next use: a pool opened with other sealed settings than the row now holds
-is closed and a new one opened, and an archived source is refused with `409 source_archived`. Only a
+reaches this one at its next use: a pool opened with other sealed settings or another size than
+the row now gives is closed and a new one opened, and an archived source is refused with `409 source_archived`. Only a
 row newer than the pool (by `updated_at`) replaces it: a use whose read landed just before a
 settings change runs on the pool already opened with the new settings, and one that finds no pool
 (the change just closed it on this replica) reads the row again before opening one. A
@@ -193,7 +205,9 @@ and ends with the process.
 `zeteo.source.created`, `zeteo.source.updated` and `zeteo.source.archived` are written to the outbox
 in the change's transaction. A refresh, a table description change and a relation declared or
 removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an update the names of the fields
-changed, and for an override the finding codes. A create, and an update that carries `settings`,
+changed, under `limits` the source's `timeout_ms`, `row_cap`, `export_enabled`, `export_row_cap`,
+`query_concurrency` and `export_concurrency` as they stand after the change, and for an override
+the finding codes. A create, and an update that carries `settings`,
 also records the settings as the adapter redacts them (for `postgres` and `azure-sql`: `host`,
 `port`, `database`, `user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the
 record. The password and `ca` are never in an audit entry.

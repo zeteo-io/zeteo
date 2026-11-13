@@ -32,6 +32,23 @@ describe("env schema", () => {
     ).toThrow(/QUERY_RUNS_RETENTION_DAYS/);
   });
 
+  it.each([
+    ["USER_QUERY_CONCURRENCY", 5, 100],
+    ["USER_EXPORT_CONCURRENCY", 1, 10],
+  ] as const)(
+    "defaults %s to %s and takes 1 to %s only",
+    (name, fallback, max) => {
+      expect(parseEnv(base)[name]).toBe(fallback);
+      expect(parseEnv({ ...base, [name]: "1" })[name]).toBe(1);
+      expect(parseEnv({ ...base, [name]: String(max) })[name]).toBe(max);
+      for (const bad of ["0", String(max + 1), "1.5", "abc"]) {
+        expect(() => parseEnv({ ...base, [name]: bad })).toThrow(
+          new RegExp(name)
+        );
+      }
+    }
+  );
+
   it("refuses a PORT that is not a number", () => {
     expect(() => parseEnv({ ...base, PORT: "abc" })).toThrow(/PORT/);
   });

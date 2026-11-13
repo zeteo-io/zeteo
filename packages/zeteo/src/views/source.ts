@@ -30,6 +30,8 @@ export const sourceView = (row: Source) => ({
   row_cap: row.rowCap,
   export_enabled: row.exportEnabled,
   export_row_cap: row.exportRowCap,
+  query_concurrency: row.queryConcurrency,
+  export_concurrency: row.exportConcurrency,
   writable_login_allowed: row.writableLoginAllowed,
   status: row.status,
   last_refreshed_at: row.lastRefreshedAt?.toISOString() ?? null,

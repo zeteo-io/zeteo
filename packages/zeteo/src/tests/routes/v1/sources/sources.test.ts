@@ -98,6 +98,67 @@ describe("/v1/sources", () => {
     expect(JSON.stringify(rows[0].payload)).not.toContain("ro-test-password");
   });
 
+  it("takes query_concurrency and export_concurrency, 5 and 2 by default, and records them with the other limits", async () => {
+    const plain = await create();
+    expect(plain.body).toMatchObject({
+      query_concurrency: 5,
+      export_concurrency: 2,
+    });
+    const res = await create({
+      query_concurrency: 12,
+      export_concurrency: 3,
+      timeout_ms: 4000,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      query_concurrency: 12,
+      export_concurrency: 3,
+    });
+    expect((await get(`/${res.body.id}`)).body).toMatchObject({
+      query_concurrency: 12,
+      export_concurrency: 3,
+    });
+    const entry = (await auditRows(res.body.id)).find(
+      (r) => r.payload.metadata.event === "zeteo.source.created"
+    );
+    expect(entry?.payload.metadata.limits).toEqual({
+      timeout_ms: 4000,
+      row_cap: 50_000,
+      export_enabled: false,
+      export_row_cap: 0,
+      query_concurrency: 12,
+      export_concurrency: 3,
+    });
+  });
+
+  it.each([
+    { query_concurrency: 0 },
+    { query_concurrency: 51 },
+    { query_concurrency: 2.5 },
+    { export_concurrency: 0 },
+    { export_concurrency: 11 },
+  ])("refuses %o with 400 invalid_request, storing nothing", async (limit) => {
+    const slug = uniqueSlug("conc");
+    const res = await post(
+      sourceBody(sourceSettings("ro"), { slug, ...limit })
+    );
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_request");
+    expect(res.body.error_description).toContain(Object.keys(limit)[0]);
+    expect(await prisma.source.count({ where: { slug } })).toBe(0);
+  });
+
+  it("accepts the bounds 1 and 50 for query_concurrency and 1 and 10 for export_concurrency", async () => {
+    for (const limits of [
+      { query_concurrency: 1, export_concurrency: 1 },
+      { query_concurrency: 50, export_concurrency: 10 },
+    ]) {
+      const res = await create(limits);
+      expect(res.status).toBe(201);
+      expect(res.body).toMatchObject(limits);
+    }
+  });
+
   it("reads the schema after the row is committed, so the catalogue is filled when the 201 arrives", async () => {
     const res = await create({ schemas: ["sales"] });
     expect(res.status).toBe(201);

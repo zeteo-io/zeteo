@@ -43,6 +43,8 @@ export const SourceFieldsShape = {
   row_cap: z.number().int().min(1).max(50_000),
   export_enabled: z.boolean(),
   export_row_cap: z.number().int().min(0).max(1_000_000),
+  query_concurrency: z.number().int().min(1).max(50),
+  export_concurrency: z.number().int().min(1).max(10),
 };
 
 export const CreateSourceSchema = z.strictObject({
@@ -59,6 +61,8 @@ export const CreateSourceSchema = z.strictObject({
   row_cap: SourceFieldsShape.row_cap.optional(),
   export_enabled: SourceFieldsShape.export_enabled.optional(),
   export_row_cap: SourceFieldsShape.export_row_cap.optional(),
+  query_concurrency: SourceFieldsShape.query_concurrency.optional(),
+  export_concurrency: SourceFieldsShape.export_concurrency.optional(),
 });
 
 export const ListSourcesQuerySchema = z.strictObject({

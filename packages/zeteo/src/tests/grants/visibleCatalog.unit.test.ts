@@ -19,6 +19,8 @@ const source = {
   rowCap: 50,
   exportEnabled: true,
   exportRowCap: 1000,
+  queryConcurrency: 3,
+  exportConcurrency: 1,
 } as Source;
 
 const table = (id: string, name: string, missing = false): SourceTable =>
@@ -115,6 +117,8 @@ describe("buildVisibleCatalog", () => {
       rowCap: 50,
       exportEnabled: true,
       exportRowCap: 1000,
+      queryConcurrency: 3,
+      exportConcurrency: 1,
     });
   });
 

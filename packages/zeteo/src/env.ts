@@ -131,6 +131,10 @@ const EnvFields = z
     TRUST_PROXY: z.string().default("false"),
     // Defaults to PUBLIC_URL's origin.
     CORS_ALLOWED_ORIGINS: corsOrigins.optional(),
+    // How many queries and exports one user may run at once, across every
+    // replica. Each source has its own limits as well.
+    USER_QUERY_CONCURRENCY: int(1, 100, 5),
+    USER_EXPORT_CONCURRENCY: int(1, 10, 1),
     // On SIGTERM, how long in-flight requests get before they are cut off.
     SHUTDOWN_TIMEOUT_SECONDS: int(1, 3600, 25),
   })

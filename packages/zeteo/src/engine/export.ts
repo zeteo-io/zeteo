@@ -17,6 +17,8 @@ import {
 } from "./record.js";
 import {
   acquireExportLeases,
+  defaultUserLimits,
+  type UserLimits,
   EXPORT_LEASE_MS,
   EXPORT_LEASE_RENEW_MS,
   EXPORT_TIMEOUT_MS,
@@ -50,6 +52,8 @@ export interface RunExportInput {
   body: unknown;
   /** Aborts when the caller goes away: the export is stopped on the source. */
   signal: AbortSignal;
+  /** The caller's concurrency limits; every user's defaults when absent. */
+  userLimits?: UserLimits;
 }
 
 /** Why an export was stopped before it ended, and what it rejects with. */
@@ -239,8 +243,9 @@ export const runExport = async (
     controller.signal.throwIfAborted();
     const leases = await acquireExportLeases(
       input.caller.userId,
-      source.id,
-      EXPORT_LEASE_MS
+      source,
+      EXPORT_LEASE_MS,
+      input.userLimits ?? defaultUserLimits()
     );
     const renewal = setInterval(
       () => void leases.renew(EXPORT_LEASE_MS),

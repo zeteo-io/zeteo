@@ -1,11 +1,17 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag slow
+import { initializeTereo, stopTereo } from "../../../../utils/tereo.js";
+import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
+import { removeSources, writeToken } from "../../../support/sources.js";
 import { describeEachEngine } from "../../../support/engines.js";
+import type { Caller } from "../../../../middleware/auth.js";
 import type { JsonResponse } from "../../../support/http.js";
-import { removeSources } from "../../../support/sources.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { runQuery } from "../../../../engine/index.js";
+import { fetchJson } from "../../../support/http.js";
 import { BASE_URL } from "../../../support/http.js";
+import env from "../../../../env.js";
 import {
   grantTo,
   newQueryUser,
@@ -25,6 +31,13 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
   let capped: SeededSource;
   /** Over the portable tables and the probe schema's wide rows. */
   let wide: SeededSource;
+  /** Runs one query at a time. */
+  let single: SeededSource;
+  /** Runs six queries at once. */
+  let six: SeededSource;
+  /** Runs more queries at once than one user may. */
+  let roomy: { source: SeededSource; queryConcurrency: number };
+  const extra: string[] = [];
   const users: string[] = [];
   const errorBodies: unknown[] = [];
 
@@ -55,10 +68,30 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     wide = await seedQuerySource(engine, {
       schemas: [...engine.schemas, "probe"],
     });
+    single = await seedQuerySource(engine, { query_concurrency: 1 });
+    six = await seedQuerySource(engine, { query_concurrency: 6 });
+    const queryConcurrency = env.USER_QUERY_CONCURRENCY + 2;
+    roomy = {
+      source: await seedQuerySource(engine, {
+        query_concurrency: queryConcurrency,
+      }),
+      queryConcurrency,
+    };
+    await initializeTereo();
   });
   afterAll(async () => {
+    await stopTereo();
     await removeRunsOf(users);
-    await removeSources([source.id, quick.id, capped.id, wide.id]);
+    await removeSources([
+      source.id,
+      quick.id,
+      capped.id,
+      wide.id,
+      single.id,
+      six.id,
+      roomy.source.id,
+      ...extra,
+    ]);
   });
 
   it("stops a query past the source's time limit with 504 query_timeout", async () => {
@@ -138,72 +171,147 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     expect(under.body.rows).toEqual([[1], [2]]);
   });
 
-  it("runs two queries at once per user, refuses a third with 429 too_many_queries, and frees the slots", async () => {
-    const user = await grantedUser(source);
-    const slow = () =>
-      ask(user.token, source, { from: "slow_orders", select: ["id"] });
-    const results = await Promise.all([slow(), slow(), slow()]);
+  const slowQuery = (token: string, on: SeededSource) =>
+    ask(token, on, { from: "slow_orders", select: ["id"] });
+
+  it("runs USER_QUERY_CONCURRENCY queries at once per user, refuses one more with 429 too_many_queries, and frees the slots", async () => {
+    const perUser = env.USER_QUERY_CONCURRENCY;
+    expect(roomy.queryConcurrency).toBeGreaterThan(perUser);
+    const user = await grantedUser(roomy.source);
+    const results = await Promise.all(
+      Array.from({ length: perUser + 1 }, () =>
+        slowQuery(user.token, roomy.source)
+      )
+    );
     const statuses = results.map((r) => r.status).sort();
-    expect(statuses).toEqual([200, 200, 429]);
+    expect(statuses).toEqual([...Array(perUser).fill(200), 429]);
     const refused = results.find((r) => r.status === 429)!;
     expect(refused.body).toEqual({
       error: "too_many_queries",
-      error_description: expect.any(String),
+      error_description: `At most ${perUser} queries may run at once for one user`,
       retry_after: 1,
       request_id: expect.any(String),
     });
-    const fourth = await ask(user.token, source, {
+    const after = await ask(user.token, roomy.source, {
       from: "orders",
       select: ["id"],
       limit: 1,
     });
-    expect(fourth.status).toBe(200);
+    expect(after.status).toBe(200);
   });
 
-  it("sends Retry-After with a refusal", async () => {
-    const user = await grantedUser(source);
-    const slow = () =>
+  it("refuses a user's second query with too_many_queries when their limit is 1", async () => {
+    const user = await grantedUser(roomy.source);
+    const caller: Caller = {
+      userId: user.id,
+      organizationId: null,
+      permissions: [DATA_READ],
+      isServiceAccount: false,
+    };
+    const run = () =>
+      runQuery({
+        caller,
+        entryPoint: "api",
+        body: {
+          source: roomy.source.slug,
+          from: "slow_orders",
+          select: ["id"],
+        },
+        userLimits: { queryConcurrency: 1, exportConcurrency: 1 },
+      });
+    const results = await Promise.allSettled([run(), run()]);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    const refused = results.find((r) => r.status === "rejected")!;
+    expect((refused as PromiseRejectedResult).reason).toMatchObject({
+      statusCode: 429,
+      code: "too_many_queries",
+      message: "At most 1 query may run at once for one user",
+    });
+  });
+
+  it("refuses a second query on a source with query_concurrency 1 from another user with 429 source_busy and Retry-After", async () => {
+    const [first, second] = await Promise.all([
+      grantedUser(single),
+      grantedUser(single),
+    ]);
+    const slow = (token: string) =>
       fetch(`${BASE_URL}/v1/query`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${user.token}`,
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          source: source.slug,
+          source: single.slug,
           from: "slow_orders",
           select: ["id"],
         }),
       });
-    const responses = await Promise.all([slow(), slow(), slow()]);
-    const refused = responses.find((r) => r.status === 429)!;
-    expect(refused.headers.get("retry-after")).toBe("1");
-    await Promise.all(responses.map((r) => r.text()));
+    const responses = await Promise.all([
+      slow(first!.token),
+      slow(second!.token),
+    ]);
+    const bodies = await Promise.all(responses.map((r) => r.json()));
+    expect(responses.map((r) => r.status).sort()).toEqual([200, 429]);
+    const at = responses.findIndex((r) => r.status === 429);
+    expect(responses[at]!.headers.get("retry-after")).toBe("1");
+    expect(bodies[at]).toMatchObject({
+      error: "source_busy",
+      error_description:
+        "The source runs at most 1 query at once; retry shortly",
+    });
+    errorBodies.push(bodies[at]);
   });
 
-  it("runs five queries at once per source and refuses a sixth with 429 source_busy", async () => {
+  it("runs six queries at once on a source with query_concurrency 6 and refuses a seventh with 429 source_busy", async () => {
     const callers = await Promise.all(
-      Array.from({ length: 6 }, () => grantedUser(source))
+      Array.from({ length: 7 }, () => grantedUser(six))
     );
     const results = await Promise.all(
-      callers.map((user) =>
-        ask(user.token, source, { from: "slow_orders", select: ["id"] })
-      )
+      callers.map((user) => slowQuery(user.token, six))
     );
     const statuses = results.map((r) => r.status).sort();
-    expect(statuses).toEqual([200, 200, 200, 200, 200, 429]);
-    expect(results.find((r) => r.status === 429)!.body.error).toBe(
-      "source_busy"
-    );
+    expect(statuses).toEqual([200, 200, 200, 200, 200, 200, 429]);
+    expect(results.find((r) => r.status === 429)!.body).toMatchObject({
+      error: "source_busy",
+      error_description:
+        "The source runs at most 6 queries at once; retry shortly",
+    });
     expect(
       (
-        await ask(callers[0]!.token, source, {
+        await ask(callers[0]!.token, six, {
           from: "orders",
           select: ["id"],
           limit: 1,
         })
       ).status
     ).toBe(200);
+  });
+
+  it("applies a changed query_concurrency to the runs that start after it", async () => {
+    const changing = await seedQuerySource(engine, { query_concurrency: 1 });
+    extra.push(changing.id);
+    const [first, second] = await Promise.all([
+      grantedUser(changing),
+      grantedUser(changing),
+    ]);
+    const twice = () =>
+      Promise.all([
+        slowQuery(first!.token, changing),
+        slowQuery(second!.token, changing),
+      ]);
+    expect((await twice()).map((r) => r.status).sort()).toEqual([200, 429]);
+    const patched = await fetchJson(
+      "PATCH",
+      `${BASE_URL}/v1/sources/${changing.id}`,
+      writeToken(),
+      { query_concurrency: 2 }
+    );
+    expect(patched.status).toBe(200);
+    expect((await twice()).map((r) => r.status)).toEqual([200, 200]);
   });
 
   it("stops at the 10 MB size limit with truncated_by bytes, the body under it", async () => {

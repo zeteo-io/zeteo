@@ -1,6 +1,6 @@
+import { connectChecked, poolSizeFor, readSettings } from "./connect.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import type { SourceConnection } from "../adapters/types.js";
-import { connectChecked, readSettings } from "./connect.js";
 import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
@@ -19,7 +19,7 @@ export const POOL_DRAIN_MS = 10_000;
 interface Entry {
   sourceId: string;
   connection: Promise<SourceConnection>;
-  /** Which sealed settings the pool was opened with. */
+  /** Which sealed settings, and what size, the pool was opened with. */
   fingerprint: string;
   /** The newest `updated_at` of the source's row seen by a call on this pool. */
   updatedAt: Date;
@@ -55,20 +55,22 @@ const draining = new Set<Entry>();
 let stopping = false;
 
 // A settings change seals with a fresh IV and data key, so these two change
-// whenever the settings do, on whichever replica made the change.
-const fingerprintOf = (sealed: unknown): string => {
-  const { iv, wrappedKey } = (sealed ?? {}) as {
+// whenever the settings do, on whichever replica made the change. The pool's
+// size changes with the source's concurrency settings.
+const fingerprintOf = (row: Source): string => {
+  const { iv, wrappedKey } = (row.sealedSettings ?? {}) as {
     iv?: unknown;
     wrappedKey?: unknown;
   };
-  return JSON.stringify([iv, wrappedKey]);
+  return JSON.stringify([iv, wrappedKey, poolSizeFor(row)]);
 };
 
 const openConnection = (row: Source): Promise<SourceConnection> => {
   const adapter = adapterFor(typeOf(row));
   return connectChecked(
     adapter,
-    readSettings(adapter, row.id, row.sealedSettings)
+    readSettings(adapter, row.id, row.sealedSettings),
+    poolSizeFor(row)
   );
 };
 
@@ -107,10 +109,10 @@ const armIdleTimer = (sourceId: string, entry: Entry): void => {
 };
 
 const acquire = (row: Source): Entry => {
-  const fingerprint = fingerprintOf(row.sealedSettings);
+  const fingerprint = fingerprintOf(row);
   let entry = entries.get(row.id);
   // Only a row newer than the pool's replaces it: a call whose read landed
-  // before a settings change uses the pool opened with the new settings.
+  // before a change uses the pool opened after it.
   if (
     entry &&
     entry.fingerprint !== fingerprint &&
@@ -158,8 +160,9 @@ const release = async (sourceId: string, entry: Entry): Promise<void> => {
 };
 
 /**
- * Runs `fn` on the source's pool, opening it on first use. Every call reads
- * the source's row: a pool opened with other settings than the row now holds
+ * Runs `fn` on the source's pool, opening it on first use with as many
+ * connections as `poolSizeFor` the row. Every call reads the source's row: a
+ * pool opened with other settings or another size than the row now holds
  * (changed by another replica) is replaced, and an archived source is refused.
  * Opening checks the source's host against the network rules again.
  * Concurrent first uses share one opening. A call that fails with

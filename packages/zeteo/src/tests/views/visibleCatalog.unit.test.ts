@@ -38,6 +38,8 @@ const catalog = (over: Partial<VisibleCatalog> = {}): VisibleCatalog => ({
     rowCap: 50,
     exportEnabled: false,
     exportRowCap: 0,
+    queryConcurrency: 5,
+    exportConcurrency: 2,
   },
   tables: [
     table("orders", "public", "orders"),

@@ -2,7 +2,6 @@ import type { LoginFinding, SourceAdapter } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
-import { connectChecked, readSettings } from "./connect.js";
 import { sealSettings } from "../utils/crypto/envelope.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
@@ -20,6 +19,12 @@ import {
   ValidationError,
   WritableLoginError,
 } from "../utils/errors.js";
+import {
+  CHECK_POOL_SIZE,
+  connectChecked,
+  poolSizeFor,
+  readSettings,
+} from "./connect.js";
 
 /** The fields a caller may set on a source, as the API names them. */
 export interface SourceFields {
@@ -31,6 +36,8 @@ export interface SourceFields {
   row_cap: number;
   export_enabled: boolean;
   export_row_cap: number;
+  query_concurrency: number;
+  export_concurrency: number;
 }
 
 export type CreateSourceInput = Pick<
@@ -56,6 +63,22 @@ const optionalColumns = (input: Partial<SourceFields>) => ({
   ...(input.export_row_cap !== undefined && {
     exportRowCap: input.export_row_cap,
   }),
+  ...(input.query_concurrency !== undefined && {
+    queryConcurrency: input.query_concurrency,
+  }),
+  ...(input.export_concurrency !== undefined && {
+    exportConcurrency: input.export_concurrency,
+  }),
+});
+
+/** The source's limits as they stand, for its audit entries. */
+const limitsMetadata = (row: Source) => ({
+  timeout_ms: row.timeoutMs,
+  row_cap: row.rowCap,
+  export_enabled: row.exportEnabled,
+  export_row_cap: row.exportRowCap,
+  query_concurrency: row.queryConcurrency,
+  export_concurrency: row.exportConcurrency,
 });
 
 /** The adapter's own check of `settings`; the issues name `settings.<field>` and never carry values. */
@@ -77,7 +100,7 @@ const inspectLogin = async (
   adapter: SourceAdapter,
   settings: unknown
 ): Promise<LoginFinding[]> => {
-  const connection = await connectChecked(adapter, settings);
+  const connection = await connectChecked(adapter, settings, CHECK_POOL_SIZE);
   try {
     return await connection.checkLogin();
   } finally {
@@ -148,6 +171,7 @@ export const createSource = async (
         slug: row.slug,
         type: input.type,
         settings: adapter.redact(settings),
+        limits: limitsMetadata(row),
         ...overrideMetadata(verdict),
       },
     });
@@ -218,6 +242,7 @@ export const updateSource = async (
         changed: Object.keys(input).filter(
           (key) => key !== "allow_writable_login"
         ),
+        limits: limitsMetadata(current),
         ...(settingsChange && {
           settings: settingsChange.redacted,
           ...overrideMetadata(settingsChange.verdict),
@@ -227,7 +252,10 @@ export const updateSource = async (
     return current;
   });
 
-  if (settingsChange) await closeSourcePool(id, updated.updatedAt);
+  // The pool is sized from the concurrency settings, so a new size retires it.
+  if (settingsChange || poolSizeFor(updated) !== poolSizeFor(row)) {
+    await closeSourcePool(id, updated.updatedAt);
+  }
   return updated;
 };
 

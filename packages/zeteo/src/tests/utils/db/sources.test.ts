@@ -41,6 +41,22 @@ describe("sources and catalogue constraints", () => {
     );
   });
 
+  it.each([
+    [{ queryConcurrency: 0 }, "sources_query_concurrency_check"],
+    [{ queryConcurrency: 51 }, "sources_query_concurrency_check"],
+    [{ exportConcurrency: 0 }, "sources_export_concurrency_check"],
+    [{ exportConcurrency: 11 }, "sources_export_concurrency_check"],
+  ])("rejects %o", async (limit, constraint) => {
+    await expect(newSource(limit)).rejects.toThrow(constraint);
+  });
+
+  it("defaults the concurrency to 5 queries and 2 exports", async () => {
+    expect(await newSource()).toMatchObject({
+      queryConcurrency: 5,
+      exportConcurrency: 2,
+    });
+  });
+
   it("rejects a relation whose column lists differ in length", async () => {
     const source = await newSource();
     const a = await prisma.sourceTable.create({
