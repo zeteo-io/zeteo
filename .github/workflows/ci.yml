@@ -5,7 +5,8 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
-  # Started by hand on a branch with no earlier run to compare with.
+  # Started by create-version-pr.yml on release/version-bump: its PR is opened
+  # with the built-in token, which triggers no pull_request workflows.
   workflow_dispatch:
 
 concurrency:
