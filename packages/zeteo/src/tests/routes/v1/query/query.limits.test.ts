@@ -32,6 +32,9 @@ import {
 const DRIVER_TEXT =
   /service:|postgres|pg_|sqlstate|statement|cancel|sleep|division|syntax|relation "|ERROR:/i;
 
+/** The highest `query_concurrency` a source takes. */
+const MAX_SOURCE_QUERY_CONCURRENCY = 50;
+
 describeEachEngine("POST /v1/query: limits", (engine) => {
   let source: SeededSource;
   let quick: SeededSource;
@@ -79,7 +82,10 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
     });
     single = await seedQuerySource(engine, { query_concurrency: 1 });
     six = await seedQuerySource(engine, { query_concurrency: 6 });
-    const queryConcurrency = env.USER_QUERY_CONCURRENCY + 2;
+    const queryConcurrency = Math.min(
+      env.USER_QUERY_CONCURRENCY + 2,
+      MAX_SOURCE_QUERY_CONCURRENCY
+    );
     roomy = {
       source: await seedQuerySource(engine, {
         query_concurrency: queryConcurrency,
@@ -185,8 +191,15 @@ describeEachEngine("POST /v1/query: limits", (engine) => {
   const slowQuery = (token: string, on: SeededSource) =>
     ask(token, on, { from: "slow_orders", select: ["id"] });
 
-  it("runs USER_QUERY_CONCURRENCY queries at once per user, refuses one more with 429 too_many_queries, and frees the slots", async () => {
+  it("runs USER_QUERY_CONCURRENCY queries at once per user, refuses one more with 429 too_many_queries, and frees the slots", async ({
+    skip,
+  }) => {
     const perUser = env.USER_QUERY_CONCURRENCY;
+    // The user's limit is reached only on a source that runs more at once.
+    skip(
+      perUser >= MAX_SOURCE_QUERY_CONCURRENCY,
+      `USER_QUERY_CONCURRENCY is ${perUser}; this test needs it below ${MAX_SOURCE_QUERY_CONCURRENCY}, a source's highest query_concurrency`
+    );
     expect(roomy.queryConcurrency).toBeGreaterThan(perUser);
     const user = await grantedUser(roomy.source);
     const results = await Promise.all(
