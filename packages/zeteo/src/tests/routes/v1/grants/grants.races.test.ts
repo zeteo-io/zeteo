@@ -69,3 +69,46 @@ describe("PUT /v1/grants/:id", () => {
     }
   });
 });
+
+describe("DELETE /v1/grants/:id", () => {
+  let app: Awaited<ReturnType<typeof startV1Routes>>;
+  let sourceId: string;
+  let tableId: string;
+
+  const call = (method: string, path: string, body?: unknown) =>
+    fetchJson(method, `${app.url}/v1/grants${path}`, grantsWriteToken(), body);
+
+  beforeAll(async () => {
+    app = await startV1Routes();
+    sourceId = await registerSource(app.url);
+    tableId = (await tableOf(sourceId, "orders")).id;
+  });
+  afterAll(async () => {
+    await removeSources([sourceId]);
+    await app.close();
+  });
+
+  it("answers one 204 and 404 to the rest when one grant is removed at once by several", async () => {
+    for (let round = 0; round < 5; round++) {
+      const made = await call("POST", "", {
+        principal_type: "user",
+        principal_id: randomUUID(),
+        table_id: tableId,
+        all_columns: true,
+      });
+      expect(made.status).toBe(201);
+
+      const answers = await Promise.all(
+        [1, 2, 3, 4].map(() => call("DELETE", `/${made.body.id}`))
+      );
+      const statuses = answers.map((a) => a.status).sort();
+      expect(statuses).toEqual([204, 404, 404, 404]);
+      for (const answer of answers.filter((a) => a.status === 404)) {
+        expect(answer.body).toMatchObject({
+          error: "not_found",
+          error_description: "Grant not found",
+        });
+      }
+    }
+  });
+});

@@ -131,7 +131,9 @@ export const removePrincipalLimit = async (
   await withAudit(async (tx, audit) => {
     const row = await tx.principalLimit.findUnique({ where: { id } });
     if (!row) throw notFound();
-    await tx.principalLimit.delete({ where: { id } });
+    // A concurrent removal may have deleted it since it was read.
+    const { count } = await tx.principalLimit.deleteMany({ where: { id } });
+    if (count === 0) throw notFound();
     audit({
       action: AUDIT_EVENTS.principalLimitRemoved,
       resourceType: RESOURCE_TYPE,

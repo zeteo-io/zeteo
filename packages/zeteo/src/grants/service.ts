@@ -171,8 +171,10 @@ export const removeGrant = async (
       include: { table: { select: { sourceId: true } }, columns: true },
     });
     if (!grant) throw new NotFoundError("Grant not found");
-    // Its columns go with it (ON DELETE CASCADE).
-    await tx.grant.delete({ where: { id } });
+    // Its columns go with it (ON DELETE CASCADE). A concurrent removal may
+    // have deleted it since it was read.
+    const { count } = await tx.grant.deleteMany({ where: { id } });
+    if (count === 0) throw new NotFoundError("Grant not found");
     audit({
       action: AUDIT_EVENTS.grantRemoved,
       resourceType: "grant",
