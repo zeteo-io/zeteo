@@ -18,15 +18,23 @@ export interface ExportRows {
   /**
    * Readable once. Throws `ExportInterruptedError` unless the stream reached
    * its end line. The connection is held until `rows` is read to its end, left
-   * early (`break`, `return()`), or the call's `signal` aborts.
+   * early (`break`, `return()`), or the call's `signal` aborts. Reading has no
+   * time limit of its own: only `signal` bounds it.
    */
   rows: AsyncIterable<unknown[]>;
-  /** Resolves with the end line; rejects with the iterator's `ExportInterruptedError`. */
+  /**
+   * Resolves with the end line; rejects with the iterator's
+   * `ExportInterruptedError`. Settles only once `rows` is read or released.
+   */
   done: Promise<ExportEnd>;
 }
 
 export interface ExportStream {
   runId: string;
+  /**
+   * The connection is held until `stream` is read to its end or destroyed;
+   * only the call's `signal` bounds it. Completeness is the caller's to check.
+   */
   stream: Readable;
 }
 
