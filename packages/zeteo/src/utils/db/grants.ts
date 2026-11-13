@@ -12,12 +12,17 @@ export interface Principal {
 
 export type GrantWithColumns = Grant & {
   columns: GrantColumn[];
-  table: { sourceId: string };
+  table: { sourceId: string; source: { archivedAt: Date | null } };
 };
 
 const withColumns = {
   columns: true,
-  table: { select: { sourceId: true } },
+  table: {
+    select: {
+      sourceId: true,
+      source: { select: { archivedAt: true } },
+    },
+  },
 } as const;
 
 export const findById = (id: string): Promise<Grant | null> =>

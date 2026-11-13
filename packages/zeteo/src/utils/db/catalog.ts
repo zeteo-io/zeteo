@@ -64,3 +64,25 @@ export const listRelationsPage = async (options: {
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
+
+/** Every table, column and relation of a source, missing ones included, in bulk. */
+export const loadSourceCatalog = async (
+  sourceId: string
+): Promise<{
+  tables: SourceTable[];
+  columns: SourceColumn[];
+  relations: Relation[];
+}> => {
+  const [tables, columns, relations] = await Promise.all([
+    prisma.sourceTable.findMany({
+      where: { sourceId },
+      orderBy: [{ schemaName: "asc" }, { name: "asc" }],
+    }),
+    prisma.sourceColumn.findMany({
+      where: { table: { sourceId } },
+      orderBy: [{ tableId: "asc" }, { position: "asc" }],
+    }),
+    prisma.relation.findMany({ where: { sourceId }, orderBy: { name: "asc" } }),
+  ]);
+  return { tables, columns, relations };
+};
