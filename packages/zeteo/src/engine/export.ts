@@ -145,20 +145,45 @@ const recordStart = async (start: ExportStart): Promise<string> => {
   }
 };
 
-/** Records the end; a failure is logged, and the run is left `running` for the sweep. */
+/** The waits before each further attempt at an export's end record. */
+const END_RETRY_DELAYS_MS = [500, 1500, 3000];
+
+/**
+ * Records the end, never rejecting. When the first attempt fails, three more
+ * follow over about five seconds without being waited for, so the export
+ * returns at once; each failure is logged. Every attempt changes only a run
+ * still `running`, so one the sweep has closed meanwhile ends the attempts.
+ * A run never recorded is left `running` for the sweep.
+ */
 const recordEnd = async (
   runId: string,
   start: ExportStart,
   end: ExportEnd
 ): Promise<void> => {
-  try {
-    await recordExportEnd(runId, start, end);
-  } catch (err) {
+  const context = { run_id: runId, source_id: start.sourceId };
+  const attempt = async (n: number): Promise<boolean> => {
+    try {
+      await recordExportEnd(runId, start, end);
+      return true;
+    } catch (err) {
+      logger.error(
+        { err, ...context, attempt: n },
+        "recording an export's end failed"
+      );
+      return false;
+    }
+  };
+  if (await attempt(1)) return;
+  void (async () => {
+    for (const [i, delay] of END_RETRY_DELAYS_MS.entries()) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      if (await attempt(i + 2)) return;
+    }
     logger.error(
-      { err, run_id: runId, source_id: start.sourceId },
-      "recording an export's end failed"
+      context,
+      "an export's end was never recorded; the housekeeping sweep will close its run"
     );
-  }
+  })();
 };
 
 /**

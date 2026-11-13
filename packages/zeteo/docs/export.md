@@ -166,8 +166,10 @@ and never with any of its rows.
 So a started export always has two audit entries, and a run left `running` by a crash still says
 who exported what from which source. The housekeeping job closes such a run as `failed` with
 `interrupted` once it is 15 minutes old (the 10-minute limit and a margin), with its own
-`zeteo.export.run` entry; see [querying.md](querying.md#retention-and-housekeeping). An export
-whose end cannot be written is logged and left for the job.
+`zeteo.export.run` entry; see [querying.md](querying.md#retention-and-housekeeping). When an
+export's end cannot be written (zeteo's own database briefly away), it is tried three more times
+over about five seconds, after the client has had its end and without holding up the stream; each
+failure is logged, and a run still not closed is left for the job.
 
 ## Shutdown
 
