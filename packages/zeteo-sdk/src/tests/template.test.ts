@@ -106,7 +106,10 @@ describe("zeteo template", () => {
 
   it("classifies errors", () => {
     expect(classifyZeteoError(httpError(429))).toEqual({ action: "fail" });
-    expect(classifyZeteoError(httpError(500))).toBeUndefined();
+    expect(classifyZeteoError(httpError(502))).toEqual({ action: "fail" });
+    expect(classifyZeteoError(httpError(504))).toEqual({ action: "fail" });
+    expect(classifyZeteoError(httpError(500))).toEqual({ action: "retry" });
+    expect(classifyZeteoError(httpError(503))).toEqual({ action: "retry" });
     expect(classifyZeteoError(httpError(404))).toBeUndefined();
     expect(classifyZeteoError(httpError())).toBeUndefined();
     expect(classifyZeteoWrite(httpError(429))).toEqual({ action: "fail" });
@@ -115,15 +118,62 @@ describe("zeteo template", () => {
     expect(classifyZeteoWrite(httpError(404))).toBeUndefined();
   });
 
-  it("retries a 500 on the service client but not on its once client", async () => {
-    stub.respond(() => ({ status: 500, body: {} }));
-    await handler.handleRequest(req(names.service)).catch(() => undefined);
-    expect(stub.requests.length).toBeGreaterThanOrEqual(2);
+  it("retries a 500 once on the service client but not on its once client", async () => {
+    stub.respond(() =>
+      stub.requests.length === 1 ? { status: 500, body: {} } : undefined
+    );
+    await handler.handleRequest(req(names.service));
+    expect(stub.requests).toHaveLength(2);
 
+    stub.respond(() => ({ status: 500, body: {} }));
     const before = stub.requests.length;
     await handler.handleRequest(req(names.serviceOnce)).catch(() => undefined);
     expect(stub.requests.length - before).toBe(1);
-  }, 30_000);
+  });
+
+  for (const status of [502, 504]) {
+    for (const client of ["service", "person"] as const) {
+      it(`returns a ${status} on the ${client} client at once and does not freeze it`, async () => {
+        stub.respond(() =>
+          stub.requests.length === 1 ? { status, body: {} } : undefined
+        );
+        await expect(
+          handler.handleRequest(req(names[client]))
+        ).rejects.toBeDefined();
+        expect(stub.requests).toHaveLength(1);
+        const started = Date.now();
+        await handler.handleRequest(req(names[client]));
+        expect(Date.now() - started).toBeLessThan(500);
+        expect(stub.requests).toHaveLength(2);
+      });
+    }
+  }
+
+  for (const status of [500, 503]) {
+    it(`repeats a ${status} without holding back another call on the client`, async () => {
+      stub.respond((r) =>
+        r.path === "/v1/catalog" && stub.requests.length === 1
+          ? { status, body: {} }
+          : undefined
+      );
+      const first = handler.handleRequest(req(names.service));
+      while (stub.requests.length === 0) {
+        await new Promise((ok) => setTimeout(ok, 5));
+      }
+      // Time for the error to reach the handler and for a freeze to be set.
+      await new Promise((ok) => setTimeout(ok, 100));
+      const started = Date.now();
+      await handler.handleRequest(req(names.service, { url: "/v1/sources" }));
+      expect(Date.now() - started).toBeLessThan(500);
+      const response = await first;
+      expect(response.status).toBe(200);
+      expect(stub.requests.map((r) => r.path)).toEqual([
+        "/v1/catalog",
+        "/v1/sources",
+        "/v1/catalog",
+      ]);
+    });
+  }
 
   it("returns a 429 at once and does not freeze the client", async () => {
     stub.respond(() =>

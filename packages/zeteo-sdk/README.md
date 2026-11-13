@@ -279,11 +279,12 @@ plain `Error` holding only the underlying message.
 
 | Case | Behaviour |
 |---|---|
-| GET, `query.run`, `replace`, `delete`: 5xx or dropped connection | Repeated by the handler, with backoff |
+| 500, 503 (`temporarily_unavailable`) on a GET, `query.run`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
+| 502 (`query_failed`, `source_unreachable`), 504 (`query_timeout`) | Thrown; not repeated, and other calls are not held back |
+| Another 5xx, or a dropped connection, on a GET, `query.run`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |
 | Export | Not repeated once the response has started |
 | 429 (`too_many_queries`, `source_busy`) | Thrown with `retryAfter`; not repeated, and other calls are not held back |
-| 503 `temporarily_unavailable` | Repeated like any other 5xx; the handler (`@dianemo/core` 2.1 and later) waits at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date |
 | Other 4xx | Thrown |
 
 A 429 means one person or one source is at its concurrency limit, not that your service is over a

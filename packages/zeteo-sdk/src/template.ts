@@ -54,10 +54,18 @@ const MUTED_STATUSES = Array.from({ length: 100 }, (_, i) => 400 + i).filter(
   (status) => status !== 429
 );
 
-// A 429 is returned to the caller at once: retrying would freeze the client
-// for every other request.
-export const classifyZeteoError: ErrorClassifier = (error) =>
-  error.response?.status === 429 ? { action: "fail" } : undefined;
+// A 429, 502 or 504 is about one caller, one source or one query: repeating it
+// re-runs a failed or timed-out query, and the default retry would freeze the
+// client for every other caller. A 500 or 503 is repeated for this request
+// only; a `Retry-After` on it is still the shortest wait.
+export const classifyZeteoError: ErrorClassifier = (error) => {
+  const status = error.response?.status;
+  if (status === 429 || status === 502 || status === 504) {
+    return { action: "fail" };
+  }
+  if (status === 500 || status === 503) return { action: "retry" };
+  return undefined;
+};
 
 // For writes: after a 5xx or a dropped connection zeteo may already have acted.
 export const classifyZeteoWrite: ErrorClassifier = (error) =>
