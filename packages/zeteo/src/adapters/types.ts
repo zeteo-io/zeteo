@@ -45,14 +45,32 @@ export interface SchemaSnapshot {
   foreignKeys: SnapshotForeignKey[];
 }
 
+/** What opening a run needs: its time. Rows and bytes are the reader's to count. */
+export interface OpenLimits {
+  /** `performance.now()` value by which the run must have ended. */
+  deadlineAt: number;
+  timeoutMs: number;
+}
+
 /** What one run may use; `maxRows` is the effective row limit. */
-export interface RunLimits {
+export interface RunLimits extends OpenLimits {
   maxRows: number;
   /** The most bytes of the rows as JSON. */
   maxBytes: number;
-  timeoutMs: number;
-  /** `performance.now()` value by which the run must have ended. */
-  deadlineAt: number;
+}
+
+/** A running query's result, read in batches. */
+export interface RowStream {
+  /** `plan.columns` by position, checked against the result before this resolves. */
+  columns: { name: string; type: ColumnType }[];
+  /**
+   * Up to `maxRows` more rows in wire forms; an empty array once the result
+   * has ended. Rejects as `openQuery` does; once it has rejected, every later
+   * call rejects the same way.
+   */
+  next(maxRows: number): Promise<unknown[][]>;
+  /** Ends the run: stops the statement if it has not finished, gives the connection back. Idempotent, never throws. */
+  close(): Promise<void>;
 }
 
 /**
@@ -77,18 +95,19 @@ export interface SourceConnection {
   checkLogin(): Promise<LoginFinding[]>;
   readSchema(schemas: string[]): Promise<SchemaSnapshot>;
   /**
-   * Runs a query prepared by this source's own adapter, read-only and within
-   * `limits`, ending by `limits.deadlineAt` however long it waited for a
-   * connection. Throws `QueryTimeoutError`, `QueryFailedError` or
-   * `SourceUnreachableError`; when `signal` aborts, stops the query on the
-   * source and rejects with the signal's reason. Throws an `Error` for a
-   * query another adapter prepared.
+   * Starts a query prepared by this source's own adapter, read-only, ending
+   * by `limits.deadlineAt` however long it waited for a connection; resolves
+   * once the result's columns are known. It and its stream's reads throw
+   * `QueryTimeoutError`, `QueryFailedError` or `SourceUnreachableError`;
+   * when `signal` aborts, they stop the query on the source and reject with
+   * the signal's reason. Throws an `Error` for a query another adapter
+   * prepared.
    */
-  runQuery(
+  openQuery(
     prepared: PreparedQuery,
-    limits: RunLimits,
+    limits: OpenLimits,
     signal?: AbortSignal
-  ): Promise<QueryResult>;
+  ): Promise<RowStream>;
   close(): Promise<void>;
 }
 

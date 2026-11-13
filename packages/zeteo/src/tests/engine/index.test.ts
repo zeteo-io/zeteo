@@ -19,6 +19,7 @@ import { acquireLease } from "../../engine/leases.js";
 import { adapterFor } from "../../adapters/index.js";
 import { loadAccess } from "../../grants/access.js";
 import { QueryError } from "../../engine/errors.js";
+import { runPrepared } from "../support/runPlan.js";
 import { runQuery } from "../../engine/index.js";
 import { performance } from "node:perf_hooks";
 import { Connection as Tds } from "tedious";
@@ -198,7 +199,8 @@ describeEachEngine(
     it("rejects with query_timeout, sending nothing, when the deadline passes while it waits for a connection", async () => {
       const single = await connectSingle();
       const holder = failureOf(
-        single.runQuery(
+        runPrepared(
+          single,
           prepare({ from: "slow_orders", select: ["id"] }),
           limitsOf(1500)
         )
@@ -206,7 +208,8 @@ describeEachEngine(
       await whileSlowRuns();
       const wire = watchWire();
       const err = await failureOf(
-        single.runQuery(
+        runPrepared(
+          single,
           prepare({ from: "accounts", select: ["id"] }),
           limitsOf(300)
         )
@@ -219,7 +222,8 @@ describeEachEngine(
     it("gives a statement that waited for a connection only the time left to its deadline", async () => {
       const single = await connectSingle();
       const holder = failureOf(
-        single.runQuery(
+        runPrepared(
+          single,
           prepare({ from: "slow_orders", select: ["id"] }),
           limitsOf(2000)
         )
@@ -227,7 +231,8 @@ describeEachEngine(
       await whileSlowRuns();
       const begun = performance.now();
       const err = await failureOf(
-        single.runQuery(
+        runPrepared(
+          single,
           prepare({ from: "slow_orders", select: ["id"] }),
           limitsOf(2800)
         )

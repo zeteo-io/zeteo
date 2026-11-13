@@ -195,6 +195,11 @@ const callerError = (err: unknown): AppError => {
 
 type Stop = "cap" | "timeout" | "abort" | "fault";
 
+/** A result and, when a cap cut it, the first row it left out. */
+export interface AzureSqlResult extends QueryResult {
+  leftOut?: unknown[];
+}
+
 /** A plan compiled to SQL Server SQL with its typed parameters. */
 export class AzureSqlPreparedQuery implements PreparedQuery {
   constructor(
@@ -265,7 +270,8 @@ const deadlineParent = (
  * only, its parameters bound with the types the dialect chose. Rows are read
  * as the driver parses them and normalised one by one; the query asks for one
  * row past `maxRows` to tell whether more exist, and at either cap the run
- * cancels the request, so the rest of the result is never read.
+ * keeps the row it left out and cancels the request, so the rest of the
+ * result is never read.
  *
  * The run ends by `deadlineAt`, however long it waited for a connection: a
  * deadline of its own cancels the request, before or after it has one; a
@@ -285,7 +291,7 @@ export const runAzureSqlQuery = async (
   prepared: AzureSqlPreparedQuery,
   limits: RunLimits,
   signal?: AbortSignal
-): Promise<QueryResult> => {
+): Promise<AzureSqlResult> => {
   if (!Number.isFinite(limits.deadlineAt)) {
     return Promise.reject(
       new Error(`invalid query deadline: ${limits.deadlineAt}`)
@@ -305,11 +311,12 @@ export const runAzureSqlQuery = async (
     logger.warn({ err }, "a query parameter could not be bound");
     return Promise.reject(new QueryFailedError());
   }
-  return new Promise<QueryResult>((resolve, reject) => {
+  return new Promise<AzureSqlResult>((resolve, reject) => {
     const rows: unknown[][] = [];
     let readers: Reader[] | undefined;
     let bytes = 0;
     let truncated: QueryResult["truncated"] = false;
+    let leftOut: unknown[] | undefined;
     let stop: Stop | undefined;
     /** Why the run failed on this side: columns or values it could not take. */
     let fault: AppError | undefined;
@@ -348,7 +355,9 @@ export const runAzureSqlQuery = async (
       try {
         if (!readers) throw new Error("a row before its columns");
         if (rows.length === limits.maxRows) {
+          // Only its existence counts: it is not read.
           truncated = "rows";
+          leftOut = raw;
           halt("cap");
           return;
         }
@@ -358,6 +367,7 @@ export const runAzureSqlQuery = async (
         bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
         if (bytes > limits.maxBytes) {
           truncated = "bytes";
+          leftOut = row;
           halt("cap");
           return;
         }
@@ -402,6 +412,7 @@ export const runAzureSqlQuery = async (
         columns: plan.columns.map(({ name, type }) => ({ name, type })),
         rows,
         truncated,
+        ...(leftOut && { leftOut }),
       });
     };
 

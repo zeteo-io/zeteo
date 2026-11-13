@@ -12,6 +12,7 @@ import type { EntryPoint } from "./limits.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
+import { collect } from "./collect.js";
 import { z } from "zod";
 import type {
   ColumnType,
@@ -200,9 +201,18 @@ const execute = async (
   );
   let result: QueryResult;
   try {
-    result = await withSourceConnection(sourceId, (conn) =>
-      conn.runQuery(prepared, { ...limits, deadlineAt }, signal)
-    );
+    result = await withSourceConnection(sourceId, async (conn) => {
+      const stream = await conn.openQuery(
+        prepared,
+        { ...limits, deadlineAt },
+        signal
+      );
+      try {
+        return { columns: stream.columns, ...(await collect(stream, limits)) };
+      } finally {
+        await stream.close();
+      }
+    });
   } finally {
     // Not waited for: a release that fails is logged, and its lease lapses.
     void release();

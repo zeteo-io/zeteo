@@ -8,13 +8,13 @@ import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
 import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { QueryError } from "../../../engine/errors.js";
 import { prisma } from "../../../utils/db/prisma.js";
+import { logger } from "../../../utils/logger.js";
 import { db } from "../../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
@@ -22,6 +22,15 @@ import {
   sourceSettings,
   uniqueSlug,
 } from "../../support/sources.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // Postgres's own types the planner reads as text or number: uuid, enums,
 // money, and domains over them (sales.ledger and sales.moods). Each works
@@ -318,12 +327,44 @@ describe("postgres runQuery: citext, char(n) and name", () => {
 });
 
 describe("postgres runQuery: a value the source cannot convert", () => {
-  it("refuses a timestamp offset Postgres does not take as invalid_value", async () => {
-    const err = await refusalOf({
-      from: "orders",
-      select: ["id"],
-      where: { created_at: { gt: "2026-01-01T00:00:00+16:00" } },
-    });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** The SQLSTATE of the driver error the refusal was logged with. */
+  const loggedCode = (info: { mock: { calls: unknown[][] } }) =>
+    info.mock.calls
+      .map(([meta]) => (meta as { err?: { code?: string } })?.err?.code)
+      .find((code) => code !== undefined);
+
+  it.each([
+    [
+      "a malformed uuid",
+      "22P02",
+      { from: "ledger", select: ["id"], where: { ref: { eq: "not-a-uuid" } } },
+    ],
+    [
+      "a timestamp offset Postgres does not take",
+      "22009",
+      {
+        from: "orders",
+        select: ["id"],
+        where: { created_at: { gt: "2026-01-01T00:00:00+16:00" } },
+      },
+    ],
+    [
+      "a number past numeric's range",
+      "22003",
+      {
+        from: "orders",
+        select: ["id"],
+        where: { total: { gt: "9".repeat(140_000) } },
+      },
+    ],
+  ])("refuses %s (%s) as invalid_value", async (_, code, query) => {
+    const info = vi.spyOn(logger, "info");
+    const err = await refusalOf(query);
     expect(err).toMatchObject(INVALID_VALUE);
+    expect(loggedCode(info)).toBe(code);
   });
 });

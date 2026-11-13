@@ -1,14 +1,17 @@
 // @module-tag int
 // @module-tag platform
+import { bufferedStream } from "../../../../adapters/bufferedStream.js";
 import { closeAllSourcePools } from "../../../../sources/pools.js";
 import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";
 import { adapterFor } from "../../../../adapters/index.js";
 import { startV1Routes } from "../../../support/v1App.js";
+import { runPrepared } from "../../../support/runPlan.js";
 import { leaseKey } from "../../../../engine/leases.js";
 import { redis } from "../../../../utils/redis.js";
 import type {
   QueryResult,
+  RunLimits,
   SourceConnection,
 } from "../../../../adapters/types.js";
 import {
@@ -51,9 +54,16 @@ vi.mock(import("../../../../sources/pools.js"), async (importOriginal) => {
           checkLogin: () => conn.checkLogin(),
           readSchema: (s) => conn.readSchema(s),
           close: () => conn.close(),
-          runQuery: async (prepared, limits, signal) => {
-            const result = await conn.runQuery(prepared, limits, signal);
-            return tamper.result ? tamper.result(result) : result;
+          openQuery: async (prepared, limits, signal) => {
+            if (!tamper.result) return conn.openQuery(prepared, limits, signal);
+            const result = await runPrepared(
+              conn,
+              prepared,
+              limits as RunLimits,
+              signal
+            );
+            const changed = tamper.result(result);
+            return bufferedStream(changed.columns, changed.rows);
           },
         })
       ),

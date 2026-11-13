@@ -5,6 +5,7 @@ import { buildVisibleCatalog } from "../../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { postgresAdapter } from "../../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
+import { BATCH_BYTES, BATCH_ROWS } from "../../../engine/collect.js";
 import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
 import type { SourceConnection } from "../../../adapters/types.js";
@@ -20,10 +21,6 @@ import { db } from "../../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Client, Pool } from "pg";
 import Cursor from "pg-cursor";
-import {
-  BATCH_BYTES,
-  BATCH_ROWS,
-} from "../../../adapters/postgres/runQuery.js";
 import {
   fixtureAdminSettings,
   fixtureSettings,

@@ -7,15 +7,15 @@ import { readSchema } from "./readSchema.js";
 import { Pool } from "pg";
 import {
   isPoolExhausted,
+  openPostgresQuery,
   PostgresPreparedQuery,
-  runPostgresQuery,
 } from "./runQuery.js";
 import type {
   ConnectOptions,
   LoginFinding,
+  OpenLimits,
   PreparedQuery,
-  QueryResult,
-  RunLimits,
+  RowStream,
   SchemaSnapshot,
   SourceConnection,
 } from "../types.js";
@@ -31,17 +31,17 @@ export class PostgresConnection implements SourceConnection {
     return this.guarded((pool) => readSchema(pool, schemas));
   }
 
-  runQuery(
+  openQuery(
     prepared: PreparedQuery,
-    limits: RunLimits,
+    limits: OpenLimits,
     signal?: AbortSignal
-  ): Promise<QueryResult> {
+  ): Promise<RowStream> {
     if (!(prepared instanceof PostgresPreparedQuery)) {
       return Promise.reject(
         new Error("a query prepared by another adapter cannot run here")
       );
     }
-    return runPostgresQuery(this.pool, prepared, limits, signal);
+    return openPostgresQuery(this.pool, prepared, limits, signal);
   }
 
   /**
