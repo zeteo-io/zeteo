@@ -11,6 +11,7 @@ export const ASPECTS = [
   "limits",
   "errors",
   "leak",
+  "injection",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

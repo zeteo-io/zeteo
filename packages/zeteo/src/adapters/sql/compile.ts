@@ -1,0 +1,189 @@
+import type { AnySelect, SqlDialect } from "./dialect.js";
+import type {
+  ColumnRef,
+  CompareOp,
+  HavingSubject,
+  PlanValue,
+  ResolvedFilter,
+  ResolvedSelect,
+  SqlPlan,
+  TableName,
+} from "./types.js";
+import {
+  sql,
+  type JoinBuilder,
+  type RawBuilder,
+  type Expression,
+  type SqlBool,
+} from "kysely";
+
+export interface CompiledQuery {
+  sql: string;
+  parameters: unknown[];
+}
+
+// Identifiers come only from the plan and only through `sql.id`, which quotes
+// each part and doubles any quote inside it; values are bound by the dialect,
+// never written into the text. Select items are aliased c0, c1… by position:
+// output names can be longer than an engine's alias limit, and the caller maps
+// result columns back to `plan.columns` by index.
+
+const COMPARE_SQL: Record<CompareOp, RawBuilder<unknown>> = {
+  eq: sql`=`,
+  ne: sql`<>`,
+  gt: sql`>`,
+  gte: sql`>=`,
+  lt: sql`<`,
+  lte: sql`<=`,
+};
+const AND = sql` and `;
+const OR = sql` or `;
+
+const table = (t: TableName) => sql.id(t.schemaName, t.name);
+const column = (c: ColumnRef) => sql.id(c.alias, c.name);
+
+const selectExpression = (
+  item: ResolvedSelect,
+  dialect: SqlDialect
+): Expression<unknown> => {
+  switch (item.kind) {
+    case "column":
+      return column(item.column);
+    case "aggregate":
+      return dialect.aggregate(
+        item.fn,
+        item.column === "*" ? "*" : column(item.column)
+      );
+    case "bucket":
+      return dialect.bucket(
+        item.unit,
+        column(item.column),
+        item.column.type === "date" ? "date" : "timestamp"
+      );
+  }
+};
+
+const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
+
+const compileFilter = <S>(
+  filter: ResolvedFilter<S>,
+  dialect: SqlDialect,
+  subject: (s: S) => {
+    expression: Expression<unknown>;
+    type: ColumnRef["type"];
+  }
+): Expression<SqlBool> => {
+  const go = (f: ResolvedFilter<S>): Expression<SqlBool> => {
+    switch (f.kind) {
+      case "and":
+      case "or":
+        return sql<SqlBool>`(${sql.join(
+          f.filters.map(go),
+          f.kind === "and" ? AND : OR
+        )})`;
+      case "not":
+        return sql<SqlBool>`not (${go(f.filter)})`;
+      case "compare": {
+        const s = subject(f.subject);
+        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${dialect.value(f.value, s.type)}`;
+      }
+      case "between": {
+        const s = subject(f.subject);
+        return sql<SqlBool>`${s.expression} between ${dialect.value(f.low, s.type)} and ${dialect.value(f.high, s.type)}`;
+      }
+      case "in": {
+        const s = subject(f.subject);
+        const values = sql.join(
+          f.values.map((v: PlanValue) => dialect.value(v, s.type))
+        );
+        return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${values})`;
+      }
+      case "match": {
+        const escaped = escapeLike(f.value);
+        return dialect.like(
+          subject(f.subject).expression,
+          f.op === "contains" ? `%${escaped}%` : `${escaped}%`
+        );
+      }
+      case "isNull":
+        return sql<SqlBool>`${subject(f.subject).expression} ${f.isNull ? sql`is null` : sql`is not null`}`;
+    }
+  };
+  return go(filter);
+};
+
+/**
+ * Compiles a plan to SQL text and bound parameters without touching a
+ * database. `fetch` is what the engine asks the database for (the requested
+ * limit plus one, to see whether more rows exist); `plan.limit` and
+ * `plan.offset` are not read.
+ */
+export const compileSql = (
+  plan: SqlPlan,
+  dialect: SqlDialect,
+  fetch: { limit: number; offset: number }
+): CompiledQuery => {
+  let qb: AnySelect = dialect.kysely.selectFrom(
+    sql`${table(plan.from)}`.as(plan.from.alias)
+  );
+  for (const join of plan.joins) {
+    const target = sql`${table(join.table)}`.as(join.alias);
+    const on = (j: JoinBuilder<never, never>) =>
+      j.on(
+        sql<SqlBool>`${sql.join(
+          join.on.map(
+            ([parent, parentColumn, col]) =>
+              sql`${sql.id(parent, parentColumn)} = ${sql.id(join.alias, col)}`
+          ),
+          AND
+        )}`
+      );
+    qb =
+      join.type === "inner"
+        ? qb.innerJoin(target, on)
+        : qb.leftJoin(target, on);
+  }
+
+  const selected = plan.select.map((item) => selectExpression(item, dialect));
+  qb = qb.select(selected.map((e, i) => sql`${e}`.as(`c${i}`)));
+  if (plan.distinct) qb = qb.distinct();
+
+  if (plan.where) {
+    qb = qb.where(
+      compileFilter(plan.where, dialect, (c) => ({
+        expression: column(c),
+        type: c.type,
+      }))
+    );
+  }
+
+  // Grouped by position: a bucket's unit is a bound parameter, and repeating
+  // the expression would number it twice, which the server rejects as two
+  // different expressions.
+  if (plan.groupBy.length > 0) {
+    qb = qb.groupBy(plan.groupBy.map((i) => sql.lit(i + 1)));
+  }
+
+  if (plan.having) {
+    qb = qb.having(
+      compileFilter(plan.having, dialect, (h: HavingSubject) => ({
+        expression: selected[h.index]!,
+        type: h.type,
+      }))
+    );
+  }
+
+  // A select item is ordered by its alias (Postgres reads a bare output name
+  // in ORDER BY as the output column before any input column of that name).
+  for (const order of plan.orderBy) {
+    const expression =
+      order.target.kind === "output"
+        ? sql.id(`c${order.target.index}`)
+        : column(order.target.column);
+    qb = dialect.orderBy(qb, expression, order.direction);
+  }
+
+  qb = dialect.page(qb, fetch.limit, fetch.offset);
+  const { sql: text, parameters } = qb.compile();
+  return { sql: text, parameters: [...parameters] };
+};

@@ -6,15 +6,15 @@ and lists the offending paths when one breaks.
 
 ## Where files go
 
-| Source                                         | Test                                                               |
-| ---------------------------------------------- | ------------------------------------------------------------------ |
-| router folder `routes/v1/sources/source/`      | `routes/v1/sources/source/source.test.ts`                          |
-| root router `routes/index.ts`                  | `routes/routes.test.ts` (e.g. `routes/routes.permissions.test.ts`) |
-| module `utils/permissions.ts`                  | `utils/permissions.unit.test.ts`                                   |
-| job `jobs/sourceProbe.ts`                   | `jobs/sourceProbe.test.ts`                                      |
-| entry points `index.ts`, `app.ts`                | `index.test.ts`, `app.test.ts`                                     |
-| behaviour spanning several routes              | `flows/<area>/<flow>.test.ts` (one folder per area, not nested)    |
-| checks on the repo's own conventions           | `conventions/<name>.unit.test.ts`                                  |
+| Source                                    | Test                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------ |
+| router folder `routes/v1/sources/source/` | `routes/v1/sources/source/source.test.ts`                          |
+| root router `routes/index.ts`             | `routes/routes.test.ts` (e.g. `routes/routes.permissions.test.ts`) |
+| module `utils/permissions.ts`             | `utils/permissions.unit.test.ts`                                   |
+| job `jobs/sourceProbe.ts`                 | `jobs/sourceProbe.test.ts`                                         |
+| entry points `index.ts`, `app.ts`         | `index.test.ts`, `app.test.ts`                                     |
+| behaviour spanning several routes         | `flows/<area>/<flow>.test.ts` (one folder per area, not nested)    |
+| checks on the repo's own conventions      | `conventions/<name>.unit.test.ts`                                  |
 
 Not tests: `setup/` (`globalSetup.ts`, `setup.ts`, `testEnv.ts`, `tags.ts`), `support/` (shared
 helpers; `support/pure/` holds those with no database, server or Redis), `fixtures/` (static data and
@@ -33,15 +33,16 @@ A test that exercises one route belongs to that route even if it sets up state t
 - `.unit`: pure; no database, server, Redis or outside network; a loopback listener the test itself starts and closes is fine. Absent means `int`.
 - `<aspect>`, from the list in `setup/tags.ts`:
 
-  | Aspect        | Holds                                                                |
-  | ------------- | -------------------------------------------------------------------- |
-  | `validation`  | input and schema checks                                              |
-  | `permissions` | route-specific authorization (org scope, ownership, hierarchy)       |
-  | `races`       | concurrency and lock-order behaviour                                 |
-  | `audit`       | audit entries a mutation records                                     |
-  | `limits`      | quotas, size caps, rate limits, pagination bounds                    |
-  | `errors`      | error mapping and failure paths                                      |
+  | Aspect        | Holds                                                                 |
+  | ------------- | --------------------------------------------------------------------- |
+  | `validation`  | input and schema checks                                               |
+  | `permissions` | route-specific authorization (org scope, ownership, hierarchy)        |
+  | `races`       | concurrency and lock-order behaviour                                  |
+  | `audit`       | audit entries a mutation records                                      |
+  | `limits`      | quotas, size caps, rate limits, pagination bounds                     |
+  | `errors`      | error mapping and failure paths                                       |
   | `leak`        | that what a caller may not see fails exactly like what does not exist |
+  | `injection`   | that hostile names and values stay identifiers and parameters         |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would
