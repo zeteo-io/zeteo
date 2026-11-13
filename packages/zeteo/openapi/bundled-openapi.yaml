@@ -4,7 +4,8 @@ info:
   version: 0.1.0
   description: |
     Zeteo is a query service for apps built on tereo. An administrator registers databases as
-    sources; this spec covers the source administration API. Every path in this spec is the full
+    sources and grants tables and columns to users and groups; this spec covers the source and
+    grant administration API. Every path in this spec is the full
     path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
 
     ## Authentication
@@ -33,6 +34,13 @@ info:
     description or touch a declared relation: what disappears from the source is marked with
     `missing_since`. See `docs/catalog.md`.
 
+    ## Grants
+
+    A grant gives one user or group the right to query one table: every column (including ones
+    added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
+    replacing and removing them needs `zeteo.grants.write`, which includes read. See
+    `docs/grants.md`.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -56,6 +64,8 @@ tags:
     description: Databases registered with Zeteo
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
+  - name: Grants
+    description: Which users and groups may query which tables and columns
   - name: Platform
     description: Health
 paths:
@@ -653,6 +663,219 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/grants:
+    get:
+      tags:
+        - Grants
+      summary: List grants
+      description: |
+        Lists grants in creation order, optionally only those of one principal, table or source.
+        Each grant's `principal_status` is looked up once per distinct principal.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+      operationId: listGrants
+      parameters:
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: table_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: source_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of grants
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListGrantsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Grants
+      summary: Create a grant
+      description: |
+        Grants a user or group the right to query a table: every column, or a list of columns of
+        that table. The principal need not exist yet. A principal has one grant per table. An audit
+        entry `zeteo.grant.created` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (the table), `409 source_archived`, `409 grant_exists`,
+        `422 invalid_grant` (a column that is not on the table).
+      operationId: createGrant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGrantRequest'
+      responses:
+        '201':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The grant is not valid - `invalid_grant`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/grants/{grantId}:
+    get:
+      tags:
+        - Grants
+      summary: Get a grant
+      description: |
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: getGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      responses:
+        '200':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Grants
+      summary: Replace a grant's columns
+      description: |
+        Replaces the grant's columns whole: every column, or exactly the listed ones. The principal
+        and table of a grant never change; remove the grant and create another for that. An audit
+        entry `zeteo.grant.updated` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 invalid_grant`.
+      operationId: replaceGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceGrantRequest'
+      responses:
+        '200':
+          description: The grant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Grant'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The grant is not valid - `invalid_grant`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Grants
+      summary: Remove a grant
+      description: |
+        Removes the grant and its columns, also when its source is archived. An audit entry
+        `zeteo.grant.removed` is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: deleteGrant
+      parameters:
+        - $ref: '#/components/parameters/GrantIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
 components:
   securitySchemes:
     BearerAuth:
@@ -701,6 +924,14 @@ components:
       schema:
         type: string
         format: uuid
+    GrantIdParam:
+      name: grantId
+      in: path
+      required: true
+      description: The grant's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
     SourceIdParam:
       name: sourceId
       in: path
@@ -729,13 +960,13 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     NotFoundResponse:
-      description: Not found - no source has this id
+      description: Not found - nothing has this id
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
     ConflictResponse:
-      description: Conflict - `slug_taken`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+      description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
       content:
         application/json:
           schema:
@@ -1434,11 +1665,205 @@ components:
             restored:
               type: integer
               minimum: 0
+    PrincipalType:
+      type: string
+      enum:
+        - user
+        - group
+    PrincipalStatus:
+      type: string
+      enum:
+        - active
+        - orphaned
+        - unknown
+      description: |
+        Whether the principal still exists in tereo, looked up when the grant is shown. A user is
+        `orphaned` when tereo has no such user. A group's existence cannot be read, so a group is
+        `active` or `unknown` (tereo refused or has no such group). An orphaned grant is inert. A
+        lookup that fails is also shown as `unknown`.
+    Grant:
+      type: object
+      description: What one user or group may query of one table
+      required:
+        - id
+        - principal_type
+        - principal_id
+        - principal_status
+        - source
+        - table
+        - all_columns
+        - columns
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+          description: The user's or group's tereo id
+        principal_status:
+          $ref: '#/components/schemas/PrincipalStatus'
+        source:
+          type: object
+          required:
+            - id
+            - slug
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+        table:
+          type: object
+          required:
+            - id
+            - schema_name
+            - name
+            - missing
+          properties:
+            id:
+              type: string
+              format: uuid
+            schema_name:
+              type: string
+            name:
+              type: string
+            missing:
+              type: boolean
+              description: The last refresh no longer found the table; the grant is kept
+        all_columns:
+          type: boolean
+          description: When true the grant covers every column of the table, including ones added later, and `columns` is empty
+        columns:
+          type: array
+          description: When `all_columns` is false, the granted columns in table order; columns added to the table later are not included
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - missing
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              missing:
+                type: boolean
+                description: The last refresh no longer found the column; the grant is kept
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ListGrantsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Grant'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    CreateGrantRequest:
+      description: A grant of every column, or of a list of columns
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - principal_type
+            - principal_id
+            - table_id
+            - all_columns
+          properties:
+            principal_type:
+              $ref: '#/components/schemas/PrincipalType'
+            principal_id:
+              type: string
+              format: uuid
+            table_id:
+              type: string
+              format: uuid
+            all_columns:
+              type: boolean
+              const: true
+        - type: object
+          additionalProperties: false
+          required:
+            - principal_type
+            - principal_id
+            - table_id
+            - all_columns
+            - column_ids
+          properties:
+            principal_type:
+              $ref: '#/components/schemas/PrincipalType'
+            principal_id:
+              type: string
+              format: uuid
+            table_id:
+              type: string
+              format: uuid
+            all_columns:
+              type: boolean
+              const: false
+            column_ids:
+              $ref: '#/components/schemas/GrantColumnIds'
+    ReplaceGrantRequest:
+      description: The grant's new columns, replacing the old ones whole
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - all_columns
+          properties:
+            all_columns:
+              type: boolean
+              const: true
+        - type: object
+          additionalProperties: false
+          required:
+            - all_columns
+            - column_ids
+          properties:
+            all_columns:
+              type: boolean
+              const: false
+            column_ids:
+              $ref: '#/components/schemas/GrantColumnIds'
+    GrantColumnIds:
+      type: array
+      minItems: 1
+      maxItems: 500
+      uniqueItems: true
+      items:
+        type: string
+        format: uuid
+      description: Columns of the grant's table
 x-tagGroups:
   - name: Sources
     tags:
       - Sources
       - Catalogue
+  - name: Access
+    tags:
+      - Grants
   - name: Platform
     tags:
       - Platform

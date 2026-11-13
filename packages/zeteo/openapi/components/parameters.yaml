@@ -39,3 +39,10 @@ RelationIdParam:
   required: true
   description: The relation's id, in the source named by the path. A relation of another source is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
+
+GrantIdParam:
+  name: grantId
+  in: path
+  required: true
+  description: The grant's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

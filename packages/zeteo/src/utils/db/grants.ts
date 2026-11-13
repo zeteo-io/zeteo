@@ -1,4 +1,4 @@
-import { prisma } from "./prisma.js";
+import { prisma, type Prisma } from "./prisma.js";
 import type {
   Grant,
   GrantColumn,
@@ -25,8 +25,24 @@ const withColumns = {
   },
 } as const;
 
+/** What a grant's view shows: its columns in table order with their names, and its table with the source's slug. */
+export const detailInclude = {
+  columns: {
+    include: { column: true },
+    orderBy: { column: { position: "asc" } },
+  },
+  table: { include: { source: { select: { id: true, slug: true } } } },
+} as const;
+
+export type GrantDetail = Prisma.GrantGetPayload<{
+  include: typeof detailInclude;
+}>;
+
 export const findById = (id: string): Promise<Grant | null> =>
   prisma.grant.findUnique({ where: { id } });
+
+export const findDetailById = (id: string): Promise<GrantDetail | null> =>
+  prisma.grant.findUnique({ where: { id }, include: detailInclude });
 
 /** Every grant held by any of the principals, with its column ids and its table's source. */
 export const listForPrincipals = (
@@ -53,7 +69,7 @@ export const listPage = async (options: {
   sourceId?: string;
   cursor?: string;
   limit: number;
-}): Promise<{ rows: Grant[]; hasMore: boolean }> => {
+}): Promise<{ rows: GrantDetail[]; hasMore: boolean }> => {
   const { principalType, principalId, tableId, sourceId, cursor, limit } =
     options;
   const rows = await prisma.grant.findMany({
@@ -64,6 +80,7 @@ export const listPage = async (options: {
       ...(sourceId && { table: { sourceId } }),
       ...(cursor && { id: { gt: cursor } }),
     },
+    include: detailInclude,
     orderBy: { id: "asc" },
     take: limit + 1,
   });

@@ -54,14 +54,14 @@ ForbiddenResponse:
         $ref: '#/Error'
 
 NotFoundResponse:
-  description: Not found - no source has this id
+  description: Not found - nothing has this id
   content:
     application/json:
       schema:
         $ref: '#/Error'
 
 ConflictResponse:
-  description: Conflict - `slug_taken`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
   content:
     application/json:
       schema:

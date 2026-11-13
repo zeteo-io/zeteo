@@ -4,7 +4,8 @@ info:
   version: 0.1.0
   description: |
     Zeteo is a query service for apps built on tereo. An administrator registers databases as
-    sources; this spec covers the source administration API. Every path in this spec is the full
+    sources and grants tables and columns to users and groups; this spec covers the source and
+    grant administration API. Every path in this spec is the full
     path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
 
     ## Authentication
@@ -33,6 +34,13 @@ info:
     description or touch a declared relation: what disappears from the source is marked with
     `missing_since`. See `docs/catalog.md`.
 
+    ## Grants
+
+    A grant gives one user or group the right to query one table: every column (including ones
+    added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
+    replacing and removing them needs `zeteo.grants.write`, which includes read. See
+    `docs/grants.md`.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -56,11 +64,15 @@ tags:
     description: Databases registered with Zeteo
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
+  - name: Grants
+    description: Which users and groups may query which tables and columns
   - name: Platform
     description: Health
 x-tagGroups:
   - name: Sources
     tags: [Sources, Catalogue]
+  - name: Access
+    tags: [Grants]
   - name: Platform
     tags: [Platform]
 paths:
@@ -84,6 +96,10 @@ paths:
     $ref: './paths/catalog/relations.yaml#/~1v1~1sources~1{sourceId}~1relations'
   /v1/sources/{sourceId}/relations/{relationId}:
     $ref: './paths/catalog/relation.yaml#/~1v1~1sources~1{sourceId}~1relations~1{relationId}'
+  /v1/grants:
+    $ref: './paths/grants/grants.yaml#/~1v1~1grants'
+  /v1/grants/{grantId}:
+    $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
 components:
   securitySchemes:
     BearerAuth:
@@ -97,6 +113,8 @@ components:
       $ref: './components/parameters.yaml#/TableIdParam'
     RelationIdParam:
       $ref: './components/parameters.yaml#/RelationIdParam'
+    GrantIdParam:
+      $ref: './components/parameters.yaml#/GrantIdParam'
   responses:
     BadRequestResponse:
       $ref: './components/responses.yaml#/BadRequestResponse'
@@ -157,3 +175,15 @@ components:
       $ref: './components/catalog/schemas.yaml#/DeclareRelationRequest'
     RefreshSummary:
       $ref: './components/catalog/schemas.yaml#/RefreshSummary'
+    PrincipalType:
+      $ref: './components/grants/schemas.yaml#/PrincipalType'
+    PrincipalStatus:
+      $ref: './components/grants/schemas.yaml#/PrincipalStatus'
+    Grant:
+      $ref: './components/grants/schemas.yaml#/Grant'
+    ListGrantsResponse:
+      $ref: './components/grants/schemas.yaml#/ListGrantsResponse'
+    CreateGrantRequest:
+      $ref: './components/grants/schemas.yaml#/CreateGrantRequest'
+    ReplaceGrantRequest:
+      $ref: './components/grants/schemas.yaml#/ReplaceGrantRequest'

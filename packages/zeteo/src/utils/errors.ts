@@ -179,6 +179,14 @@ export class InvalidRelationError extends AppError {
   }
 }
 
+/** A grant the catalogue cannot hold, such as a column that is not on the grant's table. */
+export class InvalidGrantError extends AppError {
+  constructor(message: string) {
+    super(422, "invalid_grant", message);
+    this.name = "InvalidGrantError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

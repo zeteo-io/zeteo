@@ -1,0 +1,81 @@
+/v1/grants:
+  get:
+    tags: [Grants]
+    summary: List grants
+    description: |
+      Lists grants in creation order, optionally only those of one principal, table or source.
+      Each grant's `principal_status` is looked up once per distinct principal.
+
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+    operationId: listGrants
+    parameters:
+      - name: principal_type
+        in: query
+        required: false
+        schema: { $ref: '../../components/grants/schemas.yaml#/PrincipalType' }
+      - name: principal_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - name: table_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - name: source_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of grants
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/ListGrantsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Grants]
+    summary: Create a grant
+    description: |
+      Grants a user or group the right to query a table: every column, or a list of columns of
+      that table. The principal need not exist yet. A principal has one grant per table. An audit
+      entry `zeteo.grant.created` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found` (the table), `409 source_archived`, `409 grant_exists`,
+      `422 invalid_grant` (a column that is not on the table).
+    operationId: createGrant
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/CreateGrantRequest'
+    responses:
+      '201':
+        description: The grant
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/Grant'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The grant is not valid - `invalid_grant`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
