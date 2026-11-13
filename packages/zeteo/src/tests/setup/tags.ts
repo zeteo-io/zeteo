@@ -12,6 +12,8 @@ export const ASPECTS = [
   "errors",
   "leak",
   "injection",
+  "postgres",
+  "mssql",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

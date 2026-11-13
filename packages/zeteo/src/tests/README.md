@@ -43,6 +43,8 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `errors`      | error mapping and failure paths                                       |
   | `leak`        | that what a caller may not see fails exactly like what does not exist |
   | `injection`   | that hostile names and values stay identifiers and parameters         |
+  | `postgres`    | behaviour specific to the Postgres dialect                            |
+  | `mssql`       | behaviour specific to the SQL Server dialect                          |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

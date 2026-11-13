@@ -24,7 +24,14 @@ export const HOSTILE = {
     bracket: "]",
     apostrophe: "'",
     drop: "x; DROP TABLE y; --",
+    backslash: "back\\slash\\",
+    placeholder: "$1",
+    // the longest a path segment may be
+    long: "c".repeat(128),
   },
+  /** A schema and a table whose names hold dots: `dot.ted`.`ta.ble`. */
+  dotted: { schema: "dot.ted", table: "ta.ble" },
+  longTable: "L".repeat(200),
 };
 
 const SOURCE = {
@@ -36,11 +43,11 @@ const SOURCE = {
   rowCap: 50_000,
 } as Source;
 
-const table = (id: string, name: string) =>
+const table = (id: string, name: string, schemaName: string = HOSTILE.schema) =>
   ({
     id,
     sourceId: SOURCE.id,
-    schemaName: HOSTILE.schema,
+    schemaName,
     name,
     kind: "table",
     description: null,
@@ -69,6 +76,8 @@ const column = (
 export const hostileCatalog = (): VisibleCatalog => {
   const { columns: c } = HOSTILE;
   const tables = [
+    table("dotted", HOSTILE.dotted.table, HOSTILE.dotted.schema),
+    table("long", HOSTILE.longTable),
     table("parent", HOSTILE.parent),
     table("child", HOSTILE.child),
   ];
@@ -77,6 +86,11 @@ export const hostileCatalog = (): VisibleCatalog => {
     column("parent", c.bracket, "number", 2),
     column("parent", c.apostrophe, "text", 3),
     column("parent", c.drop, "timestamp", 4),
+    column("parent", c.backslash, "text", 5),
+    column("parent", c.placeholder, "text", 6),
+    column("parent", c.long, "text", 7),
+    column("dotted", c.quote, "text", 1),
+    column("long", c.quote, "text", 1),
     column("child", c.quote, "text", 1),
     column("child", c.bracket, "number", 2),
   ];

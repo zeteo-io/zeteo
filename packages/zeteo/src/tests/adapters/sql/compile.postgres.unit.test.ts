@@ -118,6 +118,12 @@ describe("compileSql on Postgres: joins", () => {
 });
 
 describe("compileSql on Postgres: aggregates and buckets", () => {
+  it("refuses * for any aggregate but count", () => {
+    expect(() => postgresDialect.aggregate("sum", "*")).toThrow(
+      "sum cannot take *"
+    );
+  });
+
   it("compiles each aggregate", () => {
     expect(
       compile({
@@ -190,17 +196,23 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
     );
   });
 
-  it("compares a decimal with an aggregate through numeric, keeping an integer uncast", () => {
+  it("casts a decimal compared with an aggregate to numeric, keeping an in-range integer bare", () => {
     const sums = (value: number | string) =>
       compile({
         select: [{ sum: "quantity", as: "q" }],
         from: "order_lines",
         having: { q: { gt: value } },
       });
-    expect(sums(10).sql).toContain("having sum(");
-    expect(sums(10).sql).toContain("> $1 order");
-    expect(sums("10.5").sql).toContain("> cast($1 as numeric) order");
-    expect(sums("10.5").parameters[0]).toBe("10.5");
+    const head =
+      'select sum("t0"."quantity") as "c0" from "shop"."order_lines" as "t0" having sum("t0"."quantity") > ';
+    expect(sums(10)).toEqual({
+      sql: `${head}$1${tail(1)}`,
+      parameters: [10, 1001, 0],
+    });
+    expect(sums("10.5")).toEqual({
+      sql: `${head}cast($1 as numeric)${tail(1)}`,
+      parameters: ["10.5", 1001, 0],
+    });
   });
 });
 
@@ -280,28 +292,77 @@ describe("compileSql on Postgres: filters", () => {
       compile({
         join: ["customer"],
         where: { "customer.region": { eq: "emea" } },
-      }).sql
-    ).toContain('where "t1"."region" = $1');
+      })
+    ).toEqual({
+      sql:
+        'select "t0"."id" as "c0" from "shop"."orders" as "t0"' +
+        ' inner join "shop"."customers" as "t1" on "t0"."customer_id" = "t1"."id"' +
+        ` where "t1"."region" = $1${tail(1)}`,
+      parameters: ["emea", 1001, 0],
+    });
   });
 
-  it("casts a timestamp to timestamptz and leaves dates and integers bare", () => {
+  it("casts a timestamp to timestamptz for a timestamptz column", () => {
+    expect(where({ created_at: { gte: "2026-01-01T00:00:00+02:00" } })).toEqual(
+      {
+        sql: `${base}"t0"."created_at" >= cast($1 as timestamptz)${tail(1)}`,
+        parameters: ["2026-01-01T00:00:00+02:00", 1001, 0],
+      }
+    );
+  });
+
+  it.each(["timestamp without time zone", "timestamp(3) without time zone"])(
+    "converts the timestamp to UTC on the parameter side for a %s column",
+    (nativeType) => {
+      const planned = planSql(
+        sqlQuerySchema.parse({
+          source: "shop",
+          from: "orders",
+          select: ["id"],
+          where: { created_at: { gte: "2026-01-01T00:00:00+02:00" } },
+        }),
+        shopCatalog()
+      );
+      const filter = planned.where;
+      if (filter?.kind !== "compare") throw new Error("expected a comparison");
+      filter.subject.nativeType = nativeType;
+      expect(
+        compileSql(planned, postgresDialect, { limit: 1001, offset: 0 })
+      ).toEqual({
+        sql: `${base}"t0"."created_at" >= (cast($1 as timestamptz) at time zone 'UTC')${tail(1)}`,
+        parameters: ["2026-01-01T00:00:00+02:00", 1001, 0],
+      });
+    }
+  );
+
+  it("leaves a date bare", () => {
     expect(
-      where({ created_at: { gte: "2026-01-01T00:00:00+02:00" } })
-    ).toMatchObject({
-      sql: expect.stringContaining(
-        '"t0"."created_at" >= cast($1 as timestamptz)'
-      ),
-      parameters: ["2026-01-01T00:00:00+02:00", 1001, 0],
+      where({ ordered_on: { between: ["2026-01-01", "2026-02-01"] } })
+    ).toEqual({
+      sql: `${base}"t0"."ordered_on" between $1 and $2${tail(2)}`,
+      parameters: ["2026-01-01", "2026-02-01", 1001, 0],
     });
-    expect(
-      where({ ordered_on: { between: ["2026-01-01", "2026-02-01"] } }).sql
-    ).toContain('"t0"."ordered_on" between $1 and $2');
   });
 
   it("casts a decimal compared with a number column to numeric", () => {
-    expect(where({ total: { in: [1, "2.50"] } }).sql).toContain(
-      '"t0"."total" in ($1, cast($2 as numeric))'
-    );
+    expect(where({ total: { in: [1, "2.50"] } })).toEqual({
+      sql: `${base}"t0"."total" in ($1, cast($2 as numeric))${tail(2)}`,
+      parameters: [1, "2.50", 1001, 0],
+    });
+  });
+
+  it("casts an integer outside the column's own integer range to numeric", () => {
+    // customer_id is a 4-byte integer, order id a bigint
+    expect(
+      where({ customer_id: { in: [2147483647, 2147483648, -2147483649] } })
+    ).toEqual({
+      sql: `${base}"t0"."customer_id" in ($1, cast($2 as numeric), cast($3 as numeric))${tail(3)}`,
+      parameters: [2147483647, 2147483648, -2147483649, 1001, 0],
+    });
+    expect(where({ id: { in: [2147483648, "9223372036854775808"] } })).toEqual({
+      sql: `${base}"t0"."id" in ($1, cast($2 as numeric))${tail(2)}`,
+      parameters: [2147483648, "9223372036854775808", 1001, 0],
+    });
   });
 
   it("compares booleans as parameters", () => {
@@ -310,7 +371,9 @@ describe("compileSql on Postgres: filters", () => {
       select: ["id"],
       where: { vip: { eq: true } },
     });
-    expect(c.sql).toContain('"t0"."vip" = $1');
-    expect(c.parameters[0]).toBe(true);
+    expect(c).toEqual({
+      sql: 'select "t0"."id" as "c0" from "shop"."customers" as "t0" where "t0"."vip" = $1 order by "c0" asc nulls last limit $2 offset $3',
+      parameters: [true, 1001, 0],
+    });
   });
 });

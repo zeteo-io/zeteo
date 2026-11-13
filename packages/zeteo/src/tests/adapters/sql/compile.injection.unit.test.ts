@@ -7,7 +7,7 @@ import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
 
-const { schema, parent, child, relation, columns } = HOSTILE;
+const { schema, parent, child, relation, columns, dotted, longTable } = HOSTILE;
 const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
 
 const compile = (query: object) =>
@@ -33,7 +33,16 @@ const HOSTILE_VALUES = [
 
 /** The text with every correctly quoted hostile identifier removed. */
 const withoutIdentifiers = (text: string) =>
-  [schema, parent, child, relation, ...Object.values(columns)]
+  [
+    schema,
+    parent,
+    child,
+    relation,
+    dotted.schema,
+    dotted.table,
+    longTable,
+    ...Object.values(columns),
+  ]
     .map(quote)
     .sort((a, b) => b.length - a.length)
     .reduce((rest, id) => rest.replaceAll(id, "ID"), text);
@@ -62,7 +71,7 @@ describe("compileSql: hostile catalogue names", () => {
       parent,
       child,
       relation,
-      ...Object.values(columns),
+      ...Object.values(columns).filter((c) => c !== columns.placeholder),
     ]) {
       expect(rest).not.toContain(raw);
     }
@@ -118,5 +127,37 @@ describe("compileSql: hostile values", () => {
       where: { [columns.apostrophe]: { contains: "100%_sure\\" } },
     });
     expect(parameters[0]).toBe("%100\\%\\_sure\\\\%");
+  });
+});
+
+describe("compileSql: dots, backslashes, placeholders and long names", () => {
+  it("never splits a name that holds dots", () => {
+    const { sql } = compile({
+      from: `${dotted.schema}.${dotted.table}`,
+      select: [columns.quote],
+    });
+    expect(sql).toBe(
+      `select "t0".${quote(columns.quote)} as "c0" from "dot.ted"."ta.ble" as "t0"` +
+        ' order by "c0" asc nulls last limit $1 offset $2'
+    );
+  });
+
+  it("keeps a backslash, a $1 name and a 128-character column as single quoted identifiers", () => {
+    const { sql, parameters } = compile({
+      select: [columns.backslash, columns.placeholder, columns.long],
+      where: { [columns.placeholder]: { eq: "v" } },
+    });
+    expect(sql).toBe(
+      `select "t0"."back\\slash\\" as "c0", "t0"."$1" as "c1", "t0"."${columns.long}" as "c2"` +
+        ` from ${quote(schema)}.${quote(parent)} as "t0" where "t0"."$1" = $1` +
+        ' order by "c0" asc nulls last, "c1" asc nulls last, "c2" asc nulls last limit $2 offset $3'
+    );
+    expect(parameters).toEqual(["v", 11, 0]);
+  });
+
+  it("quotes a 200-character table name whole", () => {
+    expect(
+      compile({ from: `${schema}.${longTable}`, select: [columns.quote] }).sql
+    ).toContain(`from ${quote(schema)}."${longTable}" as "t0"`);
   });
 });

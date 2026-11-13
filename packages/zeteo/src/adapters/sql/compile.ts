@@ -1,4 +1,4 @@
-import type { AnySelect, SqlDialect } from "./dialect.js";
+import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
 import type {
   ColumnRef,
   CompareOp,
@@ -68,10 +68,7 @@ const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
 const compileFilter = <S>(
   filter: ResolvedFilter<S>,
   dialect: SqlDialect,
-  subject: (s: S) => {
-    expression: Expression<unknown>;
-    type: ColumnRef["type"];
-  }
+  subject: (s: S) => ValueSubject & { expression: Expression<unknown> }
 ): Expression<SqlBool> => {
   const go = (f: ResolvedFilter<S>): Expression<SqlBool> => {
     switch (f.kind) {
@@ -85,16 +82,16 @@ const compileFilter = <S>(
         return sql<SqlBool>`not (${go(f.filter)})`;
       case "compare": {
         const s = subject(f.subject);
-        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${dialect.value(f.value, s.type)}`;
+        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${dialect.value(f.value, s)}`;
       }
       case "between": {
         const s = subject(f.subject);
-        return sql<SqlBool>`${s.expression} between ${dialect.value(f.low, s.type)} and ${dialect.value(f.high, s.type)}`;
+        return sql<SqlBool>`${s.expression} between ${dialect.value(f.low, s)} and ${dialect.value(f.high, s)}`;
       }
       case "in": {
         const s = subject(f.subject);
         const values = sql.join(
-          f.values.map((v: PlanValue) => dialect.value(v, s.type))
+          f.values.map((v: PlanValue) => dialect.value(v, s))
         );
         return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${values})`;
       }
@@ -153,15 +150,16 @@ export const compileSql = (
       compileFilter(plan.where, dialect, (c) => ({
         expression: column(c),
         type: c.type,
+        nativeType: c.nativeType,
       }))
     );
   }
 
-  // Grouped by position: a bucket's unit is a bound parameter, and repeating
-  // the expression would number it twice, which the server rejects as two
-  // different expressions.
   if (plan.groupBy.length > 0) {
-    qb = qb.groupBy(plan.groupBy.map((i) => sql.lit(i + 1)));
+    qb = dialect.groupBy(
+      qb,
+      plan.groupBy.map((index) => ({ expression: selected[index]!, index }))
+    );
   }
 
   if (plan.having) {
@@ -173,14 +171,18 @@ export const compileSql = (
     );
   }
 
-  // A select item is ordered by its alias (Postgres reads a bare output name
-  // in ORDER BY as the output column before any input column of that name).
   for (const order of plan.orderBy) {
-    const expression =
-      order.target.kind === "output"
-        ? sql.id(`c${order.target.index}`)
-        : column(order.target.column);
-    qb = dialect.orderBy(qb, expression, order.direction);
+    const { target } = order;
+    qb = dialect.orderBy(
+      qb,
+      target.kind === "output"
+        ? {
+            expression: selected[target.index]!,
+            alias: sql.id(`c${target.index}`),
+          }
+        : { expression: column(target.column) },
+      order.direction
+    );
   }
 
   qb = dialect.page(qb, fetch.limit, fetch.offset);
