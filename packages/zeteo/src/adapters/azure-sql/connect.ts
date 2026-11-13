@@ -1,7 +1,6 @@
 import { sourceBusy, SourceUnreachableError } from "../../utils/errors.js";
 import { type AzureSqlSettings, toMssqlConfig } from "./settings.js";
 import type { ResolvedTarget } from "../../sources/network.js";
-import { bufferedStream } from "../bufferedStream.js";
 import { logger } from "../../utils/logger.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
@@ -10,7 +9,7 @@ import sql from "mssql";
 import {
   isPoolExhausted,
   AzureSqlPreparedQuery,
-  runAzureSqlQuery,
+  openAzureSqlQuery,
 } from "./runQuery.js";
 import type {
   ConnectOptions,
@@ -18,14 +17,9 @@ import type {
   OpenLimits,
   PreparedQuery,
   RowStream,
-  RunLimits,
   SchemaSnapshot,
   SourceConnection,
 } from "../types.js";
-
-const hasCaps = (limits: OpenLimits): limits is RunLimits =>
-  typeof (limits as Partial<RunLimits>).maxRows === "number" &&
-  typeof (limits as Partial<RunLimits>).maxBytes === "number";
 
 export class AzureSqlConnection implements SourceConnection {
   constructor(readonly pool: ConnectionPool) {}
@@ -38,29 +32,17 @@ export class AzureSqlConnection implements SourceConnection {
     return this.guarded((pool) => readSchema(pool, schemas));
   }
 
-  /**
-   * Runs the query whole within the row and byte caps the caller's limits
-   * carry, then hands its rows out from memory; the first row left out
-   * comes last, so the reader sees the cap.
-   */
-  async openQuery(
+  openQuery(
     prepared: PreparedQuery,
     limits: OpenLimits,
     signal?: AbortSignal
   ): Promise<RowStream> {
     if (!(prepared instanceof AzureSqlPreparedQuery)) {
-      throw new Error("a query prepared by another adapter cannot run here");
+      return Promise.reject(
+        new Error("a query prepared by another adapter cannot run here")
+      );
     }
-    if (!hasCaps(limits)) {
-      throw new Error("an Azure SQL query needs row and byte caps");
-    }
-    const { columns, rows, leftOut } = await runAzureSqlQuery(
-      this.pool,
-      prepared,
-      limits,
-      signal
-    );
-    return bufferedStream(columns, leftOut ? [...rows, leftOut] : rows);
+    return openAzureSqlQuery(this.pool, prepared, limits, signal);
   }
 
   /**

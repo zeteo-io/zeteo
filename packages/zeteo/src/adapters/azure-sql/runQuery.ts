@@ -14,10 +14,10 @@ import {
   SourceUnreachableError,
 } from "../../utils/errors.js";
 import type {
+  OpenLimits,
   PreparedQuery,
   QueryPlan,
-  QueryResult,
-  RunLimits,
+  RowStream,
 } from "../types.js";
 
 /**
@@ -137,12 +137,12 @@ const CONNECTION_CODES = new Set([
   "ELOGIN",
   "EINSTLOOKUP",
 ]);
-// Conversion and overflow errors a bound value raises when the server
-// converts it to the column's type: 241 (date or time from text), 242 (out of
-// a date type's range), 8169 (uniqueidentifier from text), 8114 (a type from
-// nvarchar), 8115 (arithmetic overflow), 245 (text to a number), 220 (an
-// integer type's range), 517 (date arithmetic overflow).
-const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 8115, 245, 220, 517]);
+// Conversion errors a bound value the planner accepted still raises when the
+// server converts it: 241 (a date or time from text), 242 (out of a date
+// type's range), 8169 (a uniqueidentifier from text), 8114 (a type from
+// nvarchar: a timestamp that leaves its type's range in UTC). Numbers bind
+// in types every numeric column compares with, so none overflows.
+const VALUE_ERRORS = new Set([241, 242, 8169, 8114]);
 /** Errors of this severity end the session on the server: KILL, a crash, a shutdown. */
 const SESSION_FATAL_SEVERITY = 20;
 
@@ -192,13 +192,6 @@ const callerError = (err: unknown): AppError => {
   logger.warn({ err }, "source query failed");
   return new QueryFailedError();
 };
-
-type Stop = "cap" | "timeout" | "abort" | "fault";
-
-/** A result and, when a cap cut it, the first row it left out. */
-export interface AzureSqlResult extends QueryResult {
-  leftOut?: unknown[];
-}
 
 /** A plan compiled to SQL Server SQL with its typed parameters. */
 export class AzureSqlPreparedQuery implements PreparedQuery {
@@ -265,39 +258,51 @@ const deadlineParent = (
   return parent as unknown as ConnectionPool;
 };
 
+/** Rows queued above this many pause the request until the reader catches up. */
+export const HIGH_WATER_ROWS = 500;
+/** A paused request resumes once fewer rows than this are queued. */
+export const LOW_WATER_ROWS = 100;
+
+/** Why the run was stopped on this side. */
+type Stop = "timeout" | "abort" | "fault" | "close";
+
+const closedError = () => new Error("the row stream is closed");
+
 /**
- * Runs a prepared query as one request on the pool: the compiled SELECT
- * only, its parameters bound with the types the dialect chose. Rows are read
- * as the driver parses them and normalised one by one; the query asks for one
- * row past `maxRows` to tell whether more exist, and at either cap the run
- * keeps the row it left out and cancels the request, so the rest of the
- * result is never read.
+ * Opens a prepared query as one request on the pool: the compiled SELECT
+ * only, its parameters bound with the types the dialect chose. It resolves
+ * once the result's columns are known and checked against the plan; the
+ * request stays in stream mode, its rows normalised and queued as the driver
+ * parses them. Above `HIGH_WATER_ROWS` queued the request is paused, so the
+ * server waits on the connection, and it resumes below `LOW_WATER_ROWS`.
+ * `next` hands out queued rows, waiting for one when none is queued.
  *
  * The run ends by `deadlineAt`, however long it waited for a connection: a
  * deadline of its own cancels the request, before or after it has one; a
  * request whose time is up once it has a connection sends nothing; and the
  * driver's request timeout, the time left then plus `DRIVER_GRACE_MS`, is
- * the backstop. An aborted `signal` cancels the same way. A cancel is an
- * attention on the request's own connection, so it never waits for another;
- * the run settles only once the driver has finished with the request, by
+ * the backstop. An aborted `signal` cancels the same way, and so does
+ * `close` before the result has ended. A cancel is an attention on the
+ * request's own connection, so it never waits for another, and the driver
+ * reads a paused request on to the acknowledgement. Every failure, and
+ * `close`, settles only once the driver has finished with the request: by
  * the server's acknowledgement (the connection goes back to the pool clean)
  * or by closing the connection when none comes within the driver's
- * `cancelTimeout` (the pool then discards it). SQL Server has no read-only
+ * `cancelTimeout` (the pool then discards it). Once the run is stopped, what
+ * the driver reports changes nothing. SQL Server has no read-only
  * transaction: the compiled statement is a single SELECT, and the login is
  * checked for write rights when the source is registered.
  */
-export const runAzureSqlQuery = async (
+export const openAzureSqlQuery = async (
   pool: ConnectionPool,
   prepared: AzureSqlPreparedQuery,
-  limits: RunLimits,
+  limits: OpenLimits,
   signal?: AbortSignal
-): Promise<AzureSqlResult> => {
+): Promise<RowStream> => {
   if (!Number.isFinite(limits.deadlineAt)) {
-    return Promise.reject(
-      new Error(`invalid query deadline: ${limits.deadlineAt}`)
-    );
+    throw new Error(`invalid query deadline: ${limits.deadlineAt}`);
   }
-  if (signal?.aborted) return Promise.reject(signal.reason);
+  signal?.throwIfAborted();
   const { plan, sql: text, parameters } = prepared;
 
   const request = new sql.Request(deadlineParent(pool, limits.deadlineAt));
@@ -309,115 +314,209 @@ export const runAzureSqlQuery = async (
     });
   } catch (err) {
     logger.warn({ err }, "a query parameter could not be bound");
-    return Promise.reject(new QueryFailedError());
+    throw new QueryFailedError();
   }
-  return new Promise<AzureSqlResult>((resolve, reject) => {
-    const rows: unknown[][] = [];
-    let readers: Reader[] | undefined;
-    let bytes = 0;
-    let truncated: QueryResult["truncated"] = false;
-    let leftOut: unknown[] | undefined;
-    let stop: Stop | undefined;
-    /** Why the run failed on this side: columns or values it could not take. */
-    let fault: AppError | undefined;
-    /** The driver's first error before the run was stopped. */
-    let failure: unknown;
 
-    const halt = (reason: Stop) => {
-      if (stop) return;
-      stop = reason;
-      request.cancel();
-    };
-    const refuse = (err: unknown) => {
-      fault = err instanceof AppError ? err : new QueryFailedError();
-      if (!(err instanceof AppError)) {
-        logger.error({ err }, "a result could not be read");
-      }
-      halt("fault");
-    };
+  /** Normalised rows not yet handed out. */
+  let queue: unknown[][] = [];
+  let paused = false;
+  let readers: Reader[] | undefined;
+  let stop: Stop | undefined;
+  /** Why the run failed on this side: columns or values it could not take. */
+  let fault: AppError | undefined;
+  /** The driver's first error before the run was stopped. */
+  let driverError: unknown;
+  /** The driver has finished with the request and given its connection back. */
+  let settled = false;
+  /** What the run ended with when the driver finished, if it failed. */
+  let endError: unknown;
+  /** What every read rejects with once one has rejected. */
+  let failure: unknown;
+  let reading: Promise<unknown[][]> | undefined;
+  let closing: Promise<void> | undefined;
 
-    request.on("recordset", (columns: ResultColumn[]) => {
-      if (stop) return;
-      try {
-        if (readers) {
-          logger.error("the query returned more than one result");
-          throw new QueryFailedError();
-        }
-        checkFields(columns, plan);
-        readers = columns.map(readerOf);
-      } catch (err) {
-        refuse(err);
-      }
+  // Whoever waits for the run to change: the opening for its columns, a
+  // read for rows, `close` for the driver to finish.
+  let waiting: (() => void)[] = [];
+  const changed = () => {
+    const woken = waiting;
+    waiting = [];
+    for (const wake of woken) wake();
+  };
+  const nextChange = () =>
+    new Promise<void>((resolve) => {
+      waiting.push(resolve);
     });
 
-    request.on("row", (raw: unknown[]) => {
-      if (stop) return;
-      try {
-        if (!readers) throw new Error("a row before its columns");
-        if (rows.length === limits.maxRows) {
-          // Only its existence counts: it is not read.
-          truncated = "rows";
-          leftOut = raw;
-          halt("cap");
-          return;
-        }
-        const row = raw.map((value, i) =>
-          value === null ? null : readers![i]!(value)
-        );
-        bytes += Buffer.byteLength(JSON.stringify(row)) + 1;
-        if (bytes > limits.maxBytes) {
-          truncated = "bytes";
-          leftOut = row;
-          halt("cap");
-          return;
-        }
-        rows.push(row);
-      } catch (err) {
-        refuse(err);
-      }
-    });
-
-    // Once the run is stopped, what the driver reports (the cancel itself,
-    // or a failure while it drains) changes nothing.
-    request.on("error", (err: unknown) => {
-      if (stop) {
-        logger.debug({ err }, "source request ended after the run stopped");
-        return;
-      }
-      failure ??= err;
-    });
-
-    const deadline = setTimeout(
-      () => halt("timeout"),
-      Math.max(0, limits.deadlineAt - performance.now())
-    );
-    const onAbort = () => halt("abort");
-    signal?.addEventListener("abort", onAbort, { once: true });
-
-    const settle = () => {
-      clearTimeout(deadline);
-      signal?.removeEventListener("abort", onAbort);
-      if (stop === "abort") return reject(signal!.reason);
-      if (stop === "timeout") {
+  const stopError = (reason: Stop): unknown => {
+    switch (reason) {
+      case "abort":
+        return signal!.reason;
+      case "timeout":
         logger.info("source query stopped at its deadline");
-        return reject(new QueryTimeoutError());
-      }
-      if (fault) return reject(fault);
-      if (failure !== undefined) return reject(callerError(failure));
-      if (!readers) {
-        logger.error("the query returned no result");
-        return reject(new QueryFailedError());
-      }
-      resolve({
-        columns: plan.columns.map(({ name, type }) => ({ name, type })),
-        rows,
-        truncated,
-        ...(leftOut && { leftOut }),
-      });
-    };
+        return new QueryTimeoutError();
+      case "close":
+        return closedError();
+      case "fault":
+        return fault;
+    }
+  };
 
-    // In stream mode the callback comes once the driver is done with the
-    // request and has released its connection; errors come as events.
-    request.query(text, settle);
+  const halt = (reason: Stop) => {
+    // A run that has already failed stays as it failed.
+    if (stop || endError !== undefined) return;
+    stop = reason;
+    if (!settled) request.cancel();
+    changed();
+  };
+  const refuse = (err: unknown) => {
+    fault = err instanceof AppError ? err : new QueryFailedError();
+    if (!(err instanceof AppError)) {
+      logger.error({ err }, "a result could not be read");
+    }
+    halt("fault");
+  };
+
+  request.on("recordset", (columns: ResultColumn[]) => {
+    if (stop) return;
+    try {
+      if (readers) {
+        logger.error("the query returned more than one result");
+        throw new QueryFailedError();
+      }
+      checkFields(columns, plan);
+      readers = columns.map(readerOf);
+      changed();
+    } catch (err) {
+      refuse(err);
+    }
   });
+
+  request.on("row", (raw: unknown[]) => {
+    if (stop || driverError !== undefined) return;
+    try {
+      if (!readers) throw new Error("a row before its columns");
+      queue.push(
+        raw.map((value, i) => (value === null ? null : readers![i]!(value)))
+      );
+      if (queue.length > HIGH_WATER_ROWS && !paused) {
+        paused = true;
+        request.pause();
+      }
+      changed();
+    } catch (err) {
+      refuse(err);
+    }
+  });
+
+  // Once the run is stopped, what the driver reports (the cancel itself, or
+  // a failure while it drains) changes nothing.
+  request.on("error", (err: unknown) => {
+    if (stop) {
+      logger.debug({ err }, "source request ended after the run stopped");
+      return;
+    }
+    driverError ??= err;
+    changed();
+  });
+
+  const deadline = setTimeout(
+    () => halt("timeout"),
+    Math.max(0, limits.deadlineAt - performance.now())
+  );
+  const onAbort = () => halt("abort");
+  signal?.addEventListener("abort", onAbort, { once: true });
+  const release = () => {
+    clearTimeout(deadline);
+    signal?.removeEventListener("abort", onAbort);
+  };
+
+  // In stream mode the callback comes once the driver is done with the
+  // request and has released its connection; errors come as events.
+  request.query(text, () => {
+    settled = true;
+    if (stop) endError = stopError(stop);
+    // A run whose time ran out while it waited for a connection timed out,
+    // however the pool reports it.
+    else if (
+      isPoolExhausted(driverError) &&
+      performance.now() >= limits.deadlineAt
+    ) {
+      endError = new QueryTimeoutError();
+    } else if (driverError !== undefined) endError = callerError(driverError);
+    else if (!readers) {
+      logger.error("the query returned no result");
+      endError = new QueryFailedError();
+    }
+    changed();
+  });
+
+  const take = (maxRows: number): unknown[][] => {
+    const rows = queue.length <= maxRows ? queue : queue.slice(0, maxRows);
+    queue = rows === queue ? [] : queue.slice(maxRows);
+    if (paused && queue.length < LOW_WATER_ROWS && !stop) {
+      paused = false;
+      request.resume();
+    }
+    return rows;
+  };
+
+  const read = async (maxRows: number): Promise<unknown[][]> => {
+    for (;;) {
+      if (settled) {
+        const err = endError ?? (stop && stopError(stop));
+        if (err !== undefined) throw err;
+        return queue.length > 0 ? take(maxRows) : [];
+      }
+      // A stopped or failing run hands out nothing more; it fails once the
+      // driver is done with it.
+      if (!stop && driverError === undefined && queue.length > 0) {
+        return take(maxRows);
+      }
+      await nextChange();
+    }
+  };
+
+  const next = (maxRows: number): Promise<unknown[][]> => {
+    if (failure !== undefined) return Promise.reject(failure);
+    if (closing) return Promise.reject(closedError());
+    if (reading) {
+      return Promise.reject(new Error("a read is already in progress"));
+    }
+    if (!Number.isInteger(maxRows) || maxRows < 1) {
+      return Promise.reject(new Error(`invalid batch size: ${maxRows}`));
+    }
+    reading = read(maxRows).catch((err: unknown) => {
+      failure = err;
+      throw err;
+    });
+    return reading.finally(() => {
+      reading = undefined;
+    });
+  };
+
+  const close = (): Promise<void> =>
+    (closing ??= (async () => {
+      halt("close");
+      while (!settled) await nextChange();
+      await reading?.catch(() => undefined);
+      release();
+    })().catch((err: unknown) => {
+      logger.error({ err }, "closing a source query failed");
+    }));
+
+  // Open once the columns are known, or fail once the driver is done.
+  while (!readers || stop) {
+    if (settled) {
+      release();
+      throw endError ?? new QueryFailedError();
+    }
+    await nextChange();
+  }
+
+  return {
+    columns: plan.columns.map(({ name, type }) => ({ name, type })),
+    next,
+    close,
+  };
 };

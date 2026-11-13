@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { AzureSqlPreparedQuery } from "../../../adapters/azure-sql/runQuery.js";
 import { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
 import { toMssqlConfig } from "../../../adapters/azure-sql/settings.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
@@ -17,8 +18,11 @@ import {
 import {
   LIMITS,
   OPTIONS,
+  drain,
   failureOf,
   kill,
+  limitsOf,
+  noneWithin,
   runningOn,
   useMssqlRuns,
   waitFor,
@@ -31,7 +35,7 @@ import {
 } from "../../../utils/errors.js";
 
 const runs = useMssqlRuns();
-const { connectWith, plan, run } = runs;
+const { connectWith, counting, open, plan, run } = runs;
 
 const accountIds = [[1], [2]];
 
@@ -493,5 +497,122 @@ describe("azure-sql runQuery: safety", () => {
       .request()
       .query("SELECT CONTEXT_INFO() AS mark");
     expect(after.recordset).toEqual([{ mark: null }]);
+  });
+});
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("azure-sql openQuery: failures on the row stream", () => {
+  it("rejects the next read with the signal's reason after an abort between reads, and every read after it", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    const controller = new AbortController();
+    const stream = await single.openQuery(
+      counting(100_000),
+      limitsOf(10_000),
+      controller.signal
+    );
+    expect(await stream.next(1)).toHaveLength(1);
+    const reason = new Error("client went away");
+    controller.abort(reason);
+    await expect(stream.next(5)).rejects.toBe(reason);
+    await expect(stream.next(5)).rejects.toBe(reason);
+    await stream.close();
+    expect(await noneWithin("counting_rows", 2000)).toBe(true);
+    expect(
+      (await run({ from: "accounts", select: ["id"] }, {}, single)).rows
+    ).toEqual(accountIds);
+  });
+
+  it("ends a run held back by its reader at its deadline", async () => {
+    const stream = await runs
+      .connection()
+      .openQuery(counting(100_000), limitsOf(1000));
+    expect(await stream.next(1)).toHaveLength(1);
+    await sleep(1200);
+    const err = await failureOf(stream.next(5));
+    expect(err).toBeInstanceOf(QueryTimeoutError);
+    await expect(stream.next(5)).rejects.toBe(err);
+    await stream.close();
+    expect(await noneWithin("counting_rows", 2000)).toBe(true);
+  });
+
+  it("rejects a read with source_unreachable when the session is killed mid-result, without hanging", async () => {
+    const stream = await runs
+      .connection()
+      .openQuery(counting(100_000), limitsOf(10_000));
+    expect(await stream.next(1)).toHaveLength(1);
+    const [{ session_id }] = await runningOn("counting_rows");
+    await kill(session_id);
+    const begun = Date.now();
+    const err = await failureOf(drain(stream));
+    expect(err).toBeInstanceOf(SourceUnreachableError);
+    await expect(stream.next(5)).rejects.toBe(err);
+    await stream.close();
+    expect(Date.now() - begun).toBeLessThan(2000);
+    expect((await run({ from: "accounts", select: ["id"] })).rows).toEqual(
+      accountIds
+    );
+  });
+
+  it("answers query_timeout, not source_busy, when the pool is exhausted after the deadline has passed", async () => {
+    const single = (await connectWith({
+      ...OPTIONS,
+      connectTimeoutMs: 300,
+      poolSize: 1,
+    })) as AzureSqlConnection;
+    const held = single.pool.request().query("WAITFOR DELAY '00:00:01.500'");
+    try {
+      await sleep(50);
+      const late = await failureOf(
+        open({ from: "accounts", select: ["id"] }, 100, single)
+      );
+      expect(late).toBeInstanceOf(QueryTimeoutError);
+      const busy = await failureOf(
+        open({ from: "accounts", select: ["id"] }, 5000, single)
+      );
+      expect(busy).toBeInstanceOf(ServiceUnavailableError);
+    } finally {
+      await held;
+    }
+  });
+
+  it("gives the driver's request timeout only the time left once the run has a connection", async () => {
+    const single = (await connectWith({
+      ...OPTIONS,
+      poolSize: 1,
+    })) as AzureSqlConnection;
+    // The run's own cancel does nothing, so only the driver's timeout, the
+    // time left plus two seconds, stops it: 0.3 s plus 2 s after it gets
+    // the connection. Counted from the start instead, it would let the 3 s
+    // view finish.
+    vi.spyOn(sql.Request.prototype, "cancel").mockImplementation(
+      () => undefined
+    );
+    const held = single.pool.request().query("WAITFOR DELAY '00:00:01.200'");
+    await sleep(50);
+    const begun = Date.now();
+    const err = await failureOf(
+      run({ from: "slow_orders", select: ["id"] }, { timeoutMs: 1500 }, single)
+    );
+    const took = Date.now() - begun;
+    await held;
+    expect(err).toBeInstanceOf(QueryTimeoutError);
+    expect(took).toBeGreaterThan(3000);
+    expect(took).toBeLessThan(4000);
+    expect(await noneWithin("slow_orders", 2000)).toBe(true);
+  });
+
+  it("fails the run, before any row, for a result column type with no wire form", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    const binary = new AzureSqlPreparedQuery(
+      plan({ from: "accounts", select: ["id"] }),
+      "SELECT CAST(0x01 AS varbinary(4)) AS c0",
+      []
+    );
+    const err = await failureOf(single.openQuery(binary, limitsOf()));
+    expect(err).toBeInstanceOf(QueryFailedError);
+    expect(
+      (await run({ from: "accounts", select: ["id"] }, {}, single)).rows
+    ).toEqual(accountIds);
   });
 });

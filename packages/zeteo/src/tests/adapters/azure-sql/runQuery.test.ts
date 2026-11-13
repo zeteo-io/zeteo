@@ -1,11 +1,30 @@
 // @module-tag int
 // @module-tag platform
-import { OPTIONS, runningOn, useMssqlRuns } from "../../support/mssqlRuns.js";
+import { AzureSqlPreparedQuery } from "../../../adapters/azure-sql/runQuery.js";
 import { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
+import { HIGH_WATER_ROWS } from "../../../adapters/azure-sql/runQuery.js";
+import type { SourceConnection } from "../../../adapters/types.js";
+import { AppError } from "../../../utils/errors.js";
 import { describe, expect, it, vi } from "vitest";
 import sql from "mssql";
+import {
+  OPTIONS,
+  drain,
+  limitsOf,
+  noneWithin,
+  runningOn,
+  useMssqlRuns,
+} from "../../support/mssqlRuns.js";
 
-const { connectWithDriverOptions, run } = useMssqlRuns();
+const {
+  connection,
+  connectWith,
+  connectWithDriverOptions,
+  counting,
+  open,
+  plan,
+  run,
+} = useMssqlRuns();
 
 const TYPED = {
   from: "typed_values",
@@ -481,5 +500,180 @@ describe("azure-sql runQuery", () => {
     expect(result.rows).toHaveLength(600);
     expect(result.rows.at(-1)).toEqual([600]);
     expect(result.truncated).toBe("rows");
+  });
+});
+
+const ACCOUNTS = [[1], [2]];
+
+const inUse = (conn: SourceConnection) =>
+  (conn as AzureSqlConnection).pool.borrowed;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** How many rows the driver has parsed, of every request, from now on. */
+const rowsParsed = () => {
+  const emit = vi.spyOn(sql.Request.prototype, "emit");
+  return () => emit.mock.calls.filter(([event]) => event === "row").length;
+};
+
+// The most rows of `counting` a 4 KB packet, tedious's default, holds a part
+// of: each is over 2 KB.
+const PACKET_ROWS = 3;
+
+describe("azure-sql openQuery: the row stream", () => {
+  it("knows its columns once open and returns [] after the end, however often asked", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    const stream = await open({ from: "orders", select: ["id"] }, 5000, single);
+    expect(stream.columns).toEqual([{ name: "id", type: "number" }]);
+    expect(await drain(stream)).toEqual(
+      Array.from({ length: 12 }, (_, i) => [i + 1])
+    );
+    expect(await stream.next(5)).toEqual([]);
+    expect(await stream.next(5)).toEqual([]);
+    await stream.close();
+    expect(inUse(single)).toBe(0);
+  });
+
+  it.each([0, -1, 2.5])("refuses to read %s rows", async (size) => {
+    const stream = await open({ from: "orders", select: ["id"] });
+    try {
+      await expect(stream.next(size)).rejects.toThrow("invalid batch size");
+      expect(await stream.next(3)).toEqual([[1], [2], [3]]);
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("stops the statement on the server when closed mid-result, and the pool gives the connection out again", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    // Far more than the network between the server and the driver buffers.
+    const stream = await open(
+      { from: "wide_rows", select: ["id", "filler"], orderBy: [{ id: "asc" }] },
+      10_000,
+      single
+    );
+    const ids: unknown[] = [];
+    while (ids.length < 10) {
+      ids.push(...(await stream.next(10 - ids.length)).map(([id]) => id));
+    }
+    expect(ids).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
+    expect(await runningOn("wide_rows")).toHaveLength(1);
+    await stream.close();
+    expect(await noneWithin("wide_rows", 2000)).toBe(true);
+    expect(inUse(single)).toBe(0);
+    await expect(stream.next(1)).rejects.toThrow("closed");
+    const again = await open(
+      { from: "accounts", select: ["id"] },
+      5000,
+      single
+    );
+    try {
+      expect(await drain(again)).toEqual(ACCOUNTS);
+    } finally {
+      await again.close();
+    }
+  });
+
+  it("closes harmlessly twice, and at once", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    const stream = await open(
+      { from: "wide_rows", select: ["id"] },
+      5000,
+      single
+    );
+    await stream.next(1);
+    await Promise.all([stream.close(), stream.close()]);
+    await expect(stream.close()).resolves.toBeUndefined();
+    expect(inUse(single)).toBe(0);
+    const again = await open(
+      { from: "accounts", select: ["id"] },
+      5000,
+      single
+    );
+    try {
+      expect(await drain(again)).toEqual(ACCOUNTS);
+    } finally {
+      await again.close();
+    }
+  });
+
+  it("holds the request back while nothing reads, and reads every row once something does", async () => {
+    const parsed = rowsParsed();
+    const stream = await connection().openQuery(
+      counting(100_000),
+      limitsOf(30_000)
+    );
+    try {
+      // Nothing reads: the driver parses until the queue passes its high
+      // water mark, finishes the packet it is in, and stops.
+      let seen = -1;
+      while (parsed() !== seen) {
+        seen = parsed();
+        await sleep(300);
+      }
+      expect(seen).toBeGreaterThan(HIGH_WATER_ROWS);
+      expect(seen).toBeLessThanOrEqual(HIGH_WATER_ROWS + PACKET_ROWS);
+      // The server waits on the connection with the rest of the result.
+      expect(await runningOn("counting_rows")).toHaveLength(1);
+      const rows = await drain(stream);
+      expect(rows).toHaveLength(100_000);
+      expect(rows[0]).toEqual(["1", "x".repeat(2048)]);
+      expect(rows.at(-1)![0]).toBe("100000");
+      expect(await stream.next(1)).toEqual([]);
+    } finally {
+      await stream.close();
+    }
+  });
+
+  it("settles a read that is waiting when it is closed, stopping the statement", async () => {
+    const single = await connectWith({ ...OPTIONS, poolSize: 1 });
+    const quick = 300;
+    // Its first rows come at once, each filling a packet; the rest wait 3 s
+    // on the server, as slow_orders spins when it is first read from.
+    const slowAfterFirst = new AzureSqlPreparedQuery(
+      plan({ from: "wide_rows", select: ["id", "filler"] }),
+      `SELECT TOP (${quick}) id AS c0, filler AS c1 /* slow_after_first */
+         FROM probe.wide_rows
+       UNION ALL SELECT id, 'x' FROM sales.slow_orders`,
+      []
+    );
+    const stream = await single.openQuery(slowAfterFirst, limitsOf(10_000));
+    // Reads until one waits: the server holds the last of the quick rows
+    // back with the slow ones, in a packet it has not filled.
+    let reading: Promise<{ rows: unknown[][] } | { err: unknown }>;
+    let read = 0;
+    for (;;) {
+      reading = stream.next(quick).then(
+        (rows) => ({ rows }),
+        (err: unknown) => ({ err })
+      );
+      const settled = await Promise.race([reading, sleep(500)]);
+      if (!settled) break;
+      expect(settled).toHaveProperty("rows");
+      read += (settled as { rows: unknown[][] }).rows.length;
+    }
+    expect(read).toBeGreaterThan(0);
+    expect(read).toBeLessThan(quick);
+    expect(await runningOn("slow_after_first")).toHaveLength(1);
+    const begun = Date.now();
+    await stream.close();
+    expect(Date.now() - begun).toBeLessThan(2000);
+    // The read neither hangs nor passes for the end of the result.
+    const settled = await reading;
+    expect(settled).toHaveProperty("err");
+    expect((settled as { err: Error }).err).not.toBeInstanceOf(AppError);
+    expect((settled as { err: Error }).err.message).toMatch(/closed/);
+    expect(await runningOn("slow_after_first")).toEqual([]);
+    expect(inUse(single)).toBe(0);
+    const again = await open(
+      { from: "accounts", select: ["id"] },
+      5000,
+      single
+    );
+    try {
+      expect(await drain(again)).toEqual(ACCOUNTS);
+    } finally {
+      await again.close();
+    }
   });
 });
