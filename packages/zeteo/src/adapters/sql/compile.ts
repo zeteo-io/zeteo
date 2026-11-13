@@ -103,9 +103,11 @@ const compileFilter = <S>(
       }
       case "match": {
         const escaped = escapeLike(f.value);
+        const s = subject(f.subject);
         return dialect.like(
-          subject(f.subject).expression,
-          f.op === "contains" ? `%${escaped}%` : `${escaped}%`
+          s.expression,
+          f.op === "contains" ? `%${escaped}%` : `${escaped}%`,
+          s.nativeType
         );
       }
       case "isNull":

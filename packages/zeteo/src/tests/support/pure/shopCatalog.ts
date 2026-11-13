@@ -11,7 +11,8 @@ import {
   type VisibleCatalog,
 } from "../../../grants/visibleCatalog.js";
 
-// A shop: customers, orders, order_lines and accounts in schema `shop`, plus
+// A shop: customers, orders, order_lines, accounts and ledger (Postgres's
+// uuid, money, an enum and domains over them) in schema `shop`, plus
 // `billing.accounts`, so the bare name `accounts` is ambiguous while both are
 // visible. Ids are readable: a table's id is its key below, a column's is
 // `<table key>.<column>`, a relation's is `<from table key>.<name>`.
@@ -70,6 +71,19 @@ const TABLES: Record<
       ["plan", "text", "text"],
     ],
   },
+  ledger: {
+    schemaName: "shop",
+    name: "ledger",
+    columns: [
+      ["id", "number", "integer"],
+      ["ref", "text", "uuid"],
+      ["amount", "number", "money"],
+      ["mood", "text", "shop.mood (enum)"],
+      ["feeling", "text", "shop.feeling (domain over shop.mood (enum))"],
+      ["price", "number", "shop.price (domain over money)"],
+      ["token", "text", "shop.token (domain over uuid)"],
+    ],
+  },
   billing_accounts: {
     schemaName: "billing",
     name: "accounts",
@@ -123,6 +137,12 @@ const MSSQL_NATIVE: Record<string, string> = {
   jsonb: "nvarchar(max)",
   bytea: "varbinary(max)",
   "timestamp with time zone": "datetimeoffset(7)",
+  uuid: "uniqueidentifier",
+  money: "money",
+  "shop.mood (enum)": "nvarchar(200)",
+  "shop.feeling (domain over shop.mood (enum))": "nvarchar(200)",
+  "shop.price (domain over money)": "money",
+  "shop.token (domain over uuid)": "uniqueidentifier",
 };
 
 const SOURCE = {

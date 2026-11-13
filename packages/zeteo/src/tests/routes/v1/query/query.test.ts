@@ -1,13 +1,14 @@
 // @module-tag int
 // @module-tag platform
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";
-import { afterAll, beforeAll, expect, it } from "vitest";
 import {
   grantTo,
   newQueryUser,
   postQuery,
   removeRunsOf,
+  runsOf,
   seedQuerySource,
   type SeededSource,
 } from "../../../support/queries.js";
@@ -31,7 +32,7 @@ describeEachEngine("POST /v1/query", (engine) => {
 
   beforeAll(async () => {
     source = await seedQuerySource(engine);
-    for (const table of ["accounts", "customers", "orders"]) {
+    for (const table of ["accounts", "customers", "orders", "ledger"]) {
       await grantTo(user.principal, source.tables[table]!, "all");
     }
   });
@@ -438,5 +439,104 @@ describeEachEngine("POST /v1/query", (engine) => {
       expect(res.status).toBe(400);
       expect(res.body.error).toBe("invalid_request");
     }
+  });
+
+  describe("uuid and money columns", () => {
+    const ledgerIds = (where: Record<string, unknown>, more = {}) =>
+      rowsOf({ from: "ledger", select: ["id"], where, ...more });
+
+    it("compares a uuid whatever the case of the value", async () => {
+      expect(
+        await ledgerIds({
+          ref: { eq: "6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B" },
+        })
+      ).toEqual([[1]]);
+      expect(
+        await ledgerIds({
+          ref: {
+            in: [
+              "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+              "00000000-0000-0000-0000-000000000003",
+            ],
+          },
+        })
+      ).toEqual([[2], [3]]);
+      expect(
+        await ledgerIds({
+          ref: { ne: "6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b" },
+        })
+      ).toEqual([[2], [3]]);
+      expect(await ledgerIds({ ref: { isNull: true } })).toEqual([[4]]);
+    });
+
+    it("matches a uuid's text ignoring case", async () => {
+      expect(await ledgerIds({ ref: { contains: "8A9B" } })).toEqual([[1]]);
+      expect(await ledgerIds({ ref: { startsWith: "a0EE" } })).toEqual([[2]]);
+    });
+
+    it("counts uuids", async () => {
+      expect(
+        await rowsOf({
+          from: "ledger",
+          select: [
+            { count: "ref", as: "n" },
+            { countDistinct: "ref", as: "d" },
+          ],
+        })
+      ).toEqual([["3", "3"]]);
+    });
+
+    it("filters money with decimals and integers", async () => {
+      expect(await ledgerIds({ amount: { gt: "1.5" } })).toEqual([[1]]);
+      expect(await ledgerIds({ amount: { lt: 0 } })).toEqual([[3]]);
+      expect(await ledgerIds({ amount: { between: [0, 1] } })).toEqual([[2]]);
+      expect(await ledgerIds({ amount: { in: [0.99, "1234.50"] } })).toEqual([
+        [1],
+        [2],
+      ]);
+    });
+
+    it("averages and orders money", async () => {
+      expect(
+        await rowsOf({
+          from: "ledger",
+          select: [{ avg: "amount", as: "a" }],
+          where: { id: { in: [1, 3] } },
+        })
+      ).toEqual([[611.125]]);
+      expect(
+        await rowsOf({
+          from: "ledger",
+          select: ["id"],
+          orderBy: [{ amount: "desc" }],
+        })
+      ).toEqual([[4], [1], [2], [3]]);
+    });
+
+    it.each([
+      ["eq", { eq: "not-a-uuid" }],
+      ["in", { in: ["6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b", "nope"] }],
+    ])(
+      "refuses a malformed uuid (%s) with 422 invalid_value, recorded as refused",
+      async (_, filter) => {
+        const res = await query({
+          from: "ledger",
+          select: ["id"],
+          where: { ref: filter },
+        });
+        expect(res.status).toBe(422);
+        expect(res.body).toMatchObject({
+          error: "invalid_value",
+          error_description:
+            "A value in the query could not be converted to its column's type",
+          path: [],
+          suggestions: [],
+        });
+        expect((await runsOf([user.id])).at(-1)).toMatchObject({
+          outcome: "refused",
+          errorCode: "invalid_value",
+        });
+      }
+    );
   });
 });

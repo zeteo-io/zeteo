@@ -32,3 +32,17 @@ export const mapPostgresType = (
   if (typname === "json" || typname === "jsonb") return "json";
   return "other";
 };
+
+// Greedy, so a quoted name holding the mark cannot take the real one's place.
+const DOMAIN = /^.* \(domain over (.*)\)$/;
+const ENUM = " (enum)";
+
+/**
+ * What a column's native type (as `readSchema` writes it) is underneath: a
+ * domain's base type, `enum` for an enum, else the native type itself.
+ */
+export const postgresBaseType = (nativeType: string | undefined): string => {
+  if (nativeType === undefined) return "";
+  const base = DOMAIN.exec(nativeType)?.[1] ?? nativeType;
+  return base.endsWith(ENUM) ? "enum" : base;
+};

@@ -87,8 +87,21 @@ Every value is bound as a parameter, and an engine takes only so many in one sta
 Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two
 included. A query that binds more, which takes several long `in` lists, is refused before it
 runs with `422 too_many_parameters` at path `[]`. A timestamp's fraction past 100 ns is cut on
-Azure SQL, its precision. A timestamp offset beyond ±14:00, or a date or timestamp before year 1
-or after 9999, fails there with `502 query_failed`.
+Azure SQL, its precision.
+
+A value that has the right shape but that the source itself cannot convert to the column's type
+is the caller's error: `422 invalid_value` at path `[]`, with the fixed message `A value in the
+query could not be converted to its column's type`, recorded as `refused`. On Postgres that is a
+malformed uuid, or a timestamp offset beyond ±15:59; on Azure SQL a malformed uniqueidentifier, a
+timestamp offset beyond ±14:00, a timestamp that leaves years 1 to 9999 once converted to UTC, and
+a bound outside 1753-01-01 to 9999-12-31 compared with a `datetime` column.
+
+**Postgres's own types.** A uuid column compares as a uuid (`eq`, `ne`, `in`, `notIn`, ranges), so
+its index is used and the value's case does not matter; `contains`, `startsWith`, `min` and `max`
+read it as text. An enum column is read as text everywhere: a label the enum does not have
+matches nothing, and it sorts, and `min` and `max` compare, alphabetically, not in the enum's
+order. A money column is read as numeric everywhere, so it filters, sums and averages like a
+decimal. A domain behaves as its base type.
 
 **Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
 names cannot be filtered on directly (select it through a view that renames it), and an `as` of
@@ -233,7 +246,7 @@ values in that order. Values arrive in these wire forms on every engine:
 |-------|------|
 | 8-, 16- and 32-bit integers, floats | JSON number; a 32-bit float (`real`) as its shortest decimal (`0.1`); Postgres's float `NaN`, `Infinity` and `-Infinity` as the strings `"NaN"`, `"Infinity"`, `"-Infinity"` |
 | 64-bit integers, decimals | string (`"9007199254740993"`, `"250.50"`, with the column's scale) |
-| money | string: on Azure SQL with four decimal places (`"640.1000"`); on Postgres as the database prints it |
+| money | string: on Azure SQL with four decimal places (`"640.1000"`); on Postgres as a decimal with the currency's two places and no symbol (`"640.10"`) |
 | `count`, `countDistinct` | string |
 | `sum` | string over integer and decimal columns, number over float columns |
 | `avg` | number: over integer and decimal columns the exact sum divided once in floating point |
@@ -241,7 +254,7 @@ values in that order. Values arrive in these wire forms on every engine:
 | date | `"YYYY-MM-DD"` |
 | timestamp | ISO 8601 in UTC with milliseconds (`"2026-03-31T21:59:59.987Z"`), with or without a time zone in the database; one without (`timestamp`, `datetime2`, `datetime`, `smalldatetime`) is taken as UTC; digits past the millisecond are cut, never rounded, except for SQL Server's `datetime`, whose 1/300 s ticks (`.003`, `.007`) are rounded to the nearest millisecond, and which a filter with the returned value still matches |
 | json | the JSON value itself (Postgres); text on Azure SQL; an integer inside a document past 2^53 loses precision |
-| anything else (uuid, uniqueidentifier, enums…) | string, as the database prints it |
+| anything else (uuid, uniqueidentifier, enums…) | string, as the database prints it: a uuid in lower case on Postgres, a uniqueidentifier in upper case on Azure SQL |
 | null | `null` |
 
 `warnings` holds `join_multiplies_rows` (with the join's `path`) when a relation that can match

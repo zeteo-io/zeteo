@@ -149,7 +149,7 @@ describe("/v1/sources/:sourceId", () => {
     expect(res.status).toBe(201);
     created.push(res.body.id);
     const tables = await call("GET", `/${res.body.id}/tables`);
-    expect(tables.body.data).toHaveLength(10);
+    expect(tables.body.data).toHaveLength(12);
 
     const patched = await call("PATCH", `/${res.body.id}`, { schemas: ["hr"] });
     expect(patched.status).toBe(200);
@@ -159,7 +159,7 @@ describe("/v1/sources/:sourceId", () => {
       "GET",
       `/${res.body.id}/tables?include_missing=true`
     );
-    expect(all.body.data).toHaveLength(10);
+    expect(all.body.data).toHaveLength(12);
     for (const table of all.body.data) {
       expect(table.missing_since).toEqual(expect.any(String));
     }

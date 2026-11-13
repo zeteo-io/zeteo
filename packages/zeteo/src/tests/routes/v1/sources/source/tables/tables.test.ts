@@ -66,6 +66,8 @@ describe("/v1/sources/:sourceId/tables", () => {
         "blobs",
         "broken_orders",
         "customers",
+        "ledger",
+        "moods",
         "order_lines",
         "orders",
         "paid_orders",
@@ -98,16 +100,16 @@ describe("/v1/sources/:sourceId/tables", () => {
         `/${sourceId}/tables?limit=4&cursor=${first.body.next_cursor}`
       );
       expect(second.body.data.map((t: { name: string }) => t.name)).toEqual([
+        "ledger",
+        "moods",
         "order_lines",
         "orders",
-        "paid_orders",
-        "session_flags",
       ]);
       const last = await call(
         "GET",
         `/${sourceId}/tables?limit=4&cursor=${second.body.next_cursor}`
       );
-      expect(last.body.data).toHaveLength(2);
+      expect(last.body.data).toHaveLength(4);
       expect(last.body.next_cursor).toBeNull();
       expect(
         (await call("GET", `/${sourceId}/tables?cursor=garbage`)).status

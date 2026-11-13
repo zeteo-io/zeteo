@@ -121,6 +121,43 @@ describe("azure-sql runQuery: safety", () => {
     );
   });
 
+  it.each([
+    [
+      "a datetime bound before 1753 (242)",
+      "legacy_times",
+      { legacy: { gt: "1000-01-01T00:00:00Z" } },
+    ],
+    [
+      "an offset SQL Server does not take (241)",
+      "legacy_times",
+      { legacy: { gt: "2026-01-01T00:00:00+14:30" } },
+    ],
+    [
+      "a timestamp that leaves datetime2's range in UTC (8114)",
+      "legacy_times",
+      { minute: { lt: "9999-12-31T23:00:00-05:00" } },
+    ],
+    [
+      "a malformed uniqueidentifier (8169)",
+      "typed_values",
+      { guid: { in: ["6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B", "nope"] } },
+    ],
+  ])(
+    "refuses %s as the caller's value: 422 invalid_value, none of the database's text",
+    async (_, from, where) => {
+      const err = await failureOf(run({ from, select: ["id"], where }));
+      expect(err).toBeInstanceOf(QueryError);
+      expect(err).toMatchObject({
+        statusCode: 422,
+        code: "invalid_value",
+        message:
+          "A value in the query could not be converted to its column's type",
+        path: [],
+      });
+      expect(JSON.stringify(err)).not.toMatch(/conver|range|uniqueidentifier/i);
+    }
+  );
+
   it("refuses a result whose columns are not the plan's", async () => {
     const planned = plan({ from: "accounts", select: ["id"] });
     const widened = {

@@ -40,6 +40,8 @@ describe("postgres readSchema", () => {
       "sales.blobs:table",
       "sales.broken_orders:view",
       "sales.customers:table",
+      "sales.ledger:table",
+      "sales.moods:table",
       "sales.order_lines:table",
       "sales.orders:table",
       "sales.paid_orders:view",
@@ -71,6 +73,36 @@ describe("postgres readSchema", () => {
     expect(column("orders", "status").type).toBe("text");
     expect(column("blobs", "data").type).toBe("other");
     expect(column("blobs", "tags").type).toBe("other");
+  });
+
+  it("marks an enum and a domain in the native type, so a dialect can tell them apart", () => {
+    expect(table("moods").columns).toMatchObject([
+      { name: "id", type: "number", nativeType: "integer" },
+      { name: "mood", type: "text", nativeType: "sales.mood (enum)" },
+      {
+        name: "feeling",
+        type: "text",
+        nativeType: "sales.feeling (domain over sales.mood (enum))",
+      },
+      {
+        name: "price",
+        type: "number",
+        nativeType: "sales.price (domain over money)",
+      },
+      {
+        name: "token",
+        type: "text",
+        nativeType: "sales.token (domain over uuid)",
+      },
+      { name: "label", type: "text", nativeType: "citext" },
+      { name: "code", type: "text", nativeType: "character(4)" },
+      { name: "handle", type: "text", nativeType: "name" },
+    ]);
+    expect(table("ledger").columns).toMatchObject([
+      { name: "id", nativeType: "integer" },
+      { name: "ref", type: "text", nativeType: "uuid" },
+      { name: "amount", type: "number", nativeType: "money" },
+    ]);
   });
 
   it("reports nullability and positions", () => {

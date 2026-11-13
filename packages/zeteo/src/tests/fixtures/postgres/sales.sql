@@ -5,6 +5,9 @@
 --   sales.order_lines    0
 --   sales.blobs          0   (types no query can use)
 --   sales.typed_values   5   (Postgres-only types, for the wire forms)
+--   sales.ledger         4   (portable; queries; uuid and money)
+--   sales.moods          3   (Postgres-only: an enum, domains over an enum,
+--                             money and uuid, and citext, char(n) and name)
 --   hr.salaries          0   (not granted)
 -- probe.sql adds a large table in schema `probe`, in the shared fixture only.
 -- Views:
@@ -16,6 +19,8 @@
 -- their types and values expressible there, and their values deterministic.
 -- Views reference only orders' id and total: catalogue tests change its other
 -- columns in throwaway copies.
+
+CREATE EXTENSION IF NOT EXISTS citext;
 
 CREATE SCHEMA sales;
 CREATE SCHEMA hr;
@@ -87,6 +92,29 @@ CREATE TABLE sales.typed_values (
   code uuid
 );
 
+CREATE TABLE sales.ledger (
+  id integer PRIMARY KEY,
+  ref uuid,
+  amount money
+);
+
+-- Declared in an order that is not alphabetical, so sorting as text shows.
+CREATE TYPE sales.mood AS ENUM ('sad', 'ok', 'happy');
+CREATE DOMAIN sales.feeling AS sales.mood;
+CREATE DOMAIN sales.price AS money;
+CREATE DOMAIN sales.token AS uuid;
+
+CREATE TABLE sales.moods (
+  id integer PRIMARY KEY,
+  mood sales.mood,
+  feeling sales.feeling,
+  price sales.price,
+  token sales.token,
+  label citext,
+  code char(4),
+  handle name
+);
+
 CREATE TABLE hr.salaries (
   employee text,
   amount numeric
@@ -128,6 +156,17 @@ INSERT INTO sales.typed_values VALUES
   (5, 1, 1, 3.25, 1e300, 1.10, true, '2026-01-01',
    '2026-01-01 00:00:00', '2026-01-01 00:00:00.000999+00',
    '{"z": 1, "a": 2}', '{"z": 1, "a": 2}', NULL);
+
+INSERT INTO sales.ledger VALUES
+  (1, '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', 1234.50),
+  (2, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 0.99),
+  (3, '00000000-0000-0000-0000-000000000003', -12.25),
+  (4, NULL, NULL);
+
+INSERT INTO sales.moods VALUES
+  (1, 'happy', 'sad', 10.50, '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', 'Beta', 'ab', 'zed'),
+  (2, 'sad', 'happy', 2.25, NULL, 'alpha', 'cd', 'Amy'),
+  (3, 'ok', NULL, NULL, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', NULL, NULL, 'bo');
 
 GRANT USAGE ON SCHEMA sales TO zeteo_ro, zeteo_rw, zeteo_owner;
 GRANT SELECT ON ALL TABLES IN SCHEMA sales TO zeteo_ro, zeteo_rw, zeteo_owner;

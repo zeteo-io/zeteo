@@ -1,5 +1,6 @@
 import { mssqlDialect, type MssqlParameter } from "../sql/dialects/mssql.js";
 import type { QueryResult, RunLimits } from "../types.js";
+import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
@@ -124,11 +125,18 @@ const CONNECTION_CODES = new Set([
   "ELOGIN",
   "EINSTLOOKUP",
 ]);
+// Conversion and overflow errors a bound value raises when the server
+// converts it to the column's type: 241 (date or time from text), 242 (out of
+// a date type's range), 8169 (uniqueidentifier from text), 8114 (a type from
+// nvarchar), 8115 (arithmetic overflow), 245 (text to a number), 220 (an
+// integer type's range), 517 (date arithmetic overflow).
+const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 8115, 245, 220, 517]);
 /** Errors of this severity end the session on the server: KILL, a crash, a shutdown. */
 const SESSION_FATAL_SEVERITY = 20;
 
 interface DriverError {
   code?: string;
+  number?: number;
   class?: number;
   originalError?: { code?: string };
 }
@@ -168,6 +176,10 @@ const callerError = (err: unknown): AppError => {
   if (isConnectionFailure(err)) {
     logger.warn({ err }, "source connection failed during a query");
     return new SourceUnreachableError();
+  }
+  if (e.code === "EREQUEST" && VALUE_ERRORS.has(e.number ?? 0)) {
+    logger.info({ err }, "the source could not convert a query's value");
+    return invalidValue();
   }
   logger.warn({ err }, "source query failed");
   return new QueryFailedError();

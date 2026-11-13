@@ -62,9 +62,14 @@ export interface SqlDialect {
   /**
    * Case-insensitive match against a pattern whose `\`, `%` and `_` are
    * already escaped; the dialect escapes whatever else its LIKE treats as
-   * special.
+   * special. `nativeType` is the column's own type name, absent for an
+   * aggregate.
    */
-  like(column: Expression<unknown>, pattern: string): Expression<SqlBool>;
+  like(
+    column: Expression<unknown>,
+    pattern: string,
+    nativeType?: string
+  ): Expression<SqlBool>;
   /**
    * Groups by select items, each given as its expression and its position in
    * `select` (0-based), so the dialect can group by either.

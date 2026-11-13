@@ -3,6 +3,7 @@ import { sendCancelRequest, type CancelTarget } from "./cancel.js";
 import { normaliseValue, type WireKind } from "../sql/values.js";
 import { postgresDialect } from "../sql/dialects/postgres.js";
 import type { QueryResult, RunLimits } from "../types.js";
+import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
@@ -48,6 +49,10 @@ const CLIENT_GRACE_MS = 2000;
 const STOP_GRACE_MS = 1000;
 
 const QUERY_CANCELED = "57014";
+// Data exceptions a bound value raises when the server converts it to the
+// column's type: invalid text (22P02), datetime format, field and time zone
+// (22007, 22008, 22009), a number out of range (22003).
+const VALUE_CODES = new Set(["22P02", "22007", "22008", "22009", "22003"]);
 // Class 08 is a connection exception; 57P01 to 57P03, the server shutting
 // down, crashing or not yet accepting connections.
 const CONNECTION_CODES = ["57P01", "57P02", "57P03"];
@@ -110,6 +115,10 @@ const callerError = (err: unknown): AppError => {
   }
   if (err instanceof DatabaseError && err.code === QUERY_CANCELED) {
     return new QueryTimeoutError();
+  }
+  if (err instanceof DatabaseError && VALUE_CODES.has(err.code ?? "")) {
+    logger.info({ err }, "the source could not convert a query's value");
+    return invalidValue();
   }
   if (isConnectionFailure(err)) {
     logger.warn({ err }, "source connection failed during a query");

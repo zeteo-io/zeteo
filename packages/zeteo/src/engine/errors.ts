@@ -100,3 +100,15 @@ export const notFound = (
     path,
     closest(name, candidates)
   );
+
+/**
+ * A value of the caller's that the source could not convert to its column's
+ * type (a malformed uuid, a timestamp out of the engine's range). The
+ * database's own text goes to the log, never to the caller.
+ */
+export const invalidValue = (): QueryError =>
+  new QueryError(
+    "invalid_value",
+    "A value in the query could not be converted to its column's type",
+    []
+  );

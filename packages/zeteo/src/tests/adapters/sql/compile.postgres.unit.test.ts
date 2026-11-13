@@ -378,6 +378,98 @@ describe("compileSql on Postgres: filters", () => {
   });
 });
 
+describe("compileSql on Postgres: uuid, enum and money", () => {
+  const ledger = (query: object) => compile({ from: "ledger", ...query });
+
+  it("reads money as numeric wherever it is selected, aggregated, filtered or ordered", () => {
+    expect(
+      ledger({
+        select: ["amount", { sum: "price", as: "s" }],
+        where: { amount: { gt: "1.50" }, price: { between: [1, 2] } },
+        groupBy: ["amount"],
+        orderBy: [{ s: "desc" }],
+      })
+    ).toEqual({
+      sql:
+        'select cast("t0"."amount" as numeric) as "c0", sum(cast("t0"."price" as numeric)) as "c1"' +
+        ' from "shop"."ledger" as "t0"' +
+        ' where (cast("t0"."amount" as numeric) > cast($1 as numeric)' +
+        ' and cast("t0"."price" as numeric) between $2 and $3)' +
+        ' group by 1 order by "c1" desc nulls first limit $4 offset $5',
+      parameters: ["1.50", 1, 2, 1001, 0],
+    });
+  });
+
+  it("averages money as numeric, and orders by a money column that is not selected", () => {
+    expect(ledger({ select: [{ avg: "amount", as: "a" }] }).sql).toBe(
+      'select avg(cast("t0"."amount" as numeric))::float8 as "c0" from "shop"."ledger" as "t0"' +
+        ORDERED
+    );
+    expect(ledger({ orderBy: [{ price: "asc" }] }).sql).toBe(
+      'select "t0"."id" as "c0" from "shop"."ledger" as "t0"' +
+        ' order by cast("t0"."price" as numeric) asc nulls last limit $1 offset $2'
+    );
+  });
+
+  it("reads an enum, and a domain over one, as text wherever it is used", () => {
+    expect(
+      ledger({
+        select: ["mood", { max: "feeling", as: "m" }],
+        where: {
+          mood: { in: ["happy", "nope"] },
+          feeling: { contains: "ap" },
+        },
+        groupBy: ["mood"],
+      })
+    ).toEqual({
+      sql:
+        'select cast("t0"."mood" as text) as "c0", max(cast("t0"."feeling" as text)) as "c1"' +
+        ' from "shop"."ledger" as "t0"' +
+        ' where (cast("t0"."mood" as text) in ($1, $2)' +
+        ` and cast("t0"."feeling" as text) ilike $3 escape '\\')` +
+        ' group by 1 order by "c0" asc nulls last, "c1" asc nulls last limit $4 offset $5',
+      parameters: ["happy", "nope", "%ap%", 1001, 0],
+    });
+  });
+
+  it("compares a uuid as it is, with the value cast to uuid", () => {
+    expect(
+      ledger({
+        select: ["ref"],
+        where: {
+          ref: { eq: "6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b" },
+          token: { notIn: ["a", "b"] },
+        },
+      })
+    ).toEqual({
+      sql:
+        'select "t0"."ref" as "c0" from "shop"."ledger" as "t0"' +
+        ' where ("t0"."ref" = cast($1 as uuid)' +
+        ' and "t0"."token" not in (cast($2 as uuid), cast($3 as uuid)))' +
+        tail(3),
+      parameters: ["6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b", "a", "b", 1001, 0],
+    });
+  });
+
+  it("matches and takes min or max of a uuid as text", () => {
+    expect(
+      ledger({
+        select: [
+          { min: "ref", as: "lo" },
+          { max: "token", as: "hi" },
+        ],
+        where: { ref: { startsWith: "6F1C" }, token: { contains: "8a9b" } },
+      }).sql
+    ).toBe(
+      'select min(cast("t0"."ref" as text)) as "c0", max(cast("t0"."token" as text)) as "c1"' +
+        ' from "shop"."ledger" as "t0"' +
+        ` where (cast("t0"."ref" as text) ilike $1 escape '\\'` +
+        ` and cast("t0"."token" as text) ilike $2 escape '\\')` +
+        ' order by "c0" asc nulls last, "c1" asc nulls last limit $3 offset $4'
+    );
+  });
+});
+
 describe("compileSql on Postgres: the parameter limit", () => {
   const lists = (count: number, extra: number) => ({
     or: [

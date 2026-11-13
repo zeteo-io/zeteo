@@ -23,10 +23,22 @@ const RELATIONS = `
    WHERE ${VISIBLE}
    ORDER BY n.nspname, c.relname`;
 
+// The type as Postgres writes it, with what a dialect must know and the name
+// cannot tell: an enum is marked ` (enum)`, a domain `(domain over <base>)`.
+// A quoted name ends in `"`, so neither mark can be part of a name.
+const NATIVE_TYPE = `
+  CASE t.typtype
+    WHEN 'e' THEN pg_catalog.format_type(a.atttypid, a.atttypmod) || ' (enum)'
+    WHEN 'd' THEN pg_catalog.format_type(a.atttypid, a.atttypmod)
+      || ' (domain over ' || pg_catalog.format_type(t.typbasetype, t.typtypmod)
+      || CASE WHEN bt.typtype = 'e' THEN ' (enum)' ELSE '' END || ')'
+    ELSE pg_catalog.format_type(a.atttypid, a.atttypmod)
+  END`;
+
 const COLUMNS = `
   SELECT c.oid::int8 AS oid, a.attname,
          row_number() OVER (PARTITION BY c.oid ORDER BY a.attnum)::int4 AS position,
-         pg_catalog.format_type(a.atttypid, a.atttypmod) AS native_type,
+         ${NATIVE_TYPE} AS native_type,
          t.typname, t.typtype, bt.typname AS base_typname, bt.typtype AS base_typtype,
          NOT a.attnotnull AS nullable,
          COALESCE(a.attnum = ANY (pk.conkey), false) AS is_primary_key

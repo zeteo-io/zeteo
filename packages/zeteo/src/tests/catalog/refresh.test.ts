@@ -96,14 +96,14 @@ describe("refreshSource", () => {
     }),
   });
 
-  it("adds the ten sales tables and views, their columns and six relations", async () => {
+  it("adds the twelve sales tables and views, their columns and six relations", async () => {
     const summary = await refreshSource(sourceId, ACTOR);
     expect(summary).toEqual({
-      tables: { added: 10, missing: 0, restored: 0 },
-      columns: { added: 44, changed: 0, missing: 0, restored: 0 },
+      tables: { added: 12, missing: 0, restored: 0 },
+      columns: { added: 55, changed: 0, missing: 0, restored: 0 },
       relations: { added: 6, missing: 0, restored: 0 },
     });
-    expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
+    expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
     expect((await tableRow("paid_orders")).kind).toBe("view");
     expect(await columnRow("orders", "total")).toMatchObject({
       type: "number",
@@ -209,7 +209,7 @@ describe("refreshSource", () => {
     expect(dropped.tables.missing).toBe(1);
     expect(dropped.columns.missing).toBe(3);
     expect((await tableRow("blobs")).missingSince).toBeInstanceOf(Date);
-    expect(await counts()).toMatchObject({ tables: 10, columns: 44 });
+    expect(await counts()).toMatchObject({ tables: 12, columns: 55 });
 
     await fixture.run(
       "CREATE TABLE sales.blobs (id integer, data bytea, tags text[]); GRANT SELECT ON sales.blobs TO zeteo_ro"
@@ -591,7 +591,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(results).toHaveLength(2);
-      expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
+      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
 
       const again = await Promise.all([
         refreshSource(sourceId, ACTOR),
@@ -599,7 +599,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(again).toHaveLength(3);
-      expect(await counts()).toEqual({ tables: 10, columns: 44, relations: 6 });
+      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
     });
 
     it("ends matching the newer snapshot when an older read lands last", async () => {
@@ -675,7 +675,7 @@ describe("refreshSource", () => {
       await slow;
 
       const tables = await prisma.sourceTable.findMany({ where: { sourceId } });
-      expect(tables).toHaveLength(10);
+      expect(tables).toHaveLength(12);
       for (const table of tables) {
         expect(table.missingSince).not.toBeNull();
       }

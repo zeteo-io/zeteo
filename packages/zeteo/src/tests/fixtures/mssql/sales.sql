@@ -5,13 +5,14 @@
 --   sales.customers      3   (account_id -> accounts)
 --   sales.orders        12   (two quarters of 2026)
 --   sales.order_lines    0
+--   sales.ledger         4   (uniqueidentifier and money)
 --   hr.salaries          0   (denied to zeteo_ro)
 -- Views:
 --   sales.paid_orders    the paid orders
 --   sales.slow_orders    spins 3 s each time it is selected from
 --   sales.broken_orders  divides by zero when its `ratio` is selected
--- Not mirrored: sales.blobs, sales.typed_values (Postgres-only types) and
--- sales.session_flags (Postgres's transaction read-only flag).
+-- Not mirrored: sales.blobs, sales.typed_values and sales.moods (Postgres-only
+-- types) and sales.session_flags (Postgres's transaction read-only flag).
 --
 -- The database keeps the server's default collation,
 -- SQL_Latin1_General_CP1_CI_AS (case-insensitive), as an Azure SQL database
@@ -55,6 +56,12 @@ CREATE TABLE sales.order_lines (
   qty int NOT NULL,
   price decimal(18,4) NOT NULL,
   CONSTRAINT order_lines_pkey PRIMARY KEY (order_id, line_no)
+);
+
+CREATE TABLE sales.ledger (
+  id int NOT NULL CONSTRAINT ledger_pkey PRIMARY KEY,
+  ref uniqueidentifier,
+  amount money
 );
 
 CREATE TABLE hr.salaries (
@@ -112,6 +119,12 @@ INSERT INTO sales.orders VALUES
   (10, 1, N'paid', 410.00, '2026-05-25 16:00:00 +00:00', N'repeat', 8),
   (11, 2, N'shipped', 12.00, '2026-06-10 10:10:10.5 +00:00', NULL, 9),
   (12, 3, N'paid', 999.99, '2026-06-30 12:00:00 +00:00', N'big', 10);
+
+INSERT INTO sales.ledger VALUES
+  (1, '6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B', 1234.50),
+  (2, 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', 0.99),
+  (3, '00000000-0000-0000-0000-000000000003', -12.25),
+  (4, NULL, NULL);
 GO
 
 CREATE USER zeteo_ro FOR LOGIN zeteo_ro;

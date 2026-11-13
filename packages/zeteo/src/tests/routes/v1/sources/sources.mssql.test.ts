@@ -91,6 +91,7 @@ describe("/v1/sources with azure-sql", () => {
       "accounts",
       "broken_orders",
       "customers",
+      "ledger",
       "order_lines",
       "orders",
       "paid_orders",

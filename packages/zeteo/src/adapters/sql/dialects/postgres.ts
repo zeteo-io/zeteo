@@ -1,4 +1,5 @@
 import type { SqlDialect, ValueSubject } from "../dialect.js";
+import { postgresBaseType } from "../../postgres/types.js";
 import type { PlanValue } from "../types.js";
 import {
   DummyDriver,
@@ -27,7 +28,8 @@ const integerLimit = (nativeType: string | undefined): bigint => {
 
 /**
  * The server infers a bound parameter's type from the column it is compared
- * with, so most values need no cast. The exceptions:
+ * with, so most values need no cast. A domain is typed as its base type. The
+ * exceptions:
  * - a decimal compared with an integer column or aggregate (`sum` of integers
  *   is bigint) would be read as an integer and fail, so it is cast to
  *   numeric, which compares with every numeric type;
@@ -37,15 +39,21 @@ const integerLimit = (nativeType: string | undefined): bigint => {
  * - a timestamp has an offset, which an inferred `timestamp without time
  *   zone` would silently drop. It is cast to timestamptz, and for a naive
  *   column converted to UTC (the session runs in UTC) on the parameter side,
- *   so the column is compared as it is and its index stays usable.
- * Dates infer as dates, text as text, booleans as booleans.
+ *   so the column is compared as it is and its index stays usable;
+ * - text compared with a uuid column is cast to uuid, so the column is
+ *   compared as it is and its index stays usable (a malformed uuid fails as
+ *   the caller's value).
+ * Dates infer as dates, text as text (an enum or money column is read as
+ * text or numeric, see `column`), booleans as booleans.
  */
 const value = (
   v: PlanValue,
   { type, nativeType }: ValueSubject
 ): Expression<unknown> => {
+  const base = postgresBaseType(nativeType);
+  if (type === "text" && base === "uuid") return sql`cast(${v} as uuid)`;
   if (type === "timestamp") {
-    return nativeType !== undefined && NAIVE_TIMESTAMP.test(nativeType)
+    return NAIVE_TIMESTAMP.test(base)
       ? sql`(cast(${v} as timestamptz) at time zone 'UTC')`
       : sql`cast(${v} as timestamptz)`;
   }
@@ -54,7 +62,7 @@ const value = (
     const outOfRange = (() => {
       if (!INTEGER_TEXT.test(text)) return true;
       const n = BigInt(text);
-      const limit = integerLimit(nativeType);
+      const limit = integerLimit(base);
       return n > limit || n < -limit - 1n;
     })();
     if (outOfRange) return sql`cast(${v} as numeric)`;
@@ -64,11 +72,41 @@ const value = (
 
 const ESCAPE = "\\";
 
+/**
+ * A column as every part of a query reads it. Money compares and sums only
+ * with money, and prints with a currency symbol: it is read as numeric. An
+ * enum compares only with its own labels (an unknown one is an error) and
+ * sorts in declaration order: it is read as text. A uuid stays as it is, so
+ * comparisons can use its index; `like` and `min`/`max` cast it themselves.
+ */
+const column = (
+  expression: Expression<unknown>,
+  nativeType: string
+): Expression<unknown> => {
+  switch (postgresBaseType(nativeType)) {
+    case "money":
+      return sql`cast(${expression} as numeric)`;
+    case "enum":
+      return sql`cast(${expression} as text)`;
+    default:
+      return expression;
+  }
+};
+
+/** A uuid as text, for what uuid itself has no operator for (`ilike`, `min`, `max`). */
+const asText = (
+  expression: Expression<unknown>,
+  nativeType: string | undefined
+): Expression<unknown> =>
+  postgresBaseType(nativeType) === "uuid"
+    ? sql`cast(${expression} as text)`
+    : expression;
+
 export const postgresDialect: SqlDialect = {
   name: "postgres",
   // The protocol counts a statement's parameters in 16 bits.
   maxParameters: 65_535,
-  column: (expression) => expression,
+  column,
   kysely: new Kysely<never>({
     dialect: {
       createAdapter: () => new PostgresAdapter(),
@@ -82,8 +120,8 @@ export const postgresDialect: SqlDialect = {
     const truncated = sql`date_trunc(${unit}, ${column})`;
     return type === "date" ? sql`${truncated}::date` : truncated;
   },
-  like: (column, pattern): Expression<SqlBool> =>
-    sql<SqlBool>`${column} ilike ${pattern} escape ${sql.lit(ESCAPE)}`,
+  like: (expression, pattern, nativeType): Expression<SqlBool> =>
+    sql<SqlBool>`${asText(expression, nativeType)} ilike ${pattern} escape ${sql.lit(ESCAPE)}`,
   // Ordinals: a bucket's unit is a bound parameter, and repeating the
   // expression would number it twice, which the server rejects as two
   // different expressions.
@@ -96,7 +134,7 @@ export const postgresDialect: SqlDialect = {
       direction === "asc" ? ob.asc().nullsLast() : ob.desc().nullsFirst()
     ),
   distinct: (qb) => qb.distinct(),
-  aggregate: (fn, arg) => {
+  aggregate: (fn, arg, nativeType) => {
     if (arg === "*") {
       if (fn !== "count") throw new Error(`${fn} cannot take *`);
       return sql`count(*)`;
@@ -111,9 +149,9 @@ export const postgresDialect: SqlDialect = {
       case "avg":
         return sql`avg(${arg})::float8`;
       case "min":
-        return sql`min(${arg})`;
+        return sql`min(${asText(arg, nativeType)})`;
       case "max":
-        return sql`max(${arg})`;
+        return sql`max(${asText(arg, nativeType)})`;
     }
   },
   output: (_item, expression) => expression,

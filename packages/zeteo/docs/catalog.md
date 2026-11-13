@@ -58,7 +58,9 @@ missing in this refresh.
 relation. The columns of a table that disappears are marked missing with it.
 
 Column types are normalised to `text`, `number`, `boolean`, `date`, `timestamp`, `json` or `other`;
-`native_type` keeps the database's own name.
+`native_type` keeps the database's own name. On Postgres it also says what the name cannot: an
+enum is `<name> (enum)` and a domain `<name> (domain over <base type>)`, such as
+`sales.price (domain over money)`; the query engine reads a domain as its base type.
 
 ### Concurrent refreshes
 
