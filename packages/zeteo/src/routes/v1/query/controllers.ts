@@ -24,7 +24,13 @@ export const postQuery = async (req: Request, res: Response) => {
     res.status(200).json(result);
   } catch (err) {
     if (abandoned.signal.aborted) {
-      logger.info({ err }, "query abandoned by its client");
+      // Nothing can be written to the closed response; an error other than
+      // the abort itself still needs looking at.
+      if (err === abandoned.signal.reason) {
+        logger.info({ err }, "query abandoned by its client");
+      } else {
+        logger.error({ err }, "query failed after its client went away");
+      }
       return;
     }
     throw err;

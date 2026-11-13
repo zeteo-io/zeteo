@@ -21,6 +21,9 @@ export interface RunRecord {
   truncated: boolean;
 }
 
+/** Stored in place of a query that could not be stored itself. */
+export const UNRECORDABLE_QUERY = { unrecordable: true } as const;
+
 /** The code recorded for a run whose client went away before it ended. */
 export const CLIENT_CLOSED = "client_closed";
 

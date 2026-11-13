@@ -1,5 +1,6 @@
 import { TooManyRequestsError } from "../utils/errors.js";
 import type { RunLimits } from "../adapters/types.js";
+import { logger } from "../utils/logger.js";
 import { acquireLease } from "./leases.js";
 
 /** What one run may return, by entry point. */
@@ -40,16 +41,32 @@ export const runLimits = (
   };
 };
 
+type Release = () => Promise<void>;
+
+/**
+ * Releases every lease, each whatever the others do. A release that fails is
+ * logged, not thrown: its lease lapses at its expiry, and the run it guarded
+ * has already ended.
+ */
+const releaseAll = async (...releases: Release[]): Promise<void> => {
+  const results = await Promise.allSettled(releases.map((r) => r()));
+  for (const result of results) {
+    if (result.status === "rejected") {
+      logger.error({ err: result.reason }, "releasing a query lease failed");
+    }
+  }
+};
+
 /**
  * Takes a slot for the user, then one for the source, each for `ttlMs`, and
- * returns their release. Refuses with 429 `too_many_queries` or `source_busy`,
- * holding neither.
+ * returns their release, which never throws. Refuses with 429
+ * `too_many_queries` or `source_busy`, holding neither.
  */
 export const acquireRunLeases = async (
   userId: string,
   sourceId: string,
   ttlMs: number
-): Promise<() => Promise<void>> => {
+): Promise<Release> => {
   const user = await acquireLease(`user:${userId}`, USER_CONCURRENCY, ttlMs);
   if (!user) {
     throw new TooManyRequestsError(
@@ -58,7 +75,7 @@ export const acquireRunLeases = async (
       "too_many_queries"
     );
   }
-  let source: (() => Promise<void>) | null;
+  let source: Release | null;
   try {
     source = await acquireLease(
       `source:${sourceId}`,
@@ -66,11 +83,11 @@ export const acquireRunLeases = async (
       ttlMs
     );
   } catch (err) {
-    await user();
+    await releaseAll(user);
     throw err;
   }
   if (!source) {
-    await user();
+    await releaseAll(user);
     throw new TooManyRequestsError(
       RETRY_AFTER_SECONDS,
       "The source is running as many queries as it allows; retry shortly",
@@ -78,8 +95,5 @@ export const acquireRunLeases = async (
     );
   }
   const held = source;
-  return async () => {
-    await held();
-    await user();
-  };
+  return () => releaseAll(held, user);
 };

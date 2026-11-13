@@ -225,10 +225,14 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
   and suggestions drawn only from names the caller can see. The kind in the message comes from
   where the name sits in the query, never from the catalogue.
 - **The source is checked first.** The body must be a JSON object with a non-empty string
-  `source` (else `400 invalid_request`). A source the caller cannot see is
+  `source`, and no string or key anywhere in it may hold NUL or ill-formed Unicode (a lone
+  UTF-16 surrogate); else `400 invalid_request`, not recorded. A source the caller cannot see is
   `422 not_found_or_not_accessible` at path `["source"]` before anything else in the body is read,
   so a malformed query against it gets the same answer as a well-formed one. Against a source the
   caller can see, a body the language refuses is `400 invalid_request` with `issues`.
+- If a plan ever references a column outside the caller's grants (the planner and the catalogue
+  disagreeing, which is logged as an error), the answer is `422 not_found_or_not_accessible` with
+  the fixed message `A name in the query was not found or is not accessible` and path `[]`.
 - Other `422` codes: `missing_in_source` (the last refresh no longer found a table, column or
   relation the caller is granted), `column_not_queryable` (a column of type `other`),
   `invalid_operator`, `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
@@ -241,7 +245,8 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
 
 ## The run log
 
-Every query past the first check (an object naming a source) is recorded, refused and failed ones
+Every query past the first check (an object naming a source, with no NUL or ill-formed Unicode)
+is recorded, refused and failed ones
 included, in one transaction that writes a `query_runs` row and a `zeteo.query.run` audit entry.
 A body the source's language refuses is not recorded.
 
@@ -252,9 +257,11 @@ A body the source's language refuses is not recorded.
   duration_ms }`; the query itself is only in the row.
 - Outcomes: `ok`; `refused` for a 4xx answer; `timeout` for `query_timeout`; `failed` for any other
   error, and for a client that went away (`client_closed`).
-- Rows are sent only once their run is recorded: when the record cannot be written, a successful
-  query answers `500 server_error` and no rows. When a failed query's record cannot be written, the
-  failure is logged and the query's own error is answered.
+- When a run cannot be stored, it is stored again with `{ "unrecordable": true }` in place of the
+  query (same outcome, code and other fields), and the failure is logged.
+- Rows are sent only once their run is recorded: when neither attempt can be written, a successful
+  query answers `500 server_error` and no rows. When a failed query's record cannot be written
+  either way, the failure is logged and the query's own error is answered.
 
 `GET /v1/runs` lists runs newest first, filtered by `user_id`, `source_id` and `outcome`, as
 `{ id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code,

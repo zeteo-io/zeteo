@@ -181,13 +181,37 @@ describeEachEngine("POST /v1/query: the run record", (engine) => {
 
   it("records nothing for a body that fails the shape check", async () => {
     const user = await grantedUser();
-    for (const body of [
+    // NUL and lone surrogates cannot be stored in a run: refused before
+    // anything is recorded, whether or not the caller can see the source.
+    const bodies: unknown[] = [
       { from: "accounts", select: ["id"] },
       { source: source.slug, from: "accounts", select: [] },
-    ]) {
-      expect((await postQuery(user.token, body)).status).toBe(400);
+    ];
+    for (const slug of [source.slug, "invented-zzqxw"]) {
+      bodies.push(
+        { source: slug, from: "accounts", select: ["na\u0000me"] },
+        { source: slug, from: "accounts", select: ["id"], "\u0000": 1 },
+        { source: slug, from: "\ud800", select: ["id"] },
+        { source: slug, from: "accounts", select: ["id"], "\udc00x": 1 },
+        { source: slug, from: "accounts", select: ["\ud83d\ude00\ud83d"] }
+      );
+    }
+    for (const body of bodies) {
+      const res = await postQuery(user.token, body);
+      expect(res.status, JSON.stringify(body)).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
     }
     expect(await runsOf([user.id])).toEqual([]);
+    // A well-formed pair (an emoji) is fine, and recorded.
+    const emoji = await postQuery(user.token, {
+      source: source.slug,
+      from: "accounts",
+      select: ["\ud83d\ude00"],
+    });
+    expect(emoji.status).toBe(422);
+    expect((await onlyRunOf(user.id)).run.query).toMatchObject({
+      select: ["\ud83d\ude00"],
+    });
   });
 
   it("records a run the client abandoned as client_closed, and stops it on the source", async () => {
@@ -239,9 +263,35 @@ describeEachEngine("POST /v1/query: the run record", (engine) => {
       await app.close();
     });
 
-    it("fails a successful query with 500 and sends none of its rows", async () => {
+    const failRecording = (times: number) => {
+      for (let i = 0; i < times; i++) {
+        vi.mocked(recordRun).mockRejectedValueOnce(new Error("disk full"));
+      }
+    };
+
+    it("records a successful run without its query when the query cannot be stored, and answers", async () => {
       const user = await grantedUser();
-      vi.mocked(recordRun).mockRejectedValueOnce(new Error("disk full"));
+      failRecording(1);
+      const res = await postQuery(
+        user.token,
+        { source: source.slug, from: "accounts", select: ["id"] },
+        app.url
+      );
+      expect(res.status).toBe(200);
+      expect(res.body.rows).toEqual([[1], [2]]);
+      const { run, audit } = await onlyRunOf(user.id);
+      expect(run).toMatchObject({
+        id: res.body.run_id,
+        query: { unrecordable: true },
+        outcome: "ok",
+        rowCount: 2,
+      });
+      expect(audit.metadata).toMatchObject({ outcome: "ok", row_count: 2 });
+    });
+
+    it("fails a successful query with 500 and sends none of its rows when it cannot be recorded at all", async () => {
+      const user = await grantedUser();
+      failRecording(2);
       const res = await postQuery(
         user.token,
         { source: source.slug, from: "accounts", select: ["id", "name"] },
@@ -255,9 +305,32 @@ describeEachEngine("POST /v1/query: the run record", (engine) => {
       expect(await runsOf([user.id])).toEqual([]);
     });
 
-    it("keeps a failed query's own error", async () => {
+    it("records a refused run without its query when the query cannot be stored", async () => {
       const user = await grantedUser();
-      vi.mocked(recordRun).mockRejectedValueOnce(new Error("disk full"));
+      failRecording(1);
+      const res = await postQuery(
+        user.token,
+        { source: "invented-zzqxw", from: "accounts", select: ["nope"] },
+        app.url
+      );
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBe("not_found_or_not_accessible");
+      const { run, audit } = await onlyRunOf(user.id);
+      expect(run).toMatchObject({
+        sourceId: null,
+        query: { unrecordable: true },
+        outcome: "refused",
+        errorCode: "not_found_or_not_accessible",
+      });
+      expect(audit.metadata).toMatchObject({
+        outcome: "refused",
+        error_code: "not_found_or_not_accessible",
+      });
+    });
+
+    it("keeps a failed query's own error when it cannot be recorded at all", async () => {
+      const user = await grantedUser();
+      failRecording(2);
       const res = await postQuery(
         user.token,
         { source: source.slug, from: "accounts", select: ["nope"] },
@@ -265,6 +338,7 @@ describeEachEngine("POST /v1/query: the run record", (engine) => {
       );
       expect(res.status).toBe(422);
       expect(res.body.error).toBe("not_found_or_not_accessible");
+      expect(await runsOf([user.id])).toEqual([]);
     });
 
     it("records through the same seam when it works", async () => {

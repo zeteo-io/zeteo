@@ -1,7 +1,6 @@
 import { acquireRunLeases, LEASE_GRACE_MS, runLimits } from "./limits.js";
 import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
-import { CLIENT_CLOSED, failureOf, recordRun } from "./record.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { loadAccess, type Access } from "../grants/access.js";
 import { withSourceConnection } from "../sources/pools.js";
@@ -20,6 +19,12 @@ import type {
   QueryResult,
   QueryWarning,
 } from "../adapters/types.js";
+import {
+  CLIENT_CLOSED,
+  failureOf,
+  recordRun,
+  UNRECORDABLE_QUERY,
+} from "./record.js";
 
 export interface RunQueryInput {
   caller: Caller;
@@ -45,18 +50,26 @@ const ShapeSchema = z.looseObject({
   source: z.string().min(1, { error: "source is the slug of a source" }),
 });
 
-/** Whether any string or key in a JSON value holds NUL, walked without recursion. */
-const holdsNul = (value: unknown): boolean => {
+// A UTF-16 surrogate without its partner: ill-formed Unicode.
+const LONE_SURROGATE =
+  /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** A string no stored run can hold: NUL, or ill-formed Unicode (Postgres `jsonb` refuses both). */
+const unstorable = (s: string): boolean =>
+  s.includes("\u0000") || LONE_SURROGATE.test(s);
+
+/** Whether any string or key in a JSON value is unstorable, walked without recursion. */
+const holdsUnstorable = (value: unknown): boolean => {
   const pending: unknown[] = [value];
   while (pending.length > 0) {
     const next = pending.pop();
     if (typeof next === "string") {
-      if (next.includes("\u0000")) return true;
+      if (unstorable(next)) return true;
     } else if (Array.isArray(next)) {
       pending.push(...next);
     } else if (next !== null && typeof next === "object") {
       for (const [key, inner] of Object.entries(next)) {
-        if (key.includes("\u0000")) return true;
+        if (unstorable(key)) return true;
         pending.push(inner);
       }
     }
@@ -64,18 +77,21 @@ const holdsNul = (value: unknown): boolean => {
   return false;
 };
 
+const UNSTORABLE_MESSAGE =
+  "No string or key in a query may hold NUL or ill-formed Unicode";
+
 /**
- * Step 1: the body is an object with a source slug. No language allows NUL
- * anywhere, and a stored run cannot hold it, so it is refused here too.
+ * Step 1: the body is an object with a source slug. No language allows NUL or
+ * ill-formed Unicode, and a stored run cannot hold either, so both are
+ * refused here, before anything is recorded.
  */
 const sourceSlugOf = (body: unknown): string => {
   const shape = ShapeSchema.safeParse(body);
   if (!shape.success) throw invalidRequest("body", shape.error);
-  if (holdsNul(body)) {
-    throw new ValidationError(
-      "Invalid request body. No string or key in a query may hold NUL",
-      [{ path: "", message: "No string or key in a query may hold NUL" }]
-    );
+  if (holdsUnstorable(body)) {
+    throw new ValidationError(`Invalid request body. ${UNSTORABLE_MESSAGE}`, [
+      { path: "", message: UNSTORABLE_MESSAGE },
+    ]);
   }
   return shape.data.source;
 };
@@ -198,20 +214,35 @@ export const runQuery = async (
   const slug = sourceSlugOf(input.body);
   const started = performance.now();
   const progress: Progress = { sourceId: null, unrecorded: false };
-  const record = (
+  /**
+   * Records the run; when the row cannot be stored, records it again with a
+   * placeholder for the query, so the run and its audit entry exist either
+   * way. Throws only when both attempts fail.
+   */
+  const record = async (
     outcome: Pick<
       Parameters<typeof recordRun>[0],
       "outcome" | "errorCode" | "rowCount" | "truncated"
     >
-  ) =>
-    recordRun({
+  ): Promise<string> => {
+    const run = {
       caller: input.caller,
       sourceId: progress.sourceId,
       entryPoint: input.entryPoint,
       query: input.body,
       durationMs: Math.round(performance.now() - started),
       ...outcome,
-    });
+    };
+    try {
+      return await recordRun(run);
+    } catch (err) {
+      logger.error(
+        { err, source_id: progress.sourceId },
+        "recording a query run failed; recording it without its query"
+      );
+      return recordRun({ ...run, query: UNRECORDABLE_QUERY });
+    }
+  };
 
   let ran: Awaited<ReturnType<typeof execute>>;
   try {
@@ -228,7 +259,7 @@ export const runQuery = async (
     } catch (recordErr) {
       logger.error(
         { err: recordErr, source_id: progress.sourceId },
-        "recording a failed query run failed"
+        "a failed query run could not be recorded, even without its query"
       );
     }
     throw err;
@@ -246,7 +277,7 @@ export const runQuery = async (
   } catch (err) {
     logger.error(
       { err, source_id: progress.sourceId },
-      "recording a query run failed; its rows are withheld"
+      "a query run could not be recorded, even without its query; its rows are withheld"
     );
     throw err;
   }

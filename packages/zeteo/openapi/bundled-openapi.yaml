@@ -947,7 +947,14 @@ paths:
               schema:
                 $ref: '#/components/schemas/QueryResult'
         '400':
-          $ref: '#/components/responses/BadRequestResponse'
+          description: |
+            Bad request - `invalid_request`, with `issues`: the body is not an object with a
+            non-empty string `source`; a string or key anywhere in it holds NUL or ill-formed Unicode
+            (a lone UTF-16 surrogate); or the source's language refuses it. None of these is recorded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
@@ -965,7 +972,9 @@ paths:
             The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
             for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
             `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-            `duplicate_output_name`, `join_parent_missing`; or `source_type_unavailable`
+            `duplicate_output_name`, `join_parent_missing`; or `source_type_unavailable`. A plan
+            that references a column outside the grants (a planner fault, logged) is
+            `not_found_or_not_accessible` with a fixed message and path `[]`.
           content:
             application/json:
               schema:
