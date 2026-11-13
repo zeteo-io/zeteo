@@ -102,12 +102,6 @@ export const resetExportShutdown = (): void => {
   shuttingDown = false;
 };
 
-/** Whether the query names an order of its own: the SQL language's `orderBy`. */
-const namesOrder = (body: unknown): boolean => {
-  const { orderBy } = body as { orderBy?: unknown };
-  return Array.isArray(orderBy) && orderBy.length > 0;
-};
-
 /** A failure after the start: never `refused`, as the export was accepted. */
 const failureAfterStart = (
   err: unknown
@@ -172,7 +166,7 @@ const recordEnd = async (
  * what the caller may see, as a query; refuses it unless the source allows
  * exports, and refuses an offset without an `orderBy`; takes the export
  * leases and opens the run on the source, unsorted unless the query names an
- * order; records it as started, then passes its rows to `sink` in the
+ * order (the plan's `defaultOrder`); records it as started, then passes its rows to `sink` in the
  * batches the source gives, up to the source's export cap, and records how
  * it ended.
  *
@@ -260,8 +254,7 @@ export const runExport = async (
     const { adapter, plan } = planFor(input.body, access, catalog, progress);
     // An export has no default order (sorting everything would hold back
     // its first row), so an offset with no orderBy would skip arbitrary rows.
-    const ordered = namesOrder(input.body);
-    if (plan.offset > 0 && !ordered) {
+    if (plan.offset > 0 && plan.defaultOrder === true) {
       throw new QueryError(
         "invalid_order",
         "An export with an offset needs an orderBy",
@@ -277,7 +270,7 @@ export const runExport = async (
     const prepared = adapter.prepare(plan, {
       limit: cap + 1,
       offset: plan.offset,
-      defaultOrder: ordered,
+      defaultOrder: false,
     });
 
     const deadlineAt = performance.now() + timeoutMs;

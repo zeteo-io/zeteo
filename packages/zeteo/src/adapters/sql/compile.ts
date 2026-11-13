@@ -118,34 +118,12 @@ const compileFilter = <S>(
 };
 
 /**
- * Whether `plan` is ordered as the planner orders a query with no `orderBy`:
- * by every select item ascending, in order, json items aside. An `orderBy`
- * naming exactly that looks the same.
- */
-const hasDefaultOrder = (plan: SqlPlan): boolean => {
-  const sortable = plan.select.flatMap((item, index) =>
-    item.type === "json" ? [] : [index]
-  );
-  return (
-    plan.orderBy.length === sortable.length &&
-    plan.orderBy.every(
-      ({ target, direction }, i) =>
-        direction === "asc" &&
-        target.kind === "output" &&
-        target.index === sortable[i]
-    )
-  );
-};
-
-/**
  * Compiles a plan to SQL text and bound parameters without touching a
  * database. `fetch` is what the engine asks the database for (the requested
  * limit plus one, to see whether more rows exist); `plan.limit` and
- * `plan.offset` are not read. With `fetch.defaultOrder` false, a plan in the
- * default order is compiled with no order at all, so the database need not
- * sort before its first row; the caller passes it only for a query with no
- * `orderBy` of its own, since one naming the default order is dropped too.
- * Throws `QueryError` `too_many_parameters` when the statement binds more
+ * `plan.offset` are not read. With `fetch.defaultOrder` false, a plan whose
+ * order the planner supplied (`plan.defaultOrder`) is compiled with no order
+ * at all, so the database need not sort before its first row. Throws `QueryError` `too_many_parameters` when the statement binds more
  * values than the dialect's engine takes.
  */
 export const compileSql = (
@@ -216,7 +194,7 @@ export const compileSql = (
   }
 
   const orderBy =
-    fetch.defaultOrder === false && hasDefaultOrder(plan) ? [] : plan.orderBy;
+    fetch.defaultOrder === false && plan.defaultOrder ? [] : plan.orderBy;
   for (const order of orderBy) {
     const { target } = order;
     qb = dialect.orderBy(

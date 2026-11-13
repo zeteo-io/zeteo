@@ -142,4 +142,9 @@ export interface SqlPlan extends QueryPlan {
    * except json items, which cannot be sorted; empty only when every item is json.
    */
   orderBy: ResolvedOrder[];
+  /**
+   * True when the query names no order of its own (no `orderBy`, or an empty
+   * one), so `orderBy` is the planner's, or empty for an empty `orderBy`.
+   */
+  defaultOrder: boolean;
 }

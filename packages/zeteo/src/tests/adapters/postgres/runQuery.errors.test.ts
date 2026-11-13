@@ -208,6 +208,7 @@ const idsOf = (schemaName: string, name: string): SqlPlan => ({
   groupBy: [],
   having: undefined,
   orderBy: [{ target: { kind: "output", index: 0 }, direction: "asc" }],
+  defaultOrder: true,
   references: [],
   columns: [{ name: "id", type: "number", references: [] }],
   warnings: [],

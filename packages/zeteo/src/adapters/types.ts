@@ -147,6 +147,11 @@ export interface QueryPlan {
   /** As the query asked; the engine applies its own default and maximum. */
   limit: number | undefined;
   offset: number;
+  /**
+   * The plan's order was supplied by the language, not the query: the query
+   * named none. Absent for a language that says nothing about order.
+   */
+  defaultOrder?: boolean;
 }
 
 export interface QueryLanguage<Q = unknown, P extends QueryPlan = QueryPlan> {
@@ -176,8 +181,8 @@ export interface SourceAdapter<S = unknown> {
   /**
    * Compiles a plan for this source type; throws `QueryError` (e.g.
    * `too_many_parameters`). No I/O. `rows.defaultOrder` (default true) false
-   * leaves out the order a query with no `orderBy` gets by default, so its
-   * rows come in whatever order the source makes them.
+   * leaves out the order of a plan whose `defaultOrder` is true, so its rows
+   * come in whatever order the source makes them.
    */
   prepare(
     plan: QueryPlan,

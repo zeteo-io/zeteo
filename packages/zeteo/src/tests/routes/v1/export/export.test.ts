@@ -416,5 +416,23 @@ describeEachEngine("POST /v1/export", (engine) => {
     expect(ndjsonLines(paged.text).slice(1, -1)).toEqual(
       ndjsonLines(all.text).slice(6, -1)
     );
+
+    // An orderBy equal to the order a query without one would get is kept.
+    const byId = await postExport({
+      token: user.token,
+      body: {
+        source: source.slug,
+        from: "orders",
+        select: ["id"],
+        orderBy: [{ id: "asc" }],
+        offset: 5,
+      },
+    });
+    expect(byId.status).toBe(200);
+    expect(ndjsonLines(byId.text).slice(1, -1)).toEqual(
+      ndjsonLines(all.text)
+        .slice(6, -1)
+        .map((row) => [(row as unknown[])[0]])
+    );
   });
 });

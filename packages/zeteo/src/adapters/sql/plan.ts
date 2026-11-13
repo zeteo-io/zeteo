@@ -719,6 +719,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
       : [],
     having,
     orderBy,
+    defaultOrder: (query.orderBy?.length ?? 0) === 0,
     references: planner.referenceList(),
     columns,
     warnings,

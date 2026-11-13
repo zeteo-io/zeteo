@@ -139,6 +139,7 @@ describe("planSql: the spec's example", () => {
         value: 1000,
       },
       orderBy: [{ target: { kind: "output", index: 2 }, direction: "desc" }],
+      defaultOrder: false,
       references: [
         ref("orders", "customer_id"),
         ref("customers", "id"),
@@ -602,6 +603,19 @@ describe("planSql: order", () => {
       { target: { kind: "output", index: 0 }, direction: "asc" },
       { target: { kind: "output", index: 1 }, direction: "asc" },
     ]);
+  });
+
+  it("says the order is its own only when the query names none", () => {
+    expect(plan({ select: ["id"] }).defaultOrder).toBe(true);
+    expect(plan({ select: ["id"], orderBy: [] })).toMatchObject({
+      orderBy: [],
+      defaultOrder: true,
+    });
+    // Equal to the default order, but the query's own.
+    expect(plan({ select: ["id"], orderBy: [{ id: "asc" }] })).toMatchObject({
+      orderBy: [{ target: { kind: "output", index: 0 }, direction: "asc" }],
+      defaultOrder: false,
+    });
   });
 
   it("prefers an output name over a column path", () => {

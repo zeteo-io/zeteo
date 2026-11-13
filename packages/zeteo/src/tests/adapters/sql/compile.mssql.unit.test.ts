@@ -694,10 +694,11 @@ describe("compileSql on SQL Server: without the default order", () => {
     }
   });
 
-  it("leaves out an orderBy identical to the default order, which the plan cannot tell from it", () => {
-    expect(unordered({ orderBy: [{ id: "asc" }] }).sql).toBe(
-      "select [t0].[id] as [c0] from [shop].[orders] as [t0]" +
-        ` order by (select null)${tail()}`
+  it("keeps an orderBy of the query's own that equals the default order", () => {
+    const query = { orderBy: [{ id: "asc" }] };
+    expect(unordered(query)).toEqual(compile(query));
+    expect(unordered(query).sql).toBe(
+      "select [t0].[id] as [c0] from [shop].[orders] as [t0]" + ORDERED
     );
   });
 
