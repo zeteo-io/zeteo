@@ -3,6 +3,7 @@
 // @module-tag security
 import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
+import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import { queryNameOf, planSql } from "../../../adapters/sql/plan.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import type { SqlDialect } from "../../../adapters/sql/dialect.js";
@@ -507,3 +508,4 @@ export const describeLeakProperties = (dialect: SqlDialect) => {
 };
 
 describeLeakProperties(postgresDialect);
+describeLeakProperties(mssqlDialect);

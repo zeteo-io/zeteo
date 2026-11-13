@@ -92,6 +92,7 @@ export const postgresDialect: SqlDialect = {
     qb.orderBy(alias ?? expression, (ob) =>
       direction === "asc" ? ob.asc().nullsLast() : ob.desc().nullsFirst()
     ),
+  distinct: (qb) => qb.distinct(),
   aggregate: (fn, arg) => {
     if (arg === "*") {
       if (fn !== "count") throw new Error(`${fn} cannot take *`);
@@ -112,5 +113,6 @@ export const postgresDialect: SqlDialect = {
         return sql`max(${arg})`;
     }
   },
+  output: (_item, expression) => expression,
   page: (qb, limit, offset) => qb.limit(limit).offset(offset),
 };

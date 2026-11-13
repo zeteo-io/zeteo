@@ -108,7 +108,22 @@ export interface ShopOptions {
    * `missing` keep the plain names.
    */
   uniqueNames?: boolean;
+  /** Whose type names `nativeType` holds; Postgres's unless SQL Server's are asked for. */
+  engine?: "postgres" | "mssql";
 }
+
+/** The SQL Server type an Azure SQL source would report for each Postgres one above. */
+const MSSQL_NATIVE: Record<string, string> = {
+  integer: "int",
+  bigint: "bigint",
+  text: "nvarchar(200)",
+  "numeric(12,2)": "decimal(12,2)",
+  boolean: "bit",
+  date: "date",
+  jsonb: "nvarchar(max)",
+  bytea: "varbinary(max)",
+  "timestamp with time zone": "datetimeoffset(7)",
+};
 
 const SOURCE = {
   id: "src",
@@ -152,7 +167,8 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
         tableId: key,
         name: columnName(key, name),
         type,
-        nativeType,
+        nativeType:
+          options.engine === "mssql" ? MSSQL_NATIVE[nativeType]! : nativeType,
         nullable: true,
         position: i + 1,
         isPrimaryKey: name === "id",

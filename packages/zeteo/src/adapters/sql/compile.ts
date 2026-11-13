@@ -50,15 +50,19 @@ const selectExpression = (
     case "column":
       return column(item.column);
     case "aggregate":
-      return dialect.aggregate(
-        item.fn,
-        item.column === "*" ? "*" : column(item.column)
-      );
+      return item.column === "*"
+        ? dialect.aggregate(item.fn, "*")
+        : dialect.aggregate(
+            item.fn,
+            column(item.column),
+            item.column.nativeType
+          );
     case "bucket":
       return dialect.bucket(
         item.unit,
         column(item.column),
-        item.column.type === "date" ? "date" : "timestamp"
+        item.column.type === "date" ? "date" : "timestamp",
+        item.column.nativeType
       );
   }
 };
@@ -142,8 +146,19 @@ export const compileSql = (
   }
 
   const selected = plan.select.map((item) => selectExpression(item, dialect));
-  qb = qb.select(selected.map((e, i) => sql`${e}`.as(`c${i}`)));
-  if (plan.distinct) qb = qb.distinct();
+  qb = qb.select(
+    selected.map((e, i) =>
+      sql`${dialect.output(plan.select[i]!, e)}`.as(`c${i}`)
+    )
+  );
+  if (plan.distinct) {
+    qb = dialect.distinct(
+      qb,
+      selected.map((expression, index) => ({ expression, index })),
+      plan.groupBy.length > 0 ||
+        plan.select.some((item) => item.kind === "aggregate")
+    );
+  }
 
   if (plan.where) {
     qb = qb.where(
@@ -185,7 +200,7 @@ export const compileSql = (
     );
   }
 
-  qb = dialect.page(qb, fetch.limit, fetch.offset);
+  qb = dialect.page(qb, fetch.limit, fetch.offset, plan.orderBy.length > 0);
   const { sql: text, parameters } = qb.compile();
   return { sql: text, parameters: [...parameters] };
 };

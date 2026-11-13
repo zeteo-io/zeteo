@@ -5,6 +5,7 @@ import type {
   Direction,
   PlanValue,
   QueryableType,
+  ResolvedSelect,
 } from "./types.js";
 
 // The compile-only instance has no schema, so its tables and columns are untyped.
@@ -37,13 +38,21 @@ export interface SqlDialect {
    * absent for an aggregate.
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
-  /** Truncates a `date` or `timestamp` column to the start of its UTC bucket, keeping its type. */
+  /**
+   * Truncates a `date` or `timestamp` column to the start of its UTC bucket,
+   * keeping its type. `nativeType` is the column's own type name.
+   */
   bucket(
     unit: BucketUnit,
     column: Expression<unknown>,
-    type: "date" | "timestamp"
+    type: "date" | "timestamp",
+    nativeType: string
   ): Expression<unknown>;
-  /** Case-insensitive match against a pattern whose `\`, `%` and `_` are already escaped. */
+  /**
+   * Case-insensitive match against a pattern whose `\`, `%` and `_` are
+   * already escaped; the dialect escapes whatever else its LIKE treats as
+   * special.
+   */
   like(column: Expression<unknown>, pattern: string): Expression<SqlBool>;
   /**
    * Groups by select items, each given as its expression and its position in
@@ -60,10 +69,32 @@ export interface SqlDialect {
     target: { expression: Expression<unknown>; alias?: Expression<unknown> },
     direction: Direction
   ): AnySelect;
-  /** `"*"` only for `count`. */
+  /**
+   * Returns every row once, given every select item. `grouped` says the
+   * query already groups (by every item that is not an aggregate), so its
+   * rows are distinct already.
+   */
+  distinct(qb: AnySelect, items: SelectItemRef[], grouped: boolean): AnySelect;
+  /** `"*"` only for `count`. `nativeType` is the column's own type name. */
   aggregate(
     fn: AggregateFn,
-    arg: Expression<unknown> | "*"
+    arg: Expression<unknown> | "*",
+    nativeType?: string
   ): Expression<unknown>;
-  page(qb: AnySelect, limit: number, offset: number): AnySelect;
+  /**
+   * A select item's value as the select list returns it, in a form the
+   * engine's driver reads without loss. Grouping, having and ordering use
+   * the expression as it is.
+   */
+  output(
+    item: ResolvedSelect,
+    expression: Expression<unknown>
+  ): Expression<unknown>;
+  /** `ordered` says whether the query has an ORDER BY. */
+  page(
+    qb: AnySelect,
+    limit: number,
+    offset: number,
+    ordered: boolean
+  ): AnySelect;
 }
