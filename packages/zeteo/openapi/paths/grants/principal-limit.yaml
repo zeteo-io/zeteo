@@ -1,0 +1,81 @@
+/v1/principal-limits/{principalLimitId}:
+  get:
+    tags: [Grants]
+    summary: Get a user's or group's concurrency limits
+    description: |
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+      **Errors:** `404 not_found`.
+    operationId: getPrincipalLimit
+    parameters:
+      - $ref: '../../components/parameters.yaml#/PrincipalLimitIdParam'
+    responses:
+      '200':
+        description: The row
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/PrincipalLimit'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Grants]
+    summary: Change a user's or group's concurrency limits
+    description: |
+      Changes either limit or both; `null` clears one. A change that would leave neither set is
+      refused: remove the row instead. The principal never changes. The change applies to the
+      runs that start after it. An audit entry `zeteo.principal_limit.updated` is written, with
+      the values before it under `previous`.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `404 not_found`.
+    operationId: updatePrincipalLimit
+    parameters:
+      - $ref: '../../components/parameters.yaml#/PrincipalLimitIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/UpdatePrincipalLimitRequest'
+    responses:
+      '200':
+        description: The row
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/PrincipalLimit'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Grants]
+    summary: Remove a user's or group's concurrency limits
+    description: |
+      Removes the row; the principal falls back to its groups' rows or the environment's
+      defaults for the runs that start after it. An audit entry `zeteo.principal_limit.removed`
+      is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found` (also for the losers of concurrent removals of one row).
+    operationId: deletePrincipalLimit
+    parameters:
+      - $ref: '../../components/parameters.yaml#/PrincipalLimitIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

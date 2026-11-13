@@ -1,0 +1,188 @@
+/v1/export:
+  post:
+    tags: [Queries]
+    summary: Export a query's result
+    description: |
+      Runs a query, with the same body as `POST /v1/query`, and streams its rows as NDJSON
+      (`?format=ndjson`, the default) or CSV (`?format=csv`), up to the source's
+      `export_row_cap`, from a source whose `export_enabled` is true. The stream is gzipped when
+      `Accept-Encoding` accepts gzip.
+
+      Everything that refuses a query refuses an export the same way, before any byte of the
+      stream: a table, column, relation or source the caller is not granted is
+      `422 not_found_or_not_accessible`, as one that does not exist. Once the status line is sent
+      no error body can follow; a failure then cuts the connection without the stream's last
+      chunk.
+
+      **Ends.** NDJSON's first line is `{ columns, warnings, run_id }`, each row is a JSON array
+      in the order of `columns`, and the last line is `{ "status": "complete" | "truncated",
+      "rows": n }` (`truncated`: more rows existed than the cap). CSV is a header record and
+      CRLF-terminated records, with the same status and count in the HTTP trailers
+      `X-Zeteo-Export-Status` and `X-Zeteo-Export-Rows`. A stream with no last line (NDJSON) or
+      no trailers (CSV) did not end: it was cut. Verify completeness with NDJSON: trailers are
+      invisible to browsers and to HTTP/1.0 clients and may be dropped by proxies.
+
+      **Order.** An export has no default order: without `orderBy` rows come in whatever order
+      the source makes them, and a capped export is an arbitrary subset. `offset` above 0 needs
+      an `orderBy` (`422 invalid_order` at path `["offset"]`).
+
+      **CSV text.** A text or json cell starting with `=`, `+`, `-`, `@`, tab or CR is written
+      with a leading `'`, so spreadsheets read it as text; CSV is therefore not byte-exact.
+      NDJSON is.
+
+      **Limits.** 10 minutes from the start to the last row, time waiting on the client
+      included; per user `USER_EXPORT_CONCURRENCY` exports at once (default 1, or the user's
+      own limit), per source its `export_concurrency`, counted apart from queries. No byte cap.
+
+      **Record.** A refused export is recorded as a refused query is, with entry point `export`
+      and a `zeteo.export.run` audit entry. One that starts is recorded as `running` with a
+      `zeteo.export.started` entry before its first row, and closed with a `zeteo.export.run`
+      entry when it ends. See `docs/export.md`.
+
+      **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
+    operationId: exportQuery
+    parameters:
+      - name: format
+        in: query
+        required: false
+        description: The stream's format. Any other query parameter is `400 invalid_request`.
+        schema: { type: string, enum: [ndjson, csv], default: ndjson }
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/queries/schemas.yaml#/Query'
+          example:
+            source: sales-db
+            from: orders
+            select: [id, status, total, created_at]
+            where: { status: { eq: paid } }
+            orderBy: [{ id: asc }]
+    responses:
+      '200':
+        description: The stream
+        headers:
+          Content-Disposition:
+            description: '`attachment; filename="zeteo-export-<run id>.<format>"`'
+            schema: { type: string }
+          Cache-Control:
+            description: '`no-store`'
+            schema: { type: string }
+          X-Zeteo-Run-Id:
+            description: The run's id in the run log
+            schema: { type: string, format: uuid }
+          Vary:
+            description: '`Accept-Encoding`'
+            schema: { type: string }
+          Content-Encoding:
+            description: '`gzip` when the request accepts gzip (`gzip` or `*` with a q above 0); absent otherwise'
+            schema: { type: string, enum: [gzip] }
+          Trailer:
+            description: 'CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows`, the trailers sent after the last record'
+            schema: { type: string }
+          X-Zeteo-Warnings:
+            description: 'CSV only, when the query has warnings: their codes, comma separated (`join_multiplies_rows`). NDJSON carries them in its first line.'
+            schema: { type: string }
+          X-Zeteo-Export-Status:
+            description: 'CSV only, an HTTP trailer: `complete` or `truncated`. Absent when the stream was cut.'
+            schema: { type: string, enum: [complete, truncated] }
+          X-Zeteo-Export-Rows:
+            description: 'CSV only, an HTTP trailer: the rows sent'
+            schema: { type: integer }
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+              description: |
+                Lines of JSON, each ending in `\n`: first `{ "columns": [{ "name", "type" }],
+                "warnings": [...], "run_id": "<uuid>" }`, then one array per row with its values in
+                the wire forms of `POST /v1/query`, last `{ "status": "complete" | "truncated",
+                "rows": <count> }`.
+            example: |
+              {"columns":[{"name":"id","type":"number"},{"name":"status","type":"text"}],"warnings":[],"run_id":"0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a"}
+              [1,"paid"]
+              [2,"paid"]
+              {"status":"complete","rows":2}
+          text/csv:
+            schema:
+              type: string
+              description: |
+                RFC 4180, UTF-8, CRLF line ends: a header record of the column names, then one record
+                per row. A null is an empty field and an empty string `""`; numbers, booleans,
+                dates and timestamps are written as their wire forms; json as its JSON text. Text
+                and json starting with `=`, `+`, `-`, `@`, tab or CR get a leading `'`.
+            example: "id,status\r\n1,paid\r\n2,paid\r\n"
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`: an unknown `format` or query parameter;
+          the body is not an object with a non-empty string `source`; a string or key in it holds
+          NUL or ill-formed Unicode; or the source's language refuses it.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403':
+        description: |
+          Forbidden - `forbidden` (the token lacks `zeteo.data.export`) or `export_not_enabled`
+          (the source's exports are off, or its `export_row_cap` is 0)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `source_archived`, the source was archived as the export started
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: |
+          The query cannot be run as written - the codes of `POST /v1/query`, and
+          `invalid_order` at path `["offset"]` for an `offset` above 0 without an `orderBy`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '429':
+        description: |
+          Too many exports - `too_many_exports` (the caller's own export limit is reached) or
+          `source_busy` (the source's `export_concurrency` is); retry after `Retry-After`
+        headers:
+          Retry-After:
+            description: Seconds to wait before retrying
+            schema: { type: integer }
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: |
+          Bad gateway - `query_failed` or `source_unreachable`, before the first row. The
+          database's own error text is never returned.
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503':
+        description: |
+          Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+          pool briefly unavailable, or the service is shutting down (an export refused for that
+          is not recorded). Retry, after `Retry-After` when given.
+        headers:
+          Retry-After:
+            description: Seconds to wait before retrying
+            schema: { type: integer }
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '504':
+        description: Gateway timeout - `query_timeout`, the export's time ran out before its first row
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

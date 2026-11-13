@@ -46,3 +46,10 @@ GrantIdParam:
   required: true
   description: The grant's id. A value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
+
+PrincipalLimitIdParam:
+  name: principalLimitId
+  in: path
+  required: true
+  description: The limits row's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

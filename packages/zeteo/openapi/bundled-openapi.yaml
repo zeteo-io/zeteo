@@ -4,9 +4,18 @@ info:
   version: 0.1.0
   description: |
     Zeteo is a query service for apps built on tereo. An administrator registers databases as
-    sources and grants tables and columns to users and groups; this spec covers the source and
-    grant administration API. Every path in this spec is the full
-    path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
+    sources and grants tables and columns to users and groups, who query them through a
+    validated JSON query language. This spec covers the HTTP API: sources and their catalogue,
+    grants and concurrency limits, querying, exporting and the run log. Every path in this spec
+    is the full path on the service: the API is versioned under `/v1`, and `GET /health` stays at
+    the root.
+
+    ## MCP
+
+    With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
+    HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
+    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
+    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
 
     ## Authentication
 
@@ -38,8 +47,9 @@ info:
 
     A grant gives one user or group the right to query one table: every column (including ones
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
-    replacing and removing them needs `zeteo.grants.write`, which includes read. See
-    `docs/grants.md`.
+    replacing and removing them needs `zeteo.grants.write`, which includes read. The same
+    permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
+    many queries and exports it runs at once. See `docs/grants.md`.
 
     ## Queries
 
@@ -48,6 +58,9 @@ info:
     (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
     Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
     `docs/querying.md`.
+
+    `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
+    CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
 
     ## Pagination
 
@@ -74,9 +87,9 @@ tags:
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
-    description: Which users and groups may query which tables and columns
+    description: Which users and groups may query which tables and columns, and how much at once
   - name: Queries
-    description: Running queries over granted tables and columns, and the record of every run
+    description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
     description: Health
 paths:
@@ -887,6 +900,204 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/principal-limits:
+    get:
+      tags:
+        - Grants
+      summary: List users' and groups' concurrency limits
+      description: |
+        Lists the rows in creation order, optionally only those of one principal type or id. Each
+        row's `principal_status` is looked up once per distinct principal.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+      operationId: listPrincipalLimits
+      parameters:
+        - name: principal_type
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: principal_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of limits rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListPrincipalLimitsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Grants
+      summary: Give a user or group its own concurrency limits
+      description: |
+        Gives one user (a service account included) or group its own limits on queries and exports
+        at once, in place of `USER_QUERY_CONCURRENCY` and `USER_EXPORT_CONCURRENCY`. Each limit
+        applies apart, as each run starts: the user's own row if it sets that limit, else the
+        highest among their groups' rows, else the environment's default. The principal need not
+        exist yet. A principal has at most one row. An audit entry `zeteo.principal_limit.created`
+        is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (neither limit, or one out of range), `409 conflict` (the
+        principal already has a row).
+      operationId: createPrincipalLimit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePrincipalLimitRequest'
+            example:
+              principal_type: group
+              principal_id: 0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a
+              query_concurrency: 10
+      responses:
+        '201':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          description: Conflict - `conflict`, the principal already has limits; change them with `PATCH`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/principal-limits/{principalLimitId}:
+    get:
+      tags:
+        - Grants
+      summary: Get a user's or group's concurrency limits
+      description: |
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `404 not_found`.
+      operationId: getPrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      responses:
+        '200':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Grants
+      summary: Change a user's or group's concurrency limits
+      description: |
+        Changes either limit or both; `null` clears one. A change that would leave neither set is
+        refused: remove the row instead. The principal never changes. The change applies to the
+        runs that start after it. An audit entry `zeteo.principal_limit.updated` is written, with
+        the values before it under `previous`.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request`, `404 not_found`.
+      operationId: updatePrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePrincipalLimitRequest'
+      responses:
+        '200':
+          description: The row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrincipalLimit'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Grants
+      summary: Remove a user's or group's concurrency limits
+      description: |
+        Removes the row; the principal falls back to its groups' rows or the environment's
+        defaults for the runs that start after it. An audit entry `zeteo.principal_limit.removed`
+        is written.
+
+        **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found` (also for the losers of concurrent removals of one row).
+      operationId: deletePrincipalLimit
+      parameters:
+        - $ref: '#/components/parameters/PrincipalLimitIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/catalog:
     get:
       tags:
@@ -948,8 +1159,10 @@ paths:
         only once their run is recorded. A client that disconnects stops its query on the source.
 
         Limits: 1,000 rows unless `limit` says otherwise, at most 50,000 or the source's row cap;
-        10 MB of rows; the source's time limit; two queries at once per user and five per source.
-        The response says when rows were left out. See `docs/querying.md`.
+        10 MB of rows; the source's time limit; per user `USER_QUERY_CONCURRENCY` queries at once
+        (default 5) unless the user or one of their groups has its own limit
+        (`/v1/principal-limits`), and per source its `query_concurrency` (default 5). The response
+        says when rows were left out. See `docs/querying.md`.
 
         **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
       operationId: runQuery
@@ -1028,8 +1241,9 @@ paths:
                 $ref: '#/components/schemas/QueryError'
         '429':
           description: |
-            Too many queries - `too_many_queries` (the caller already has two running) or
-            `source_busy` (the source already has five); retry after `Retry-After`
+            Too many queries - `too_many_queries` (the caller already runs as many as their limit)
+            or `source_busy` (the source already runs its `query_concurrency`); retry after
+            `Retry-After`. The body's `retry_after` repeats it, and the message states the limit.
           headers:
             Retry-After:
               description: Seconds to wait before retrying
@@ -1050,9 +1264,241 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable (the source busy). Retry, after `Retry-After` when given.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
           description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/export:
+    post:
+      tags:
+        - Queries
+      summary: Export a query's result
+      description: |
+        Runs a query, with the same body as `POST /v1/query`, and streams its rows as NDJSON
+        (`?format=ndjson`, the default) or CSV (`?format=csv`), up to the source's
+        `export_row_cap`, from a source whose `export_enabled` is true. The stream is gzipped when
+        `Accept-Encoding` accepts gzip.
+
+        Everything that refuses a query refuses an export the same way, before any byte of the
+        stream: a table, column, relation or source the caller is not granted is
+        `422 not_found_or_not_accessible`, as one that does not exist. Once the status line is sent
+        no error body can follow; a failure then cuts the connection without the stream's last
+        chunk.
+
+        **Ends.** NDJSON's first line is `{ columns, warnings, run_id }`, each row is a JSON array
+        in the order of `columns`, and the last line is `{ "status": "complete" | "truncated",
+        "rows": n }` (`truncated`: more rows existed than the cap). CSV is a header record and
+        CRLF-terminated records, with the same status and count in the HTTP trailers
+        `X-Zeteo-Export-Status` and `X-Zeteo-Export-Rows`. A stream with no last line (NDJSON) or
+        no trailers (CSV) did not end: it was cut. Verify completeness with NDJSON: trailers are
+        invisible to browsers and to HTTP/1.0 clients and may be dropped by proxies.
+
+        **Order.** An export has no default order: without `orderBy` rows come in whatever order
+        the source makes them, and a capped export is an arbitrary subset. `offset` above 0 needs
+        an `orderBy` (`422 invalid_order` at path `["offset"]`).
+
+        **CSV text.** A text or json cell starting with `=`, `+`, `-`, `@`, tab or CR is written
+        with a leading `'`, so spreadsheets read it as text; CSV is therefore not byte-exact.
+        NDJSON is.
+
+        **Limits.** 10 minutes from the start to the last row, time waiting on the client
+        included; per user `USER_EXPORT_CONCURRENCY` exports at once (default 1, or the user's
+        own limit), per source its `export_concurrency`, counted apart from queries. No byte cap.
+
+        **Record.** A refused export is recorded as a refused query is, with entry point `export`
+        and a `zeteo.export.run` audit entry. One that starts is recorded as `running` with a
+        `zeteo.export.started` entry before its first row, and closed with a `zeteo.export.run`
+        entry when it ends. See `docs/export.md`.
+
+        **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
+      operationId: exportQuery
+      parameters:
+        - name: format
+          in: query
+          required: false
+          description: The stream's format. Any other query parameter is `400 invalid_request`.
+          schema:
+            type: string
+            enum:
+              - ndjson
+              - csv
+            default: ndjson
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Query'
+            example:
+              source: sales-db
+              from: orders
+              select:
+                - id
+                - status
+                - total
+                - created_at
+              where:
+                status:
+                  eq: paid
+              orderBy:
+                - id: asc
+      responses:
+        '200':
+          description: The stream
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="zeteo-export-<run id>.<format>"`'
+              schema:
+                type: string
+            Cache-Control:
+              description: '`no-store`'
+              schema:
+                type: string
+            X-Zeteo-Run-Id:
+              description: The run's id in the run log
+              schema:
+                type: string
+                format: uuid
+            Vary:
+              description: '`Accept-Encoding`'
+              schema:
+                type: string
+            Content-Encoding:
+              description: '`gzip` when the request accepts gzip (`gzip` or `*` with a q above 0); absent otherwise'
+              schema:
+                type: string
+                enum:
+                  - gzip
+            Trailer:
+              description: 'CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows`, the trailers sent after the last record'
+              schema:
+                type: string
+            X-Zeteo-Warnings:
+              description: 'CSV only, when the query has warnings: their codes, comma separated (`join_multiplies_rows`). NDJSON carries them in its first line.'
+              schema:
+                type: string
+            X-Zeteo-Export-Status:
+              description: 'CSV only, an HTTP trailer: `complete` or `truncated`. Absent when the stream was cut.'
+              schema:
+                type: string
+                enum:
+                  - complete
+                  - truncated
+            X-Zeteo-Export-Rows:
+              description: 'CSV only, an HTTP trailer: the rows sent'
+              schema:
+                type: integer
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: |
+                  Lines of JSON, each ending in `\n`: first `{ "columns": [{ "name", "type" }],
+                  "warnings": [...], "run_id": "<uuid>" }`, then one array per row with its values in
+                  the wire forms of `POST /v1/query`, last `{ "status": "complete" | "truncated",
+                  "rows": <count> }`.
+              example: |
+                {"columns":[{"name":"id","type":"number"},{"name":"status","type":"text"}],"warnings":[],"run_id":"0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a"}
+                [1,"paid"]
+                [2,"paid"]
+                {"status":"complete","rows":2}
+            text/csv:
+              schema:
+                type: string
+                description: |
+                  RFC 4180, UTF-8, CRLF line ends: a header record of the column names, then one record
+                  per row. A null is an empty field and an empty string `""`; numbers, booleans,
+                  dates and timestamps are written as their wire forms; json as its JSON text. Text
+                  and json starting with `=`, `+`, `-`, `@`, tab or CR get a leading `'`.
+              example: "id,status\r\n1,paid\r\n2,paid\r\n"
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`: an unknown `format` or query parameter;
+            the body is not an object with a non-empty string `source`; a string or key in it holds
+            NUL or ill-formed Unicode; or the source's language refuses it.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          description: |
+            Forbidden - `forbidden` (the token lacks `zeteo.data.export`) or `export_not_enabled`
+            (the source's exports are off, or its `export_row_cap` is 0)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `source_archived`, the source was archived as the export started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: |
+            The query cannot be run as written - the codes of `POST /v1/query`, and
+            `invalid_order` at path `["offset"]` for an `offset` above 0 without an `orderBy`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: |
+            Too many exports - `too_many_exports` (the caller's own export limit is reached) or
+            `source_busy` (the source's `export_concurrency` is); retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: |
+            Bad gateway - `query_failed` or `source_unreachable`, before the first row. The
+            database's own error text is never returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable, or the service is shutting down (an export refused for that
+            is not recorded). Retry, after `Retry-After` when given.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          description: Gateway timeout - `query_timeout`, the export's time ran out before its first row
           content:
             application/json:
               schema:
@@ -1161,6 +1607,14 @@ components:
       schema:
         type: string
         format: uuid
+    PrincipalLimitIdParam:
+      name: principalLimitId
+      in: path
+      required: true
+      description: The limits row's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
     SourceIdParam:
       name: sourceId
       in: path
@@ -1195,7 +1649,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     ConflictResponse:
-      description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+      description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
       content:
         application/json:
           schema:
@@ -1245,6 +1699,9 @@ components:
         request_id:
           type: string
           description: The request's id, as in its `X-Request-ID` response header; the server's log lines for the request carry it too
+        retry_after:
+          type: integer
+          description: On a `429`, the seconds to wait, as in the `Retry-After` header
         issues:
           type: array
           description: On `invalid_request`, the failed checks
@@ -1417,6 +1874,8 @@ components:
         - row_cap
         - export_enabled
         - export_row_cap
+        - query_concurrency
+        - export_concurrency
         - writable_login_allowed
         - status
         - last_refreshed_at
@@ -1460,6 +1919,16 @@ components:
           type: integer
           minimum: 0
           maximum: 1000000
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: The queries the source runs at once across every replica; one more is `429 source_busy`
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: The exports the source runs at once across every replica; one more is `429 source_busy`
         writable_login_allowed:
           type: boolean
           description: True when the login check found something and an administrator allowed it
@@ -1552,6 +2021,18 @@ components:
           minimum: 0
           maximum: 1000000
           default: 0
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          default: 5
+          description: The queries the source runs at once across every replica; one more is `429 source_busy`
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          default: 2
+          description: The exports the source runs at once across every replica; one more is `429 source_busy`
     UpdateSourceRequest:
       type: object
       description: |
@@ -1596,6 +2077,16 @@ components:
           type: integer
           minimum: 0
           maximum: 1000000
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 50
+          description: Applies to the queries that start after the change; a change of the pool's size closes the source's pool once the calls on it end
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: As `query_concurrency`, for exports
     TestSourceResponse:
       type: object
       required:
@@ -1692,9 +2183,16 @@ components:
           $ref: '#/components/schemas/ColumnType'
         native_type:
           type: string
+          description: |
+            The type as the database writes it. On Postgres an enum is marked `<name> (enum)` and a
+            domain `<name> (domain over <base type>)`, the base marked `(enum)` too when it is one
+            (`sales.price (domain over money)`); on Azure SQL the type as SQL Server writes it
+            (`nvarchar(100)`, `decimal(12,2)`).
           examples:
             - integer
             - character varying(20)
+            - sales.order_status (enum)
+            - sales.price (domain over money)
         nullable:
           type: boolean
         position:
@@ -1955,10 +2453,10 @@ components:
         - orphaned
         - unknown
       description: |
-        Whether the principal still exists in tereo, looked up when the grant is shown. A user is
-        `orphaned` when tereo has no such user. A group's existence cannot be read, so a group is
-        `active` or `unknown` (tereo refused or has no such group). An orphaned grant is inert. A
-        lookup that fails is also shown as `unknown`.
+        Whether the principal still exists in tereo, looked up when the grant or limits row is shown.
+        A user is `active`, or `orphaned` when tereo has no such user; an orphaned row is inert. Zeteo
+        reads a user's groups but cannot read a group itself, so a group is `unknown`. A lookup that
+        fails is also shown as `unknown`.
     Grant:
       type: object
       description: What one user or group may query of one table
@@ -2125,6 +2623,112 @@ components:
               const: false
             column_ids:
               $ref: '#/components/schemas/GrantColumnIds'
+    PrincipalLimit:
+      type: object
+      description: A user's or group's own concurrency limits, in place of the environment's defaults
+      required:
+        - id
+        - principal_type
+        - principal_id
+        - principal_status
+        - query_concurrency
+        - export_concurrency
+        - created_by
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+          description: The user's or group's tereo id
+        principal_status:
+          $ref: '#/components/schemas/PrincipalStatus'
+        query_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100
+          description: Queries the principal may run at once; null when this row does not set it
+        export_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10
+          description: Exports the principal may run at once; null when this row does not set it
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ListPrincipalLimitsResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PrincipalLimit'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    CreatePrincipalLimitRequest:
+      type: object
+      description: At least one of the two limits
+      additionalProperties: false
+      required:
+        - principal_type
+        - principal_id
+      anyOf:
+        - required:
+            - query_concurrency
+        - required:
+            - export_concurrency
+      properties:
+        principal_type:
+          $ref: '#/components/schemas/PrincipalType'
+        principal_id:
+          type: string
+          format: uuid
+        query_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 100
+        export_concurrency:
+          type: integer
+          minimum: 1
+          maximum: 10
+    UpdatePrincipalLimitRequest:
+      type: object
+      description: Either limit or both; `null` clears one. A change that would leave neither set is `400 invalid_request`.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        query_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 100
+        export_concurrency:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          maximum: 10
     Query:
       type: object
       additionalProperties: false
@@ -2246,7 +2850,7 @@ components:
           enum:
             - rows
             - bytes
-          description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB)
+          description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB; 1 MB through MCP)
         warnings:
           type: array
           items:
@@ -2322,10 +2926,15 @@ components:
         - refused
         - failed
         - timeout
-      description: '`refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error'
+        - running
+      description: |
+        `refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error, a
+        client that went away (`client_closed`) included; `running` for an export that has started
+        and not yet ended. An export whose process died is closed by the housekeeping job as
+        `failed` with `interrupted`.
     Run:
       type: object
-      description: One query, as it was recorded
+      description: One query or export, as it was recorded
       required:
         - id
         - user_id
@@ -2357,6 +2966,7 @@ components:
             - api
             - mcp
             - export
+          description: '`POST /v1/query`, the MCP `query` tool, or `POST /v1/export`'
         query:
           description: The query as it was sent
         duration_ms:
@@ -2365,14 +2975,14 @@ components:
           type:
             - integer
             - 'null'
-          description: Rows returned; null unless the run succeeded
+          description: Rows returned; null unless the run succeeded. For an export that started, the rows sent to the client (null while `running`)
         outcome:
           $ref: '#/components/schemas/RunOutcome'
         error_code:
           type:
             - string
             - 'null'
-          description: The error answered; `client_closed` when the client went away first
+          description: The error answered; `client_closed` when the client went away first; for an export, also `shutting_down` (stopped by the service shutting down) and `interrupted` (its process died)
         truncated:
           type: boolean
         created_at:
@@ -2511,6 +3121,7 @@ components:
             - default_rows
             - max_rows
             - timeout_ms
+            - export
           properties:
             default_rows:
               type: integer
@@ -2520,6 +3131,19 @@ components:
               description: The most a `limit` may ask for
             timeout_ms:
               type: integer
+            export:
+              type: object
+              description: What `POST /v1/export` may take from this source; it also needs `zeteo.data.export`
+              required:
+                - enabled
+                - max_rows
+              properties:
+                enabled:
+                  type: boolean
+                  description: The source's exports are on and its export cap is above 0
+                max_rows:
+                  type: integer
+                  description: The source's `export_row_cap`; 0 when exports are off
         tables:
           type: array
           description: Ordered by schema, then name

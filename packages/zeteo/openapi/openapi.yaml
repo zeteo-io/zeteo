@@ -4,9 +4,18 @@ info:
   version: 0.1.0
   description: |
     Zeteo is a query service for apps built on tereo. An administrator registers databases as
-    sources and grants tables and columns to users and groups; this spec covers the source and
-    grant administration API. Every path in this spec is the full
-    path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
+    sources and grants tables and columns to users and groups, who query them through a
+    validated JSON query language. This spec covers the HTTP API: sources and their catalogue,
+    grants and concurrency limits, querying, exporting and the run log. Every path in this spec
+    is the full path on the service: the API is versioned under `/v1`, and `GET /health` stays at
+    the root.
+
+    ## MCP
+
+    With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
+    HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
+    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
+    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
 
     ## Authentication
 
@@ -38,8 +47,9 @@ info:
 
     A grant gives one user or group the right to query one table: every column (including ones
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
-    replacing and removing them needs `zeteo.grants.write`, which includes read. See
-    `docs/grants.md`.
+    replacing and removing them needs `zeteo.grants.write`, which includes read. The same
+    permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
+    many queries and exports it runs at once. See `docs/grants.md`.
 
     ## Queries
 
@@ -48,6 +58,9 @@ info:
     (`zeteo.data.read`); what the caller is not granted fails exactly as what does not exist.
     Every query is recorded in the run log, which `GET /v1/runs` lists (`zeteo.runs.read`). See
     `docs/querying.md`.
+
+    `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
+    CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
 
     ## Pagination
 
@@ -74,9 +87,9 @@ tags:
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
-    description: Which users and groups may query which tables and columns
+    description: Which users and groups may query which tables and columns, and how much at once
   - name: Queries
-    description: Running queries over granted tables and columns, and the record of every run
+    description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
     description: Health
 x-tagGroups:
@@ -113,10 +126,16 @@ paths:
     $ref: './paths/grants/grants.yaml#/~1v1~1grants'
   /v1/grants/{grantId}:
     $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
+  /v1/principal-limits:
+    $ref: './paths/grants/principal-limits.yaml#/~1v1~1principal-limits'
+  /v1/principal-limits/{principalLimitId}:
+    $ref: './paths/grants/principal-limit.yaml#/~1v1~1principal-limits~1{principalLimitId}'
   /v1/catalog:
     $ref: './paths/queries/catalog.yaml#/~1v1~1catalog'
   /v1/query:
     $ref: './paths/queries/query.yaml#/~1v1~1query'
+  /v1/export:
+    $ref: './paths/queries/export.yaml#/~1v1~1export'
   /v1/runs:
     $ref: './paths/queries/runs.yaml#/~1v1~1runs'
 components:
@@ -134,6 +153,8 @@ components:
       $ref: './components/parameters.yaml#/RelationIdParam'
     GrantIdParam:
       $ref: './components/parameters.yaml#/GrantIdParam'
+    PrincipalLimitIdParam:
+      $ref: './components/parameters.yaml#/PrincipalLimitIdParam'
   responses:
     BadRequestResponse:
       $ref: './components/responses.yaml#/BadRequestResponse'
@@ -208,6 +229,14 @@ components:
       $ref: './components/grants/schemas.yaml#/CreateGrantRequest'
     ReplaceGrantRequest:
       $ref: './components/grants/schemas.yaml#/ReplaceGrantRequest'
+    PrincipalLimit:
+      $ref: './components/grants/schemas.yaml#/PrincipalLimit'
+    ListPrincipalLimitsResponse:
+      $ref: './components/grants/schemas.yaml#/ListPrincipalLimitsResponse'
+    CreatePrincipalLimitRequest:
+      $ref: './components/grants/schemas.yaml#/CreatePrincipalLimitRequest'
+    UpdatePrincipalLimitRequest:
+      $ref: './components/grants/schemas.yaml#/UpdatePrincipalLimitRequest'
     Query:
       $ref: './components/queries/schemas.yaml#/Query'
     QueryResult:

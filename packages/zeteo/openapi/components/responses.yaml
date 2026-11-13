@@ -12,6 +12,9 @@ Error:
     request_id:
       type: string
       description: The request's id, as in its `X-Request-ID` response header; the server's log lines for the request carry it too
+    retry_after:
+      type: integer
+      description: On a `429`, the seconds to wait, as in the `Retry-After` header
     issues:
       type: array
       description: On `invalid_request`, the failed checks
@@ -64,7 +67,7 @@ NotFoundResponse:
         $ref: '#/Error'
 
 ConflictResponse:
-  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
   content:
     application/json:
       schema:

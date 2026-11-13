@@ -1,10 +1,10 @@
 # Catalogue
 
-The catalogue is what Zeteo knows about a source's tables, columns and the relations between
-tables. It is read from the source by a refresh and described by an administrator. Grants
-([grants.md](grants.md)) refer to its tables and columns by id and queries ([querying.md](querying.md))
-run over the part a caller is granted, so **ids are stable**: a refresh never changes the id of a
-table, column or relation.
+The catalogue is what Zeteo knows about a source's tables, columns and the relations between tables.
+It is read from the source by a refresh and described by an administrator. Grants
+([grants.md](grants.md)) refer to its tables and columns by id and queries
+([querying.md](querying.md)) run over the part a caller is granted, so **ids are stable**: a refresh
+never changes the id of a table, column or relation.
 
 | Route | Permission | Result |
 |-------|------------|--------|
@@ -89,8 +89,8 @@ table does not have). What the body leaves out is unchanged. It is audited as
 Each foreign key gives two **discovered** relations, matched across refreshes by constraint name:
 
 - forward, on the table that holds the key, `to_many: false`, named after the single key column
-  without a trailing `_id`, `Id` or `_fk` (`customer_id` gives `customer`), or the target table's name
-  when the key has several columns or nothing is left of the column's name (`id`);
+  without a trailing `_id`, `Id` or `_fk` (`customer_id` gives `customer`), or the target table's
+  name when the key has several columns or nothing is left of the column's name (`id`);
 - reverse, on the referenced table, `to_many: true`, named after the table that holds the key.
 
 Discovered names follow the declared-name pattern: camelCase boundaries become `_`, the name is
@@ -101,7 +101,8 @@ already stored are never renamed.
 When a name is already taken on that table (by another relation, discovered or declared) a `_2`,
 `_3`, ... is appended. A discovered relation keeps its name and id when its foreign key is dropped
 and created again, even under another constraint name (a missing or renamed relation with the same
-tables, columns and direction is taken over; exact constraint names are matched first), and cannot be removed (`409 relation_discovered`).
+tables, columns and direction is taken over; exact constraint names are matched first), and cannot
+be removed (`409 relation_discovered`).
 
 A **declared** relation is one an administrator adds, for a join the database does not enforce:
 

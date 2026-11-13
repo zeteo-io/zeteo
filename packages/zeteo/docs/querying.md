@@ -1,12 +1,15 @@
 # Querying
 
 Users query sources through one JSON language, over only the tables and columns they are granted
-(see `docs/grants.md`). The reference for the routes is `openapi/openapi.yaml`.
+(see [grants.md](grants.md)), over HTTP or through an AI connected over MCP ([mcp.md](mcp.md)). The
+same query can be exported whole as NDJSON or CSV ([export.md](export.md)). The reference for the
+routes is `openapi/openapi.yaml`.
 
 | Route | Permission | Result |
 |-------|------------|--------|
 | `GET /v1/catalog` (`source`) | `zeteo.data.read` | `{ sources }`: what the caller may query, and the language schema |
 | `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `POST /v1/export` (`format`) | `zeteo.data.export` | a stream of NDJSON or CSV ([export.md](export.md)) |
 | `GET /v1/runs` (`user_id`, `source_id`, `outcome`, `limit`, `cursor`) | `zeteo.runs.read` | `{ data, next_cursor }`, newest first |
 
 ## The SQL query language
@@ -159,7 +162,12 @@ trace of a table, column, relation or source they are not granted.
       "name": "Sales",
       "type": "postgres",
       "language": { "id": "sql", "schema": { "type": "object", "properties": { "select": {} } } },
-      "limits": { "default_rows": 1000, "max_rows": 50000, "timeout_ms": 30000 },
+      "limits": {
+        "default_rows": 1000,
+        "max_rows": 50000,
+        "timeout_ms": 30000,
+        "export": { "enabled": true, "max_rows": 200000 }
+      },
       "tables": [
         {
           "name": "orders",
@@ -186,7 +194,9 @@ trace of a table, column, relation or source they are not granted.
   names (through a joined relation, `customer.account`); `to` is the target table as `from` would
   write it. A relation appears only when every key column on both sides is granted.
 - `limits` are those of `POST /v1/query`: `default_rows` and `max_rows` are lowered to the
-  source's `row_cap`, `timeout_ms` is the source's time limit.
+  source's `row_cap`, `timeout_ms` is the source's time limit. `export` says whether the source
+  takes exports (`enabled`: `export_enabled` and an `export_row_cap` above 0) and up to how many
+  rows (`max_rows`, 0 when it does not); exporting also needs `zeteo.data.export`.
 - `language.schema` is the JSON Schema of the query body.
 - `missing` marks a table, column or relation the last refresh did not find; a query that uses
   one fails with `missing_in_source`.
@@ -287,12 +297,12 @@ once.
 
 ## Limits
 
-| Limit | `POST /v1/query` | MCP (plan 3) |
+| Limit | `POST /v1/query` | MCP `query` tool ([mcp.md](mcp.md)) |
 |-------|------------------|--------------|
 | Rows, default / maximum | 1,000 / 50,000 | 100 / 5,000 |
 | Result size (rows as JSON) | 10 MB | 1 MB |
 | Time | the source's `timeout_ms` (default 30 s) | same |
-| Queries at once | the user's limit (`USER_QUERY_CONCURRENCY` unless set for them, default 5), the source's `query_concurrency` (default 5) | shared |
+| Queries at once | the user's limit (`USER_QUERY_CONCURRENCY` unless set for them, default 5), the source's `query_concurrency` (default 5) | the same slots, shared with `POST /v1/query` |
 
 - The row limit is `limit`, or the default, lowered to the maximum and to the source's `row_cap`.
   A `limit` above the maximum is lowered, not refused.
@@ -305,29 +315,31 @@ once.
 - A query the source cannot take (`422 too_many_parameters`) is refused before the concurrency
   check, so it is never answered `429`.
 - Concurrency is counted in Redis, so it holds across replicas. A user may run
-  `USER_QUERY_CONCURRENCY` queries at once (1 to 100, default 5, set in the environment) unless
-  an administrator gave them or one of their groups its own limit
+  `USER_QUERY_CONCURRENCY` queries at once (1 to 100, default 5, set in the environment) unless an
+  administrator gave them or one of their groups its own limit
   ([grants.md](grants.md#concurrency-limits): the user's own, else the highest of their groups');
-  one more is `429 too_many_queries`. A source runs its `query_concurrency` at once (1 to 50, default 5, set
-  per source, [sources.md](sources.md#the-source)); one more is `429 source_busy`. Both answers
-  carry `Retry-After` and `retry_after` (seconds), and their message states the limit that applied.
-  The limits are read as each query starts: a change applies to the queries that start after it,
-  and queries already running go on. Exports are counted apart, against `USER_EXPORT_CONCURRENCY`
-  per user (1 to 10, default 1, or the user's own limit as for queries; `429 too_many_exports`) and the source's `export_concurrency`
-  (1 to 10, default 2; `429 source_busy`). A slot is held at most the time limit plus 5 s, and is released as soon
-  as the query ends, however it ends; the response does not wait for the release, and a release
-  Redis does not take lapses at that expiry. When Redis fails or does not answer within a second,
-  no slot can be taken and the query is `503 temporarily_unavailable`, recorded as `failed`.
+  one more is `429 too_many_queries`. A source runs its `query_concurrency` at once (1 to 50,
+  default 5, set per source, [sources.md](sources.md#the-source)); one more is `429 source_busy`.
+  Both answers carry `Retry-After` and `retry_after` (seconds), and their message states the limit
+  that applied. The limits are read as each query starts: a change applies to the queries that start
+  after it, and queries already running go on. Exports are counted apart, against
+  `USER_EXPORT_CONCURRENCY` per user (1 to 10, default 1, or the user's own limit as for queries;
+  `429 too_many_exports`) and the source's `export_concurrency` (1 to 10, default 2;
+  `429 source_busy`); see [export.md](export.md#limits). A query's slot is held at most the time limit
+  plus 5 s, and is released as soon as the query ends, however it ends; the response does not wait
+  for the release, and a release Redis does not take lapses at that expiry. When Redis fails or does
+  not answer within a second, no slot can be taken and the query is `503 temporarily_unavailable`,
+  recorded as `failed`.
 - The body is at most 64 KB (`413 payload_too_large`).
 - A client that disconnects stops its query on the source; the run is recorded as `failed` with
   `client_closed`.
 
 ## Errors
 
-Every error is `{ error, error_description, ..., request_id }`, where `request_id` is the request's
-`X-Request-ID` header, also on the server's log lines for it. A query the language accepts but which cannot
-be run as written is `422` with `path` (keys and array indexes from the root of the query) and
-`suggestions` (up to three close names, closest first).
+Every error is `{ error, error_description, ..., request_id }`, where `request_id` is the
+request's `X-Request-ID` header, also on the server's log lines for it. A query the language
+accepts but which cannot be run as written is `422` with `path` (keys and array indexes from the
+root of the query) and `suggestions` (up to three close names, closest first).
 
 - **Not granted and not there look the same.** A source, table, relation or column the caller is
   not granted is refused exactly as one that does not exist: `422 not_found_or_not_accessible`,
@@ -357,10 +369,10 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
 
 ## The run log
 
-Every query past the first check (an object naming a source, with no NUL or ill-formed Unicode)
-is recorded, refused and failed ones
-included, in one transaction that writes a `query_runs` row and a `zeteo.query.run` audit entry.
-A body the source's language refuses is not recorded.
+Every query past the first check (an object naming a source, with no NUL or ill-formed Unicode) is
+recorded, refused and failed ones included, in one transaction that writes a `query_runs` row and a
+`zeteo.query.run` audit entry. A body the source's language refuses is not recorded. Exports are
+recorded in the same table, with their own audit entries ([export.md](export.md#what-is-recorded)).
 
 - The row holds the query as sent, who ran it, the source (null when the caller could not see the
   one named), the entry point (`api`, `mcp`, `export`), the duration, the rows returned, the
@@ -368,7 +380,8 @@ A body the source's language refuses is not recorded.
 - The audit entry's metadata is `{ source_id, entry_point, outcome, error_code, row_count,
   duration_ms }`; the query itself is only in the row.
 - Outcomes: `ok`; `refused` for a 4xx answer; `timeout` for `query_timeout`; `failed` for any other
-  error, and for a client that went away (`client_closed`).
+  error, and for a client that went away (`client_closed`); `running` for an export that has
+  started and not yet ended.
 - When a run cannot be stored, it is stored again with `{ "unrecordable": true }` in place of the
   query (same outcome, code and other fields), and the failure is logged.
 - Rows are sent only once their run is recorded: when neither attempt can be written, a successful
@@ -378,3 +391,19 @@ A body the source's language refuses is not recorded.
 `GET /v1/runs` lists runs newest first, filtered by `user_id`, `source_id` and `outcome`, as
 `{ id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code,
 truncated, created_at }`.
+
+## Retention and housekeeping
+
+A job runs in every replica, the first time 60 to 120 seconds after start (a random delay, so
+replicas started together spread out) and then every hour, under a Redis lock
+(`zeteo:job:runs-housekeeping`, 10 minutes) so one replica does each sweep. A sweep that cannot
+take the lock, Redis being away, is skipped. Each sweep:
+
+1. closes every export still `running` 15 minutes after it started (its 10-minute limit and a
+   margin, so its process has died) as `failed` with `interrupted`, each with its
+   `zeteo.export.run` audit entry; one that fails to close is logged and the rest go on;
+2. deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (default 90, 0 keeps them all), 1,000 at a
+   time, never one still `running`. The deletion writes no audit entry: Tereo's audit log, where
+   every run's `zeteo.query.run` or `zeteo.export.run` entry stays, is the lasting record.
+
+The job is not started in the test suite's shared server.

@@ -62,14 +62,15 @@ shown (once per distinct principal in a list), never stored.
 |--------|---------|
 | `active` | Tereo knows the user or group |
 | `orphaned` | A user Tereo no longer has. The grant is inert and stays until an admin removes it |
-| `unknown` | A group Tereo refused to confirm or has no record of: group existence cannot be read with the permissions a service can request, so a group is `active` or `unknown`, never `orphaned`. Also shown when the lookup itself failed |
+| `unknown` | A group, or a principal whose lookup failed |
 
 A failed lookup is logged and shown as `unknown`; it never fails the request, since the grant itself
 was read or changed.
 
-With today's Tereo a service cannot read groups at all, so in production a group grant's
-`principal_status` is always `unknown`, never `active`. It only reports; a group grant counts for its
-members whatever its status.
+Zeteo reads a user's groups from Tereo (that is how a group's grants reach its members), but it
+cannot read a group itself with the access a service has, so a group principal's
+`principal_status` is always `unknown`, never `active` or `orphaned`. It only reports; a group
+grant counts for its members whatever its status.
 
 ## Concurrency limits
 
@@ -87,7 +88,7 @@ or a group its own limits instead, under the same permissions as grants:
 
 The row: `{ id, principal_type, principal_id, principal_status, query_concurrency,
 export_concurrency, created_by, created_at, updated_at }`, with `principal_status` as for a grant
-([below](#principal-statuses)) and a limit the row does not set shown as `null`.
+([above](#principal-statuses)) and a limit the row does not set shown as `null`.
 
 - Create takes `{ principal_type, principal_id, query_concurrency?, export_concurrency? }` with at
   least one limit: `query_concurrency` 1 to 100, `export_concurrency` 1 to 10 (`400
@@ -95,6 +96,8 @@ export_concurrency, created_by, created_at, updated_at }`, with `principal_statu
   row does not need its principal to exist; a row for a principal Tereo does not know is inert.
 - `PATCH` takes either limit or both; `null` clears one. A change that would leave neither set is
   `400 invalid_request`: remove the row instead. The principal never changes.
+- Removing a row that is not there, also one another request has just removed, is
+  `404 not_found`.
 - Each create, change and removal writes one audit entry (`zeteo.principal_limit.created`,
   `zeteo.principal_limit.updated`, `zeteo.principal_limit.removed`) in the same transaction, with
   `{ principal_type, principal_id, query_concurrency, export_concurrency }` as metadata and, on a
@@ -104,3 +107,7 @@ Which limit applies is decided for each limit apart, as each query or export sta
 row if it sets that limit; otherwise the highest value among the rows of the groups that count for
 the user (the same groups as for grants); otherwise the environment's default. A group's row
 replaces the default even when it is lower. A change applies to the runs that start after it.
+
+Every source keeps its own limits on top (`query_concurrency`, `export_concurrency`,
+[sources.md](sources.md#the-source)): a user allowed ten queries still waits for a slot on a source
+that runs five.

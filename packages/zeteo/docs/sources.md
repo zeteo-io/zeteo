@@ -29,10 +29,12 @@ created_at, archived_at }`.
   source whose stored settings cannot be decrypted (the master key changed); list and get still
   work, and using the source fails as a `500 server_error` with the generic body.
 - Limits: `timeout_ms` 1000 to 120000 (default 30000), `row_cap` 1 to 50000 (default 50000),
-  `export_row_cap` 0 to 1000000 (default 0), `export_enabled` (default false).
+  `export_row_cap` 0 to 1000000 (default 0), `export_enabled` (default false). A source takes
+  exports only with `export_enabled` and an `export_row_cap` above 0 ([export.md](export.md)).
 - Concurrency: `query_concurrency` 1 to 50 (default 5), the queries the source runs at once
-  across every replica, and `export_concurrency` 1 to 10 (default 2), its exports at once. One more is `429 source_busy` ([querying.md](querying.md#limits)). A change
-  applies to the runs that start after it; running ones go on. Each replica opens up to
+  across every replica, and `export_concurrency` 1 to 10 (default 2), its exports at once. One
+  more is `429 source_busy` ([querying.md](querying.md#limits)). A change applies to the runs that
+  start after it; running ones go on. Each replica opens up to
   `query_concurrency + export_concurrency + 2` connections to the source
   ([connection pools](#connection-pools)), so the database's own limit (Postgres
   `max_connections`, the concurrent requests or workers of an Azure SQL tier) must allow the number
@@ -104,8 +106,9 @@ answer is still `201`.
 
 A `PATCH` with neither `settings` nor `schemas` never contacts the source; `allow_writable_login`
 is accepted only with `settings`, and an override has to be sent again on each settings change. A
-settings change, and a change to `query_concurrency` or `export_concurrency`, closes the source's
-open pool once the calls running on it end. After a `PATCH` that carries `settings` or `schemas`
+settings change, and a change to `query_concurrency` or `export_concurrency` that changes the
+pool's size (their sum), closes the source's open pool once the calls running on it end; a change
+that leaves the size as it was keeps the pool. After a `PATCH` that carries `settings` or `schemas`
 is committed, Zeteo refreshes the catalogue, so it describes the new target at once (and a source
 fixed by new settings is `active` again). If that refresh fails the change stands and the answer is
 still `200`; `status` becomes `unreachable` only when the refresh failed with `source_unreachable`
@@ -146,7 +149,8 @@ have this grant.
 
 With findings, create and settings change answer `422 writable_login` and the body lists them as
 `{ code, detail }` under `findings`: at most 20, with `truncated: true` when there were more.
-`POST /v1/sources/:sourceId/test` caps its `findings` the same way. With `allow_writable_login: true` the source is stored with
+`POST /v1/sources/:sourceId/test` caps its `findings` the same way. With
+`allow_writable_login: true` the source is stored with
 `writable_login_allowed: true` and the audit entry's metadata carries the codes. With no findings,
 `writable_login_allowed` is false whatever the flag says.
 
@@ -180,34 +184,35 @@ connections (9 with the defaults): the queries and exports the source may run at
 refresh still gets one. The size is read from the source's row when the pool opens; connect timeout
 5 s. A login check (on create, on a settings change and on `test`) uses a connection of its own, not
 the pool. A pool is opened on first use and closed after 5 idle minutes, on archive, on a change to
-the settings or to either concurrency setting, and on shutdown. Catalogue reads
+the settings or to the pool's size, and on shutdown. Catalogue reads
 (the login check and schema reads) run under a 15 s query timeout; user queries run under the
 source's own `timeout_ms` ([querying.md](querying.md)). Concurrent first uses open one pool. A call
 running when its pool is closed finishes first.
 
 Every use reads the source's row (one indexed read), so a change made through another replica
-reaches this one at its next use: a pool opened with other sealed settings or another size than
-the row now gives is closed and a new one opened, and an archived source is refused with `409 source_archived`. Only a
-row newer than the pool (by `updated_at`) replaces it: a use whose read landed just before a
-settings change runs on the pool already opened with the new settings, and one that finds no pool
-(the change just closed it on this replica) reads the row again before opening one. A
-use that fails with `source_unreachable` closes the pool, so the next use resolves the host and
-connects again (after a database failover to a new address, for example). A use that finds every
+reaches this one at its next use: a pool opened with other sealed settings or another size than the
+row now gives is closed and a new one opened, and an archived source is refused with
+`409 source_archived`. Only a row newer than the pool (by `updated_at`) replaces it: a use whose read
+landed just before a settings change runs on the pool already opened with the new settings, and one
+that finds no pool (the change just closed it on this replica) reads the row again before opening
+one. A use that fails with `source_unreachable` closes the pool, so the next use resolves the host
+and connects again (after a database failover to a new address, for example). A use that finds every
 connection in use for the connect timeout is `503 temporarily_unavailable` (the source is busy): the
-pool is kept, and a refresh that meets it leaves the source's `status` as it was. Once shutdown begins,
-no new use is accepted (`503 temporarily_unavailable`), a use whose row read was under way is
-refused after it, and shutdown waits up to 2 s for the calls still running (HTTP has already drained
-by then). Past that it asks their pools to end and moves on; a call still running is not stopped,
-and ends with the process.
+pool is kept, and a refresh that meets it leaves the source's `status` as it was. Once shutdown
+begins, no new use is accepted (`503 temporarily_unavailable`), a use whose row read was under way
+is refused after it, and shutdown waits up to 2 s for the calls still running (HTTP has already
+drained by then; running exports were stopped before the drain, [export.md](export.md#shutdown)).
+Past that it asks their pools to end and moves on; a call still running is not stopped, and ends
+with the process.
 
 ## Audit
 
 `zeteo.source.created`, `zeteo.source.updated` and `zeteo.source.archived` are written to the outbox
 in the change's transaction. A refresh, a table description change and a relation declared or
-removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an update the names of the fields
-changed, under `limits` the source's `timeout_ms`, `row_cap`, `export_enabled`, `export_row_cap`,
-`query_concurrency` and `export_concurrency` as they stand after the change, and for an override
-the finding codes. A create, and an update that carries `settings`,
+removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an
+update the names of the fields changed, under `limits` the source's `timeout_ms`, `row_cap`,
+`export_enabled`, `export_row_cap`, `query_concurrency` and `export_concurrency` as they stand after
+the change, and for an override the finding codes. A create, and an update that carries `settings`,
 also records the settings as the adapter redacts them (for `postgres` and `azure-sql`: `host`,
 `port`, `database`, `user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the
 record. The password and `ca` are never in an audit entry.

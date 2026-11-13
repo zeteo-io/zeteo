@@ -1,0 +1,78 @@
+/v1/principal-limits:
+  get:
+    tags: [Grants]
+    summary: List users' and groups' concurrency limits
+    description: |
+      Lists the rows in creation order, optionally only those of one principal type or id. Each
+      row's `principal_status` is looked up once per distinct principal.
+
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+    operationId: listPrincipalLimits
+    parameters:
+      - name: principal_type
+        in: query
+        required: false
+        schema: { $ref: '../../components/grants/schemas.yaml#/PrincipalType' }
+      - name: principal_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of limits rows
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/ListPrincipalLimitsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Grants]
+    summary: Give a user or group its own concurrency limits
+    description: |
+      Gives one user (a service account included) or group its own limits on queries and exports
+      at once, in place of `USER_QUERY_CONCURRENCY` and `USER_EXPORT_CONCURRENCY`. Each limit
+      applies apart, as each run starts: the user's own row if it sets that limit, else the
+      highest among their groups' rows, else the environment's default. The principal need not
+      exist yet. A principal has at most one row. An audit entry `zeteo.principal_limit.created`
+      is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request` (neither limit, or one out of range), `409 conflict` (the
+      principal already has a row).
+    operationId: createPrincipalLimit
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/CreatePrincipalLimitRequest'
+          example:
+            principal_type: group
+            principal_id: 0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a
+            query_concurrency: 10
+    responses:
+      '201':
+        description: The row
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/PrincipalLimit'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '409':
+        description: Conflict - `conflict`, the principal already has limits; change them with `PATCH`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

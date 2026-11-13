@@ -173,7 +173,7 @@ QueryResult:
     truncated_by:
       type: string
       enum: [rows, bytes]
-      description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB)
+      description: Present when `truncated`. `rows`, more rows existed than the limit; `bytes`, the next row would have passed the result size limit (10 MB; 1 MB through MCP)
     warnings:
       type: array
       items: { $ref: '#/QueryWarning' }
@@ -203,23 +203,27 @@ QueryError:
 
 RunOutcome:
   type: string
-  enum: [ok, refused, failed, timeout]
-  description: '`refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error'
+  enum: [ok, refused, failed, timeout, running]
+  description: |
+    `refused` for a 4xx answer, `timeout` for `query_timeout`, `failed` for any other error, a
+    client that went away (`client_closed`) included; `running` for an export that has started
+    and not yet ended. An export whose process died is closed by the housekeeping job as
+    `failed` with `interrupted`.
 
 Run:
   type: object
-  description: One query, as it was recorded
+  description: One query or export, as it was recorded
   required: [id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code, truncated, created_at]
   properties:
     id: { type: string, format: uuid }
     user_id: { type: string, format: uuid }
     source_id: { type: [string, 'null'], format: uuid, description: Null when the query named no source the caller could see }
-    entry_point: { type: string, enum: [api, mcp, export] }
+    entry_point: { type: string, enum: [api, mcp, export], description: '`POST /v1/query`, the MCP `query` tool, or `POST /v1/export`' }
     query: { description: The query as it was sent }
     duration_ms: { type: integer }
-    row_count: { type: [integer, 'null'], description: Rows returned; null unless the run succeeded }
+    row_count: { type: [integer, 'null'], description: 'Rows returned; null unless the run succeeded. For an export that started, the rows sent to the client (null while `running`)' }
     outcome: { $ref: '#/RunOutcome' }
-    error_code: { type: [string, 'null'], description: 'The error answered; `client_closed` when the client went away first' }
+    error_code: { type: [string, 'null'], description: 'The error answered; `client_closed` when the client went away first; for an export, also `shutting_down` (stopped by the service shutting down) and `interrupted` (its process died)' }
     truncated: { type: boolean }
     created_at: { type: string, format: date-time }
 
@@ -287,11 +291,18 @@ DiscoveredSource:
     limits:
       type: object
       description: What one query on this source may return and take
-      required: [default_rows, max_rows, timeout_ms]
+      required: [default_rows, max_rows, timeout_ms, export]
       properties:
         default_rows: { type: integer, description: Rows when the query sets no `limit` }
         max_rows: { type: integer, description: The most a `limit` may ask for }
         timeout_ms: { type: integer }
+        export:
+          type: object
+          description: What `POST /v1/export` may take from this source; it also needs `zeteo.data.export`
+          required: [enabled, max_rows]
+          properties:
+            enabled: { type: boolean, description: The source's exports are on and its export cap is above 0 }
+            max_rows: { type: integer, description: The source's `export_row_cap`; 0 when exports are off }
     tables:
       type: array
       description: Ordered by schema, then name

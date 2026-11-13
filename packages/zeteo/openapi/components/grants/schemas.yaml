@@ -6,10 +6,10 @@ PrincipalStatus:
   type: string
   enum: [active, orphaned, unknown]
   description: |
-    Whether the principal still exists in tereo, looked up when the grant is shown. A user is
-    `orphaned` when tereo has no such user. A group's existence cannot be read, so a group is
-    `active` or `unknown` (tereo refused or has no such group). An orphaned grant is inert. A
-    lookup that fails is also shown as `unknown`.
+    Whether the principal still exists in tereo, looked up when the grant or limits row is shown.
+    A user is `active`, or `orphaned` when tereo has no such user; an orphaned row is inert. Zeteo
+    reads a user's groups but cannot read a group itself, so a group is `unknown`. A lookup that
+    fails is also shown as `unknown`.
 
 Grant:
   type: object
@@ -103,3 +103,58 @@ ReplaceGrantRequest:
       properties:
         all_columns: { type: boolean, const: false }
         column_ids: { $ref: '#/GrantColumnIds' }
+
+PrincipalLimit:
+  type: object
+  description: A user's or group's own concurrency limits, in place of the environment's defaults
+  required: [id, principal_type, principal_id, principal_status, query_concurrency, export_concurrency, created_by, created_at, updated_at]
+  properties:
+    id: { type: string, format: uuid }
+    principal_type: { $ref: '#/PrincipalType' }
+    principal_id: { type: string, format: uuid, description: The user's or group's tereo id }
+    principal_status: { $ref: '#/PrincipalStatus' }
+    query_concurrency:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 100
+      description: Queries the principal may run at once; null when this row does not set it
+    export_concurrency:
+      type: [integer, 'null']
+      minimum: 1
+      maximum: 10
+      description: Exports the principal may run at once; null when this row does not set it
+    created_by: { type: string, format: uuid }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+
+ListPrincipalLimitsResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/PrincipalLimit' }
+    next_cursor: { type: [string, 'null'] }
+
+CreatePrincipalLimitRequest:
+  type: object
+  description: At least one of the two limits
+  additionalProperties: false
+  required: [principal_type, principal_id]
+  anyOf:
+    - required: [query_concurrency]
+    - required: [export_concurrency]
+  properties:
+    principal_type: { $ref: '#/PrincipalType' }
+    principal_id: { type: string, format: uuid }
+    query_concurrency: { type: integer, minimum: 1, maximum: 100 }
+    export_concurrency: { type: integer, minimum: 1, maximum: 10 }
+
+UpdatePrincipalLimitRequest:
+  type: object
+  description: Either limit or both; `null` clears one. A change that would leave neither set is `400 invalid_request`.
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    query_concurrency: { type: [integer, 'null'], minimum: 1, maximum: 100 }
+    export_concurrency: { type: [integer, 'null'], minimum: 1, maximum: 10 }

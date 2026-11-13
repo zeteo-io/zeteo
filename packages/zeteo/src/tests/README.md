@@ -77,9 +77,18 @@ adapter's tests also need SQL Server: `docker compose up -d mssql` from the repo
 port 1463; `TEST_MSSQL_URL` points elsewhere). `globalSetup` recreates its `zeteo_fixture` database
 from `fixtures/mssql/sales.sql` and fails at once, saying how to start it, when it is not up.
 
-The query suites run once per engine through `describeEachEngine` (`support/engines.ts`), each
-`describe` named `<name> (postgres)` or `<name> (azure-sql)`. One engine's part:
-`npx vitest run --project int -t "(azure-sql)"`.
+The query and export suites run once per engine through `describeEachEngine` (`support/engines.ts`),
+each `describe` named `<name> (postgres)` or `<name> (azure-sql)`, and expect the same rows from
+both. One engine's part: `npx vitest run --project int -t "(azure-sql)"`. Each engine has the same
+fixture data, `fixtures/<engine>/sales.sql`, and `probe.sql` beside it for the `probe` schema only
+some tests use (views of very wide, huge or trickling rows); `globalSetup` loads both into a
+`zeteo_fixture` database on each engine. A change to one engine's fixture is made to the other too.
+An export with no `orderBy` sends rows in no set order, so a test that exports without one compares
+its rows as a set (sorted), and a capped one as a subset.
+
+`e2e/` at the repository root is not one of these projects: it has its own vitest config
+(`*.e2e.test.ts`), runs against a real Tereo through `e2e/run.sh`, and is not run by CI
+([e2e/README.md](../../../../e2e/README.md)).
 
 ## Tags
 

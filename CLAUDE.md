@@ -44,14 +44,20 @@ One ordinary package:
 | `src/grants/` | `service.ts` (create, replace, remove, read grants, each audited), `access.ts` (`loadAccess`: what a caller's user and groups are granted), `principals.ts` (group membership from tereo, cached 30 s per user) and `principalStatuses.ts`, `visibleCatalog.ts` (`buildVisibleCatalog`/`loadVisibleCatalog`: granted columns only, relations whose keys are all granted; the only view of a source the planner gets) |
 | `src/limits/` | `service.ts` (create, change, remove a user's or group's own concurrency limits, each audited), `resolve.ts` (`loadUserLimits`: the caller's limits per field, from their own row, else the highest of their groups', else the environment) |
 | `src/engine/` | `index.ts` (`runQuery`: shape check, plan, concurrency leases, open the run on the adapter and read it, record), `collect.ts` (reads a row stream in batches within the row and byte caps), `export.ts` (`runExport`: the same checks and plan as a query, then export leases, renewed while it runs, and the rows passed to a sink up to the source's export cap; `POST /v1/export` streams it through `export/httpSink.ts`), `limits.ts` (profiles, row caps, Redis leases per user and per source, for queries and for exports apart), `record.ts` (the `query_runs` log; an export's run is `running` until it ends), `errors.ts` |
-| `src/jobs/` | `refreshSources.ts`: the check (30-60 s after start, then hourly) that refreshes sources not refreshed in 24 hours, under a Redis lock per source, re-reading each under the lock; started by `index.ts` (not in the test suite's shared server) |
+| `src/jobs/` | `refreshSources.ts`: the check (30-60 s after start, then hourly) that refreshes sources not refreshed in 24 hours, under a Redis lock per source, re-reading each under the lock; `runsHousekeeping.ts`: the sweep (60-120 s after start, then hourly, under one Redis lock) that closes exports still `running` after 15 minutes as `interrupted` and deletes runs older than `QUERY_RUNS_RETENTION_DAYS`. Both started by `index.ts` (not in the test suite's shared server) |
 | `src/export/` | `csv.ts` and `ndjson.ts` (an export's lines), `httpSink.ts` (the sink writing an export to the response: headers, gzip when accepted, back-pressure, CSV trailers) |
 | `src/views/` | Response shapes (`source.ts`, `catalog.ts`, `grant.ts`, `principalLimit.ts`, `run.ts`, `visibleCatalog.ts`); never carry secrets, and the caller's catalogue view carries no ids |
 | `src/routes/` | Mirrors the URL. `index.ts` is the root; `health/` at the root, the API under `v1/` (`sources/`, `sources/source/`, with `archive/`, `test/`, `refresh/`, `tables/` (and `table/`) and `relations/` (and `relation/`); `grants/` (and `grant/`); `principal-limits/` (and `principal-limit/`); `catalog/`; `export/`; `query/`; `runs/`) |
-| `openapi/`, `docs/` | The OpenAPI spec (`npm run openapi:lint` / `openapi:build` in `packages/zeteo`) and per-area notes (`docs/sources.md`, `catalog.md`, `grants.md`, `querying.md`, `azure-sql.md`) |
+| `openapi/`, `docs/` | The OpenAPI spec (`npm run openapi:lint` / `openapi:build` in `packages/zeteo`; commit the bundle, `openapi/bundled-openapi.yaml`, with its sources) and per-area notes (`docs/sources.md`, `catalog.md`, `grants.md`, `querying.md`, `export.md`, `mcp.md`, `azure-sql.md`) |
 | `src/utils/`, `src/utils/db/` | Shared: `errors.ts`, `cursor.ts`, `crypto/envelope.ts`, `validateReq.ts`, `logger.ts`, `redis.ts`, `requestId.ts`, `httpServer.ts`, `prismaErrors.ts`, `idSchema.ts`, `tereo.ts` (the one SDK client), `transaction.ts` (`withAudit`: a transaction that writes its audit entries to `core.outbox`; optional `timeoutMs`), `outboxCollector.ts`, `text.ts` (`noNul` for request strings); `db/prisma.ts` is the Prisma client and the health probe |
 | `src/tests/` | Mirrors `src/`: `<base>[.<aspect>][.unit].test.ts`, `flows/`, `conventions/`; `setup/`, `support/`, `fixtures/` are not tests. Two projects, `unit` (no server) and `int` (one real server). Rules: [src/tests/README.md](packages/zeteo/src/tests/README.md) |
 | `prisma/` | The one schema and migrations |
+
+Outside the package, `e2e/` is a local end-to-end run (`e2e/run.sh`, not run by CI): a released
+Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.0`), zeteo's own image built from
+the checkout, and a TLS source Postgres, with real sign-ins; see [e2e/README.md](e2e/README.md).
+Zeteo depends on Tereo only through released artifacts: `@tereo-io/sdk` and `@tereo-io/mcp` from
+npm, and Tereo's published image in `e2e/`. Nothing here builds Tereo from source.
 
 ## Key conventions
 
@@ -69,7 +75,7 @@ One ordinary package:
 - **Validation**: always Zod — `validateBody/Params/Query` from `utils/validateReq.ts`, Zod schemas
   for env vars.
 - **Errors**: `AppError` subclasses from `utils/errors.ts` — never `res.status(400).json(...)`
-  directly. The body is `{ error: <code>, error_description, ...details }`.
+  directly. The body is `{ error: <code>, error_description, ...details, request_id }`.
 - **Auth**: `authenticate` then `requirePermission()` from `middleware/auth.ts` on every protected
   route. `TEREO_TEST_MODE` (refused in production) accepts the SDK's `test-token-…` tokens; tests
   build them with `tests/support/tokens.ts`. A change that must be audited runs in `withAudit`, and
@@ -104,6 +110,7 @@ npm run test:unit                                        # no database or Redis 
 npm run test:int                                         # uses <db>_test and Redis db 1 (TEST_DATABASE_URL overrides)
 npm run test:local -- --tags-filter "platform"           # a tag expression; npx vitest --list-tags
 npx vitest run --project int -t "(azure-sql)"            # one engine's part of the query suite; `(postgres)` for the other
+e2e/run.sh                                               # from the root: the end-to-end run against a real Tereo (Docker)
 ```
 
 `docker compose up` builds the image from source, runs `migrate`, then Zeteo on

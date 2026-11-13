@@ -27,7 +27,14 @@ Column:
     id: { type: string, format: uuid, description: 'Stable across refreshes' }
     name: { type: string }
     type: { $ref: '#/ColumnType' }
-    native_type: { type: string, examples: ['integer', 'character varying(20)'] }
+    native_type:
+      type: string
+      description: |
+        The type as the database writes it. On Postgres an enum is marked `<name> (enum)` and a
+        domain `<name> (domain over <base type>)`, the base marked `(enum)` too when it is one
+        (`sales.price (domain over money)`); on Azure SQL the type as SQL Server writes it
+        (`nvarchar(100)`, `decimal(12,2)`).
+      examples: ['integer', 'character varying(20)', 'sales.order_status (enum)', 'sales.price (domain over money)']
     nullable: { type: boolean }
     position: { type: integer, minimum: 1 }
     is_primary_key: { type: boolean }

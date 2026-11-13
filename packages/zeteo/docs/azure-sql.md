@@ -140,21 +140,21 @@ dates and times are read in binary. Every connection sets `ANSI_NULLS`, `ANSI_WA
 `ARITHABORT` on when it opens, whatever the server's or login's defaults, so an overflow or a
 division by zero fails the query instead of yielding `NULL`.
 
-**Exact values.** The driver would read `decimal`, `numeric` and `money` as floating-point
-numbers, so the select list returns them as text, as SQL Server prints them (a `decimal(12,2)` as
+**Exact values.** The driver would read `decimal`, `numeric` and `money` as floating-point numbers,
+so the select list returns them as text, as SQL Server prints them (a `decimal(12,2)` as
 `"250.50"`). Sums run in `bigint` over smaller integers and in `decimal(38,0)` over `bigint`, so
 they do not overflow where Postgres's would not; averages over exact columns divide the exact sum
-once. Timestamps are read as UTC and cut at the millisecond (a `datetime` rounded, see below); a `datetimeoffset` is converted to
-UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC. `sum` of a `real` column is a
-`real`, as on Postgres.
+once. Timestamps are read as UTC and cut at the millisecond (a `datetime` rounded, see below); a
+`datetimeoffset` is converted to UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC.
+`sum` of a `real` column is a `real`, as on Postgres.
 
-**Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on
-the server with an attention on its own connection (no second connection is needed, so a cancel
-never waits for a busy pool); the driver's own request timeout, set when the request gets its
-connection to the time left plus two seconds, is the backstop. Once the server acknowledges the cancel the connection goes back to the pool clean; if
-it does not within two seconds, the connection is closed and the pool replaces it. Rows are read
-as they arrive: at the row or size limit the request is cancelled and the rest of the result is
-never read.
+**Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on the
+server with an attention on its own connection (no second connection is needed, so a cancel never
+waits for a busy pool); the driver's own request timeout, set when the request gets its connection
+to the time left plus two seconds, is the backstop. Once the server acknowledges the cancel the
+connection goes back to the pool clean; if it does not within two seconds, the connection is closed
+and the pool replaces it. Rows are read as they arrive: at the row or size limit the request is
+cancelled and the rest of the result is never read.
 
 **Differences from Postgres.** Text comparison, sorting, `distinct` and grouping follow the
 column's collation (case-insensitive by default; see [querying.md](querying.md)). `text`, `ntext`
@@ -173,7 +173,11 @@ a value a query returned finds its row; a bound between two ticks (`.005`) round
 
 ## Exports and load
 
-A source's queries run on the database it names. To keep exports and heavy reads off a primary,
+Exports ([export.md](export.md)) run as one request each, as a query does, read as their rows
+arrive and held back when the client is slow (the request is paused, so the server waits on the
+connection); they are stopped the same way.
+
+A source's queries and exports run on the database it names. To keep exports and heavy reads off a primary,
 point the source at a readable secondary or a copy that has its own hostname (a geo-replica, a
 named replica in Hyperscale, or a database copy). Read scale-out replicas reached with
 `ApplicationIntent=ReadOnly` are not supported: zeteo does not send that intent.
