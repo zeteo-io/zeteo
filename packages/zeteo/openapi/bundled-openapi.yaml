@@ -1,0 +1,774 @@
+openapi: 3.1.0
+info:
+  title: Zeteo API
+  version: 0.1.0
+  description: |
+    Zeteo is a query service for apps built on tereo. An administrator registers databases as
+    sources; this spec covers the source administration API. Every path in this spec is the full
+    path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
+
+    ## Authentication
+
+    Requests carry a tereo access token as `Authorization: Bearer <token>`. Zeteo verifies it with
+    tereo's SDK.
+
+    ## Permissions
+
+    Reading sources needs `zeteo.sources.read`; registering, changing, archiving and testing a
+    source needs `zeteo.sources.write`, which includes read. Without the permission the answer is
+    `403 forbidden`, before the body is validated or any source is looked up.
+
+    ## Sources
+
+    A source's `settings` depend on its `type` and are write-only in part: the response carries
+    the settings the adapter marks safe (`password` and `ca` are never returned). See
+    `docs/sources.md` for the settings of each type, the login check and its override, and the
+    network rules.
+
+    ## Pagination
+
+    Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
+    `{ data, next_cursor }`, where `next_cursor` is `null` on the last page.
+
+    ## Errors
+
+    An error is `{ "error": "<code>", "error_description": "<text>", ...details }`. A validation
+    failure is `400 invalid_request` with `issues`, a list of `{ path, message }`. The text of a
+    database's own error never appears in a response.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:4201
+    description: Local development server (each app deploys its own Zeteo; substitute its host)
+security:
+  - BearerAuth: []
+tags:
+  - name: Sources
+    description: Databases registered with Zeteo
+  - name: Platform
+    description: Health
+paths:
+  /health:
+    get:
+      tags:
+        - Platform
+      summary: Health check
+      description: |
+        Whether Postgres and Redis answer. Public: it names no version and takes no token.
+      operationId: getHealth
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+        '503':
+          description: A dependency does not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthStatus'
+  /v1/sources:
+    get:
+      tags:
+        - Sources
+      summary: List sources
+      description: |
+        Lists sources in creation order (`created_at`, then `id`). Archived sources are left out
+        unless `include_archived=true`. A source whose stored settings cannot be decrypted is
+        listed with `settings: null`.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: listSources
+      parameters:
+        - name: include_archived
+          in: query
+          required: false
+          description: Also list archived sources
+          schema:
+            type: boolean
+            default: false
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of sources
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSourcesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Sources
+      summary: Register a source
+      description: |
+        Registers a database. Before anything is stored, Zeteo validates `settings` against the
+        type's schema, checks the host against the deploy's network rules, connects with the login
+        and inspects its rights. A login that holds rights a read-only login would not is refused
+        with `422 writable_login` (the body lists the finding codes) unless `allow_writable_login`
+        is true, in which case the source is stored with `writable_login_allowed: true` and the audit
+        entry records the finding codes. Nothing is stored when any step fails. An audit entry
+        `zeteo.source.created` is written with the slug and type, never the settings.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
+        `422 source_type_unavailable`, `502 source_unreachable`.
+      operationId: createSource
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSourceRequest'
+      responses:
+        '201':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The destination or login was refused - `host_not_allowed`, `writable_login` (with `findings`) or `source_type_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}:
+    get:
+      tags:
+        - Sources
+      summary: Get a source
+      description: |
+        Returns one source, archived or not. `settings` is redacted, and null when the stored
+        settings cannot be decrypted.
+
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      operationId: getSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Sources
+      summary: Change a source
+      description: |
+        Changes any of the create fields except `slug` and `type`. A request without `settings`
+        never contacts the source. With `settings`, the new object replaces the old one whole and
+        goes through the same checks as a create (the login check included; send
+        `allow_writable_login: true` again to keep an override); the source's open connections are
+        closed so the next use connects with the new settings. An audit entry
+        `zeteo.source.updated` lists the names of the fields changed, never their values.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `422 writable_login`, `502 source_unreachable`.
+      operationId: updateSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSourceRequest'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/archive:
+    post:
+      tags:
+        - Sources
+      summary: Archive a source
+      description: |
+        Archives the source and closes its connections. Sources are never deleted, and an archived
+        source takes no further change. An audit entry `zeteo.source.archived` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived` (already archived).
+      operationId: archiveSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/test:
+    post:
+      tags:
+        - Sources
+      summary: Test a source's login
+      description: |
+        Connects with the stored settings on a fresh connection, re-checks the host against the
+        network rules and runs the login check. Returns the findings (empty for a read-only login);
+        it changes nothing, whatever it finds.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        `502 source_unreachable`.
+      operationId: testSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The login check's findings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TestSourceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '422':
+          description: The host is not permitted - `host_not_allowed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A tereo access token. Zeteo verifies it with tereo's SDK and takes the caller's user id and
+        permissions from it.
+
+        Routes ask for `zeteo.sources.read` (the reads) or `zeteo.sources.write` (every change, and
+        the login test). Permissions are tereo's dotted, hierarchical form: `write` covers `read`.
+  parameters:
+    CursorParam:
+      name: cursor
+      in: query
+      description: |
+        Opaque cursor for keyset pagination: the `next_cursor` of the previous page. Omit it on the
+        first request. A malformed cursor is `400 invalid_request`.
+      required: false
+      schema:
+        type: string
+    LimitParam:
+      name: limit
+      in: query
+      description: Maximum number of items per page
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    SourceIdParam:
+      name: sourceId
+      in: path
+      required: true
+      description: The source's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+  responses:
+    BadRequestResponse:
+      description: Bad request - `invalid_request`, with `issues`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    UnauthorizedResponse:
+      description: Unauthorized - the access token is missing, invalid or expired
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ForbiddenResponse:
+      description: Forbidden - the token lacks the permission the route needs
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFoundResponse:
+      description: Not found - no source has this id
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ConflictResponse:
+      description: Conflict - `slug_taken`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    PayloadTooLargeResponse:
+      description: Payload too large - `payload_too_large`, the body is over the route's size limit
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServerErrorResponse:
+      description: Server error - `server_error`
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServiceUnavailableResponse:
+      description: |
+        Service unavailable - `temporarily_unavailable`: the database was too busy (a transaction or a
+        lock wait ran out of time, or no connection was free). Nothing was changed; retry, after
+        `Retry-After` when it is given.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NoContentResponse:
+      description: Done; no content
+  schemas:
+    Error:
+      type: object
+      description: Every error body
+      required:
+        - error
+        - error_description
+      properties:
+        error:
+          type: string
+          description: A stable, machine-readable code
+        error_description:
+          type: string
+          description: A human-readable explanation
+        issues:
+          type: array
+          description: On `invalid_request`, the failed checks
+          items:
+            type: object
+            required:
+              - path
+              - message
+            properties:
+              path:
+                type: string
+                description: The field, dotted (`settings.port`); empty for the whole value
+              message:
+                type: string
+        findings:
+          type: array
+          description: On `writable_login`, the codes of what the login check found
+          items:
+            type: string
+    HealthStatus:
+      type: object
+      required:
+        - status
+        - postgres
+        - redis
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+            - degraded
+        postgres:
+          type: string
+          enum:
+            - ok
+            - fail
+        redis:
+          type: string
+          enum:
+            - ok
+            - fail
+    SourceType:
+      type: string
+      enum:
+        - postgres
+        - azure-sql
+      description: |
+        The kind of database. `azure-sql` is reserved: creating one answers `422 source_type_unavailable`.
+    PostgresSettings:
+      type: object
+      description: |
+        The settings of a `postgres` source. Unknown keys are refused. A source's settings are
+        replaced whole by an update. `password` and `ca` are stored encrypted and never returned.
+      required:
+        - host
+        - database
+        - user
+        - password
+      additionalProperties: false
+      properties:
+        host:
+          type: string
+          description: A hostname or IP address the deploy's network rules permit
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 5432
+        database:
+          type: string
+          minLength: 1
+        user:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+          writeOnly: true
+        tls:
+          type: string
+          enum:
+            - verify
+            - require
+            - 'off'
+          default: verify
+          description: '`verify` checks the server certificate (against `ca` when given); `require` encrypts without checking it'
+        ca:
+          type: string
+          writeOnly: true
+          description: PEM certificate authority to verify the server against
+    LoginFinding:
+      type: object
+      description: A right the source's login holds that a read-only login would not
+      required:
+        - code
+        - detail
+      properties:
+        code:
+          type: string
+          enum:
+            - superuser
+            - can_create_roles
+            - can_create_databases
+            - bypasses_row_security
+            - owns_objects
+            - can_write_tables
+            - can_create_in_schema
+            - write_role_member
+            - replication
+            - reads_server_files
+        detail:
+          type: string
+    Source:
+      type: object
+      description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+      required:
+        - id
+        - slug
+        - name
+        - type
+        - settings
+        - schemas
+        - timeout_ms
+        - row_cap
+        - export_enabled
+        - export_row_cap
+        - writable_login_allowed
+        - status
+        - last_refreshed_at
+        - created_at
+        - archived_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,62}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        type:
+          $ref: '#/components/schemas/SourceType'
+        settings:
+          type:
+            - object
+            - 'null'
+          description: The type's settings without `password` and `ca`
+          additionalProperties: true
+        schemas:
+          type: array
+          description: The database schemas Zeteo exposes
+          items:
+            type: string
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+        export_enabled:
+          type: boolean
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+        writable_login_allowed:
+          type: boolean
+          description: True when the login check found something and an administrator allowed it
+        status:
+          type: string
+          enum:
+            - active
+            - unreachable
+        last_refreshed_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        archived_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    ListSourcesResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Source'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+          description: The cursor of the next page, `null` on the last
+    CreateSourceRequest:
+      type: object
+      required:
+        - slug
+        - name
+        - type
+        - settings
+        - schemas
+      additionalProperties: false
+      properties:
+        slug:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,62}$
+          description: Unique, lower case letters, digits and hyphens, starting with a letter
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        type:
+          $ref: '#/components/schemas/SourceType'
+        settings:
+          description: The type's settings; for `postgres`, see PostgresSettings
+          $ref: '#/components/schemas/PostgresSettings'
+        schemas:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        allow_writable_login:
+          type: boolean
+          description: Accept a login the check found rights on; ignored when it found none
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+          default: 30000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+          default: 50000
+        export_enabled:
+          type: boolean
+          default: false
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          default: 0
+    UpdateSourceRequest:
+      type: object
+      description: |
+        Any of the create fields except `slug` and `type`, at least one. `settings` replaces the whole
+        settings object and runs the same checks as a create; `allow_writable_login` is accepted only
+        together with `settings`.
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        settings:
+          $ref: '#/components/schemas/PostgresSettings'
+        schemas:
+          type: array
+          minItems: 1
+          maxItems: 20
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        allow_writable_login:
+          type: boolean
+        timeout_ms:
+          type: integer
+          minimum: 1000
+          maximum: 120000
+        row_cap:
+          type: integer
+          minimum: 1
+          maximum: 50000
+        export_enabled:
+          type: boolean
+        export_row_cap:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+    TestSourceResponse:
+      type: object
+      required:
+        - ok
+        - findings
+      properties:
+        ok:
+          type: boolean
+          const: true
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/LoginFinding'
+x-tagGroups:
+  - name: Sources
+    tags:
+      - Sources
+  - name: Platform
+    tags:
+      - Platform

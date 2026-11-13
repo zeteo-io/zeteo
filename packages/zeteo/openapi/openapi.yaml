@@ -1,0 +1,115 @@
+openapi: 3.1.0
+info:
+  title: Zeteo API
+  version: 0.1.0
+  description: |
+    Zeteo is a query service for apps built on tereo. An administrator registers databases as
+    sources; this spec covers the source administration API. Every path in this spec is the full
+    path on the service: the API is versioned under `/v1`, and `GET /health` stays at the root.
+
+    ## Authentication
+
+    Requests carry a tereo access token as `Authorization: Bearer <token>`. Zeteo verifies it with
+    tereo's SDK.
+
+    ## Permissions
+
+    Reading sources needs `zeteo.sources.read`; registering, changing, archiving and testing a
+    source needs `zeteo.sources.write`, which includes read. Without the permission the answer is
+    `403 forbidden`, before the body is validated or any source is looked up.
+
+    ## Sources
+
+    A source's `settings` depend on its `type` and are write-only in part: the response carries
+    the settings the adapter marks safe (`password` and `ca` are never returned). See
+    `docs/sources.md` for the settings of each type, the login check and its override, and the
+    network rules.
+
+    ## Pagination
+
+    Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
+    `{ data, next_cursor }`, where `next_cursor` is `null` on the last page.
+
+    ## Errors
+
+    An error is `{ "error": "<code>", "error_description": "<text>", ...details }`. A validation
+    failure is `400 invalid_request` with `issues`, a list of `{ path, message }`. The text of a
+    database's own error never appears in a response.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+servers:
+  - url: http://localhost:4201
+    description: Local development server (each app deploys its own Zeteo; substitute its host)
+security:
+  - BearerAuth: []
+tags:
+  - name: Sources
+    description: Databases registered with Zeteo
+  - name: Platform
+    description: Health
+x-tagGroups:
+  - name: Sources
+    tags: [Sources]
+  - name: Platform
+    tags: [Platform]
+paths:
+  /health:
+    $ref: './paths/platform/health.yaml#/~1health'
+  /v1/sources:
+    $ref: './paths/sources/sources.yaml#/~1v1~1sources'
+  /v1/sources/{sourceId}:
+    $ref: './paths/sources/source.yaml#/~1v1~1sources~1{sourceId}'
+  /v1/sources/{sourceId}/archive:
+    $ref: './paths/sources/archive.yaml#/~1v1~1sources~1{sourceId}~1archive'
+  /v1/sources/{sourceId}/test:
+    $ref: './paths/sources/test.yaml#/~1v1~1sources~1{sourceId}~1test'
+components:
+  securitySchemes:
+    BearerAuth:
+      $ref: './components/security.yaml#/BearerAuth'
+  parameters:
+    CursorParam:
+      $ref: './components/parameters.yaml#/CursorParam'
+    LimitParam:
+      $ref: './components/parameters.yaml#/LimitParam'
+  responses:
+    BadRequestResponse:
+      $ref: './components/responses.yaml#/BadRequestResponse'
+    UnauthorizedResponse:
+      $ref: './components/responses.yaml#/UnauthorizedResponse'
+    ForbiddenResponse:
+      $ref: './components/responses.yaml#/ForbiddenResponse'
+    NotFoundResponse:
+      $ref: './components/responses.yaml#/NotFoundResponse'
+    ConflictResponse:
+      $ref: './components/responses.yaml#/ConflictResponse'
+    PayloadTooLargeResponse:
+      $ref: './components/responses.yaml#/PayloadTooLargeResponse'
+    ServerErrorResponse:
+      $ref: './components/responses.yaml#/ServerErrorResponse'
+    ServiceUnavailableResponse:
+      $ref: './components/responses.yaml#/ServiceUnavailableResponse'
+    NoContentResponse:
+      $ref: './components/responses.yaml#/NoContentResponse'
+  schemas:
+    Error:
+      $ref: './components/responses.yaml#/Error'
+    HealthStatus:
+      $ref: './components/platform/schemas.yaml#/HealthStatus'
+    SourceType:
+      $ref: './components/sources/schemas.yaml#/SourceType'
+    PostgresSettings:
+      $ref: './components/sources/schemas.yaml#/PostgresSettings'
+    LoginFinding:
+      $ref: './components/sources/schemas.yaml#/LoginFinding'
+    Source:
+      $ref: './components/sources/schemas.yaml#/Source'
+    ListSourcesResponse:
+      $ref: './components/sources/schemas.yaml#/ListSourcesResponse'
+    CreateSourceRequest:
+      $ref: './components/sources/schemas.yaml#/CreateSourceRequest'
+    UpdateSourceRequest:
+      $ref: './components/sources/schemas.yaml#/UpdateSourceRequest'
+    TestSourceResponse:
+      $ref: './components/sources/schemas.yaml#/TestSourceResponse'

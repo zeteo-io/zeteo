@@ -23,3 +23,21 @@ export const startV1App = async (v1Router: Router) => {
       }),
   };
 };
+
+/**
+ * The real `/v1` router served from the test's own process, with the tereo
+ * client it needs. Sources opened through it live in this process's pools.
+ */
+export const startV1Routes = async () => {
+  const { initializeTereo, stopTereo } = await import("../../utils/tereo.js");
+  const { default: v1Router } = await import("../../routes/v1/index.js");
+  await initializeTereo();
+  const app = await startV1App(v1Router);
+  return {
+    url: app.url,
+    close: async () => {
+      await app.close();
+      await stopTereo();
+    },
+  };
+};

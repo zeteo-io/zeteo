@@ -1,0 +1,187 @@
+// @module-tag int
+// @module-tag platform
+import { postgresAdapter } from "../../../../../adapters/postgres/index.js";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { sealSettings } from "../../../../../utils/crypto/envelope.js";
+import { startV1Routes } from "../../../../support/v1App.js";
+import { prisma } from "../../../../../utils/db/prisma.js";
+import { fetchJson } from "../../../../support/http.js";
+import {
+  isSourcePoolOpen,
+  withSourceConnection,
+} from "../../../../../sources/pools.js";
+import {
+  auditRows,
+  removeSources,
+  sourceBody,
+  writeToken,
+  sourceSettings,
+} from "../../../../support/sources.js";
+
+describe("/v1/sources/:sourceId", () => {
+  let app: Awaited<ReturnType<typeof startV1Routes>>;
+  const created: string[] = [];
+
+  beforeAll(async () => {
+    app = await startV1Routes();
+  });
+  afterAll(async () => {
+    await removeSources(created);
+    await app.close();
+  });
+
+  const call = (method: string, path: string, body?: unknown) =>
+    fetchJson(method, `${app.url}/v1/sources${path}`, writeToken(), body);
+
+  const create = async () => {
+    const res = await call("POST", "", sourceBody(sourceSettings("ro")));
+    created.push(res.body.id);
+    return res.body as { id: string; slug: string };
+  };
+
+  it("PATCH with a name only does not contact the source", async () => {
+    const source = await create();
+    // The stored settings now point at a closed port.
+    await prisma.source.update({
+      where: { id: source.id },
+      data: {
+        sealedSettings: sealSettings(
+          sourceSettings("ro", { port: 1 }),
+          source.id
+        ) as object,
+      },
+    });
+    const connect = vi.spyOn(postgresAdapter, "connect");
+    try {
+      const res = await call("PATCH", `/${source.id}`, {
+        name: "Renamed",
+        timeout_ms: 5000,
+      });
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ name: "Renamed", timeout_ms: 5000 });
+      expect(connect).not.toHaveBeenCalled();
+    } finally {
+      connect.mockRestore();
+    }
+    const entries = await auditRows(source.id);
+    expect(entries.at(-1)?.payload).toMatchObject({
+      action: "UPDATE",
+      metadata: { event: "zeteo.source.updated", slug: source.slug },
+    });
+  });
+
+  it("PATCH with settings re-runs the login check and replaces the settings", async () => {
+    const source = await create();
+    const refused = await call("PATCH", `/${source.id}`, {
+      settings: sourceSettings("rw"),
+    });
+    expect(refused.status).toBe(422);
+    expect(refused.body.error).toBe("writable_login");
+    expect((await call("GET", `/${source.id}`)).body.settings.user).toBe(
+      "zeteo_ro"
+    );
+
+    const unreachable = await call("PATCH", `/${source.id}`, {
+      settings: sourceSettings("ro", { port: 1 }),
+    });
+    expect(unreachable.status).toBe(502);
+
+    const allowed = await call("PATCH", `/${source.id}`, {
+      settings: sourceSettings("rw"),
+      allow_writable_login: true,
+    });
+    expect(allowed.status).toBe(200);
+    expect(allowed.body.settings.user).toBe("zeteo_rw");
+    expect(allowed.body.writable_login_allowed).toBe(true);
+    expect(JSON.stringify(allowed.body)).not.toContain("rw-test-password");
+    const entries = await auditRows(source.id);
+    expect(JSON.stringify(entries)).not.toContain("rw-test-password");
+    expect(entries.at(-1)?.payload.metadata.findings).toContain(
+      "can_write_tables"
+    );
+  });
+
+  it("PATCH settings closes the source's open pool", async () => {
+    const source = await create();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+    const res = await call("PATCH", `/${source.id}`, {
+      settings: sourceSettings("ro"),
+    });
+    expect(res.status).toBe(200);
+    expect(isSourcePoolOpen(source.id)).toBe(false);
+  });
+
+  it("answers 400 to allow_writable_login without settings, and to slug or type", async () => {
+    const source = await create();
+    for (const body of [
+      { allow_writable_login: true },
+      { slug: "other-slug" },
+      { type: "postgres" },
+      {},
+    ]) {
+      const res = await call("PATCH", `/${source.id}`, body);
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("archives with 204, closes the pool, and refuses later changes with 409 source_archived", async () => {
+    const source = await create();
+    await withSourceConnection(source.id, (c) => c.checkLogin());
+    expect(isSourcePoolOpen(source.id)).toBe(true);
+
+    const res = await call("POST", `/${source.id}/archive`);
+    expect(res.status).toBe(204);
+    expect(isSourcePoolOpen(source.id)).toBe(false);
+
+    const patch = await call("PATCH", `/${source.id}`, { name: "late" });
+    expect(patch.status).toBe(409);
+    expect(patch.body.error).toBe("source_archived");
+    expect((await call("POST", `/${source.id}/archive`)).body.error).toBe(
+      "source_archived"
+    );
+    expect((await call("POST", `/${source.id}/test`)).body.error).toBe(
+      "source_archived"
+    );
+    await expect(
+      withSourceConnection(source.id, (c) => c.checkLogin())
+    ).rejects.toMatchObject({ code: "source_archived" });
+
+    const view = await call("GET", `/${source.id}`);
+    expect(view.body.archived_at).toEqual(expect.any(String));
+    const entries = await auditRows(source.id);
+    expect(entries.at(-1)?.payload).toMatchObject({
+      action: "ARCHIVE",
+      metadata: { event: "zeteo.source.archived" },
+    });
+  });
+
+  it("POST /test returns the findings and changes nothing", async () => {
+    const source = await create();
+    const clean = await call("POST", `/${source.id}/test`);
+    expect(clean.status).toBe(200);
+    expect(clean.body).toEqual({ ok: true, findings: [] });
+
+    await prisma.source.update({
+      where: { id: source.id },
+      data: {
+        sealedSettings: sealSettings(sourceSettings("rw"), source.id) as object,
+      },
+    });
+    const before = await prisma.source.findUniqueOrThrow({
+      where: { id: source.id },
+    });
+    const dirty = await call("POST", `/${source.id}/test`);
+    expect(dirty.status).toBe(200);
+    expect(dirty.body.ok).toBe(true);
+    expect(dirty.body.findings.map((f: { code: string }) => f.code)).toContain(
+      "can_write_tables"
+    );
+
+    const after = await prisma.source.findUniqueOrThrow({
+      where: { id: source.id },
+    });
+    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect(after.writableLoginAllowed).toBe(false);
+  });
+});

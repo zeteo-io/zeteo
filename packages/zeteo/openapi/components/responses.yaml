@@ -1,0 +1,95 @@
+Error:
+  type: object
+  description: Every error body
+  required: [error, error_description]
+  properties:
+    error:
+      type: string
+      description: A stable, machine-readable code
+    error_description:
+      type: string
+      description: A human-readable explanation
+    issues:
+      type: array
+      description: On `invalid_request`, the failed checks
+      items:
+        type: object
+        required: [path, message]
+        properties:
+          path:
+            type: string
+            description: The field, dotted (`settings.port`); empty for the whole value
+          message:
+            type: string
+    findings:
+      type: array
+      description: On `writable_login`, the codes of what the login check found
+      items:
+        type: string
+
+BadRequestResponse:
+  description: Bad request - `invalid_request`, with `issues`
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+UnauthorizedResponse:
+  description: Unauthorized - the access token is missing, invalid or expired
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+ForbiddenResponse:
+  description: Forbidden - the token lacks the permission the route needs
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+NotFoundResponse:
+  description: Not found - no source has this id
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+ConflictResponse:
+  description: Conflict - `slug_taken`, `source_archived` (the source is archived and takes no change), or `version_conflict` (a concurrent write; re-read and retry)
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+PayloadTooLargeResponse:
+  description: Payload too large - `payload_too_large`, the body is over the route's size limit
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+ServerErrorResponse:
+  description: Server error - `server_error`
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+ServiceUnavailableResponse:
+  description: |
+    Service unavailable - `temporarily_unavailable`: the database was too busy (a transaction or a
+    lock wait ran out of time, or no connection was free). Nothing was changed; retry, after
+    `Retry-After` when it is given.
+  headers:
+    Retry-After:
+      description: Seconds to wait before retrying
+      schema:
+        type: integer
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'
+
+NoContentResponse:
+  description: Done; no content

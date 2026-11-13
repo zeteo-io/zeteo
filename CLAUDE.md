@@ -9,11 +9,12 @@ Guidance for Claude Code when working in this repository.
 and columns to tereo users and groups; people query through a validated JSON query language over
 HTTP or through an AI connected over MCP.
 
-That is the design; the code is not there yet. Today the repository is a scaffold: **one service**,
-`packages/zeteo` (port 4201), with one Postgres database (schemas `zeteo` and `core`, neither with
-tables of its own yet beyond `core`'s outbox) and Redis, answering `GET /health`. Sign-in through
-tereo, permissions and the audit outbox exist; there is no data model, no source and no query yet. Do not describe or rely on any of
-them as existing.
+That is the design; the code is only part of the way there. Today: **one service**,
+`packages/zeteo` (port 4201), with one Postgres database (schemas `zeteo` and `core`) and Redis.
+Sign-in through tereo, permissions and the audit outbox exist, and so does the sources admin API
+(`/v1/sources`: register, list, change, archive and test a Postgres source, with encrypted
+settings, a network allowlist, a login check and per-source connection pools). There is no
+catalogue refresh, grant or query yet. Do not describe or rely on those as existing.
 
 Read [README.md](README.md) first. The design and the plans are in `docs/superpowers/` (kept out of
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the
@@ -30,8 +31,12 @@ One ordinary package:
 | `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read`, `zeteo.sources.write`), the `zeteo_admin` role, audit event names. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
 | `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |
 | `src/sources/network.ts` | The one decision whether zeteo may connect to a host: `SOURCE_ALLOWED_HOSTS` rules (`parseAllowedHosts`, parsed at start by `env.ts`) and `resolveAllowed`, which resolves once and returns the address to dial. Link-local, metadata, unspecified and multicast addresses are refused whatever the rules say |
-| `src/routes/` | Mirrors the URL. `index.ts` is the root; `health/` is the only area so far |
-| `src/utils/`, `src/utils/db/` | Shared: `errors.ts`, `validateReq.ts`, `logger.ts`, `redis.ts`, `requestId.ts`, `httpServer.ts`, `prismaErrors.ts`, `idSchema.ts`, `tereo.ts` (the one SDK client), `transaction.ts` (`withAudit`: a transaction that writes its audit entries to `core.outbox`), `outboxCollector.ts`; `db/prisma.ts` is the Prisma client and the health probe |
+| `src/adapters/` | `SourceAdapter` (settings schema, redaction, connect, login check, schema read) per source type; `adapterFor`. Postgres is the only one |
+| `src/sources/` | `service.ts` (create, update, archive, test: the checks, sealing and audit), `pools.ts` (`withSourceConnection`, one pool per source, idle close), `connect.ts` (reads settings, `connectChecked`), `network.ts` |
+| `src/views/` | Response shapes (`source.ts`); never carry secrets |
+| `src/routes/` | Mirrors the URL. `index.ts` is the root; `health/` at the root, the API under `v1/` (`sources/`, `sources/source/`, with `archive/` and `test/`) |
+| `openapi/`, `docs/` | The OpenAPI spec (`npm run openapi:lint` / `openapi:build` in `packages/zeteo`) and per-area notes (`docs/sources.md`) |
+| `src/utils/`, `src/utils/db/` | Shared: `errors.ts`, `cursor.ts`, `crypto/envelope.ts`, `validateReq.ts`, `logger.ts`, `redis.ts`, `requestId.ts`, `httpServer.ts`, `prismaErrors.ts`, `idSchema.ts`, `tereo.ts` (the one SDK client), `transaction.ts` (`withAudit`: a transaction that writes its audit entries to `core.outbox`), `outboxCollector.ts`; `db/prisma.ts` is the Prisma client and the health probe |
 | `src/tests/` | Mirrors `src/`: `<base>[.<aspect>][.unit].test.ts`, `flows/`, `conventions/`; `setup/`, `support/`, `fixtures/` are not tests. Two projects, `unit` (no server) and `int` (one real server). Rules: [src/tests/README.md](packages/zeteo/src/tests/README.md) |
 | `prisma/` | The one schema and migrations |
 

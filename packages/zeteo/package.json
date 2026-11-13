@@ -13,6 +13,8 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "test": "../../docker/test/run.sh",
     "tereo:provisioning": "tsx scripts/tereo-provisioning.ts",
+    "openapi:lint": "redocly lint",
+    "openapi:build": "redocly lint && redocly bundle",
     "test:unit": "vitest run --project unit",
     "test:int": "vitest run --project int",
     "test:local": "vitest run",
@@ -41,6 +43,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@redocly/cli": "^2.78.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.9",

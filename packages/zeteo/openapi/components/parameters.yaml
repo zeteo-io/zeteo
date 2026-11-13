@@ -1,0 +1,27 @@
+CursorParam:
+  name: cursor
+  in: query
+  description: |
+    Opaque cursor for keyset pagination: the `next_cursor` of the previous page. Omit it on the
+    first request. A malformed cursor is `400 invalid_request`.
+  required: false
+  schema:
+    type: string
+
+LimitParam:
+  name: limit
+  in: query
+  description: Maximum number of items per page
+  required: false
+  schema:
+    type: integer
+    minimum: 1
+    maximum: 100
+    default: 50
+
+SourceIdParam:
+  name: sourceId
+  in: path
+  required: true
+  description: The source's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

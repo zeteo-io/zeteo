@@ -1,0 +1,76 @@
+/v1/sources/{sourceId}:
+  get:
+    tags: [Sources]
+    summary: Get a source
+    description: |
+      Returns one source, archived or not. `settings` is redacted, and null when the stored
+      settings cannot be decrypted.
+
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+    operationId: getSource
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '200':
+        description: The source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/sources/schemas.yaml#/Source'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Sources]
+    summary: Change a source
+    description: |
+      Changes any of the create fields except `slug` and `type`. A request without `settings`
+      never contacts the source. With `settings`, the new object replaces the old one whole and
+      goes through the same checks as a create (the login check included; send
+      `allow_writable_login: true` again to keep an override); the source's open connections are
+      closed so the next use connects with the new settings. An audit entry
+      `zeteo.source.updated` lists the names of the fields changed, never their values.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+      `422 writable_login`, `502 source_unreachable`.
+    operationId: updateSource
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/sources/schemas.yaml#/UpdateSourceRequest'
+    responses:
+      '200':
+        description: The source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/sources/schemas.yaml#/Source'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `source_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

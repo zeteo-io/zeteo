@@ -1,0 +1,21 @@
+/health:
+  get:
+    tags: [Platform]
+    summary: Health check
+    description: |
+      Whether Postgres and Redis answer. Public: it names no version and takes no token.
+    operationId: getHealth
+    security: []
+    responses:
+      '200':
+        description: Healthy
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/platform/schemas.yaml#/HealthStatus'
+      '503':
+        description: A dependency does not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/platform/schemas.yaml#/HealthStatus'

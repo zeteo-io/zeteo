@@ -1,0 +1,80 @@
+/v1/sources:
+  get:
+    tags: [Sources]
+    summary: List sources
+    description: |
+      Lists sources in creation order (`created_at`, then `id`). Archived sources are left out
+      unless `include_archived=true`. A source whose stored settings cannot be decrypted is
+      listed with `settings: null`.
+
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+    operationId: listSources
+    parameters:
+      - name: include_archived
+        in: query
+        required: false
+        description: Also list archived sources
+        schema: { type: boolean, default: false }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of sources
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/sources/schemas.yaml#/ListSourcesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Sources]
+    summary: Register a source
+    description: |
+      Registers a database. Before anything is stored, Zeteo validates `settings` against the
+      type's schema, checks the host against the deploy's network rules, connects with the login
+      and inspects its rights. A login that holds rights a read-only login would not is refused
+      with `422 writable_login` (the body lists the finding codes) unless `allow_writable_login`
+      is true, in which case the source is stored with `writable_login_allowed: true` and the audit
+      entry records the finding codes. Nothing is stored when any step fails. An audit entry
+      `zeteo.source.created` is written with the slug and type, never the settings.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
+      `422 source_type_unavailable`, `502 source_unreachable`.
+    operationId: createSource
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/sources/schemas.yaml#/CreateSourceRequest'
+    responses:
+      '201':
+        description: The source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/sources/schemas.yaml#/Source'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The destination or login was refused - `host_not_allowed`, `writable_login` (with `findings`) or `source_type_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

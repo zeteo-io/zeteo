@@ -25,3 +25,26 @@ export const update = (
 
 export const archive = (id: string): Promise<Source> =>
   prisma.source.update({ where: { id }, data: { archivedAt: new Date() } });
+
+/** One page in creation order (`created_at`, then `id`), starting after `after`; `hasMore` says whether another page follows. */
+export const listPage = async (options: {
+  includeArchived: boolean;
+  limit: number;
+  after?: { createdAt: Date; id: string };
+}): Promise<{ rows: Source[]; hasMore: boolean }> => {
+  const { includeArchived, limit, after } = options;
+  const rows = await prisma.source.findMany({
+    where: {
+      ...(includeArchived ? {} : { archivedAt: null }),
+      ...(after && {
+        OR: [
+          { createdAt: { gt: after.createdAt } },
+          { createdAt: after.createdAt, id: { gt: after.id } },
+        ],
+      }),
+    },
+    orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    take: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+};

@@ -133,6 +133,30 @@ export class SourceTypeUnavailableError extends AppError {
   }
 }
 
+/**
+ * A login that can change data or reach beyond the database, found by the
+ * login check; `findings` are the codes, never the details.
+ */
+export class WritableLoginError extends AppError {
+  constructor(findings: string[]) {
+    super(
+      422,
+      "writable_login",
+      "The login can write or reach beyond the database; use a read-only login or set allow_writable_login",
+      { details: { findings } }
+    );
+    this.name = "WritableLoginError";
+  }
+}
+
+/** A change to a source that has been archived. */
+export class SourceArchivedError extends AppError {
+  constructor() {
+    super(409, "source_archived", "The source is archived");
+    this.name = "SourceArchivedError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

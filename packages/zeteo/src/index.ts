@@ -3,6 +3,7 @@ import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
+import { closeAllSourcePools } from "./sources/pools.js";
 import { createServer, type Server } from "http";
 import { logger } from "./utils/logger.js";
 import env from "./env.js";
@@ -76,6 +77,7 @@ export function createAppServer(port: number = env.PORT): ServerInstance {
             logger.info("HTTP server closed");
           });
         }
+        await step("source pools", closeAllSourcePools);
         await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);
