@@ -14,8 +14,11 @@ Requires Node.js 22.
 ## Install
 
 ```sh
-npm install @zeteo-io/sdk @dianemo/core
+npm install @zeteo-io/sdk @dianemo/core ioredis
 ```
+
+`@dianemo/core` and `ioredis` are peer dependencies: the handler and Redis connection your service
+passes in must be the same copies the SDK uses.
 
 ## Set up
 

@@ -1,16 +1,11 @@
 export { createZeteoClient } from "./client.js";
 export type { ZeteoClient, ZeteoCalls, ZeteoClientOptions } from "./client.js";
-export { zeteoPlugin } from "./plugin.js";
-export { ZETEO_TEMPLATE } from "./template.js";
-export type { ZeteoCredentials } from "./template.js";
 export {
   ZeteoError,
   QueryRefusedError,
   ExportInterruptedError,
 } from "./errors.js";
 export { paginate } from "./paginate.js";
-export { OPERATIONS } from "./operations.js";
-export type { OperationId } from "./operations.js";
 export type {
   Page,
   ListOptions,
