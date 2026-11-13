@@ -268,7 +268,9 @@ once.
 - Concurrency is counted in Redis, so it holds across replicas. A third query from one user is
   `429 too_many_queries`; a sixth on one source `429 source_busy`; both with `Retry-After` and
   `retry_after` (seconds). A slot is held at most the time limit plus 5 s, and is released as soon
-  as the query ends, however it ends.
+  as the query ends, however it ends; the response does not wait for the release, and a release
+  Redis does not take lapses at that expiry. When Redis fails or does not answer within a second,
+  no slot can be taken and the query is `503 temporarily_unavailable`, recorded as `failed`.
 - The body is at most 64 KB (`413 payload_too_large`).
 - A client that disconnects stops its query on the source; the run is recorded as `failed` with
   `client_closed`.
@@ -300,7 +302,7 @@ be run as written is `422` with `path` (keys and array indexes from the root of 
   values than the source's engine takes; see *Filters*).
 - From running: `502 query_failed` (the source refused or failed to run the query),
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
-  `503 temporarily_unavailable` (group membership or the source pool briefly unavailable).
+  `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
   fixed message, and the request's id is in the log line.
 

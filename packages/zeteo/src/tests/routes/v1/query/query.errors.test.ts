@@ -1,11 +1,12 @@
 // @module-tag int
 // @module-tag platform
-import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import { closeAllSourcePools } from "../../../../sources/pools.js";
 import { describeEachEngine } from "../../../support/engines.js";
 import { removeSources } from "../../../support/sources.js";
 import { adapterFor } from "../../../../adapters/index.js";
 import { startV1Routes } from "../../../support/v1App.js";
+import { leaseKey } from "../../../../engine/leases.js";
+import { redis } from "../../../../utils/redis.js";
 import type {
   QueryResult,
   SourceConnection,
@@ -19,6 +20,15 @@ import {
   seedQuerySource,
   type SeededSource,
 } from "../../../support/queries.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 // The engine's own checks against a planner or adapter that misbehaves, made
 // to misbehave in this process: what the result goes through on its way out,
@@ -157,6 +167,71 @@ describeEachEngine("POST /v1/query: the engine's checks", (engine) => {
     expect(run).toMatchObject({
       outcome: "refused",
       errorCode: "not_found_or_not_accessible",
+    });
+  });
+
+  describe("Redis that never answers", () => {
+    const redisUser = newQueryUser();
+    const never = () => new Promise<never>(() => undefined);
+    const askAs = () =>
+      postQuery(
+        redisUser.token,
+        { source: source.slug, from: "accounts", select: ["id", "name"] },
+        app.url
+      );
+    // The lease command's one-second bound, plus room for a slow runner.
+    const WITHIN_MS = 4000;
+
+    beforeAll(async () => {
+      await grantTo(redisUser.principal, source.tables.accounts!, [
+        "id",
+        "name",
+      ]);
+    });
+    afterEach(async () => {
+      vi.restoreAllMocks();
+      // Leases a hung release left behind would otherwise outlive the test.
+      await redis.del(
+        leaseKey(`user:${redisUser.id}`),
+        leaseKey(`source:${source.id}`)
+      );
+    });
+    afterAll(async () => {
+      await removeRunsOf([redisUser.id]);
+    });
+
+    it("returns the result while releasing its leases hangs", async () => {
+      vi.spyOn(redis, "zrem").mockImplementation(never);
+      const started = Date.now();
+      const res = await askAs();
+      expect(Date.now() - started).toBeLessThan(WITHIN_MS);
+      expect(res.status).toBe(200);
+      expect(res.body.rows).toEqual([
+        [1, "Northwind"],
+        [2, "Contoso"],
+      ]);
+      expect((await runsOf([redisUser.id])).at(-1)).toMatchObject({
+        outcome: "ok",
+      });
+    });
+
+    it("answers 503 and records a failed run when no lease can be taken", async () => {
+      const evaluate = redis.eval.bind(redis);
+      vi.spyOn(redis, "eval").mockImplementation(((
+        ...args: Parameters<typeof redis.eval>
+      ) =>
+        args.some((a) => typeof a === "string" && a.startsWith("zeteo:lease:"))
+          ? never()
+          : evaluate(...args)) as typeof redis.eval);
+      const started = Date.now();
+      const res = await askAs();
+      expect(Date.now() - started).toBeLessThan(WITHIN_MS);
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("temporarily_unavailable");
+      expect((await runsOf([redisUser.id])).at(-1)).toMatchObject({
+        outcome: "failed",
+        errorCode: "temporarily_unavailable",
+      });
     });
   });
 });

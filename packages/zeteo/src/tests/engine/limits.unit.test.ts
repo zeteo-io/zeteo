@@ -2,8 +2,11 @@
 // @module-tag platform
 import { acquireRunLeases, runLimits } from "../../engine/limits.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TooManyRequestsError } from "../../utils/errors.js";
 import { acquireLease } from "../../engine/leases.js";
+import {
+  ServiceUnavailableError,
+  TooManyRequestsError,
+} from "../../utils/errors.js";
 
 vi.mock(import("../../engine/leases.js"), () => ({
   acquireLease: vi.fn(),
@@ -35,6 +38,24 @@ describe("acquireRunLeases", () => {
     const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
     expect(err).toBeInstanceOf(TooManyRequestsError);
     expect(err.code).toBe("source_busy");
+    expect(releaseUser).toHaveBeenCalledOnce();
+  });
+
+  it("does not wait for the user's release when the source refuses", async () => {
+    const releaseUser = vi.fn(() => new Promise<void>(() => undefined));
+    lease.mockResolvedValueOnce(releaseUser).mockResolvedValueOnce(null);
+    const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
+    expect(err.code).toBe("source_busy");
+    expect(releaseUser).toHaveBeenCalledOnce();
+  });
+
+  it("does not wait for the user's release when the source's lease fails", async () => {
+    const releaseUser = vi.fn(() => new Promise<void>(() => undefined));
+    lease
+      .mockResolvedValueOnce(releaseUser)
+      .mockRejectedValueOnce(new ServiceUnavailableError("redis down"));
+    const err = await acquireRunLeases("u", "s", 1000).catch((e) => e);
+    expect(err).toBeInstanceOf(ServiceUnavailableError);
     expect(releaseUser).toHaveBeenCalledOnce();
   });
 

@@ -1,3 +1,5 @@
+import { withinRedisTimeout } from "../utils/redisTimeout.js";
+import { ServiceUnavailableError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
 import { randomUUID } from "crypto";
@@ -21,8 +23,10 @@ return 1`;
 
 /**
  * Takes one of `limit` slots under `key` for at most `ttlMs`. Returns its
- * release, or null when all `limit` are taken. Releasing twice is harmless; a
- * release that fails is logged, and the lease then lapses at its expiry.
+ * release, or null when all `limit` are taken; throws a 503 when Redis fails
+ * or does not answer within its bound. Releasing twice is harmless; a release
+ * that fails or does not answer in time is logged, and the lease then lapses
+ * at its expiry.
  */
 export const acquireLease = async (
   key: string,
@@ -31,11 +35,21 @@ export const acquireLease = async (
 ): Promise<(() => Promise<void>) | null> => {
   const redisKey = leaseKey(key);
   const member = randomUUID();
-  const taken = await redis.eval(ACQUIRE, 1, redisKey, limit, ttlMs, member);
+  let taken: unknown;
+  try {
+    taken = await withinRedisTimeout(
+      redis.eval(ACQUIRE, 1, redisKey, limit, ttlMs, member)
+    );
+  } catch (err) {
+    logger.warn({ err, key }, "taking a lease failed");
+    throw new ServiceUnavailableError(
+      "Query limits cannot be checked right now; retry shortly"
+    );
+  }
   if (taken !== 1) return null;
   return async () => {
     try {
-      await redis.zrem(redisKey, member);
+      await withinRedisTimeout(redis.zrem(redisKey, member));
     } catch (err) {
       logger.warn({ err, key }, "releasing a lease failed");
     }

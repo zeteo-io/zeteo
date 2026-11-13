@@ -195,7 +195,8 @@ const execute = async (
       conn.runQuery(plan, limits, signal)
     );
   } finally {
-    await release();
+    // Not waited for: a release that fails is logged, and its lease lapses.
+    void release();
   }
   checkResult(plan, result, sourceId);
   return { plan, result };

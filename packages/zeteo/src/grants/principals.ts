@@ -1,5 +1,6 @@
 import { getGroup, listUserGroups } from "../utils/tereoGroups.js";
 import { requests, RequestError } from "@tereo-io/sdk/handler";
+import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { assertNoTransaction } from "../utils/tereo.js";
 import type { Caller } from "../middleware/auth.js";
@@ -46,7 +47,8 @@ export const fetchGroupsFromTereo = async (
 
 /**
  * The user's groups through `fetch`, cached 30 s in Redis (unfiltered). A
- * failed fetch is a 503, never an empty list.
+ * failed fetch is a 503, never an empty list. A cache that fails or does not
+ * answer within its bound is passed over.
  */
 export const resolveGroupsWith = async (
   fetch: (userId: string) => Promise<GroupRef[]>,
@@ -54,7 +56,7 @@ export const resolveGroupsWith = async (
 ): Promise<GroupRef[]> => {
   const key = groupsKey(userId);
   try {
-    const cached = await redis.get(key);
+    const cached = await withinRedisTimeout(redis.get(key));
     if (cached !== null) return JSON.parse(cached) as GroupRef[];
   } catch (err) {
     logger.warn({ err }, "group cache unreadable; asking tereo");
@@ -67,15 +69,27 @@ export const resolveGroupsWith = async (
     throw unavailable();
   }
   try {
-    await redis.set(key, JSON.stringify(groups), "EX", GROUPS_TTL_SECONDS);
+    await withinRedisTimeout(
+      redis.set(key, JSON.stringify(groups), "EX", GROUPS_TTL_SECONDS)
+    );
   } catch (err) {
     logger.warn({ err }, "group cache not written");
   }
   return groups;
 };
 
+/** A test-mode seam's Redis read; one that fails or does not answer in time is a 503. */
+const readTestSeam = async <T>(command: Promise<T>): Promise<T> => {
+  try {
+    return await withinRedisTimeout(command);
+  } catch (err) {
+    logger.warn({ err }, "test-mode principal data unreadable");
+    throw unavailable();
+  }
+};
+
 const testGroups = async (userId: string): Promise<GroupRef[]> => {
-  const raw = await redis.get(testGroupsKey(userId));
+  const raw = await readTestSeam(redis.get(testGroupsKey(userId)));
   return raw === null ? [] : (JSON.parse(raw) as GroupRef[]);
 };
 
@@ -124,7 +138,7 @@ export const principalStatus = async (
   id: string
 ): Promise<PrincipalStatus> => {
   if (env.TEREO_TEST_MODE) {
-    return (await redis.sismember(TEST_ORPHANED_KEY, id)) === 1
+    return (await readTestSeam(redis.sismember(TEST_ORPHANED_KEY, id))) === 1
       ? "orphaned"
       : "active";
   }

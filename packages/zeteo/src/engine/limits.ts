@@ -60,7 +60,8 @@ const releaseAll = async (...releases: Release[]): Promise<void> => {
 /**
  * Takes a slot for the user, then one for the source, each for `ttlMs`, and
  * returns their release, which never throws. Refuses with 429
- * `too_many_queries` or `source_busy`, holding neither.
+ * `too_many_queries` or `source_busy`, or 503 when Redis fails, holding
+ * neither: a lease already taken is released without waiting for Redis.
  */
 export const acquireRunLeases = async (
   userId: string,
@@ -83,11 +84,11 @@ export const acquireRunLeases = async (
       ttlMs
     );
   } catch (err) {
-    await releaseAll(user);
+    void releaseAll(user);
     throw err;
   }
   if (!source) {
-    await releaseAll(user);
+    void releaseAll(user);
     throw new TooManyRequestsError(
       RETRY_AFTER_SECONDS,
       "The source is running as many queries as it allows; retry shortly",
