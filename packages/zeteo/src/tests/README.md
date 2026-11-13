@@ -72,7 +72,10 @@ A `.unit` file must not import any of these: `utils/db/`, `utils/redis.ts`, the 
 `app.ts` and `index.ts`, `setup/` (only `setup/tags.ts` is allowed) and `support/` (only
 `support/pure/` is allowed). The check covers direct imports only.
 
-`int` tests run against the real server, Postgres and Redis, with no mocks of them.
+`int` tests run against the real server, Postgres and Redis, with no mocks of them. The Azure SQL
+adapter's tests also need SQL Server: `docker compose up -d mssql` from the repository root (host
+port 1463; `TEST_MSSQL_URL` points elsewhere). `globalSetup` recreates its `zeteo_fixture` database
+from `fixtures/mssql/sales.sql` and fails at once, saying how to start it, when it is not up.
 
 ## Tags
 
@@ -123,7 +126,7 @@ requires (`AREA_BY_PATH` in `tags.ts`, longest prefix wins). Detail tags are opt
 
 ```sh
 npm run test:unit                                   # unit project; no Docker, DB or Redis needed
-npm run test:int                                    # int project; postgres + redis up
+npm run test:int                                    # int project; postgres, redis and mssql up
 npm run test:local -- --tags-filter "auth && race"  # any tag expression, both projects
 npx vitest --list-tags
 npm test                                            # docker/test/run.sh

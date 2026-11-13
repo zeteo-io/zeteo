@@ -1,4 +1,4 @@
-# Isolated integration-test stack: throwaway Postgres and Redis on tmpfs, no
+# Isolated integration-test stack: throwaway Postgres, SQL Server and Redis, no
 # published ports, and the test runner. Driven by docker/test/run.sh, which
 # starts one of these per shard of the suite.
 name: zeteo-test
@@ -29,6 +29,26 @@ services:
       timeout: 3s
       retries: 30
 
+  # The Azure SQL adapter's fixture server. amd64 only; no volume, so its
+  # data goes with the container.
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Zeteo-test-1
+      MSSQL_PID: Developer
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
   runner:
     # Tagged, so every shard's stack runs the one image built for the run. The
     # prefix keeps concurrent runs (one per worktree) from retagging each other's.
@@ -41,6 +61,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      mssql:
+        condition: service_healthy
     environment:
       DOCKER_TEST: "true"
       # This stack's shard of the suite, `<index>/<count>`; unset runs it all.
@@ -52,9 +74,10 @@ services:
       TEREO_TEST_MODE: "true"
       # Tests only: 32 bytes of 0x07.
       ZETEO_MASTER_KEY: BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc
-      # Loopback, and this stack's Postgres by its service name.
-      SOURCE_ALLOWED_HOSTS: 127.0.0.0/8,::1/128,localhost,postgres
+      # Loopback, and this stack's Postgres and SQL Server by their service names.
+      SOURCE_ALLOWED_HOSTS: 127.0.0.0/8,::1/128,localhost,postgres,mssql
       PORT: "4201"
       PUBLIC_URL: http://localhost:4201
       DATABASE_URL: postgresql://zeteo:zeteo@postgres:5432/zeteo_test
       REDIS_URL: redis://redis:6379
+      TEST_MSSQL_URL: mssql://sa:Zeteo-test-1@mssql:1433

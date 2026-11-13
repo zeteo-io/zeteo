@@ -66,6 +66,11 @@ export function loadTestEnv(): Record<string, string> {
       process.env.TEST_DATABASE_URL ?? env.TEST_DATABASE_URL ?? db.toString(),
     REDIS_URL:
       process.env.TEST_REDIS_URL ?? env.TEST_REDIS_URL ?? redis.toString(),
+    // The SQL Server of the Azure SQL tests: docker-compose.yml's `mssql`.
+    TEST_MSSQL_URL:
+      process.env.TEST_MSSQL_URL ??
+      env.TEST_MSSQL_URL ??
+      "mssql://sa:Zeteo-test-1@localhost:1463",
     NODE_ENV: "test",
     LOG_LEVEL: "silent",
     TEREO_TEST_MODE: "true",

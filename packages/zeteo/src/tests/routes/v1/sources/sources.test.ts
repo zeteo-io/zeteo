@@ -199,14 +199,6 @@ describe("/v1/sources", () => {
     expect(again.body.error).toBe("slug_taken");
   });
 
-  it("answers 422 source_type_unavailable for azure-sql", async () => {
-    const res = await post(
-      sourceBody({ server: "x" }, { type: "azure-sql", slug: uniqueSlug() })
-    );
-    expect(res.status).toBe(422);
-    expect(res.body.error).toBe("source_type_unavailable");
-  });
-
   it("answers 400 invalid_request for a malformed slug, with no row", async () => {
     const slug = "Bad Slug";
     const res = await post(sourceBody(sourceSettings("ro"), { slug }));

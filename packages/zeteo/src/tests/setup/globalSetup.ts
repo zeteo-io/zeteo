@@ -121,6 +121,8 @@ export async function setup() {
   });
 
   await recreateFixtureDatabase(process.env.DATABASE_URL!);
+  const { recreateMssqlFixture } = await import("../support/mssqlFixture.js");
+  await recreateMssqlFixture();
 
   // Earlier runs would otherwise leave state in Redis db 1.
   const { redis } = await import("../../utils/redis.js");

@@ -161,6 +161,8 @@ components:
       $ref: './components/sources/schemas.yaml#/SourceType'
     PostgresSettings:
       $ref: './components/sources/schemas.yaml#/PostgresSettings'
+    AzureSqlSettings:
+      $ref: './components/sources/schemas.yaml#/AzureSqlSettings'
     LoginFinding:
       $ref: './components/sources/schemas.yaml#/LoginFinding'
     Source:

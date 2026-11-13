@@ -1,5 +1,5 @@
-import { SourceTypeUnavailableError } from "../utils/errors.js";
 import type { SourceAdapter, SourceType } from "./types.js";
+import { azureSqlAdapter } from "./azure-sql/index.js";
 import { postgresAdapter } from "./postgres/index.js";
 
 export const adapterFor = (type: SourceType): SourceAdapter => {
@@ -7,6 +7,6 @@ export const adapterFor = (type: SourceType): SourceAdapter => {
     case "postgres":
       return postgresAdapter as SourceAdapter;
     case "azure-sql":
-      throw new SourceTypeUnavailableError(type);
+      return azureSqlAdapter as SourceAdapter;
   }
 };

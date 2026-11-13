@@ -57,7 +57,22 @@ zeteo sends the startup option `default_transaction_read_only=on` as a backstop,
 
 ### `azure-sql`
 
-Reserved. Creating one answers `422 source_type_unavailable`.
+```json
+{
+  "host": "sales.database.windows.net",
+  "port": 1433,
+  "database": "sales",
+  "user": "zeteo_reader",
+  "password": "...",
+  "tls": "verify"
+}
+```
+
+`port` defaults to 1433 and `tls` to `verify`; `tls` is `verify` or `trust-server-certificate`, and
+the connection is always encrypted. `password` is encrypted at rest and never returned. Sources of
+this type are created, checked and read into the catalogue; queries on them are not available yet.
+The settings, the read-only login to create, what its login check refuses and the type mapping are
+in [azure-sql.md](azure-sql.md).
 
 ## Creating and changing
 
@@ -92,7 +107,8 @@ The check runs on every create, on every settings change and on `POST /v1/source
 It covers the whole connected database, not just the listed `schemas`: the list can change later
 without the login being checked again. It reads the catalogs only, counts every role the login is a
 member of (it can `SET ROLE` to them), and returns `{ code, detail }` findings for rights a
-read-only login would not have. Each code means:
+read-only login would not have. Each code means, for `postgres` (for `azure-sql`, see
+[azure-sql.md](azure-sql.md#what-the-login-check-refuses)):
 
 | Code | Meaning |
 |------|---------|
@@ -169,9 +185,9 @@ and ends with the process.
 in the change's transaction. A refresh, a table description change and a relation declared or
 removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an update the names of the fields
 changed, and for an override the finding codes. A create, and an update that carries `settings`,
-also records the settings as the adapter redacts them (for `postgres`: `host`, `port`, `database`,
-`user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the record. The password
-and `ca` are never in an audit entry.
+also records the settings as the adapter redacts them (for `postgres` and `azure-sql`: `host`,
+`port`, `database`, `user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the
+record. The password and `ca` are never in an audit entry.
 
 ## Error codes
 
@@ -184,5 +200,5 @@ and `ca` are never in an audit entry.
 | 409 | `source_archived` | any change to, or test of, an archived source |
 | 422 | `host_not_allowed` | the host is not permitted |
 | 422 | `writable_login` | the login check found something and the override was not given |
-| 422 | `source_type_unavailable` | the type is not available yet |
+| 422 | `source_type_unavailable` | a query on a source whose type cannot run queries yet (`azure-sql`) |
 | 502 | `source_unreachable` | the source could not be reached or refused the login; the driver's text is logged, never returned |

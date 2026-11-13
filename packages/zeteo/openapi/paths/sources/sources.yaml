@@ -45,7 +45,7 @@
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
       **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
-      `422 source_type_unavailable`, `502 source_unreachable`.
+      `502 source_unreachable`.
     operationId: createSource
     requestBody:
       required: true
@@ -66,7 +66,7 @@
       '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
-        description: The destination or login was refused - `host_not_allowed`, `writable_login` (with `findings`) or `source_type_unavailable`
+        description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
         content:
           application/json:
             schema:

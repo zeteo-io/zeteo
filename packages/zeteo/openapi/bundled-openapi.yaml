@@ -157,7 +157,7 @@ paths:
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
         **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
-        `422 source_type_unavailable`, `502 source_unreachable`.
+        `502 source_unreachable`.
       operationId: createSource
       requestBody:
         required: true
@@ -183,7 +183,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: The destination or login was refused - `host_not_allowed`, `writable_login` (with `findings`) or `source_type_unavailable`
+          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
           content:
             application/json:
               schema:
@@ -1292,7 +1292,8 @@ components:
         - postgres
         - azure-sql
       description: |
-        The kind of database. `azure-sql` is reserved: creating one answers `422 source_type_unavailable`.
+        The kind of database. Queries on an `azure-sql` source are not available yet: they answer
+        `422 source_type_unavailable`.
     PostgresSettings:
       type: object
       description: |
@@ -1335,6 +1336,48 @@ components:
           type: string
           writeOnly: true
           description: PEM certificate authority to verify the server against
+    AzureSqlSettings:
+      type: object
+      description: |
+        The settings of an `azure-sql` source (Azure SQL Database or SQL Server, SQL authentication).
+        Unknown keys are refused. A source's settings are replaced whole by an update. `password` is
+        stored encrypted and never returned. The connection is always encrypted.
+      required:
+        - host
+        - database
+        - user
+        - password
+      additionalProperties: false
+      properties:
+        host:
+          type: string
+          maxLength: 253
+          description: A hostname or IP address the deploy's network rules permit; no instance name
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          default: 1433
+        database:
+          type: string
+          minLength: 1
+          maxLength: 128
+        user:
+          type: string
+          minLength: 1
+          maxLength: 128
+        password:
+          type: string
+          minLength: 1
+          maxLength: 128
+          writeOnly: true
+        tls:
+          type: string
+          enum:
+            - verify
+            - trust-server-certificate
+          default: verify
+          description: '`verify` checks the server certificate against `host`; `trust-server-certificate` encrypts without checking it'
     LoginFinding:
       type: object
       description: A right the source's login holds that a read-only login would not
@@ -1471,8 +1514,10 @@ components:
         type:
           $ref: '#/components/schemas/SourceType'
         settings:
-          description: The type's settings; for `postgres`, see PostgresSettings
-          $ref: '#/components/schemas/PostgresSettings'
+          description: The type's settings, PostgresSettings or AzureSqlSettings
+          anyOf:
+            - $ref: '#/components/schemas/PostgresSettings'
+            - $ref: '#/components/schemas/AzureSqlSettings'
         schemas:
           type: array
           minItems: 1
@@ -1518,7 +1563,10 @@ components:
           minLength: 1
           maxLength: 255
         settings:
-          $ref: '#/components/schemas/PostgresSettings'
+          description: The source type's settings, PostgresSettings or AzureSqlSettings
+          anyOf:
+            - $ref: '#/components/schemas/PostgresSettings'
+            - $ref: '#/components/schemas/AzureSqlSettings'
         schemas:
           type: array
           minItems: 1

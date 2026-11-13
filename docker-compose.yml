@@ -4,10 +4,10 @@
 #   docker compose up                     # everything: migrate, then zeteo on 4201;
 #                                         # no .env needed
 #
-# Host ports (5462 / 6409) keep clear of 5432/6379 and of the sibling stacks
-# (tereo 5442 / 6389); override with ZETEO_POSTGRES_PORT /
-# ZETEO_REDIS_PORT. Both are published on 127.0.0.1 only: their credentials
-# are the public defaults below.
+# Host ports (5462 / 6409 / 1463) keep clear of 5432/6379/1433 and of the
+# sibling stacks (tereo 5442 / 6389); override with ZETEO_POSTGRES_PORT /
+# ZETEO_REDIS_PORT / ZETEO_MSSQL_PORT. All are published on 127.0.0.1 only:
+# their credentials are the public defaults below.
 name: zeteo
 
 services:
@@ -36,6 +36,32 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+
+  # SQL Server, the Azure SQL adapter's test fixture. Not needed to run zeteo,
+  # so a plain `up` leaves it out; naming it starts it:
+  #   docker compose up -d mssql
+  # amd64 only; on Apple Silicon it runs under emulation. The sa password is a
+  # public test default.
+  mssql:
+    profiles: ["mssql"]
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    platform: linux/amd64
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: Zeteo-test-1
+      MSSQL_PID: Developer
+    ports:
+      - "127.0.0.1:${ZETEO_MSSQL_PORT:-1463}:1433"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' -b -o /dev/null",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
 
   # Migrations, once per `up`, before zeteo starts.
   migrate:

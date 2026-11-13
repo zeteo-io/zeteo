@@ -28,7 +28,10 @@ const row = (overrides: Partial<Source>): Source => ({
 
 describe("sourceView", () => {
   it.each([
-    ["the type has no adapter", { type: "azure_sql" as const }],
+    [
+      "an azure-sql source's settings cannot be opened",
+      { type: "azure_sql" as const, sealedSettings: { v: 1 } },
+    ],
     ["the settings cannot be opened", { sealedSettings: { v: 1 } }],
   ])(
     "shows settings null, and logs the cause under err, when %s",
