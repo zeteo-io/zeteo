@@ -11,7 +11,9 @@ import {
   bodyOf,
   CFG,
   jsonResponse,
+  exposedSurface,
   LOGIN_KEY,
+  secretsOf,
   storeLogin,
   tokenBody,
 } from "@/test/oauthFixtures";
@@ -33,6 +35,8 @@ const fetchMock = vi.fn<typeof fetch>();
 let assign: ReturnType<typeof vi.spyOn>;
 let meAnswers: Array<() => Response>;
 let tokenAnswers: Array<() => Response>;
+let defaultToken: () => Response;
+let tokenTimes: number[];
 
 const callsTo = (url: string) =>
   fetchMock.mock.calls.filter(([u]) => String(u) === url);
@@ -68,12 +72,15 @@ beforeEach(() => {
   vi.mocked(loadConfig).mockReset().mockResolvedValue(CFG);
   meAnswers = [];
   tokenAnswers = [];
+  defaultToken = () => jsonResponse(200, tokenBody());
+  tokenTimes = [];
   fetchMock.mockReset().mockImplementation(async (input) => {
     const url = String(input);
     if (url === "/v1/me")
       return (meAnswers.shift() ?? (() => jsonResponse(200, ME)))();
     if (url === `${CFG.tereoUrl}/oauth/token`) {
-      return (tokenAnswers.shift() ?? (() => jsonResponse(200, tokenBody())))();
+      tokenTimes.push(Date.now());
+      return (tokenAnswers.shift() ?? defaultToken)();
     }
     if (url === `${CFG.tereoUrl}/oauth/revoke`)
       return new Response(null, { status: 200 });
@@ -85,6 +92,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  Reflect.deleteProperty(window, "isSecureContext");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   window.history.replaceState(null, "", "/");
@@ -272,7 +280,7 @@ describe("AuthProvider", () => {
     ).toBeInTheDocument();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(31_000);
     });
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
     expect(lastNavigation().searchParams.get("prompt")).toBe("none");
@@ -303,5 +311,113 @@ describe("AuthProvider", () => {
     });
     expect(callsTo(`${CFG.tereoUrl}/oauth/token`)).toHaveLength(1);
     expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps no token outside memory after the callback and after a renewal", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    localStorage.clear();
+    const issued = [
+      tokenBody({ suffix: "cb", expiresIn: 120 }),
+      tokenBody({ suffix: "renewed", expiresIn: 120 }),
+    ];
+    tokenAnswers.push(
+      () => jsonResponse(200, issued[0]),
+      () => jsonResponse(200, issued[1])
+    );
+    const secrets = secretsOf(issued);
+    const login = storeLogin({ returnTo: "/sources" });
+    renderAt(`/callback?code=c8&state=${login.state}`);
+
+    expect(
+      await screen.findByText("signed in as Ada Lovelace")
+    ).toBeInTheDocument();
+    for (const secret of secrets)
+      expect(exposedSurface()).not.toContain(secret);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(61_000);
+    });
+    expect(getTokens()?.refreshToken).toBe(issued[1].refresh_token);
+    for (const secret of secrets)
+      expect(exposedSurface()).not.toContain(secret);
+  });
+
+  it("renews a 30-second token about every 15 seconds, never back to back", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    defaultToken = () => jsonResponse(200, tokenBody({ expiresIn: 30 }));
+    const login = storeLogin();
+    renderAt(`/callback?code=c9&state=${login.state}`);
+    expect(
+      await screen.findByText("signed in as Ada Lovelace")
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300_000);
+    });
+
+    const renewals = tokenTimes.length - 1;
+    expect(renewals).toBeGreaterThanOrEqual(15);
+    expect(renewals).toBeLessThanOrEqual(22);
+    for (let i = 1; i < tokenTimes.length; i++) {
+      expect(tokenTimes[i] - tokenTimes[i - 1]).toBeGreaterThanOrEqual(5_000);
+    }
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("starts one sign-in, not a loop, when a 30-second token's renewal is refused", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    tokenAnswers.push(() => jsonResponse(200, tokenBody({ expiresIn: 30 })));
+    defaultToken = () => jsonResponse(400, { error: "invalid_grant" });
+    const login = storeLogin();
+    renderAt(`/callback?code=c10&state=${login.state}`);
+    expect(
+      await screen.findByText("signed in as Ada Lovelace")
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300_000);
+    });
+
+    expect(tokenTimes).toHaveLength(2);
+    expect(assign).toHaveBeenCalledTimes(1);
+    expect(lastNavigation().searchParams.get("prompt")).toBe("none");
+  });
+
+  it("retries a renewal Tereo keeps refusing with 429 on a bounded cadence, keeping the session", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    tokenAnswers.push(() => jsonResponse(200, tokenBody({ expiresIn: 30 })));
+    defaultToken = () => jsonResponse(429, { error: "too_many_requests" });
+    const login = storeLogin();
+    renderAt(`/callback?code=c11&state=${login.state}`);
+    expect(
+      await screen.findByText("signed in as Ada Lovelace")
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300_000);
+    });
+
+    expect(tokenTimes.length - 1).toBeLessThanOrEqual(61);
+    for (let i = 1; i < tokenTimes.length; i++) {
+      expect(tokenTimes[i] - tokenTimes[i - 1]).toBeGreaterThanOrEqual(5_000);
+    }
+    expect(getTokens()).not.toBeNull();
+    expect(assign).not.toHaveBeenCalled();
+  });
+
+  it("explains that sign-in needs https when the page is not a secure context", async () => {
+    Object.defineProperty(window, "isSecureContext", {
+      value: false,
+      configurable: true,
+    });
+    renderAt("/");
+
+    expect(
+      await screen.findByText(
+        "Sign-in needs https (or localhost): this page was opened over plain http."
+      )
+    ).toBeInTheDocument();
+    expect(assign).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(LOGIN_KEY)).toBeNull();
   });
 });

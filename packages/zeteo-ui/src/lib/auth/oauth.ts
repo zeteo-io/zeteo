@@ -92,6 +92,10 @@ export const startLogin = async (
     returnTo = "/",
   }: { silent?: boolean; returnTo?: string } = {}
 ): Promise<void> => {
+  // crypto.subtle exists only in a secure context (https or localhost).
+  if (window.isSecureContext === false || !globalThis.crypto?.subtle) {
+    throw new AuthError("insecure_context");
+  }
   const login: LoginState = {
     verifier: createVerifier(),
     state: randomToken(),
@@ -126,10 +130,12 @@ const cleanCode = (value: unknown, fallback: string): string =>
 const postForm = async (
   cfg: UiConfig,
   path: string,
-  form: Record<string, string>
+  form: Record<string, string>,
+  signal?: AbortSignal
 ): Promise<Response> => {
   try {
     return await fetch(`${cfg.tereoUrl}${path}`, {
+      signal,
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -281,9 +287,11 @@ const refresh = async (cfg: UiConfig): Promise<Tokens> => {
   });
   if (!res.ok) {
     const code = await errorCodeOf(res);
-    // A refused refresh token (revoked, expired, or its family ended) is
-    // dead: drop it. A 5xx leaves it for another try.
-    if (res.status < 500 && getTokens() === held) setTokens(null);
+    // 400 invalid_grant (revoked, expired, or its family ended) or 401: the
+    // refresh token is dead. A 429, a 5xx and the like leave it for another try.
+    if ((res.status === 400 || res.status === 401) && getTokens() === held) {
+      setTokens(null);
+    }
     throw new AuthError(code);
   }
   const tokens = await readTokens(res, held);
@@ -307,6 +315,7 @@ export const renew = (cfg: UiConfig): Promise<Tokens> => {
 // Tereo refuses an id_token_hint that expired more than an hour ago
 // (ID_TOKEN_HINT_GRACE_SECONDS); without one it asks the person to confirm.
 const HINT_GRACE_MS = 60 * 60 * 1000;
+const REVOKE_TIMEOUT_MS = 5_000;
 
 const usableHint = (idToken: string): string | null => {
   const exp = decodeClaims(idToken)?.exp;
@@ -326,15 +335,30 @@ export const signOut = async (cfg: UiConfig): Promise<void> => {
   }
 
   if (held) {
-    try {
-      await postForm(cfg, "/oauth/revoke", {
+    // Best effort, and bounded: end-session below still ends Tereo's session.
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timedOut = new Promise<void>((resolve) => {
+      timer = setTimeout(() => {
+        abort.abort();
+        resolve();
+      }, REVOKE_TIMEOUT_MS);
+    });
+    const revoked = postForm(
+      cfg,
+      "/oauth/revoke",
+      {
         token: held.refreshToken,
         token_type_hint: "refresh_token",
         client_id: cfg.clientId,
-      });
-    } catch {
-      // Best effort: end-session below still ends Tereo's session.
-    }
+      },
+      abort.signal
+    ).then(
+      () => undefined,
+      () => undefined
+    );
+    await Promise.race([revoked, timedOut]);
+    clearTimeout(timer);
   }
 
   const params = new URLSearchParams({

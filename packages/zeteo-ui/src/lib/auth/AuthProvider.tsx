@@ -22,8 +22,15 @@ import {
   type ReactNode,
 } from "react";
 
-const RENEW_BEFORE_EXPIRY_MS = 60_000;
+// Renew 60 s before expiry, or halfway through a shorter-lived token, and
+// never sooner than 5 s after the previous attempt: Tereo's access-token
+// lifetime can be configured down to seconds.
+const RENEW_LEAD_MS = 60_000;
+const MIN_RENEW_GAP_MS = 5_000;
 const RENEW_RETRY_MS = 30_000;
+
+const INSECURE_CONTEXT_MESSAGE =
+  "Sign-in needs https (or localhost): this page was opened over plain http.";
 
 // Answers to a silent (prompt=none) login that mean "sign in on Tereo's page".
 const NEEDS_INTERACTION = new Set([
@@ -50,6 +57,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const cfgRef = useRef<UiConfig | null>(null);
   const started = useRef(false);
   const signingOut = useRef(false);
+  const lastRenewal = useRef(Number.NEGATIVE_INFINITY);
+  const reloginStarted = useRef(false);
   const onCallback = useRef(window.location.pathname === CALLBACK_PATH);
 
   const redirect = useCallback(
@@ -57,12 +66,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       try {
         await startLogin(cfg, opts);
       } catch (err) {
-        // crypto.subtle and sessionStorage are missing outside a secure
-        // context (https or localhost) or with storage blocked.
         setState({
           status: "error",
           title: "Sign-in cannot start",
-          message: `This browser could not start a sign-in: ${messageOf(err)}`,
+          message:
+            err instanceof AuthError && err.code === "insecure_context"
+              ? INSECURE_CONTEXT_MESSAGE
+              : `This browser could not start a sign-in: ${messageOf(err)}`,
           canSignOut: false,
         });
       }
@@ -158,21 +168,31 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!signedIn || !cfg) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
+    const runIn = (delay: number) => {
+      clearTimeout(timer);
+      const earliest = lastRenewal.current + MIN_RENEW_GAP_MS - Date.now();
+      timer = setTimeout(run, Math.max(0, delay, earliest));
+    };
     const run = () => {
+      lastRenewal.current = Date.now();
       renew(cfg).catch(() => {
         if (signingOut.current) return;
-        if (getTokens()) {
-          timer = setTimeout(run, RENEW_RETRY_MS);
-        } else {
+        const tokens = getTokens();
+        if (tokens) {
+          const remaining = Math.max(0, tokens.expiresAt - Date.now());
+          runIn(Math.min(RENEW_RETRY_MS, remaining / 2));
+        } else if (!reloginStarted.current) {
+          reloginStarted.current = true;
           void redirect(cfg, { silent: true, returnTo: currentPath() });
         }
       });
     };
+    // Called as tokens arrive, so what remains is about their whole lifetime.
     const schedule = (tokens: Tokens | null) => {
       clearTimeout(timer);
       if (!tokens) return;
-      const delay = tokens.expiresAt - RENEW_BEFORE_EXPIRY_MS - Date.now();
-      timer = setTimeout(run, Math.max(0, delay));
+      const remaining = Math.max(0, tokens.expiresAt - Date.now());
+      runIn(remaining - Math.min(RENEW_LEAD_MS, remaining / 2));
     };
 
     schedule(getTokens());

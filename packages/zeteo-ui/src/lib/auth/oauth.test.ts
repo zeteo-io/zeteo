@@ -81,6 +81,37 @@ describe("startLogin", () => {
     expect(p.get("code_challenge")).toBe(await challengeFor(stored.verifier));
   });
 
+  it.each([
+    [
+      "outside a secure context",
+      () => {
+        Object.defineProperty(window, "isSecureContext", {
+          value: false,
+          configurable: true,
+        });
+      },
+    ],
+    [
+      "without crypto.subtle",
+      () => {
+        vi.spyOn(globalThis.crypto, "subtle", "get").mockReturnValue(
+          undefined as unknown as SubtleCrypto
+        );
+      },
+    ],
+  ])("refuses to start %s, storing nothing", async (_name, arrange) => {
+    arrange();
+    try {
+      const err = await startLogin(CFG).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(AuthError);
+      expect((err as AuthError).code).toBe("insecure_context");
+      expect(assign).not.toHaveBeenCalled();
+      expect(sessionStorage.getItem(LOGIN_KEY)).toBeNull();
+    } finally {
+      Reflect.deleteProperty(window, "isSecureContext");
+    }
+  });
+
   it("adds prompt=none only when silent", async () => {
     await startLogin(CFG, { silent: true });
     expect(navigatedTo().searchParams.get("prompt")).toBe("none");
@@ -355,6 +386,32 @@ describe("renew", () => {
     expect(getTokens()).toBeNull();
   });
 
+  it.each([[401, "invalid_client"]])(
+    "clears the tokens on a %i",
+    async (status, error) => {
+      setTokens(someTokens());
+      fetchMock.mockResolvedValue(jsonResponse(status, { error }));
+      await expect(renew(CFG)).rejects.toBeInstanceOf(AuthError);
+      expect(getTokens()).toBeNull();
+    }
+  );
+
+  it.each([
+    [429, "too_many_requests"],
+    [403, "forbidden"],
+    [500, "server_error"],
+    [503, "temporarily_unavailable"],
+  ])("keeps the tokens and rejects on a %i", async (status, error) => {
+    const held = someTokens();
+    setTokens(held);
+    fetchMock.mockResolvedValue(jsonResponse(status, { error }));
+
+    const err = await renew(CFG).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AuthError);
+    expect((err as AuthError).code).toBe(error);
+    expect(getTokens()).toBe(held);
+  });
+
   it("keeps the tokens when Tereo cannot be reached", async () => {
     const held = someTokens();
     setTokens(held);
@@ -413,6 +470,52 @@ describe("signOut", () => {
     expect(end.searchParams.get("post_logout_redirect_uri")).toBe(
       `${window.location.origin}/`
     );
+  });
+
+  it("gives up on a revoke that hangs after 5 seconds and still ends the session", async () => {
+    vi.useFakeTimers();
+    try {
+      setTokens(someTokens());
+      let aborted = false;
+      fetchMock.mockImplementation(
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              aborted = true;
+              reject(new DOMException("aborted", "AbortError"));
+            });
+          })
+      );
+
+      let done = false;
+      const out = signOut(CFG).then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(done).toBe(false);
+      expect(assign).not.toHaveBeenCalled();
+      expect(getTokens()).toBeNull();
+
+      await vi.advanceTimersByTimeAsync(200);
+      await out;
+      expect(aborted).toBe(true);
+      expect(navigatedTo().pathname).toBe("/oauth/end-session");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ends the session after 5 seconds even when the revoke ignores the abort", async () => {
+    vi.useFakeTimers();
+    try {
+      setTokens(someTokens());
+      fetchMock.mockReturnValue(new Promise<Response>(() => {}));
+
+      const out = signOut(CFG);
+      await vi.advanceTimersByTimeAsync(5_000);
+      await out;
+      expect(navigatedTo().pathname).toBe("/oauth/end-session");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still clears the tokens and ends the session when the revoke fails", async () => {

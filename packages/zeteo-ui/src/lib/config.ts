@@ -32,7 +32,19 @@ const parseConfig = (body: unknown): UiConfig => {
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new ConfigError(`${CONFIG_PATH}'s tereo_url is not an http(s) URL`);
   }
-  return { tereoUrl: tereo_url.replace(/\/+$/, ""), clientId: client_id };
+  if (url.username || url.password) {
+    throw new ConfigError(`${CONFIG_PATH}'s tereo_url carries credentials`);
+  }
+  // `url.search`/`url.hash` are empty for a bare "?" or "#", hence the raw check.
+  if (url.search || url.hash || /[?#]/.test(tereo_url)) {
+    throw new ConfigError(
+      `${CONFIG_PATH}'s tereo_url has a query string or a fragment`
+    );
+  }
+  return {
+    tereoUrl: `${url.origin}${url.pathname}`.replace(/\/+$/, ""),
+    clientId: client_id,
+  };
 };
 
 const fetchConfig = async (): Promise<UiConfig> => {

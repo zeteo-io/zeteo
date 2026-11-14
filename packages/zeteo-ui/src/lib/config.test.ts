@@ -36,6 +36,22 @@ describe("loadConfig", () => {
     );
   });
 
+  it.each([
+    ["https://tereo.example.com", "https://tereo.example.com"],
+    ["https://tereo.example.com/auth/", "https://tereo.example.com/auth"],
+    ["HTTPS://Tereo.Example.com:443/", "https://tereo.example.com"],
+    ["http://localhost:4001//", "http://localhost:4001"],
+  ])(
+    "keeps %s as %s (origin and path, no trailing slash)",
+    async (raw, kept) => {
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, { tereo_url: raw, client_id: "c" })
+      );
+      const { loadConfig } = await load();
+      expect((await loadConfig()).tereoUrl).toBe(kept);
+    }
+  );
+
   it("fetches once however often it is asked", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(200, { tereo_url: "https://t.example", client_id: "c" })
@@ -64,7 +80,7 @@ describe("loadConfig", () => {
     await expect(loadConfig()).rejects.toBeInstanceOf(ConfigError);
   });
 
-  it.each([
+  it.each<[string, Response]>([
     ["not JSON", new Response("<html>", { status: 200 })],
     ["no client_id", jsonResponse(200, { tereo_url: "https://t.example" })],
     [
@@ -81,6 +97,21 @@ describe("loadConfig", () => {
       jsonResponse(200, { tereo_url: "javascript:alert(1)", client_id: "c" }),
     ],
     ["an array", jsonResponse(200, [])],
+    ...(
+      [
+        ["an ftp tereo_url", "ftp://tereo.example"],
+        ["a file tereo_url", "file:///etc/passwd"],
+        ["a tereo_url with a user", "https://user@tereo.example"],
+        ["a tereo_url with credentials", "https://user:pw@tereo.example"],
+        ["a tereo_url with a query", "https://tereo.example/?a=1"],
+        ["a tereo_url with a bare ?", "https://tereo.example/?"],
+        ["a tereo_url with a fragment", "https://tereo.example/#x"],
+        ["a tereo_url with a bare #", "https://tereo.example#"],
+      ] as const
+    ).map(([name, tereo_url]): [string, Response] => [
+      name,
+      jsonResponse(200, { tereo_url, client_id: "c" }),
+    ]),
   ])("rejects with a ConfigError on %s", async (_name, response) => {
     fetchMock.mockResolvedValue(response);
     const { loadConfig, ConfigError } = await load();

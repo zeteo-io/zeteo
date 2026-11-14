@@ -68,3 +68,20 @@ export const callbackUrl = (params: Record<string, string>) =>
 
 export const bodyOf = (init: RequestInit | undefined) =>
   Object.fromEntries(new URLSearchParams(String(init?.body ?? "")));
+
+/** Each token, and each long JWT segment on its own in case one is stored split. */
+export const secretsOf = (issued: ReturnType<typeof tokenBody>[]) =>
+  issued.flatMap((t) =>
+    [t.access_token, t.refresh_token, t.id_token]
+      .filter((s): s is string => typeof s === "string")
+      .flatMap((s) => [s, ...s.split(".").filter((part) => part.length > 20)])
+  );
+
+/** Every place outside memory a token could end up in this page. */
+export const exposedSurface = () =>
+  [
+    JSON.stringify({ ...localStorage }),
+    JSON.stringify({ ...sessionStorage }),
+    document.cookie,
+    window.location.href,
+  ].join("\n");
