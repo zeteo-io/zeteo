@@ -1,0 +1,47 @@
+.z-runs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.z-runs-filters > * {
+  min-width: 12rem;
+}
+
+.z-runs-person {
+  margin-bottom: 0.75rem;
+}
+
+.z-runs-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-run-detail dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.z-run-detail dt {
+  font-weight: 600;
+}
+
+.z-run-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.z-run-query {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid currentColor;
+  border-radius: 0.375rem;
+}

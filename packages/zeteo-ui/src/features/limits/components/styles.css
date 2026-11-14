@@ -1,0 +1,20 @@
+.z-limits-filter {
+  margin-bottom: 0.75rem;
+}
+
+.z-limits-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.z-limits-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-limits-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
