@@ -102,6 +102,34 @@ describe("lookupFromTereo", () => {
     expect(sdk.getUsersByIds).toHaveBeenCalledWith([A, MISSING]);
   });
 
+  it("asks for more than 100 users in batches of at most 100, in the refs' order", async () => {
+    const ids = Array.from(
+      { length: 150 },
+      (_, i) => `01a1d7a8-0000-7000-8000-${String(i).padStart(12, "0")}`
+    );
+    sdk.getUsersByIds.mockImplementation(async (batch: string[]) =>
+      batch.map((id) => user(id))
+    );
+    const out = await lookupFromTereo(ids.map((id) => ({ type: "user", id })));
+    expect(sdk.getUsersByIds.mock.calls.map(([b]) => b.length)).toEqual([
+      100, 50,
+    ]);
+    expect(out.map((p) => p.id)).toEqual(ids);
+    expect(out.every((p) => p.status === "active")).toBe(true);
+  });
+
+  it("a batch element without an id or status is tereo_unreachable", async () => {
+    for (const bad of [
+      { email: "x@example.com", status: "active" },
+      { id: A },
+    ]) {
+      sdk.getUsersByIds.mockResolvedValue([bad]);
+      await expect(
+        lookupFromTereo([{ type: "user", id: A }])
+      ).rejects.toBeInstanceOf(TereoUnreachableError);
+    }
+  });
+
   it("collapses a repeated ref to its first", async () => {
     sdk.getUsersByIds.mockResolvedValue([user(A), user(B)]);
     const out = await lookupFromTereo([

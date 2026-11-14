@@ -38,6 +38,11 @@ export const MAX_USER_IDS_PER_REQUEST = 100;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const chunks = <T>(items: T[], size: number): T[][] =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, i) =>
+    items.slice(i * size, (i + 1) * size)
+  );
+
 const refKey = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
 
 const orphaned = (ref: PrincipalRef): Principal =>
@@ -170,11 +175,15 @@ export const lookupFromTereo = async (
   assertNoTransaction("tereo lookupPrincipals()");
   try {
     await Promise.all([
-      userIds.length === 0
-        ? undefined
-        : requests.auth.getUsersByIds(userIds).then((users) => {
-            for (const u of users) found.set(`user:${u.id}`, fromUser(u));
-          }),
+      ...chunks(userIds, MAX_USER_IDS_PER_REQUEST).map(async (ids) => {
+        for (const u of await requests.auth.getUsersByIds(ids)) {
+          // A malformed element would be filed under the wrong id and read as an orphan.
+          if (typeof u?.id !== "string" || typeof u.status !== "string") {
+            throw new Error("tereo returned a malformed user");
+          }
+          found.set(`user:${u.id}`, fromUser(u));
+        }
+      }),
       ...groupIds.map(async (id) => {
         const group = await getTereo().auth.getGroup(id);
         if (group) found.set(`group:${id}`, fromGroup(group));
