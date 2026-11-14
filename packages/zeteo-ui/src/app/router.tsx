@@ -1,5 +1,8 @@
 import { RequirePermission } from "@/components/RequirePermission";
+import { NoAccessSection } from "@/components/NoAccessSection";
+import { sourceRoutes } from "@/features/sources/routes";
 import { EmptyState, Spinner } from "@kosmeo-ui/react";
+import { RouteError } from "@/components/RouteError";
 import { PageHeader } from "@/components/PageHeader";
 import { RootLayout } from "./layouts/RootLayout";
 import { Suspense, lazy, useState } from "react";
@@ -30,7 +33,12 @@ const pages = {
 const DefaultSection = () => {
   const { can } = useAuth();
   const section = SECTIONS.find((s) => can(s.permission));
-  return section ? <Navigate to={section.path} replace /> : null;
+  // Holding none of the sections' permissions: say what is missing.
+  return section ? (
+    <Navigate to={section.path} replace />
+  ) : (
+    <NoAccessSection permission={SECTIONS[0].permission} />
+  );
 };
 
 const NotFound = () => (
@@ -44,6 +52,7 @@ export const routes = [
   {
     path: "/",
     element: <RootLayout />,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <DefaultSection /> },
       ...SECTIONS.map((section) => {
@@ -59,6 +68,7 @@ export const routes = [
           ),
         };
       }),
+      ...sourceRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },
