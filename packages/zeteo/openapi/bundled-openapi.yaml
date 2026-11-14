@@ -93,7 +93,7 @@ tags:
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
-    description: Health
+    description: Health and the signed-in caller
 paths:
   /health:
     get:
@@ -117,6 +117,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthStatus'
+  /v1/me:
+    get:
+      tags:
+        - Platform
+      summary: Who is signed in, and which zeteo permissions they hold
+      description: |
+        Describes the caller for the admin UI. `permissions` lists the caller's permissions that start
+        with `zeteo.`, sorted, exactly as held: a permission is not expanded along its ladder, so a
+        holder of `zeteo.grants.write` is not shown `zeteo.grants.read`, and the UI applies the ladder
+        itself (`write` includes `read`, `archive` includes `write`, `delete` includes `archive`,
+        `admin` includes all on its base). A bare `admin` permission covers every zeteo permission
+        and is listed too when held, verbatim. `name` and `email` come from tereo's directory and
+        are `null` when it cannot be reached or does not know the user; the answer is still `200`.
+
+        **Required permissions:** none beyond a valid token.
+      operationId: getMe
+      responses:
+        '200':
+          description: The caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/sources:
     get:
       tags:
@@ -1868,6 +1895,37 @@ components:
           enum:
             - ok
             - fail
+    Me:
+      type: object
+      required:
+        - id
+        - type
+        - name
+        - email
+        - permissions
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The caller's user id (a service account's own user id)
+        type:
+          type: string
+          enum:
+            - user
+            - service
+        name:
+          type:
+            - string
+            - 'null'
+        email:
+          type:
+            - string
+            - 'null'
+        permissions:
+          type: array
+          description: Held permissions starting with `zeteo.` (and a bare `admin`, if held), sorted, not expanded along their ladders
+          items:
+            type: string
     SourceType:
       type: string
       enum:

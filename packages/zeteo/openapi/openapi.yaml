@@ -93,7 +93,7 @@ tags:
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
-    description: Health
+    description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
     tags: [Sources, Catalogue]
@@ -106,6 +106,8 @@ x-tagGroups:
 paths:
   /health:
     $ref: './paths/platform/health.yaml#/~1health'
+  /v1/me:
+    $ref: './paths/platform/me.yaml#/~1v1~1me'
   /v1/sources:
     $ref: './paths/sources/sources.yaml#/~1v1~1sources'
   /v1/sources/{sourceId}:
@@ -185,6 +187,8 @@ components:
       $ref: './components/responses.yaml#/Error'
     HealthStatus:
       $ref: './components/platform/schemas.yaml#/HealthStatus'
+    Me:
+      $ref: './components/platform/schemas.yaml#/Me'
     SourceType:
       $ref: './components/sources/schemas.yaml#/SourceType'
     PostgresSettings:
