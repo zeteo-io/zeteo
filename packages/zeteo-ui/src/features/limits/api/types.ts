@@ -1,9 +1,6 @@
 // Field for field the OpenAPI `PrincipalLimit`, `CreatePrincipalLimitRequest`
 // and `UpdatePrincipalLimitRequest` schemas.
-import type {
-  PrincipalStatus,
-  PrincipalType,
-} from "@/features/grants/api/types";
+import type { PrincipalStatus, PrincipalType } from "@/features/principals";
 
 export interface PrincipalLimit {
   id: string;

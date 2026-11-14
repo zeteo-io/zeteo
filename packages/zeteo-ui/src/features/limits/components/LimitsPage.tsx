@@ -1,4 +1,3 @@
-import { PrincipalCell } from "@/features/grants/components/PrincipalCell";
 import { Button, EmptyState, Spinner, Table } from "@kosmeo-ui/react";
 import type { LimitFilters, PrincipalLimit } from "../api/types";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -12,6 +11,7 @@ import { LimitForm } from "./LimitForm";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
+  PrincipalCell,
   PrincipalPicker,
   usePrincipalNames,
   type PrincipalRef,
@@ -122,7 +122,13 @@ export const LimitsPage = () => {
           columns={[
             {
               title: "Principal",
-              cellElement: (limit) => <PrincipalCell grant={limit} />,
+              cellElement: (limit) => (
+                <PrincipalCell
+                  principal_type={limit.principal_type}
+                  principal_id={limit.principal_id}
+                  status={limit.principal_status}
+                />
+              ),
             },
             {
               title: "Query concurrency",

@@ -1,8 +1,8 @@
 import { PrincipalLabel, PrincipalPicker } from "@/features/principals";
-import { useAllSources } from "@/features/grants/api/useAllSources";
 import { formatDuration } from "@/utils/formatDuration";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
+import { useAllSources } from "@/features/sources";
 import { useSearchParams } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
 import { OutcomeBadge } from "./OutcomeBadge";

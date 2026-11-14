@@ -1,3 +1,4 @@
+import { parseNumberField } from "@/utils/parseNumberField";
 import { useCreateSource } from "../api/useCreateSource";
 import { useUpdateSource } from "../api/useUpdateSource";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -110,13 +111,6 @@ const parseSchemas = (text: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-/** Undefined for an empty field; NaN for anything but digits (reported by `validate`). */
-const parseNumber = (text: string): number | undefined => {
-  const t = text.trim();
-  if (t === "") return undefined;
-  return /^\d+$/.test(t) ? Number(t) : NaN;
-};
-
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
@@ -142,7 +136,7 @@ const buildSettings = (
   type: SourceType,
   c: ConnectionState
 ): SourceSettings => {
-  const port = parseNumber(c.port);
+  const port = parseNumberField(c.port);
   const base = {
     host: c.host.trim(),
     ...(port !== undefined && { port }),
@@ -262,7 +256,7 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     }
     if (!name.trim()) found.name = "A name is required.";
     if (connectionOpen) {
-      const port = parseNumber(conn.port);
+      const port = parseNumberField(conn.port);
       if (!conn.host.trim()) found["settings.host"] = "A host is required.";
       if (!conn.database.trim()) {
         found["settings.database"] = "A database is required.";
@@ -291,7 +285,7 @@ export const SourceForm = ({ source }: SourceFormProps) => {
       found.schemas = `A schema name is at most ${MAX_SCHEMA_BYTES} bytes.`;
     }
     for (const field of NUMBER_FIELDS) {
-      const n = parseNumber(limits[field.key]);
+      const n = parseNumberField(limits[field.key]);
       if (n !== undefined && Number.isNaN(n)) {
         found[field.key] = "Enter a number.";
       } else if (n !== undefined && (n < field.min || n > field.max)) {
@@ -308,7 +302,7 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     const list = parseSchemas(schemas);
     if (!sameList(list, src.schemas)) body.schemas = list;
     for (const field of NUMBER_FIELDS) {
-      const n = parseNumber(limits[field.key]);
+      const n = parseNumberField(limits[field.key]);
       if (n !== undefined && n !== src[field.key]) body[field.key] = n;
     }
     if (exportEnabled !== src.export_enabled)
@@ -349,7 +343,7 @@ export const SourceForm = ({ source }: SourceFormProps) => {
       export_enabled: exportEnabled,
     };
     for (const field of NUMBER_FIELDS) {
-      const n = parseNumber(limits[field.key]);
+      const n = parseNumberField(limits[field.key]);
       if (n !== undefined) body[field.key] = n;
     }
     if (allowWritable) body.allow_writable_login = true;

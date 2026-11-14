@@ -4,13 +4,13 @@ import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
-import { useAllSources } from "../api/useAllSources";
-import { PrincipalCell } from "./PrincipalCell";
+import { useAllSources } from "@/features/sources";
 import { useGrants } from "../api/useGrants";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
+  PrincipalCell,
   PrincipalLabel,
   PrincipalPicker,
   type PrincipalRef,
@@ -262,7 +262,13 @@ export const GrantsPage = () => {
           columns={[
             {
               title: "Principal",
-              cellElement: (grant) => <PrincipalCell grant={grant} />,
+              cellElement: (grant) => (
+                <PrincipalCell
+                  principal_type={grant.principal_type}
+                  principal_id={grant.principal_id}
+                  status={grant.principal_status}
+                />
+              ),
             },
             {
               title: "Source",

@@ -6,9 +6,9 @@ import { useReplaceGrant } from "../api/useReplaceGrant";
 import type { Grant, ReplaceGrant } from "../api/types";
 import { useCreateGrant } from "../api/useCreateGrant";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { PrincipalCell } from "@/features/principals";
 import { Link, useNavigate } from "react-router-dom";
-import { useAllSources } from "../api/useAllSources";
-import { PrincipalCell } from "./PrincipalCell";
+import { useAllSources } from "@/features/sources";
 import { useAuth } from "@/lib/auth";
 import { useState } from "react";
 import "./styles.css";
@@ -123,7 +123,11 @@ export const GrantForm = ({ grant }: GrantFormProps) => {
           <>
             <div>
               <h2>Principal</h2>
-              <PrincipalCell grant={grant} />
+              <PrincipalCell
+                principal_type={grant.principal_type}
+                principal_id={grant.principal_id}
+                status={grant.principal_status}
+              />
             </div>
             <div>
               <h2>Table</h2>

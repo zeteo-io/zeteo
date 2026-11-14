@@ -1,6 +1,6 @@
 import { api, toApiError, type ApiError } from "@/lib/api";
-import type { Source } from "@/features/sources";
 import { useQuery } from "@tanstack/react-query";
+import type { Source } from "./types";
 
 // The API's largest page.
 const PAGE_LIMIT = 100;

@@ -1,25 +1,32 @@
-import { usePrincipalNames } from "@/features/principals";
-import type { Grant } from "../api/types";
+import type { PrincipalStatus, PrincipalType } from "../api/types";
+import { usePrincipalNames } from "../api/usePrincipalNames";
 import { Badge } from "@kosmeo-ui/react";
 
 interface PrincipalCellProps {
-  grant: Pick<Grant, "principal_type" | "principal_id" | "principal_status">;
+  principal_type: PrincipalType;
+  principal_id: string;
+  /** The row's own `principal_status`. */
+  status: PrincipalStatus;
 }
 
 /**
- * Who a grant is for. The name comes from the batched lookup. At most one
- * status badge: the grant's own `orphaned`, else its `unknown`, else the
+ * Who a row is for. The name comes from the batched lookup. At most one
+ * status badge: the row's own `orphaned`, else its `unknown`, else the
  * lookup's `inactive`. A failed or contrary lookup never adds a badge.
  */
-export const PrincipalCell = ({ grant }: PrincipalCellProps) => {
-  const ref = { type: grant.principal_type, id: grant.principal_id };
+export const PrincipalCell = ({
+  principal_type,
+  principal_id,
+  status,
+}: PrincipalCellProps) => {
+  const ref = { type: principal_type, id: principal_id };
   const { get, unavailable } = usePrincipalNames([ref]);
   const principal = get(ref);
 
   const badge =
-    grant.principal_status === "orphaned"
+    status === "orphaned"
       ? { text: "Orphaned", variant: "warning" as const }
-      : grant.principal_status === "unknown"
+      : status === "unknown"
         ? { text: "Unknown", variant: "secondary" as const }
         : principal?.status === "inactive"
           ? { text: "Inactive", variant: "secondary" as const }

@@ -1,8 +1,7 @@
 // Field for field the OpenAPI `Grant`, `CreateGrantRequest` and
 // `ReplaceGrantRequest` schemas.
 
-export type PrincipalType = "user" | "group";
-export type PrincipalStatus = "active" | "orphaned" | "unknown";
+import type { PrincipalStatus, PrincipalType } from "@/features/principals";
 
 export interface GrantColumn {
   id: string;
