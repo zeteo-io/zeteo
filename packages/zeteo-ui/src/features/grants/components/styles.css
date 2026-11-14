@@ -1,0 +1,46 @@
+.z-grants-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.z-grants-filters > * {
+  min-width: 12rem;
+}
+
+.z-grants-principal-filter {
+  margin-bottom: 0.75rem;
+}
+
+.z-grants-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.z-grants-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-grant-form {
+  max-width: 48rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.z-grant-form h2 {
+  font-size: var(--k-text-size-lg);
+  margin: 0;
+}
+
+.z-grant-columns-tools {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}

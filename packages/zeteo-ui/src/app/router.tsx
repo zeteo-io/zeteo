@@ -58,6 +58,13 @@ const relationsPage = lazy(() =>
   import("@/features/relations").then((m) => ({ default: m.RelationsPage }))
 );
 
+const grantNewPage = lazy(() =>
+  import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
+);
+const grantEditPage = lazy(() =>
+  import("@/features/grants").then((m) => ({ default: m.GrantEditPage }))
+);
+
 const inSuspense = (Page: ComponentType) => (
   <Suspense fallback={<Spinner size="lg" />}>
     <Page />
@@ -85,6 +92,18 @@ const sourceRoutesWithCatalogue = sourceRoutes.map((route) =>
     : route
 );
 
+const grantWriteRoutes = [
+  { path: "grants/new", page: grantNewPage },
+  { path: "grants/:grantId/edit", page: grantEditPage },
+].map(({ path, page }) => ({
+  path,
+  element: (
+    <RequirePermission permission="zeteo.grants.write">
+      {inSuspense(page)}
+    </RequirePermission>
+  ),
+}));
+
 export const routes = [
   {
     path: "/",
@@ -106,6 +125,7 @@ export const routes = [
         };
       }),
       ...sourceRoutesWithCatalogue,
+      ...grantWriteRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },
