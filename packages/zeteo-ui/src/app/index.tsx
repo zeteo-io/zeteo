@@ -1,8 +1,8 @@
-import { Spinner } from "@kosmeo-ui/react";
 import { AppProvider } from "./provider";
+import { AppRouter } from "./router";
 
 export const App = () => (
   <AppProvider>
-    <Spinner size="lg" />
+    <AppRouter />
   </AppProvider>
 );

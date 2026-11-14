@@ -1,0 +1,100 @@
+.z-user-menu-container {
+  position: relative;
+}
+
+.z-avatar-btn {
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  border: 2px solid var(--k-overlay-light-medium);
+  background-color: var(--k-overlay-light-weak);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: border-color 0.2s;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.z-avatar-btn:hover {
+  border-color: var(--k-text-color-light);
+}
+
+.z-avatar-icon {
+  color: var(--k-text-color-light);
+  font-size: 0.9rem;
+}
+
+.z-user-menu {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  background-color: var(--k-background-color);
+  border-radius: 0.5rem;
+  border: 1px solid var(--k-border-color);
+  box-shadow:
+    0 0.5rem 1.5rem var(--k-shadow-color-hover),
+    0 0.25rem 0.5rem var(--k-shadow-color);
+  min-width: 15rem;
+  z-index: 200;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-0.5rem);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0.2s;
+}
+
+.z-user-menu.open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.z-user-menu-header {
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--k-border-color);
+}
+
+.z-user-menu-name {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--k-text-color);
+}
+
+.z-user-menu-email {
+  font-size: 0.75rem;
+  color: var(--k-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.z-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--k-text-color);
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.z-user-menu-item:hover {
+  background-color: var(--k-background-color-hover);
+}
+
+.z-user-menu-item svg {
+  width: 1rem;
+  color: var(--k-text-color-secondary);
+}
