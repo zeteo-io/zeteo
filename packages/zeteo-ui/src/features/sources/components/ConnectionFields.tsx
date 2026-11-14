@@ -37,7 +37,16 @@ interface ConnectionFieldsProps {
   onChange: (patch: Partial<ConnectionState>) => void;
   /** The message for a field, by its API path (`settings.host`). */
   errorFor: (path: string) => string | undefined;
+  /** Editing a stored source: its password and CA are never shown. */
+  editing?: boolean;
 }
+
+const FieldError = ({ message }: { message?: string }) =>
+  message ? (
+    <div className="z-source-field-error" role="alert">
+      {message}
+    </div>
+  ) : null;
 
 // Controlled: kosmeo's Input and TextArea show whatever `value` they are given.
 export const ConnectionFields = ({
@@ -45,6 +54,7 @@ export const ConnectionFields = ({
   value,
   onChange,
   errorFor,
+  editing = false,
 }: ConnectionFieldsProps) => (
   <FormGrid columns={2}>
     <Input
@@ -56,9 +66,6 @@ export const ConnectionFields = ({
     />
     <Input
       label="Port"
-      type="number"
-      min={1}
-      max={65535}
       value={value.port}
       error={errorFor("settings.port")}
       onChange={(e) => onChange({ port: e.target.value })}
@@ -84,21 +91,38 @@ export const ConnectionFields = ({
       autoComplete="new-password"
       value={value.password}
       error={errorFor("settings.password")}
+      helperText={
+        editing
+          ? "The stored password is not shown. Enter it again."
+          : undefined
+      }
       onChange={(e) => onChange({ password: e.target.value })}
     />
-    <Select
-      label="TLS"
-      value={value.tls}
-      options={TLS_MODES[type].map((mode) => ({ value: mode, label: mode }))}
-      onChange={(tls) => onChange({ tls: tls ?? "verify" })}
-    />
-    {type === "postgres" && (
-      <TextArea
-        label="CA certificate"
-        rows={4}
-        value={value.ca}
-        onChange={(e) => onChange({ ca: e.target.value })}
+    <div>
+      <Select
+        label="TLS"
+        value={value.tls}
+        options={TLS_MODES[type].map((mode) => ({ value: mode, label: mode }))}
+        onChange={(tls) => onChange({ tls: tls ?? "verify" })}
       />
+      <FieldError message={errorFor("settings.tls")} />
+    </div>
+    {type === "postgres" && (
+      <div>
+        <TextArea
+          label="CA certificate"
+          rows={4}
+          value={value.ca}
+          onChange={(e) => onChange({ ca: e.target.value })}
+        />
+        {editing && (
+          <div className="z-source-field-note">
+            The stored CA is not shown. Paste it again; leaving this empty
+            removes it.
+          </div>
+        )}
+        <FieldError message={errorFor("settings.ca")} />
+      </div>
     )}
   </FormGrid>
 );

@@ -2,8 +2,8 @@ import { useCreateSource } from "../api/useCreateSource";
 import { useUpdateSource } from "../api/useUpdateSource";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { issueFor, type ApiError } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
 import "./styles.css";
 import {
   ConnectionFields,
@@ -81,18 +81,28 @@ const NUMBER_FIELDS: NumberField[] = [
 
 type Limits = Record<NumberField["key"], string>;
 
-/** Paths the form shows beside a field; any other issue goes to the notice. */
-const FIELD_PATHS = new Set([
-  "slug",
+/** The paths the form shows beside a field right now; other issues go to the notice. */
+const shownPaths = (
+  creating: boolean,
+  connectionOpen: boolean,
+  type: SourceType
+): string[] => [
+  ...(creating ? ["slug"] : []),
   "name",
   "schemas",
-  "settings.host",
-  "settings.port",
-  "settings.database",
-  "settings.user",
-  "settings.password",
+  ...(connectionOpen
+    ? [
+        "settings.host",
+        "settings.port",
+        "settings.database",
+        "settings.user",
+        "settings.password",
+        "settings.tls",
+        ...(type === "postgres" ? ["settings.ca"] : []),
+      ]
+    : []),
   ...NUMBER_FIELDS.map((f) => f.key),
-]);
+];
 
 const parseSchemas = (text: string): string[] =>
   text
@@ -100,8 +110,12 @@ const parseSchemas = (text: string): string[] =>
     .map((s) => s.trim())
     .filter(Boolean);
 
-const parseNumber = (text: string): number | undefined =>
-  text.trim() === "" ? undefined : Number(text);
+/** Undefined for an empty field; NaN for anything but digits (reported by `validate`). */
+const parseNumber = (text: string): number | undefined => {
+  const t = text.trim();
+  if (t === "") return undefined;
+  return /^\d+$/.test(t) ? Number(t) : NaN;
+};
 
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
@@ -176,11 +190,59 @@ export const SourceForm = ({ source }: SourceFormProps) => {
   const [offerWritable, setOfferWritable] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  // The password and CA must not outlive the form in the mutation cache.
+  const resets = useRef([create.reset, update.reset]);
+  useEffect(() => {
+    const [resetCreate, resetUpdate] = resets.current;
+    return () => {
+      resetCreate();
+      resetUpdate();
+    };
+  }, []);
+
   const serverError: ApiError | null = mutation.error;
   const errorFor = (path: string) =>
     errors[path] ?? issueFor(serverError, path);
 
+  /** An edit: its own client-side error and the server's notice are stale. */
+  const edited = (...paths: string[]) => {
+    if (paths.length > 0) {
+      setErrors((e) =>
+        Object.fromEntries(
+          Object.entries(e).filter(([k]) => !paths.includes(k))
+        )
+      );
+    }
+    if (mutation.error) mutation.reset();
+  };
+
+  // The writable-login override was given for the login as it was.
+  const loginChanged = () => {
+    setAllowWritable(false);
+    setOfferWritable(false);
+  };
+
+  const changeConnection = (patch: Partial<ConnectionState>) => {
+    setConn((c) => ({ ...c, ...patch }));
+    loginChanged();
+    edited(...Object.keys(patch).map((k) => `settings.${k}`));
+  };
+
+  const keepConnection = (src: Source) => {
+    setConnectionOpen(false);
+    setConn(connectionOf(src));
+    loginChanged();
+    setErrors((e) =>
+      Object.fromEntries(
+        Object.entries(e).filter(([k]) => !k.startsWith("settings."))
+      )
+    );
+    mutation.reset();
+  };
+
   const changeType = (next: SourceType) => {
+    loginChanged();
+    edited("settings.port", "settings.tls", "settings.ca");
     setConn((c) => ({
       ...emptyConnection(next),
       host: c.host,
@@ -211,10 +273,9 @@ export const SourceForm = ({ source }: SourceFormProps) => {
           ? "Enter the password again to change the connection."
           : "A password is required.";
       }
-      if (
-        port !== undefined &&
-        (!Number.isInteger(port) || port < 1 || port > 65535)
-      ) {
+      if (port !== undefined && Number.isNaN(port)) {
+        found["settings.port"] = "Enter a number.";
+      } else if (port !== undefined && (port < 1 || port > 65535)) {
         found["settings.port"] = "A port is 1 to 65535.";
       }
     }
@@ -231,10 +292,9 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     }
     for (const field of NUMBER_FIELDS) {
       const n = parseNumber(limits[field.key]);
-      if (
-        n !== undefined &&
-        (!Number.isInteger(n) || n < field.min || n > field.max)
-      ) {
+      if (n !== undefined && Number.isNaN(n)) {
+        found[field.key] = "Enter a number.";
+      } else if (n !== undefined && (n < field.min || n > field.max)) {
         found[field.key] = `${field.label} is ${field.min} to ${field.max}.`;
       }
     }
@@ -267,13 +327,15 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length > 0) return;
-    const onError = (err: ApiError) => {
-      if (err.code === "writable_login") setOfferWritable(true);
-    };
+    const onError = (err: ApiError) =>
+      setOfferWritable(err.code === "writable_login");
 
     if (source) {
       update.mutate(changes(source), {
-        onSuccess: () => navigate(`/sources/${source.id}`),
+        onSuccess: () => {
+          update.reset();
+          navigate(`/sources/${source.id}`);
+        },
         onError,
       });
       return;
@@ -292,7 +354,10 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     }
     if (allowWritable) body.allow_writable_login = true;
     create.mutate(body, {
-      onSuccess: (created) => navigate(`/sources/${created.id}`),
+      onSuccess: (created) => {
+        create.reset();
+        navigate(`/sources/${created.id}`);
+      },
       onError,
     });
   };
@@ -305,10 +370,11 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     );
   }
 
+  const fieldPaths = shownPaths(!source, connectionOpen, source?.type ?? type);
   const allIssuesShown =
     serverError?.status === 400 &&
     (serverError.issues?.length ?? 0) > 0 &&
-    serverError.issues!.every((i) => FIELD_PATHS.has(i.path));
+    serverError.issues!.every((i) => fieldPaths.includes(i.path));
 
   return (
     <div className="z-source-form">
@@ -321,7 +387,10 @@ export const SourceForm = ({ source }: SourceFormProps) => {
               value={slug}
               error={errorFor("slug")}
               helperText="Lower case letters, digits and hyphens. Cannot be changed later."
-              onChange={(e) => setSlug(e.target.value)}
+              onChange={(e) => {
+                setSlug(e.target.value);
+                edited("slug");
+              }}
             />
             <Select<SourceType>
               label="Type"
@@ -339,18 +408,33 @@ export const SourceForm = ({ source }: SourceFormProps) => {
           required
           value={name}
           error={errorFor("name")}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            edited("name");
+          }}
         />
 
         <fieldset>
           <legend>Connection</legend>
           {connectionOpen ? (
-            <ConnectionFields
-              type={source?.type ?? type}
-              value={conn}
-              onChange={(patch) => setConn((c) => ({ ...c, ...patch }))}
-              errorFor={errorFor}
-            />
+            <>
+              <ConnectionFields
+                type={source?.type ?? type}
+                value={conn}
+                onChange={changeConnection}
+                editing={!!source}
+                errorFor={errorFor}
+              />
+              {source && (
+                <Button
+                  variant="secondary"
+                  fullWidth={false}
+                  onClick={() => keepConnection(source)}
+                >
+                  Keep connection unchanged
+                </Button>
+              )}
+            </>
           ) : (
             <div className="z-source-connection-unchanged">
               <span>Connection: unchanged</span>
@@ -371,7 +455,10 @@ export const SourceForm = ({ source }: SourceFormProps) => {
           value={schemas}
           error={errorFor("schemas")}
           helperText="Separate with commas: at most 20, each listed once."
-          onChange={(e) => setSchemas(e.target.value)}
+          onChange={(e) => {
+            setSchemas(e.target.value);
+            edited("schemas");
+          }}
         />
 
         <FormGrid columns={2}>
@@ -379,15 +466,13 @@ export const SourceForm = ({ source }: SourceFormProps) => {
             <Input
               key={field.key}
               label={field.label}
-              type="number"
-              min={field.min}
-              max={field.max}
               placeholder={source ? undefined : `${field.default} (default)`}
               value={limits[field.key]}
               error={errorFor(field.key)}
-              onChange={(e) =>
-                setLimits((l) => ({ ...l, [field.key]: e.target.value }))
-              }
+              onChange={(e) => {
+                setLimits((l) => ({ ...l, [field.key]: e.target.value }));
+                edited(field.key);
+              }}
             />
           ))}
         </FormGrid>
@@ -397,7 +482,9 @@ export const SourceForm = ({ source }: SourceFormProps) => {
           onChange={(e) => setExportEnabled(e.target.checked)}
         />
 
-        {serverError && !allIssuesShown && <ErrorNotice error={serverError} />}
+        {serverError && !allIssuesShown && (
+          <ErrorNotice error={serverError} fieldPaths={fieldPaths} />
+        )}
         {offerWritable && (
           <Checkbox
             label="Allow this login although it can write"

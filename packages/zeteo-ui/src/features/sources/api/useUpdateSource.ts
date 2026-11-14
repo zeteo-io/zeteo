@@ -5,6 +5,8 @@ import type { Source, UpdateSource } from "./types";
 export const useUpdateSource = (sourceId: string) => {
   const queryClient = useQueryClient();
   return useMutation<Source, ApiError, UpdateSource>({
+    // The body may hold the password: keep nothing once the form is gone.
+    gcTime: 0,
     mutationFn: async (body) => {
       try {
         return (await api.patch<Source>(`/v1/sources/${sourceId}`, body)).data;

@@ -4,9 +4,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
 import { useSources } from "../api/useSources";
 import { SourceStatus } from "./SourceStatus";
+import { useEffect, useState } from "react";
 import type { Source } from "../api/types";
 import { useAuth } from "@/lib/auth";
-import { useState } from "react";
 import "./styles.css";
 import {
   Button,
@@ -24,6 +24,10 @@ export const SourcesPage = () => {
   const { items, isLoading, error, hasMore, loadMore } = useSources({
     includeArchived,
   });
+
+  // The list hook does not report a page in flight: wait for the list to change.
+  const [loadingMore, setLoadingMore] = useState(false);
+  useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
 
   return (
     <>
@@ -82,7 +86,16 @@ export const SourcesPage = () => {
       )}
       {hasMore && (
         <div className="z-sources-more">
-          <Button variant="secondary" fullWidth={false} onClick={loadMore}>
+          <Button
+            variant="secondary"
+            fullWidth={false}
+            isLoading={loadingMore}
+            disabled={loadingMore}
+            onClick={() => {
+              setLoadingMore(true);
+              loadMore();
+            }}
+          >
             Load more
           </Button>
         </div>

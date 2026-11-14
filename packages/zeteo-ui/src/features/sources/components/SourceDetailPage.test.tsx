@@ -61,6 +61,15 @@ describe("SourceDetailPage", () => {
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
   });
 
+  it("prints non-primitive settings values as JSON, not [object Object]", async () => {
+    get.mockResolvedValue({
+      data: makeSource({ settings: { host: "h", options: { a: 1 } } }),
+    });
+    renderDetail();
+    expect(await screen.findByText('{"a":1}')).toBeInTheDocument();
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+  });
+
   it("says so when the settings are unreadable", async () => {
     get.mockResolvedValue({ data: makeSource({ settings: null }) });
     renderDetail();

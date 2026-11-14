@@ -1,9 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
 import { makeSource, SOURCE_ID } from "../testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
+import { MemoryRouter } from "react-router-dom";
 import { SourceForm } from "./SourceForm";
 
 const post = vi.hoisted(() => vi.fn());
@@ -67,12 +69,12 @@ describe("SourceForm", () => {
     it("swaps the connection fields and the default port with the type", async () => {
       const user = userEvent.setup();
       renderCreate();
-      expect(field("Port")).toHaveValue(5432);
+      expect(field("Port")).toHaveValue("5432");
       expect(field("CA certificate")).toBeInTheDocument();
 
       await user.selectOptions(field("Type"), "azure-sql");
 
-      expect(field("Port")).toHaveValue(1433);
+      expect(field("Port")).toHaveValue("1433");
       expect(maybeField("CA certificate")).not.toBeInTheDocument();
       expect(
         screen.getByRole("option", { name: "trust-server-certificate" })
@@ -330,7 +332,244 @@ describe("SourceForm", () => {
       expect(
         screen.queryByRole("button", { name: "Save changes" })
       ).not.toBeInTheDocument();
-      expect(screen.getByText(/archived/i)).toBeInTheDocument();
+      expect(
+        screen.getByText("This source is archived and cannot be changed.")
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("create, more", () => {
+    const fillBasics = async (user: ReturnType<typeof userEvent.setup>) => {
+      await type(user, "Slug", "orders");
+      await type(user, "Name", "Orders DB");
+      await fillConnection(user);
+      await type(user, "Schemas", "public");
+    };
+
+    it("sends an Azure SQL source with its port and tls and no ca", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await user.selectOptions(field("Type"), "azure-sql");
+      await user.selectOptions(field("TLS"), "trust-server-certificate");
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1]).toMatchObject({
+        type: "azure-sql",
+        settings: {
+          port: 1433,
+          tls: "trust-server-certificate",
+        },
+      });
+      expect(post.mock.calls[0][1].settings).not.toHaveProperty("ca");
+    });
+
+    it("drops a typed CA when the type is switched to Azure SQL", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await type(user, "CA certificate", "PEM");
+      await user.selectOptions(field("Type"), "azure-sql");
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1].settings).not.toHaveProperty("ca");
+    });
+
+    it("offers the writable-login override on create and resends with it", async () => {
+      const user = userEvent.setup();
+      post.mockRejectedValueOnce({
+        status: 422,
+        code: "writable_login",
+        message: "This login can write",
+        findings: [{ code: "superuser", detail: "is a superuser" }],
+      });
+      renderCreate();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      expect(await screen.findByText(/is a superuser/)).toBeInTheDocument();
+      await user.click(field("Allow this login although it can write"));
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+      expect(post.mock.calls[1][1]).toMatchObject({
+        allow_writable_login: true,
+      });
+    });
+
+    it("hides the override when the login is edited afterwards", async () => {
+      const user = userEvent.setup();
+      post.mockRejectedValueOnce({
+        status: 422,
+        code: "writable_login",
+        message: "This login can write",
+        findings: [{ code: "superuser", detail: "is a superuser" }],
+      });
+      renderCreate();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await user.click(field("Allow this login although it can write"));
+      await type(user, "User", "someone-else");
+      expect(
+        maybeField("Allow this login although it can write")
+      ).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+      expect(post.mock.calls[1][1]).not.toHaveProperty("allow_writable_login");
+    });
+
+    it("shows issues at the CA field and at an unknown path", async () => {
+      const user = userEvent.setup();
+      post.mockRejectedValue({
+        status: 400,
+        code: "invalid_request",
+        message: "Invalid request body.",
+        issues: [
+          { path: "settings.ca", message: "Not a PEM certificate" },
+          { path: "settings.extra", message: "Unknown key" },
+        ],
+      });
+      renderCreate();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      expect(
+        await screen.findByText("Not a PEM certificate")
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("settings.extra: Unknown key")
+      ).toBeInTheDocument();
+    });
+
+    it("shows an issue at tls beside the select", async () => {
+      const user = userEvent.setup();
+      post.mockRejectedValue({
+        status: 400,
+        code: "invalid_request",
+        message: "Invalid request body.",
+        issues: [{ path: "settings.tls", message: "Bad tls mode" }],
+      });
+      renderCreate();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      expect(await screen.findByText("Bad tls mode")).toBeInTheDocument();
+    });
+
+    it("reports a non-numeric number as 'Enter a number' and sends nothing", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await fillBasics(user);
+      await type(user, "Row cap", "12abc");
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      expect(await screen.findByText("Enter a number.")).toBeInTheDocument();
+      expect(post).not.toHaveBeenCalled();
+      await type(user, "Row cap", "12");
+      expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
+    });
+
+    it("clears the server's notice once a field is edited", async () => {
+      const user = userEvent.setup();
+      post.mockRejectedValue({
+        status: 409,
+        code: "slug_taken",
+        message: "That slug is in use",
+      });
+      renderCreate();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      expect(
+        await screen.findByText("That slug is in use")
+      ).toBeInTheDocument();
+      await type(user, "Slug", "orders-2");
+      expect(screen.queryByText("That slug is in use")).not.toBeInTheDocument();
+    });
+
+    it("keeps no password in the mutation cache once the form is gone", async () => {
+      const user = userEvent.setup();
+      const client = new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      });
+      const { unmount } = render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter initialEntries={["/sources/new"]}>
+            <Routes>
+              <Route path="/sources/new" element={<SourceForm />} />
+              <Route path="/sources/:sourceId" element={<p>detail page</p>} />
+            </Routes>
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await screen.findByText("detail page");
+      unmount();
+      await waitFor(() =>
+        expect(
+          client
+            .getMutationCache()
+            .getAll()
+            .filter((m) => JSON.stringify(m.state.variables).includes("s3cret"))
+        ).toHaveLength(0)
+      );
+    });
+
+    it("has no stored-secret notes on create", () => {
+      renderCreate();
+      expect(
+        screen.queryByText(/stored CA is not shown/)
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByText(/stored password is not shown/)
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("edit, more", () => {
+    it("says the stored CA and password are not shown once the connection is opened", async () => {
+      const user = userEvent.setup();
+      renderEdit();
+      await user.click(
+        screen.getByRole("button", { name: "Change connection" })
+      );
+      expect(
+        screen.getByText(
+          "The stored CA is not shown. Paste it again; leaving this empty removes it."
+        )
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("The stored password is not shown. Enter it again.")
+      ).toBeInTheDocument();
+    });
+
+    it("undoes a connection change with 'Keep connection unchanged'", async () => {
+      const user = userEvent.setup();
+      renderEdit();
+      await user.click(
+        screen.getByRole("button", { name: "Change connection" })
+      );
+      await type(user, "Host", "elsewhere.example.test");
+      await user.click(
+        screen.getByRole("button", { name: "Keep connection unchanged" })
+      );
+      expect(screen.getByText("Connection: unchanged")).toBeInTheDocument();
+
+      await type(user, "Name", "Renamed");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch.mock.calls[0][1]).toEqual({ name: "Renamed" });
+    });
+
+    it("restores the stored host when the connection is reopened after keeping it", async () => {
+      const user = userEvent.setup();
+      renderEdit();
+      await user.click(
+        screen.getByRole("button", { name: "Change connection" })
+      );
+      await type(user, "Host", "elsewhere.example.test");
+      await user.click(
+        screen.getByRole("button", { name: "Keep connection unchanged" })
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Change connection" })
+      );
+      expect(field("Host")).toHaveValue("db.example.test");
     });
   });
 });

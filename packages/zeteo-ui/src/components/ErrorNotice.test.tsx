@@ -20,8 +20,27 @@ describe("ErrorNotice", () => {
     );
     expect(screen.getByText("Bad body")).toBeInTheDocument();
     expect(screen.getByText("Whole-body problem")).toBeInTheDocument();
-    expect(screen.queryByText("Required")).not.toBeInTheDocument();
+    expect(screen.getByText("name: Required")).toBeInTheDocument();
     expect(screen.getByText(/No key columns/)).toBeInTheDocument();
+  });
+
+  it("leaves out issues whose path the screen shows beside a field", () => {
+    render(
+      <ErrorNotice
+        fieldPaths={["name"]}
+        error={{
+          status: 400,
+          code: "invalid_request",
+          message: "Bad body",
+          issues: [
+            { path: "name", message: "Required" },
+            { path: "settings.ca", message: "Not a PEM" },
+          ],
+        }}
+      />
+    );
+    expect(screen.queryByText(/Required/)).not.toBeInTheDocument();
+    expect(screen.getByText("settings.ca: Not a PEM")).toBeInTheDocument();
   });
 
   it("says the server could not be reached for status null", () => {

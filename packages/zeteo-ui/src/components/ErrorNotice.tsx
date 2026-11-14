@@ -3,12 +3,15 @@ import { Alert } from "@kosmeo-ui/react";
 
 interface ErrorNoticeProps {
   error: ApiError | null | undefined;
+  /** Paths the screen shows beside their fields; other issues are listed here. */
+  fieldPaths?: string[];
 }
 
-/** An API failure: its message, its issues not tied to a field, and its findings. */
-export const ErrorNotice = ({ error }: ErrorNoticeProps) => {
+/** An API failure: its message, its issues not shown beside a field, and its findings. */
+export const ErrorNotice = ({ error, fieldPaths }: ErrorNoticeProps) => {
   if (!error) return null;
-  const general = error.issues?.filter((i) => !i.path) ?? [];
+  const general =
+    error.issues?.filter((i) => !fieldPaths?.includes(i.path)) ?? [];
   return (
     <Alert variant="danger">
       <p>
@@ -22,7 +25,9 @@ export const ErrorNotice = ({ error }: ErrorNoticeProps) => {
       {general.length > 0 && (
         <ul>
           {general.map((issue, i) => (
-            <li key={i}>{issue.message}</li>
+            <li key={i}>
+              {issue.path ? `${issue.path}: ${issue.message}` : issue.message}
+            </li>
           ))}
         </ul>
       )}

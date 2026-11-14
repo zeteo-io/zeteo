@@ -35,7 +35,7 @@ export const SourceDetailPage = () => {
   const [error, setError] = useState<ApiError | null>(null);
 
   const canWrite = can("zeteo.sources.write") && !source.archived_at;
-  const busy = test.isPending || refresh.isPending;
+  const busy = test.isPending || refresh.isPending || archive.isPending;
 
   const runTest = () => {
     if (busy) return;
@@ -170,7 +170,11 @@ export const SourceDetailPage = () => {
             {Object.entries(source.settings).map(([key, value]) => (
               <div key={key} style={{ display: "contents" }}>
                 <dt>{key}</dt>
-                <dd>{String(value)}</dd>
+                <dd>
+                  {typeof value === "object"
+                    ? JSON.stringify(value)
+                    : String(value)}
+                </dd>
               </div>
             ))}
           </dl>
