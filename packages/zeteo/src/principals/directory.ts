@@ -2,6 +2,7 @@ import { assertNoTransaction, getTereo } from "../utils/tereo.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import { TEST_ORPHANED_KEY } from "../grants/principals.js";
 import { TereoUnreachableError } from "../utils/errors.js";
+import { mapConcurrently } from "../utils/concurrency.js";
 import type { AuthServiceUser } from "@tereo-io/sdk";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
@@ -35,6 +36,53 @@ export const TEST_DIRECTORY_KEY = "zeteo:test:directory";
 
 /** Tereo's most ids in one `getUsersByIds` request. */
 export const MAX_USER_IDS_PER_REQUEST = 100;
+
+/**
+ * How long one search or lookup may wait on tereo, retries included. The SDK
+ * sets no timeout and the handler retries timeouts and 5xx with back-off, so
+ * without this a silent tereo could hold a request for minutes.
+ */
+export const DIRECTORY_BUDGET_MS = 5000;
+
+/** How many groups one lookup reads from tereo at once; each is its own request, and a 429 would pause every call zeteo makes to tereo. */
+export const GROUP_READS_IN_FLIGHT = 8;
+
+export const GROUP_CACHE_TTL_SECONDS = 60;
+export const groupCacheKey = (id: string) => `zeteo:directory:group:${id}`;
+
+class DirectoryDeadlineError extends Error {
+  constructor() {
+    super(`tereo did not answer within ${DIRECTORY_BUDGET_MS} ms`);
+    this.name = "DirectoryDeadlineError";
+  }
+}
+
+/**
+ * `run`, or a `DirectoryDeadlineError` once it has taken the budget. The
+ * signal aborts when the call ends either way, cancelling the requests that
+ * were given it and any still running beside a failed one.
+ */
+const withinBudget = async <T>(
+  run: (signal: AbortSignal) => Promise<T>
+): Promise<T> => {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new DirectoryDeadlineError()),
+      DIRECTORY_BUDGET_MS
+    );
+  });
+  const work = run(controller.signal);
+  // Settling after the deadline, it must not be an unhandled rejection.
+  work.catch(() => undefined);
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+    controller.abort();
+  }
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -90,11 +138,13 @@ const unreachable = (
   counts: Record<string, number>
 ): TereoUnreachableError => {
   const status = statusOf(err);
+  const outcome =
+    err instanceof DirectoryDeadlineError
+      ? `did not finish within ${DIRECTORY_BUDGET_MS} ms`
+      : `failed${status === undefined ? "" : ` with HTTP ${status}`}`;
   logger.error(
     {
-      err: new Error(
-        `${call} failed${status === undefined ? "" : ` with HTTP ${status}`}`
-      ),
+      err: new Error(`${call} ${outcome}`),
       ...counts,
     },
     "asking tereo for users or groups failed"
@@ -108,7 +158,8 @@ interface PaginatedUsers {
 
 /** One `GET /v1/admin/users` through the raw handler, as the SDK's requests do on a 401: a new service token, once. */
 const getUsers = async (
-  params: Record<string, string | number>
+  params: Record<string, string | number>,
+  signal: AbortSignal
 ): Promise<AuthServiceUser[]> => {
   const send = () =>
     getHandler().handleRequest<PaginatedUsers>({
@@ -117,6 +168,7 @@ const getUsers = async (
       method: "GET",
       url: "/v1/admin/users",
       params,
+      signal,
     });
   try {
     return (await send()).data.data;
@@ -129,11 +181,21 @@ const getUsers = async (
 };
 
 /** Users whose name or email contains `q`: two requests, as tereo's filters are ANDed. Human users only. */
-const searchUsers = async (q: string, limit: number): Promise<Principal[]> => {
+const searchUsers = async (
+  q: string,
+  limit: number,
+  signal: AbortSignal
+): Promise<Principal[]> => {
   const base = { "filter[userType]": "human", limit };
   const [byName, byEmail] = await Promise.all([
-    getUsers({ ...base, "filter[name]": q, "filter[name_op]": "contains" }),
-    getUsers({ ...base, "filter[email]": q, "filter[email_op]": "contains" }),
+    getUsers(
+      { ...base, "filter[name]": q, "filter[name_op]": "contains" },
+      signal
+    ),
+    getUsers(
+      { ...base, "filter[email]": q, "filter[email_op]": "contains" },
+      signal
+    ),
   ]);
   const seen = new Map<string, AuthServiceUser>();
   for (const u of [...byName, ...byEmail])
@@ -154,11 +216,58 @@ export const searchFromTereo = async (
 ): Promise<Principal[]> => {
   assertNoTransaction(`tereo search ${type}s`);
   try {
-    return type === "user"
-      ? await searchUsers(q, limit)
-      : await searchGroups(q, limit);
+    return await withinBudget((signal) =>
+      type === "user" ? searchUsers(q, limit, signal) : searchGroups(q, limit)
+    );
   } catch (err) {
     throw unreachable(`searching ${type}s`, err, { limit });
+  }
+};
+
+/*
+ * Groups' resolved principals are cached, found or orphaned, never a failed
+ * read. Users are not: their names and emails are personal data, kept out of
+ * Redis. A cache that fails or is slow is passed over.
+ */
+const readGroupCache = async (
+  ids: string[]
+): Promise<Map<string, Principal>> => {
+  const cached = new Map<string, Principal>();
+  if (ids.length === 0) return cached;
+  try {
+    const values = await withinRedisTimeout(
+      redis.mget(...ids.map(groupCacheKey))
+    );
+    ids.forEach((id, i) => {
+      const value = values[i];
+      if (value) cached.set(id, JSON.parse(value) as Principal);
+    });
+  } catch (err) {
+    logger.warn({ err }, "directory group cache unreadable; asking tereo");
+    cached.clear();
+  }
+  return cached;
+};
+
+const writeGroupCache = async (groups: Principal[]): Promise<void> => {
+  const results = await Promise.allSettled(
+    groups.map((g) =>
+      withinRedisTimeout(
+        redis.set(
+          groupCacheKey(g.id),
+          JSON.stringify(g),
+          "EX",
+          GROUP_CACHE_TTL_SECONDS
+        )
+      )
+    )
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  if (failed.length > 0) {
+    logger.warn(
+      { err: failed[0]!.reason, failed: failed.length },
+      "directory group cache not written"
+    );
   }
 };
 
@@ -172,26 +281,42 @@ export const lookupFromTereo = async (
   const userIds = askable.filter((r) => r.type === "user").map((r) => r.id);
   const groupIds = askable.filter((r) => r.type === "group").map((r) => r.id);
   const found = new Map<string, Principal>();
+  const readGroups: Principal[] = [];
   assertNoTransaction("tereo lookupPrincipals()");
   try {
-    await Promise.all([
-      ...chunks(userIds, MAX_USER_IDS_PER_REQUEST).map(async (ids) => {
-        for (const u of await requests.auth.getUsersByIds(ids)) {
-          // A malformed element would be filed under the wrong id and read as an orphan.
-          if (typeof u?.id !== "string" || typeof u.status !== "string") {
-            throw new Error("tereo returned a malformed user");
+    await withinBudget(async (signal) => {
+      const cached = await readGroupCache(groupIds);
+      for (const [id, p] of cached) found.set(`group:${id}`, p);
+      const unread = groupIds.filter((id) => !cached.has(id));
+      await Promise.all([
+        ...chunks(userIds, MAX_USER_IDS_PER_REQUEST).map(async (ids) => {
+          for (const u of await requests.auth.getUsersByIds(ids)) {
+            // A malformed element would be filed under the wrong id and read as an orphan.
+            if (typeof u?.id !== "string" || typeof u.status !== "string") {
+              throw new Error("tereo returned a malformed user");
+            }
+            found.set(`user:${u.id}`, fromUser(u));
           }
-          found.set(`user:${u.id}`, fromUser(u));
-        }
-      }),
-      ...groupIds.map(async (id) => {
-        const group = await getTereo().auth.getGroup(id);
-        if (group) found.set(`group:${id}`, fromGroup(group));
-      }),
-    ]);
+        }),
+        mapConcurrently(
+          unread,
+          GROUP_READS_IN_FLIGHT,
+          async (id) => {
+            const group = await getTereo().auth.getGroup(id);
+            readGroups.push(
+              group ? fromGroup(group) : orphaned({ type: "group", id })
+            );
+          },
+          signal
+        ),
+      ]);
+    });
   } catch (err) {
     throw unreachable("looking up principals", err, { refs: distinct.length });
   }
+  for (const p of readGroups) found.set(`group:${p.id}`, p);
+  // Not awaited: the answer does not wait on the cache, and the write never rejects.
+  void writeGroupCache(readGroups);
   return distinct.map((r) => found.get(refKey(r)) ?? orphaned(r));
 };
 

@@ -6,7 +6,11 @@ import { runInTransactionScope } from "../../utils/tereo.js";
 import { RequestError } from "@tereo-io/sdk/handler";
 import { logger } from "../../utils/logger.js";
 import {
+  GROUP_CACHE_TTL_SECONDS,
+  GROUP_READS_IN_FLIGHT,
+  groupCacheKey,
   lookupFromTereo,
+  MAX_USER_IDS_PER_REQUEST,
   searchFromTereo,
 } from "../../principals/directory.js";
 
@@ -26,7 +30,26 @@ vi.mock("../../utils/tereo.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../utils/tereo.js")>()),
   getTereo: () => ({ auth }),
 }));
-vi.mock("../../utils/redis.js", () => ({ redis: {} }));
+// A Redis of one map; `down` makes every command fail.
+const cache = vi.hoisted(() => ({
+  store: new Map<string, string>(),
+  ttl: new Map<string, number>(),
+  down: false,
+}));
+vi.mock("../../utils/redis.js", () => ({
+  redis: {
+    mget: async (...keys: string[]) => {
+      if (cache.down) throw new Error("redis down");
+      return keys.map((k) => cache.store.get(k) ?? null);
+    },
+    set: async (key: string, value: string, _ex: "EX", seconds: number) => {
+      if (cache.down) throw new Error("redis down");
+      cache.store.set(key, value);
+      cache.ttl.set(key, seconds);
+      return "OK";
+    },
+  },
+}));
 vi.mock("@tereo-io/sdk/handler", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tereo-io/sdk/handler")>()),
   requests: {
@@ -67,6 +90,9 @@ beforeEach(() => {
   vi.spyOn(logger, "warn").mockImplementation(() => undefined);
 });
 afterEach(() => {
+  cache.store.clear();
+  cache.ttl.clear();
+  cache.down = false;
   vi.resetAllMocks();
   vi.restoreAllMocks();
 });
@@ -103,8 +129,9 @@ describe("lookupFromTereo", () => {
   });
 
   it("asks for more than 100 users in batches of at most 100, in the refs' order", async () => {
+    expect(MAX_USER_IDS_PER_REQUEST).toBe(100);
     const ids = Array.from(
-      { length: 150 },
+      { length: MAX_USER_IDS_PER_REQUEST + 50 },
       (_, i) => `01a1d7a8-0000-7000-8000-${String(i).padStart(12, "0")}`
     );
     sdk.getUsersByIds.mockImplementation(async (batch: string[]) =>
@@ -112,7 +139,8 @@ describe("lookupFromTereo", () => {
     );
     const out = await lookupFromTereo(ids.map((id) => ({ type: "user", id })));
     expect(sdk.getUsersByIds.mock.calls.map(([b]) => b.length)).toEqual([
-      100, 50,
+      MAX_USER_IDS_PER_REQUEST,
+      50,
     ]);
     expect(out.map((p) => p.id)).toEqual(ids);
     expect(out.every((p) => p.status === "active")).toBe(true);
@@ -194,6 +222,84 @@ describe("lookupFromTereo", () => {
         /withAudit transaction/
       );
     });
+  });
+});
+
+const groupIds = (n: number) =>
+  Array.from(
+    { length: n },
+    (_, i) => `01a1d7a8-0000-7000-8000-${String(i).padStart(12, "0")}`
+  );
+
+describe("lookupFromTereo's group reads", () => {
+  it("reads 100 groups never more than 8 at a time, in the refs' order", async () => {
+    expect(GROUP_READS_IN_FLIGHT).toBe(8);
+    let inFlight = 0;
+    let most = 0;
+    auth.getGroup.mockImplementation(async (id: string) => {
+      most = Math.max(most, ++inFlight);
+      await new Promise((r) => setImmediate(r));
+      inFlight--;
+      return group(id);
+    });
+    const ids = groupIds(100);
+    const out = await lookupFromTereo(ids.map((id) => ({ type: "group", id })));
+    expect(auth.getGroup).toHaveBeenCalledTimes(100);
+    expect(most).toBe(GROUP_READS_IN_FLIGHT);
+    expect(out.map((p) => p.id)).toEqual(ids);
+  });
+
+  it("asks tereo once for a group looked up again within the cache's 60 s", async () => {
+    expect(GROUP_CACHE_TTL_SECONDS).toBe(60);
+    auth.getGroup.mockResolvedValue(group(G));
+    const first = await lookupFromTereo([{ type: "group", id: G }]);
+    const second = await lookupFromTereo([{ type: "group", id: G }]);
+    expect(second).toEqual(first);
+    expect(auth.getGroup).toHaveBeenCalledTimes(1);
+    expect(cache.ttl.get(groupCacheKey(G))).toBe(GROUP_CACHE_TTL_SECONDS);
+    expect(groupCacheKey(G)).toBe(`zeteo:directory:group:${G}`);
+  });
+
+  it("caches an orphaned group as orphaned", async () => {
+    auth.getGroup.mockResolvedValue(null);
+    await lookupFromTereo([{ type: "group", id: G }]);
+    const [p] = await lookupFromTereo([{ type: "group", id: G }]);
+    expect(p).toEqual({ type: "group", id: G, name: null, status: "orphaned" });
+    expect(auth.getGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not cache a failed read", async () => {
+    auth.getGroup.mockRejectedValueOnce(
+      new RequestError("AS_0001", "down", { httpStatus: 503 })
+    );
+    await expect(
+      lookupFromTereo([{ type: "group", id: G }])
+    ).rejects.toBeInstanceOf(TereoUnreachableError);
+    expect(cache.store.size).toBe(0);
+    auth.getGroup.mockResolvedValue(group(G));
+    const [p] = await lookupFromTereo([{ type: "group", id: G }]);
+    expect(p!.status).toBe("active");
+    expect(auth.getGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks tereo when the cache fails, and only warns", async () => {
+    cache.down = true;
+    auth.getGroup.mockResolvedValue(group(G));
+    const [p] = await lookupFromTereo([{ type: "group", id: G }]);
+    expect(p).toEqual({
+      type: "group",
+      id: G,
+      name: "Analysts",
+      status: "active",
+    });
+    expect(logger.warn).toHaveBeenCalled();
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it("keeps users out of the cache", async () => {
+    sdk.getUsersByIds.mockResolvedValue([user(A)]);
+    await lookupFromTereo([{ type: "user", id: A }]);
+    expect(cache.store.size).toBe(0);
   });
 });
 
