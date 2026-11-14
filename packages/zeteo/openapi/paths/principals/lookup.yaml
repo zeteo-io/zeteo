@@ -1,0 +1,43 @@
+/v1/principals/lookup:
+  post:
+    tags: [Grants]
+    summary: Look up users and groups of tereo by id
+    description: |
+      Answers one principal per requested one, in the request's order; a repeated one is answered
+      once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
+      the search limit.
+
+      **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read` (`403 forbidden` without
+      either).
+
+      **Errors:** `400 invalid_request` (not 1 to 100 principals, an id that is no UUID),
+      `502 tereo_unreachable`.
+    operationId: lookupPrincipals
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/principals/schemas.yaml#/LookupPrincipalsRequest'
+          example:
+            principals:
+              - type: user
+                id: 0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a
+    responses:
+      '200':
+        description: The principals
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/principals/schemas.yaml#/ListDirectoryPrincipalsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`, tereo did not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
