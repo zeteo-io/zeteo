@@ -69,7 +69,7 @@ jobs:
       - name: Build
         run: npx nx $NX_SCOPE -t build --parallel=4
 
-      # Zeteo's unit tests need no database, Redis or server.
+      # The unit tests of zeteo and @zeteo-io/sdk need no database, Redis or server.
       - name: Unit tests
         run: npx nx $NX_SCOPE -t test:unit --parallel=4
 

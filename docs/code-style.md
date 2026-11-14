@@ -122,10 +122,13 @@ To sort on save in VS Code, install *Run on Save* (`emeraldwalk.runonsave`) and 
 
 ## Releases
 
-`zeteo` is versioned with Nx release version plans, in one release group, `core`, tagged
+`zeteo` is versioned with Nx release version plans, in the release group `core`, tagged
 `zeteo@<version>`. It is the image's version; the package is not published to npm.
+`@zeteo-io/sdk` (`packages/zeteo-sdk`) is the group `sdk`, versioned on its own, tagged
+`@zeteo-io/sdk@<version>` and published to npm.
 
-A PR that changes the package needs a plan: `npm run version-plan`, then commit the file in
+A PR that changes `packages/zeteo` or `packages/zeteo-sdk` needs a plan (naming `"zeteo"` or
+`"@zeteo-io/sdk"`): `npm run version-plan`, then commit the file in
 `.nx/version-plans/`. CI's version-plan check says when one is missing.
 
 Merging a PR into `master` while plans are pending opens (or updates) the release PR,
@@ -134,6 +137,10 @@ the version and changelog and deletes them (`.github/workflows/create-version-pr
 that PR publishes `ghcr.io/zeteo-io/zeteo:<version>` (and `<major>.<minor>`) for amd64 and arm64
 and tags `zeteo@<version>` (`.github/workflows/publish.yml`). The publish workflow can also be
 started by hand, for the first release or to retry one; it skips a version whose tag exists.
+The same release publishes `@zeteo-io/sdk` to npm and tags it, unless its version is `0.0.0` or
+already on npm. There is no npm token: the job uses npm trusted publishing. The first publish is
+by hand (`npm login`, then `npm publish -w @zeteo-io/sdk --access public`), after which the repo
+owner configures the trusted publisher on npmjs.com (this repository, workflow `publish.yml`).
 
 Before 1.0, a plan's bump is one step smaller than its name: `major` for a breaking change gives
 0.1 → 0.2, `minor` for a feature and `patch` for a fix both give 0.1.0 → 0.1.1. Plan a breaking

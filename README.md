@@ -30,6 +30,7 @@ Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRI
 | Path | Contents |
 |------|----------|
 | `packages/zeteo` | The service: an Express app on port 4201 with Prisma + Postgres and Redis |
+| `packages/zeteo-sdk` | `@zeteo-io/sdk`: the TypeScript client for zeteo's API, published to npm ([README](packages/zeteo-sdk/README.md)) |
 | `e2e/` | Not a package: a local end-to-end run against a real tereo ([e2e/README.md](e2e/README.md)) |
 
 ## Develop

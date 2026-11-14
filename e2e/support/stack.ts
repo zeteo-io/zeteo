@@ -31,6 +31,13 @@ export const stack = {
   get webClientSecret() {
     return required("E2E_WEB_CLIENT_SECRET");
   },
+  /** The calling app service of e2e/provisioning/e2e-app.json: audience zeteo, role zeteo_admin. */
+  get app() {
+    return {
+      clientId: "e2e-app",
+      clientSecret: required("E2E_APP_CLIENT_SECRET"),
+    };
+  },
   get sourceReaderPassword() {
     return required("E2E_SOURCE_READER_PASSWORD");
   },

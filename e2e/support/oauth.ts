@@ -130,3 +130,20 @@ export const signIn = async ({
   if (token.status !== 200) await fail("token", token);
   return ((await token.json()) as { access_token: string }).access_token;
 };
+
+/** A client-credentials token for a confidential client, as a service gets its own. */
+export const serviceToken = async (
+  clientId: string,
+  clientSecret: string
+): Promise<string> => {
+  const res = await fetch(`${stack.tereoUrl}/oauth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+    },
+    body: new URLSearchParams({ grant_type: "client_credentials" }),
+  });
+  if (res.status !== 200) await fail("client credentials", res);
+  return ((await res.json()) as { access_token: string }).access_token;
+};

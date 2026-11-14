@@ -11,9 +11,77 @@ concurrency:
   group: publish
   cancel-in-progress: false
 
-# The job releases the version zeteo's manifest names unless that version's tag
+# Each job releases what its manifest's version names unless that version's tag
 # already exists, so a rerun skips what already went out.
 jobs:
+  npm:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true &&
+       contains(github.event.pull_request.labels.*.name, 'automated-version-bump'))
+    runs-on: ubuntu-latest
+    permissions:
+      # Tags each published version.
+      contents: write
+      # npm trusted publishing (OIDC) and provenance.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: master
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          # The runner's cached 22.x can lag; dependencies need >= 22.22.2.
+          check-latest: true
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later; Node 22 ships npm 10.
+      - run: npm install -g npm@11
+
+      # Skipping install scripts keeps dependency code from running in a job
+      # that can publish.
+      - run: npm ci --ignore-scripts
+
+      - run: npx nx run-many -t build --projects=@zeteo-io/sdk
+
+      # npm authenticates through the package's trusted publisher (this
+      # workflow's OIDC token); there is no npm token. Version 0.0.0 is the
+      # unreleased placeholder: nothing is published or tagged until a release
+      # PR bumps it.
+      - name: Publish an unreleased version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # npm refuses provenance for private repositories.
+          PROVENANCE: ${{ github.event.repository.private && '--no-provenance' || '--provenance' }}
+        run: |
+          name=@zeteo-io/sdk
+          version=$(node -p "require('./packages/zeteo-sdk/package.json').version")
+          if [ "$version" = "0.0.0" ]; then
+            echo "$name has no release yet (0.0.0)"
+            exit 0
+          fi
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on npm"
+          else
+            npm publish -w "$name" "$PROVENANCE"
+          fi
+          # A version published by hand, or by a run that failed to tag it,
+          # still gets its tag.
+          if git rev-parse -q --verify "refs/tags/$name@$version" >/dev/null; then
+            echo "$name@$version is already tagged"
+            exit 0
+          fi
+          AUTH=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git tag "$name@$version"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $AUTH" \
+            push origin "$name@$version"
+
   image:
     if: >
       github.event_name == 'workflow_dispatch' ||

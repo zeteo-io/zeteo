@@ -65,6 +65,10 @@ done
 
 STARTED=$SECONDS
 
+# Before any image or container, so a build failure fails fast.
+log "Building @zeteo-io/sdk for the SDK's cases"
+(cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
+
 # --- Images --------------------------------------------------------------
 TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.1}"
 if ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
@@ -131,6 +135,7 @@ E2E_ZETEO_CA_PORT=$ZETEO_CA_PORT
 E2E_SETUP_TOKEN=$(hex 16)
 E2E_ZETEO_CLIENT_SECRET=tereo_sk_$(b64url 32)
 E2E_WEB_CLIENT_SECRET=tereo_sk_$(b64url 32)
+E2E_APP_CLIENT_SECRET=tereo_sk_$(b64url 32)
 E2E_ZETEO_MASTER_KEY=$(b64url 32)
 E2E_REQUEST_HANDLER_KEY=$(hex 32)
 E2E_SOURCE_READER_PASSWORD=$(hex 16)

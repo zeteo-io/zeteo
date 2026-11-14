@@ -26,6 +26,10 @@ Read [README.md](README.md) first. The design and the plans are in `docs/superpo
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the
 plans are beside it in `docs/superpowers/plans/`.
 
+The other package is `@zeteo-io/sdk` (`packages/zeteo-sdk`), the TypeScript client for zeteo's API,
+published to npm in its own release group, `sdk` (see [docs/code-style.md](docs/code-style.md)).
+Nothing in `zeteo` depends on it.
+
 ## Layout of `packages/zeteo`
 
 One ordinary package:
