@@ -1,3 +1,4 @@
+import { Suspense, lazy, useState, type ComponentType } from "react";
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
@@ -5,7 +6,6 @@ import { EmptyState, Spinner } from "@kosmeo-ui/react";
 import { RouteError } from "@/components/RouteError";
 import { PageHeader } from "@/components/PageHeader";
 import { RootLayout } from "./layouts/RootLayout";
-import { Suspense, lazy, useState } from "react";
 import { SECTIONS } from "./sections";
 import { useAuth } from "@/lib/auth";
 import {
@@ -48,6 +48,43 @@ const NotFound = () => (
   </>
 );
 
+const tablesPage = lazy(() =>
+  import("@/features/tables").then((m) => ({ default: m.TablesPage }))
+);
+const tablePage = lazy(() =>
+  import("@/features/tables").then((m) => ({ default: m.TablePage }))
+);
+const relationsPage = lazy(() =>
+  import("@/features/relations").then((m) => ({ default: m.RelationsPage }))
+);
+
+const inSuspense = (Page: ComponentType) => (
+  <Suspense fallback={<Spinner size="lg" />}>
+    <Page />
+  </Suspense>
+);
+
+/** A source's tables and relations pages, in place of the source routes' placeholders. */
+const catalogueRoutes = [
+  { path: "tables", element: inSuspense(tablesPage) },
+  { path: "tables/:tableId", element: inSuspense(tablePage) },
+  { path: "relations", element: inSuspense(relationsPage) },
+];
+
+const sourceRoutesWithCatalogue = sourceRoutes.map((route) =>
+  route.children
+    ? {
+        ...route,
+        children: [
+          ...route.children.filter(
+            (child) => child.path !== "tables" && child.path !== "relations"
+          ),
+          ...catalogueRoutes,
+        ],
+      }
+    : route
+);
+
 export const routes = [
   {
     path: "/",
@@ -68,7 +105,7 @@ export const routes = [
           ),
         };
       }),
-      ...sourceRoutes,
+      ...sourceRoutesWithCatalogue,
       { path: "*", element: <NotFound /> },
     ],
   },

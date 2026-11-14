@@ -1,0 +1,37 @@
+.z-relations-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.z-relations-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-relation-form {
+  max-width: 48rem;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.z-relation-form h2 {
+  font-size: var(--k-text-size-lg);
+  margin: 0 0 0.75rem;
+}
+
+.z-relation-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.z-relation-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+}
