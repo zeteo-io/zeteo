@@ -1,6 +1,5 @@
-import { ConfirmButton } from "@/components/ConfirmButton";
 import { useNavigate, useParams } from "react-router-dom";
-import { useDeleteGrant } from "../api/useDeleteGrant";
+import { GrantDeleteButton } from "./GrantDeleteButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { EmptyState, Spinner } from "@kosmeo-ui/react";
 import { PageHeader } from "@/components/PageHeader";
@@ -21,7 +20,6 @@ export const GrantEditPage = () => {
   const { grantId = "" } = useParams();
   const navigate = useNavigate();
   const { data: grant, isLoading, error } = useGrant(grantId);
-  const del = useDeleteGrant();
 
   if (isLoading) return <Spinner size="lg" />;
   if (error?.status === 404) {
@@ -47,15 +45,11 @@ export const GrantEditPage = () => {
       <PageHeader
         title="Edit grant"
         actions={
-          <ConfirmButton
-            danger
+          <GrantDeleteButton
+            grant={grant}
             label="Delete grant"
-            confirmTitle="Delete this grant?"
-            confirmText="The principal can no longer query this table through this grant."
             confirmLabel="Remove grant"
-            onConfirm={() =>
-              del.mutateAsync(grant.id).then(() => navigate("/grants"))
-            }
+            onDeleted={() => navigate("/grants")}
           />
         }
       />

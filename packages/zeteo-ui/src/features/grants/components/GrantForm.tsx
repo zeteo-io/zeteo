@@ -71,12 +71,18 @@ export const GrantForm = ({ grant }: GrantFormProps) => {
     ),
   ];
 
+  const choosePrincipal = (p: PrincipalRef) => {
+    create.reset();
+    setPrincipal(p);
+  };
   const chooseSource = (id: string) => {
+    create.reset();
     setSourceId(id);
     setTableId("");
     setChoice((c) => ({ ...c, selected: [] }));
   };
   const chooseTable = (id: string) => {
+    create.reset();
     setTableId(id);
     setChoice((c) => ({ ...c, selected: [] }));
   };
@@ -135,7 +141,7 @@ export const GrantForm = ({ grant }: GrantFormProps) => {
           <>
             <div>
               <h2>Principal</h2>
-              <PrincipalPicker value={principal} onChange={setPrincipal} />
+              <PrincipalPicker value={principal} onChange={choosePrincipal} />
             </div>
             <div>
               <h2>Table</h2>

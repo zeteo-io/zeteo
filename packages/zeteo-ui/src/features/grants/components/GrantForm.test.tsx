@@ -7,7 +7,9 @@ import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { GrantForm } from "./GrantForm";
 import {
+  CUSTOMERS_ID,
   ORDERS_ID,
+  makeColumn,
   makeTable,
   makeTableDetail,
 } from "@/features/tables/testFixtures";
@@ -110,6 +112,7 @@ describe("GrantForm", () => {
               data: {
                 data: [
                   makeTable(),
+                  makeTable({ id: CUSTOMERS_ID, name: "customers" }),
                   makeTable({
                     id: "a3333333-1c7a-4a53-9d0e-6a3b1f2c4d03",
                     name: "gone",
@@ -118,6 +121,17 @@ describe("GrantForm", () => {
                 ],
                 next_cursor: null,
               },
+            };
+          }
+          if (url === `/v1/sources/${SOURCE_ID}/tables/${CUSTOMERS_ID}`) {
+            return {
+              data: makeTableDetail({
+                id: CUSTOMERS_ID,
+                name: "customers",
+                columns: [
+                  makeColumn({ id: COL(7), name: "email", position: 1 }),
+                ],
+              }),
             };
           }
           if (url === `/v1/sources/${SOURCE_ID}/tables/${ORDERS_ID}`) {
@@ -262,6 +276,91 @@ describe("GrantForm", () => {
       )
     ).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("sends explicit ids, not all_columns, when every box is ticked", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await chooseTable(user);
+    await user.click(screen.getByLabelText("Choose columns"));
+    for (const name of ["id", "customer_id", "note"]) {
+      await user.click(await screen.findByLabelText(name));
+    }
+    await user.click(screen.getByRole("button", { name: "Create grant" }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post.mock.calls[0][1]).toMatchObject({
+      all_columns: false,
+      column_ids: [COL(1), COL(2), COL(3)],
+    });
+  });
+
+  it("submits only the new table's columns after the table changes", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await chooseTable(user);
+    await user.click(screen.getByLabelText("Choose columns"));
+    await user.click(await screen.findByLabelText("id"));
+    await user.selectOptions(screen.getByLabelText("Table"), CUSTOMERS_ID);
+    expect(screen.getByRole("button", { name: "Create grant" })).toBeDisabled();
+    await user.click(await screen.findByLabelText("email"));
+    await user.click(screen.getByRole("button", { name: "Create grant" }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    expect(post.mock.calls[0][1]).toMatchObject({
+      table_id: CUSTOMERS_ID,
+      column_ids: [COL(7)],
+    });
+  });
+
+  it("does not say the new table already has a grant after changing it", async () => {
+    const user = userEvent.setup();
+    post.mockRejectedValue({
+      status: 409,
+      code: "grant_exists",
+      message: "exists",
+    });
+    renderForm();
+    await chooseTable(user);
+    await user.click(screen.getByRole("button", { name: "Create grant" }));
+    await screen.findByText("exists");
+    await user.selectOptions(screen.getByLabelText("Table"), CUSTOMERS_ID);
+    expect(screen.queryByText("exists")).not.toBeInTheDocument();
+    expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
+  });
+
+  it("keeps a held but missing column through Select all and a plain Save", async () => {
+    const user = userEvent.setup();
+    const partial = makeGrant({
+      all_columns: false,
+      columns: [
+        { id: COL(1), name: "id", missing: false },
+        { id: COL(9), name: "dropped", missing: true },
+      ],
+    });
+    renderForm(partial);
+    await user.click(await screen.findByRole("button", { name: "Select all" }));
+    expect(screen.getByLabelText(/dropped/)).toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Select none" }));
+    expect(screen.getByLabelText(/dropped/)).not.toBeChecked();
+  });
+
+  it("keeps a missing column in column_ids when saved unchanged", async () => {
+    const user = userEvent.setup();
+    renderForm(
+      makeGrant({
+        all_columns: false,
+        columns: [
+          { id: COL(1), name: "id", missing: false },
+          { id: COL(9), name: "dropped", missing: true },
+        ],
+      })
+    );
+    await screen.findByLabelText("note");
+    await user.click(screen.getByRole("button", { name: "Save grant" }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0][1]).toEqual({
+      all_columns: false,
+      column_ids: [COL(1), COL(9)],
+    });
   });
 
   describe("editing", () => {

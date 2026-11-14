@@ -1,10 +1,8 @@
-import { PrincipalPicker, type PrincipalRef } from "@/features/principals";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { tableLabel, useAllTables } from "@/features/tables";
-import { ConfirmButton } from "@/components/ConfirmButton";
+import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { useDeleteGrant } from "../api/useDeleteGrant";
 import { PageHeader } from "@/components/PageHeader";
 import { useAllSources } from "../api/useAllSources";
 import { PrincipalCell } from "./PrincipalCell";
@@ -12,6 +10,11 @@ import { useGrants } from "../api/useGrants";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
+import {
+  PrincipalLabel,
+  PrincipalPicker,
+  type PrincipalRef,
+} from "@/features/principals";
 import {
   Alert,
   Badge,
@@ -27,20 +30,37 @@ const columnsText = (grant: Grant) =>
     ? "All columns"
     : `${grant.columns.length} ${grant.columns.length === 1 ? "column" : "columns"}`;
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const uuidParam = (params: URLSearchParams, key: string) => {
+  const value = params.get(key);
+  return value && UUID.test(value) ? value : undefined;
+};
+
+/** The filters the address asks for, minus anything invalid or half a principal. */
 const filtersOf = (params: URLSearchParams): GrantFilters => {
   const type = params.get("principal_type");
+  const principalId = uuidParam(params, "principal_id");
+  const principalType = type === "user" || type === "group" ? type : undefined;
+  const pair = principalType && principalId;
   return {
-    source_id: params.get("source_id") || undefined,
-    table_id: params.get("table_id") || undefined,
-    principal_type: type === "user" || type === "group" ? type : undefined,
-    principal_id: params.get("principal_id") || undefined,
+    source_id: uuidParam(params, "source_id"),
+    table_id: uuidParam(params, "table_id"),
+    principal_type: pair ? principalType : undefined,
+    principal_id: pair ? principalId : undefined,
   };
+};
+
+const queryOf = (filters: GrantFilters) => {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(filters)) {
+    if (value) query.set(key, value);
+  }
+  return query;
 };
 
 export const GrantsPage = () => {
   const { can } = useAuth();
   const navigate = useNavigate();
-  const del = useDeleteGrant();
   const [params, setParams] = useSearchParams();
   const filters = filtersOf(params);
   const canReadSources = can("zeteo.sources.read");
@@ -52,17 +72,40 @@ export const GrantsPage = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
 
-  const setFilters = (next: GrantFilters) => {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(next)) {
-      if (value) query.set(key, value);
-    }
-    setParams(query, { replace: true });
-  };
+  // Dropping what is invalid rewrites the address in place; a person's own
+  // change is a step of its own in the history.
+  const cleaned = queryOf(filters).toString();
+  const current = queryOf({
+    source_id: params.get("source_id") ?? undefined,
+    table_id: params.get("table_id") ?? undefined,
+    principal_type:
+      (params.get("principal_type") as GrantFilters["principal_type"]) ??
+      undefined,
+    principal_id: params.get("principal_id") ?? undefined,
+  }).toString();
+  useEffect(() => {
+    if (cleaned !== current)
+      setParams(new URLSearchParams(cleaned), { replace: true });
+  }, [cleaned, current, setParams]);
+  const setFilters = (next: GrantFilters) => setParams(queryOf(next));
   const principal: PrincipalRef | null =
     filters.principal_type && filters.principal_id
       ? { type: filters.principal_type, id: filters.principal_id }
       : null;
+  const anyFilter = !!(filters.source_id || filters.table_id || principal);
+  const sourceName = filters.source_id
+    ? (sources.sources.find((x) => x.id === filters.source_id)?.slug ??
+      items.find((g) => g.source.id === filters.source_id)?.source.slug ??
+      filters.source_id)
+    : "";
+  const tableName = filters.table_id
+    ? (() => {
+        const known =
+          tables.tables.find((t) => t.id === filters.table_id) ??
+          items.find((g) => g.table.id === filters.table_id)?.table;
+        return known ? tableLabel(known) : filters.table_id;
+      })()
+    : "";
   const selectsUnavailable = !canReadSources || sources.error?.status === 403;
   const canWrite = can("zeteo.grants.write");
 
@@ -115,27 +158,75 @@ export const GrantsPage = () => {
         error={sources.error?.status === 403 ? null : sources.error}
       />
       <div className="z-grants-principal-filter">
-        {principal && (
-          <p>
-            Principal:{" "}
-            <code>
-              {principal.type} {principal.id}
-            </code>{" "}
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() =>
-                setFilters({
-                  ...filters,
-                  principal_type: undefined,
-                  principal_id: undefined,
-                })
-              }
-            >
-              Clear principal
-            </Button>
-          </p>
+        {anyFilter && (
+          <ul className="z-grants-chips" aria-label="Active filters">
+            {filters.source_id && (
+              <li>
+                Source: <code>{sourceName}</code>{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear source"
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      source_id: undefined,
+                      table_id: undefined,
+                    })
+                  }
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            {filters.table_id && (
+              <li>
+                Table: <code>{tableName}</code>{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear table"
+                  onClick={() =>
+                    setFilters({ ...filters, table_id: undefined })
+                  }
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            {principal && (
+              <li>
+                Principal: <PrincipalLabel refValue={principal} />{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear principal"
+                  onClick={() =>
+                    setFilters({
+                      ...filters,
+                      principal_type: undefined,
+                      principal_id: undefined,
+                    })
+                  }
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            <li>
+              <Button
+                size="sm"
+                variant="secondary"
+                fullWidth={false}
+                onClick={() => setFilters({})}
+              >
+                Clear all
+              </Button>
+            </li>
+          </ul>
         )}
         <Button
           size="sm"
@@ -201,13 +292,10 @@ export const GrantsPage = () => {
                     cellElement: (grant: Grant) => (
                       <div className="z-grants-actions">
                         <Link to={`/grants/${grant.id}/edit`}>Edit</Link>
-                        <ConfirmButton
-                          danger
+                        <GrantDeleteButton
+                          grant={grant}
                           label="Delete"
-                          confirmTitle="Delete this grant?"
-                          confirmText="The principal can no longer query this table through this grant."
                           confirmLabel="Delete grant"
-                          onConfirm={() => del.mutateAsync(grant.id)}
                         />
                       </div>
                     ),

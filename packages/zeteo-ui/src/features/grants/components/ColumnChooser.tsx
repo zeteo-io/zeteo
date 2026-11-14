@@ -66,7 +66,13 @@ export const ColumnChooser = ({
               fullWidth={false}
               disabled={live.length === 0}
               onClick={() =>
-                onChange({ ...value, selected: live.map((c) => c.id) })
+                // A column the grant holds but the table lost stays ticked.
+                onChange({
+                  ...value,
+                  selected: columns
+                    .filter((c) => !c.missing || value.selected.includes(c.id))
+                    .map((c) => c.id),
+                })
               }
             >
               Select all

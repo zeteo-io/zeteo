@@ -3,6 +3,7 @@ import { makeSource, SOURCE_ID } from "@/features/sources/testFixtures";
 import { ORDERS_ID, makeTable } from "@/features/tables/testFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useLocation, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { GrantsPage } from "./GrantsPage";
@@ -21,6 +22,25 @@ vi.mock("@/lib/auth", async () => {
     useAuth: () => mockAuth({ permissions: held.permissions }).useAuth(),
   };
 });
+
+const Where = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <p data-testid="where">{location.search}</p>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+};
+const renderPage = (route = "/grants") =>
+  renderWithProviders(
+    <>
+      <Where />
+      <GrantsPage />
+    </>,
+    { route }
+  );
 
 const userGrant = makeGrant();
 const orphan = makeGrant({
@@ -129,7 +149,7 @@ describe("GrantsPage", () => {
     renderWithProviders(<GrantsPage />, {
       route: `/grants?source_id=${SOURCE_ID}&table_id=${ORDERS_ID}&principal_type=user&principal_id=${USER_ID}`,
     });
-    await screen.findByText("Ada Lovelace");
+    await screen.findAllByText("Ada Lovelace");
     expect(grantParams()[0]).toMatchObject({
       source_id: SOURCE_ID,
       table_id: ORDERS_ID,
@@ -161,7 +181,7 @@ describe("GrantsPage", () => {
     renderWithProviders(<GrantsPage />, {
       route: `/grants?principal_type=user&principal_id=${USER_ID}`,
     });
-    await screen.findByText("Ada Lovelace");
+    await screen.findAllByText("Ada Lovelace");
     await user.click(screen.getByRole("button", { name: "Clear principal" }));
     await waitFor(() =>
       expect(grantParams().at(-1)).not.toHaveProperty("principal_id")
@@ -209,5 +229,196 @@ describe("GrantsPage", () => {
     expect(
       screen.getByText(/needs the Read sources permission/)
     ).toBeInTheDocument();
+  });
+
+  it("names whose grant on which table is removed in the confirmation", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByText(
+        "Remove Ada Lovelace's grant on orders · public.orders? They will no longer be able to query this table through this grant."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("names the principal by type and id while the lookup has no name", async () => {
+    post
+      .mockReset()
+      .mockRejectedValue({ status: 502, code: "x", message: "x" });
+    const user = userEvent.setup();
+    renderPage();
+    const row = (await screen.findByText(USER_ID)).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Delete" }));
+    expect(
+      screen.getByText(new RegExp(`^Remove user ${USER_ID}'s grant on orders`))
+    ).toBeInTheDocument();
+  });
+
+  describe("filters in the address", () => {
+    it("drops invalid values from the request and the address", async () => {
+      renderPage(
+        `/grants?source_id=nope&table_id=${ORDERS_ID}&principal_type=robot&principal_id=${USER_ID}`
+      );
+      await screen.findByText("Ada Lovelace");
+      expect(grantParams()[0]).toEqual({ table_id: ORDERS_ID, limit: 50 });
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(
+          `?table_id=${ORDERS_ID}`
+        )
+      );
+      expect(screen.getByTestId("where").textContent).not.toMatch(/nope|robot/);
+    });
+
+    it("applies a principal only as a complete pair", async () => {
+      renderPage(`/grants?principal_type=user`);
+      await screen.findByText("Ada Lovelace");
+      expect(grantParams()[0]).toEqual({ limit: 50 });
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
+      );
+      expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
+    });
+
+    it("keeps a table without a source, shows it, and lets it be cleared", async () => {
+      const user = userEvent.setup();
+      renderPage(`/grants?table_id=${ORDERS_ID}`);
+      await screen.findByText("Ada Lovelace");
+      expect(grantParams()[0]).toMatchObject({ table_id: ORDERS_ID });
+      expect(
+        screen.getByText("public.orders", { selector: "code" })
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Clear table" }));
+      await waitFor(() =>
+        expect(grantParams().at(-1)).not.toHaveProperty("table_id")
+      );
+    });
+
+    it("shows every active filter with its own clear, and Clear all, without zeteo.sources.read", async () => {
+      held.permissions = ["zeteo.grants.read"];
+      const user = userEvent.setup();
+      renderPage(
+        `/grants?source_id=${SOURCE_ID}&table_id=${ORDERS_ID}&principal_type=user&principal_id=${USER_ID}`
+      );
+      await screen.findAllByText("Ada Lovelace");
+      const chips = screen.getByRole("list", { name: "Active filters" });
+      expect(
+        within(chips).getByText("orders", { selector: "code" })
+      ).toBeInTheDocument();
+      expect(
+        within(chips).getByText("public.orders", { selector: "code" })
+      ).toBeInTheDocument();
+      expect(within(chips).getByText("Ada Lovelace")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Clear source" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("where").textContent).not.toMatch(
+          /source_id|table_id/
+        )
+      );
+      await user.click(screen.getByRole("button", { name: "Clear all" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
+      );
+    });
+
+    it("steps through filter states with Back", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await screen.findByText("Ada Lovelace");
+      await user.selectOptions(
+        await screen.findByLabelText("Source"),
+        SOURCE_ID
+      );
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(
+          `source_id=${SOURCE_ID}`
+        )
+      );
+      await user.click(screen.getByRole("button", { name: "Back" }));
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
+      );
+      expect(grantParams().at(-1)).not.toHaveProperty("source_id");
+    });
+  });
+
+  describe("one status badge", () => {
+    const only = async (grant: ReturnType<typeof makeGrant>) => {
+      get.mockImplementation(async (url: string) =>
+        url === "/v1/grants"
+          ? { data: { data: [grant], next_cursor: null } }
+          : { data: { data: [], next_cursor: null } }
+      );
+      renderPage();
+      return (await screen.findByText(/Ada Lovelace|name unavailable/)).closest(
+        "tr"
+      )!;
+    };
+
+    it("shows only Unknown when the grant is unknown and the lookup says inactive", async () => {
+      post.mockImplementation(
+        async (_u: string, body: { principals: object[] }) => ({
+          data: {
+            data: body.principals.map((p) => ({
+              ...p,
+              name: "Ada Lovelace",
+              status: "inactive",
+            })),
+          },
+        })
+      );
+      const row = await only(makeGrant({ principal_status: "unknown" }));
+      expect(within(row).getByText("Unknown")).toBeInTheDocument();
+      expect(within(row).queryByText("Inactive")).toBeNull();
+    });
+
+    it("shows Inactive from the lookup alone", async () => {
+      post.mockImplementation(
+        async (_u: string, body: { principals: object[] }) => ({
+          data: {
+            data: body.principals.map((p) => ({
+              ...p,
+              name: "Ada Lovelace",
+              status: "inactive",
+            })),
+          },
+        })
+      );
+      const row = await only(makeGrant());
+      expect(await within(row).findByText("Inactive")).toBeInTheDocument();
+    });
+
+    it("adds no Orphaned badge when only the lookup says orphaned", async () => {
+      post.mockImplementation(
+        async (_u: string, body: { principals: object[] }) => ({
+          data: {
+            data: body.principals.map((p) => ({
+              ...p,
+              name: null,
+              status: "orphaned",
+            })),
+          },
+        })
+      );
+      get.mockImplementation(async (url: string) =>
+        url === "/v1/grants"
+          ? { data: { data: [makeGrant()], next_cursor: null } }
+          : { data: { data: [], next_cursor: null } }
+      );
+      renderPage();
+      const row = (await screen.findByText(USER_ID)).closest("tr")!;
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(within(row).queryByText(/orphaned/i)).toBeNull();
+    });
+
+    it("shows Orphaned and name unavailable when the grant is orphaned and the lookup fails", async () => {
+      post
+        .mockReset()
+        .mockRejectedValue({ status: 502, code: "x", message: "x" });
+      const row = await only(makeGrant({ principal_status: "orphaned" }));
+      expect(within(row).getByText("Orphaned")).toBeInTheDocument();
+      expect(row).toHaveTextContent("name unavailable");
+    });
   });
 });
