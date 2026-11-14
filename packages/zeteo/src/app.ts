@@ -1,8 +1,11 @@
 import { hostHeaderValidation, originValidation } from "@tereo-io/mcp";
 import { createRequestIdMiddleware } from "./utils/requestId.js";
 import { errorHandler, NotFoundError } from "./utils/errors.js";
+import { uiConfigRouter, uiEnabled } from "./ui/config.js";
 import { MCP_PATH, MCP_PATHS } from "./mcp/paths.js";
 import express, { type Router } from "express";
+import { cspDirectives } from "./ui/csp.js";
+import { uiRouter } from "./ui/serve.js";
 import routes from "./routes/index.js";
 import helmet from "helmet";
 import env from "./env.js";
@@ -26,7 +29,14 @@ export const createApp = (mcpRouter: Router | null) => {
   app.set("trust proxy", trustProxy);
 
   app.use(createRequestIdMiddleware());
-  app.use(helmet({ contentSecurityPolicy: false }));
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        useDefaults: false,
+        directives: cspDirectives(env),
+      },
+    })
+  );
   app.use(cors({ origin: env.CORS_ALLOWED_ORIGINS }));
 
   if (mcpRouter) {
@@ -44,8 +54,12 @@ export const createApp = (mcpRouter: Router | null) => {
     app.use(mcpRouter);
   }
 
+  uiEnabled();
+  app.use(uiConfigRouter);
+
   // JSON bodies are parsed per area, each with its own limit.
   app.use(routes);
+  app.use(uiRouter());
 
   app.use(() => {
     throw new NotFoundError("Not found");

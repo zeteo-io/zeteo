@@ -33,6 +33,17 @@
       "redirectUris": ["http://127.0.0.1/e2e-other/callback"],
       "scopes": ["openid", "profile", "email"],
       "consentRequired": false
+    },
+    {
+      "clientId": "e2e-ui",
+      "name": "E2E admin UI",
+      "description": "A public login client for a page on zeteo's origin that holds its tokens in memory",
+      "clientType": "public",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": ["http://127.0.0.1/e2e-ui/callback"],
+      "scopes": ["openid", "profile", "email", "offline_access"],
+      "audience": ["zeteo"],
+      "consentRequired": false
     }
   ]
 }

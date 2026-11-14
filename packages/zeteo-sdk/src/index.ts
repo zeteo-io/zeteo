@@ -69,3 +69,10 @@ export type {
   UpdatePrincipalLimitRequest,
   ListPrincipalLimitsOptions,
 } from "./types/principalLimits.js";
+export type {
+  Me,
+  Principal,
+  PrincipalRef,
+  DirectoryPrincipalStatus,
+  SearchPrincipalsOptions,
+} from "./types/principals.js";

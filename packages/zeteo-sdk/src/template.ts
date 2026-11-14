@@ -61,10 +61,12 @@ const MUTED_STATUSES = Array.from({ length: 100 }, (_, i) => 400 + i).filter(
   (status) => status !== 429
 );
 
-// Zeteo's own 502 and 504 codes: one source or one query failed.
+// Zeteo's own 502 and 504 codes: one source or one query failed, or zeteo
+// says tereo did not answer.
 const ZETEO_GATEWAY_ERRORS = new Set([
   "query_failed",
   "source_unreachable",
+  "tereo_unreachable",
   "query_timeout",
 ]);
 

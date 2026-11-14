@@ -11,3 +11,23 @@ HealthStatus:
     redis:
       type: string
       enum: [ok, fail]
+
+Me:
+  type: object
+  required: [id, type, name, email, permissions]
+  properties:
+    id:
+      type: string
+      format: uuid
+      description: The caller's user id (a service account's own user id)
+    type:
+      type: string
+      enum: [user, service]
+    name:
+      type: [string, 'null']
+    email:
+      type: [string, 'null']
+    permissions:
+      type: array
+      description: Held permissions starting with `zeteo.` (and a bare `admin`, if held), sorted, not expanded along their ladders
+      items: { type: string }

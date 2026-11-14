@@ -189,4 +189,35 @@ describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
     expect(refused).toBeInstanceOf(ZeteoError);
     expect(refused).toMatchObject({ status: 401 });
   });
+
+  it("reads who it is and searches the directory", async () => {
+    const me = await zeteo.me.get();
+    expect(me.id).toBe(serviceUserId);
+    expect(me.type).toBe("service");
+    expect(me.permissions).toContain("zeteo.grants.read");
+
+    const found = await zeteo.principals.search({
+      type: "user",
+      q: "ice@e2e.ex",
+    });
+    expect(found.data).toContainEqual({
+      type: "user",
+      id: e2e.alice.id,
+      name: "alice",
+      email: e2e.alice.email,
+      status: "active",
+    });
+
+    const looked = await zeteo.principals.lookup([
+      { type: "group", id: e2e.groupId },
+    ]);
+    expect(looked.data).toEqual([
+      {
+        type: "group",
+        id: e2e.groupId,
+        name: "e2e-analysts",
+        status: "active",
+      },
+    ]);
+  });
 });

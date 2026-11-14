@@ -27,7 +27,7 @@
       {
         "name": "zeteo.grants.read",
         "displayName": "Read grants",
-        "description": "List and read who may query which tables and columns, and users' and groups' concurrency limits",
+        "description": "List and read who may query which tables and columns, and users' and groups' concurrency limits; also lets the holder look up users' names and email addresses",
         "orgAssignable": false
       },
       {
@@ -51,7 +51,7 @@
       {
         "name": "zeteo.runs.read",
         "displayName": "Read query runs",
-        "description": "List the record of queries that were run",
+        "description": "List the record of queries that were run; also lets the holder look up users' names and email addresses",
         "orgAssignable": false
       },
       {

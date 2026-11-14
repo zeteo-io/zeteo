@@ -1,0 +1,44 @@
+DirectoryPrincipalStatus:
+  type: string
+  enum: [active, inactive, orphaned]
+  description: |
+    `active` or `inactive` (a deactivated user, an archived group) as tereo has it, or `orphaned`
+    when tereo has no such user or group.
+
+DirectoryPrincipal:
+  type: object
+  description: A user or group of tereo, by name. A group has no `email` key.
+  required: [type, id, name, status]
+  properties:
+    type: { $ref: '../grants/schemas.yaml#/PrincipalType' }
+    id: { type: string, format: uuid }
+    name: { type: [string, 'null'], description: Null when the principal is orphaned }
+    email:
+      type: [string, 'null']
+      description: Users only; null when the user is orphaned. Absent on a group.
+    status: { $ref: '#/DirectoryPrincipalStatus' }
+
+ListDirectoryPrincipalsResponse:
+  type: object
+  required: [data]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/DirectoryPrincipal' }
+
+LookupPrincipalsRequest:
+  type: object
+  required: [principals]
+  additionalProperties: false
+  properties:
+    principals:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items:
+        type: object
+        required: [type, id]
+        additionalProperties: false
+        properties:
+          type: { $ref: '../grants/schemas.yaml#/PrincipalType' }
+          id: { type: string, format: uuid }
