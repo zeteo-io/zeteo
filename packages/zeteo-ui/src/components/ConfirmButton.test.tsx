@@ -1,6 +1,6 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
 import { ConfirmButton } from "./ConfirmButton";
 
 const setup = (onConfirm: () => Promise<void> | void) => {
@@ -57,5 +57,41 @@ describe("ConfirmButton", () => {
         screen.queryByText("This cannot be undone.")
       ).not.toBeInTheDocument()
     );
+  });
+
+  describe("when onConfirm rejects", () => {
+    const unhandled = vi.fn();
+    beforeEach(() => process.on("unhandledRejection", unhandled));
+    afterEach(() => process.off("unhandledRejection", unhandled));
+
+    it("stays open, shows the failure and lets the person try again", async () => {
+      const onConfirm = vi
+        .fn()
+        .mockRejectedValueOnce({
+          status: 409,
+          code: "conflict",
+          message: "Still in use",
+        })
+        .mockResolvedValueOnce(undefined);
+      setup(onConfirm);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+      await user.click(screen.getByRole("button", { name: "Yes, delete" }));
+
+      expect(await screen.findByText("Still in use")).toBeInTheDocument();
+      expect(screen.getByText("This cannot be undone.")).toBeInTheDocument();
+      const again = screen.getByRole("button", { name: "Yes, delete" });
+      expect(again).toBeEnabled();
+
+      await user.click(again);
+      await waitFor(() =>
+        expect(
+          screen.queryByText("This cannot be undone.")
+        ).not.toBeInTheDocument()
+      );
+      expect(onConfirm).toHaveBeenCalledTimes(2);
+      await new Promise((r) => setTimeout(r, 20));
+      expect(unhandled).not.toHaveBeenCalled();
+    });
   });
 });

@@ -1,5 +1,6 @@
+import { AuthError, getTokens, renew, startLogin } from "@/lib/auth";
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import { getTokens, renew, startLogin } from "@/lib/auth";
+import { toApiError, type ApiError } from "./errors";
 import { loadConfig } from "@/lib/config";
 
 const RENEW_BEFORE_EXPIRY_MS = 60_000;
@@ -24,8 +25,9 @@ const sameOrigin = (config: InternalAxiosRequestConfig): boolean => {
 
 const renewNow = async () => renew(await loadConfig());
 
-// A renewal that cannot succeed (or a token Tereo keeps refusing) means the
-// session is over: leave for Tereo's sign-in page, once.
+// The session is over (no tokens, or Tereo refused the refresh token, or kept
+// refusing the access token): leave for Tereo's sign-in page, silently first
+// as AuthProvider does, once. If leaving fails the next 401 may try again.
 let signingIn = false;
 const beginSignIn = async (): Promise<void> => {
   if (signingIn) return;
@@ -33,10 +35,21 @@ const beginSignIn = async (): Promise<void> => {
   try {
     const cfg = await loadConfig();
     const { pathname, search, hash } = window.location;
-    await startLogin(cfg, { returnTo: `${pathname}${search}${hash}` });
-  } catch {
-    // The auth module shows its own error; the request still rejects.
+    await startLogin(cfg, {
+      silent: true,
+      returnTo: `${pathname}${search}${hash}`,
+    });
+  } catch (err) {
+    signingIn = false;
+    throw toApiError(err);
   }
+};
+
+const sentToken = (config: InternalAxiosRequestConfig): string | undefined => {
+  const header = config.headers.get("Authorization");
+  return typeof header === "string"
+    ? header.replace(/^Bearer /, "")
+    : undefined;
 };
 
 api.interceptors.request.use(async (config) => {
@@ -61,15 +74,31 @@ api.interceptors.response.use(undefined, async (error: unknown) => {
   }
   const config = error.config;
   if (!config || !sameOrigin(config)) throw error;
-  if (config.zeteoRetried) {
+
+  const held = getTokens();
+  // The token just sent is still refused after a renewal, or there is none.
+  if (config.zeteoRetried || !held) {
     await beginSignIn();
     throw error;
   }
+  // Another request already renewed while this one was in flight.
+  if (sentToken(config) !== held.accessToken) {
+    return api.request({ ...config, zeteoRetried: true });
+  }
   try {
     await renewNow();
-  } catch {
-    await beginSignIn();
-    throw error;
+  } catch (err) {
+    // Tokens cleared: Tereo refused the refresh token. Tokens kept: a passing
+    // failure (429, 5xx, network), which must not end the session.
+    if (!getTokens()) {
+      await beginSignIn();
+      throw error;
+    }
+    throw {
+      status: null,
+      code: err instanceof AuthError ? err.code : "renew_failed",
+      message: "Renewing your sign-in failed. Try again in a moment.",
+    } satisfies ApiError;
   }
   return api.request({ ...config, zeteoRetried: true });
 });

@@ -1,8 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrincipalPicker } from "./PrincipalPicker";
 import userEvent from "@testing-library/user-event";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -17,7 +23,7 @@ const ID = "00000000-0000-4000-8000-0000000000aa";
 
 const setup = () => {
   const onChange = vi.fn();
-  const user = userEvent.setup();
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   render(
     <QueryClientProvider
       client={
@@ -30,8 +36,14 @@ const setup = () => {
   return { onChange, user };
 };
 
+const pasteBox = () => screen.getByLabelText("Or paste an id");
+const paste = (value: string) =>
+  fireEvent.change(pasteBox(), { target: { value } });
+const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
 describe("PrincipalPicker", () => {
   beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     get.mockReset().mockResolvedValue({
       data: {
         data: [
@@ -47,21 +59,21 @@ describe("PrincipalPicker", () => {
     });
     post.mockReset();
   });
-  const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  afterEach(() => vi.useRealTimers());
 
   it("searches nothing for one character", async () => {
     const { user } = setup();
     await user.type(screen.getByLabelText("Search by name or email"), "a");
-    await wait(450);
+    await advance(1000);
     expect(get).not.toHaveBeenCalled();
   });
 
   it("searches once, 300 ms after typing 'ada', and calls onChange on a pick", async () => {
     const { user, onChange } = setup();
     await user.type(screen.getByLabelText("Search by name or email"), "ada");
+    await advance(200);
     expect(get).not.toHaveBeenCalled();
-    await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
-    await wait(450);
+    await advance(150);
     expect(get).toHaveBeenCalledTimes(1);
     expect(get.mock.calls[0][1].params).toEqual({
       type: "user",
@@ -75,7 +87,7 @@ describe("PrincipalPicker", () => {
     expect(onChange).toHaveBeenCalledWith({ type: "user", id: ID });
   });
 
-  it("looks up a pasted UUID with the chosen type and lets it be selected", async () => {
+  it("looks up a pasted UUID with the chosen type, selects it, and clears the field", async () => {
     post.mockResolvedValue({
       data: {
         data: [{ type: "group", id: ID, name: "Analysts", status: "active" }],
@@ -83,9 +95,8 @@ describe("PrincipalPicker", () => {
     });
     const { user, onChange } = setup();
     await user.click(screen.getByRole("button", { name: "Groups" }));
-    fireEvent.change(screen.getByLabelText("Or paste an id"), {
-      target: { value: ID },
-    });
+    paste(ID);
+    await advance(50);
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][1]).toEqual({
       principals: [{ type: "group", id: ID }],
@@ -93,6 +104,8 @@ describe("PrincipalPicker", () => {
     expect(await screen.findByText("Analysts")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Select" }));
     expect(onChange).toHaveBeenCalledWith({ type: "group", id: ID });
+    expect(pasteBox()).toHaveValue("");
+    expect(screen.queryByText("Analysts")).not.toBeInTheDocument();
   });
 
   it("cannot select a pasted id that is orphaned", async () => {
@@ -104,9 +117,8 @@ describe("PrincipalPicker", () => {
       },
     });
     setup();
-    fireEvent.change(screen.getByLabelText("Or paste an id"), {
-      target: { value: ID },
-    });
+    paste(ID);
+    await advance(50);
     expect(await screen.findByText(/orphaned/i)).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Select" })
@@ -120,9 +132,40 @@ describe("PrincipalPicker", () => {
       message: "down",
     });
     const { user, onChange } = setup();
-    fireEvent.change(screen.getByLabelText("Or paste an id"), {
-      target: { value: ID },
+    paste(ID);
+    await advance(50);
+    expect(await screen.findByText(/name unavailable/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Select" }));
+    expect(onChange).toHaveBeenCalledWith({ type: "user", id: ID });
+  });
+
+  it("shows the message and does not allow selecting on a 403", async () => {
+    post.mockRejectedValue({
+      status: 403,
+      code: "forbidden",
+      message: "You may not look this up",
     });
+    setup();
+    paste(ID);
+    await advance(50);
+    expect(
+      await screen.findByText("You may not look this up")
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Select" })
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("allows selecting as name unavailable after a network failure", async () => {
+    post.mockRejectedValue({
+      status: null,
+      code: "network",
+      message: "zeteo could not be reached",
+    });
+    const { user, onChange } = setup();
+    paste(ID);
+    await advance(50);
     expect(await screen.findByText(/name unavailable/i)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Select" }));
     expect(onChange).toHaveBeenCalledWith({ type: "user", id: ID });

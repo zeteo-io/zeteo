@@ -1,4 +1,4 @@
-import { AxiosError, AxiosHeaders } from "axios";
+import { AxiosError, AxiosHeaders, CanceledError } from "axios";
 import { issueFor, toApiError } from "./errors";
 import { describe, expect, it } from "vitest";
 
@@ -50,6 +50,28 @@ describe("toApiError", () => {
       )
     );
     expect(err.retryAfter).toBe(7);
+  });
+
+  it("reads Retry-After as an HTTP date, never negative", () => {
+    const header = (date: Date) =>
+      axiosError(429, {}, { "retry-after": date.toUTCString() });
+    const future = toApiError(header(new Date(Date.now() + 30_000)));
+    expect(future.retryAfter).toBeGreaterThan(25);
+    expect(future.retryAfter).toBeLessThanOrEqual(30);
+    expect(toApiError(header(new Date(Date.now() - 60_000))).retryAfter).toBe(
+      0
+    );
+  });
+
+  it("maps a cancelled request to cancelled", () => {
+    expect(toApiError(new CanceledError("x")).code).toBe("cancelled");
+  });
+
+  it("maps a timeout to timeout, saying the server took too long", () => {
+    const err = toApiError(new AxiosError("timeout", "ECONNABORTED"));
+    expect(err.code).toBe("timeout");
+    expect(err.status).toBeNull();
+    expect(err.message).toMatch(/took too long/i);
   });
 
   it("falls back when the body is not zeteo's", () => {

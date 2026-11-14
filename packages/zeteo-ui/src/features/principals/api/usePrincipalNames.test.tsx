@@ -74,6 +74,20 @@ describe("usePrincipalNames", () => {
     expect(post.mock.calls[1][1].principals).toEqual([both[1]]);
   });
 
+  it("exposes a lookup's error and flags only server-side failures as unavailable", async () => {
+    post.mockReset().mockRejectedValue({
+      status: 403,
+      code: "forbidden",
+      message: "No",
+    });
+    const refs: PrincipalRef[] = [{ type: "user", id: uuid(1) }];
+    const { result } = renderHook(() => usePrincipalNames(refs), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(result.current.error?.code).toBe("forbidden"));
+    expect(result.current.unavailable).toBe(false);
+  });
+
   it("sets unavailable on a 502 tereo_unreachable", async () => {
     post.mockReset().mockRejectedValue({
       status: 502,

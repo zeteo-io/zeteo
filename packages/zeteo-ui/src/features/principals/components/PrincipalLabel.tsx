@@ -28,7 +28,7 @@ export const PrincipalLabelView = ({
       </span>
     );
   }
-  if (principal.status === "orphaned" || !principal.name) {
+  if (principal.status === "orphaned") {
     return (
       <span>
         <code>{refValue.id}</code>{" "}
@@ -40,7 +40,7 @@ export const PrincipalLabelView = ({
   }
   return (
     <span>
-      <span>{principal.name}</span>
+      <span>{principal.name ?? <code>{refValue.id}</code>}</span>
       {principal.email && <small> {principal.email}</small>}
       {principal.status === "inactive" && (
         <>

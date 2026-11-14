@@ -5,6 +5,7 @@
 // `["sources", id]` therefore refreshes the source and everything under it.
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { toApiError, type ApiError } from "./errors";
+import { useMemo } from "react";
 import { api } from "./client";
 
 const PAGE_SIZE = 50;
@@ -49,7 +50,19 @@ export const useCursorList = <T>(
     getNextPageParam: (last) => last.next_cursor ?? undefined,
   });
 
-  const items = query.data?.pages.flatMap((page) => page.data) ?? [];
+  // A list that changes between page loads can repeat a row on the next page.
+  const items = useMemo(() => {
+    const seen = new Set<unknown>();
+    return (query.data?.pages ?? []).flatMap((page) =>
+      page.data.filter((item) => {
+        const id = (item as { id?: unknown } | null)?.id;
+        if (typeof id !== "string") return true;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+    );
+  }, [query.data]);
   return {
     items,
     isLoading: query.isLoading,

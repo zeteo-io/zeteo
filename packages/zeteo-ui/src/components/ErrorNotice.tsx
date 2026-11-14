@@ -12,7 +12,7 @@ export const ErrorNotice = ({ error }: ErrorNoticeProps) => {
   return (
     <Alert variant="danger">
       <p>
-        {error.status === null
+        {error.code === "network"
           ? "zeteo could not be reached. Check your connection and try again."
           : error.message}
       </p>

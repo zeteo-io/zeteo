@@ -1,4 +1,4 @@
-import { isAxiosError } from "axios";
+import axios, { isAxiosError } from "axios";
 
 export interface ApiError {
   /** Null when no response came back at all. */
@@ -38,6 +38,17 @@ const findingsOf = (v: unknown): ApiError["findings"] =>
       }))
     : undefined;
 
+// Retry-After is seconds or an HTTP date.
+const retryAfterSeconds = (value: unknown): number | undefined => {
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds);
+  const date = Date.parse(value);
+  return Number.isNaN(date)
+    ? undefined
+    : Math.max(0, Math.ceil((date - Date.now()) / 1000));
+};
+
 /** Maps what a failed request threw to the one shape the screens handle. */
 export const toApiError = (err: unknown): ApiError => {
   if (isApiError(err)) return err;
@@ -48,7 +59,21 @@ export const toApiError = (err: unknown): ApiError => {
       message: err instanceof Error ? err.message : String(err),
     };
   }
+  if (axios.isCancel(err)) {
+    return {
+      status: null,
+      code: "cancelled",
+      message: "The request was cancelled",
+    };
+  }
   const res = err.response;
+  if (!res && (err.code === "ECONNABORTED" || err.code === "ETIMEDOUT")) {
+    return {
+      status: null,
+      code: "timeout",
+      message: "zeteo took too long to answer. Try again.",
+    };
+  }
   if (!res) {
     return {
       status: null,
@@ -69,10 +94,8 @@ export const toApiError = (err: unknown): ApiError => {
   if (issues) out.issues = issues;
   const findings = findingsOf(body.findings);
   if (findings) out.findings = findings;
-  const retry = Number(res.headers?.["retry-after"]);
-  if (Number.isFinite(retry) && retry >= 0 && res.headers?.["retry-after"]) {
-    out.retryAfter = retry;
-  }
+  const retry = retryAfterSeconds(res.headers?.["retry-after"]);
+  if (retry !== undefined) out.retryAfter = retry;
   return out;
 };
 

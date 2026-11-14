@@ -143,6 +143,90 @@ describe("api client", () => {
     expect(startLogin).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects with an ApiError and keeps the session when renewal fails transiently", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: "temporarily_unavailable" }), {
+          status: 503,
+        })
+    );
+    stubAdapter(api, () => 401);
+    await expect(api.get("/v1/a")).rejects.toMatchObject({
+      code: "temporarily_unavailable",
+    });
+    expect(startLogin).not.toHaveBeenCalled();
+    expect(auth.getTokens()).not.toBeNull();
+  });
+
+  it("starts a silent sign-in once when Tereo refuses the refresh token", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    fetchMock.mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ error: "invalid_grant" }), {
+          status: 400,
+        })
+    );
+    stubAdapter(api, () => 401);
+    await Promise.allSettled([api.get("/v1/a"), api.get("/v1/b")]);
+    expect(startLogin).toHaveBeenCalledTimes(1);
+    expect(startLogin).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ silent: true })
+    );
+  });
+
+  it("surfaces a failed sign-in start and allows another attempt", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    startLogin.mockRejectedValueOnce(new Error("no crypto"));
+    stubAdapter(api, () => 401);
+    await expect(api.get("/v1/a")).rejects.toMatchObject({
+      message: "no crypto",
+    });
+    await expect(api.get("/v1/a")).rejects.toBeDefined();
+    expect(startLogin).toHaveBeenCalledTimes(2);
+  });
+
+  it("repeats a late 401 with the current token and no renewal", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    const seen: InternalAxiosRequestConfig[] = [];
+    stubAdapter(
+      api,
+      (config) => {
+        if (authHeader(config) === "Bearer old") {
+          // Another request's renewal finished while this one was in flight.
+          auth.setTokens(tokens("fresh", Date.now() + 3_600_000));
+          return 401;
+        }
+        return 200;
+      },
+      seen
+    );
+    const res = await api.get("/v1/a");
+    expect(res.status).toBe(200);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(authHeader(seen[1])).toBe("Bearer fresh");
+  });
+
+  it("replays a POST body once, unchanged", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    const seen: InternalAxiosRequestConfig[] = [];
+    stubAdapter(
+      api,
+      (config) => (authHeader(config) === "Bearer old" ? 401 : 200),
+      seen
+    );
+    await api.post("/v1/sources", { name: "x", n: 1 });
+    expect(seen).toHaveLength(2);
+    expect(seen[0].data).toBe(seen[1].data);
+    expect(JSON.parse(seen[1].data)).toEqual({ name: "x", n: 1 });
+  });
+
   it("renews first when the token expires within 60 s", async () => {
     const { auth, api } = await load();
     auth.setTokens(tokens("old", Date.now() + 30_000));
@@ -160,6 +244,8 @@ describe("api client", () => {
     const seen: InternalAxiosRequestConfig[] = [];
     stubAdapter(api, () => 200, seen);
     await api.get("https://elsewhere.test/v1/a");
+    await api.get("//other.example/x");
     expect(authHeader(seen[0])).toBeFalsy();
+    expect(authHeader(seen[1])).toBeFalsy();
   });
 });

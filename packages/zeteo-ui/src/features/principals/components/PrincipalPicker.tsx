@@ -20,10 +20,18 @@ const PastedId = ({
   refValue: PrincipalRef;
   onChange: (value: PrincipalRef) => void;
 }) => {
-  const { get, unavailable } = usePrincipalNames([refValue]);
+  const { get, unavailable, error } = usePrincipalNames([refValue]);
   const principal = get(refValue);
 
-  if (!principal && !unavailable) return <Spinner size="sm" />;
+  if (!principal && !error) return <Spinner size="sm" />;
+  if (!principal && !unavailable) {
+    // Refused or invalid (4xx): nothing says this id can be chosen.
+    return (
+      <div>
+        <code>{refValue.id}</code> <small>{error?.message}</small>
+      </div>
+    );
+  }
   const selectable = unavailable || principal?.status !== "orphaned";
   return (
     <div>
@@ -56,6 +64,8 @@ export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
   const [type, setType] = useState<"user" | "group">("user");
   const [query, setQuery] = useState("");
   const [pasted, setPasted] = useState("");
+  // kosmeo's Input is uncontrolled: a new key empties the field.
+  const [pasteKey, setPasteKey] = useState(0);
   const search = usePrincipalSearch(type, query);
   const pastedId = pasted.trim().toLowerCase();
 
@@ -117,6 +127,7 @@ export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
       )}
 
       <Input
+        key={pasteKey}
         label="Or paste an id"
         placeholder="A user, group or service account id"
         helperText={`Looked up as a ${type}; switch above for a group.`}
@@ -132,7 +143,11 @@ export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
         <PastedId
           key={`${type}:${pastedId}`}
           refValue={{ type, id: pastedId }}
-          onChange={onChange}
+          onChange={(selected) => {
+            onChange(selected);
+            setPasted("");
+            setPasteKey((k) => k + 1);
+          }}
         />
       )}
     </div>

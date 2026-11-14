@@ -3,17 +3,17 @@
 }
 
 .z-avatar-btn {
-  width: 2rem;
   height: 2rem;
-  border-radius: 50%;
+  min-width: 2rem;
+  gap: 0.5rem;
+  padding: 0 0.75rem;
+  border-radius: 1rem;
   border: 2px solid var(--k-overlay-light-medium);
   background-color: var(--k-overlay-light-weak);
   cursor: pointer;
-  padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
   transition: border-color 0.2s;
   user-select: none;
   -webkit-user-select: none;
@@ -97,4 +97,30 @@
 .z-user-menu-item svg {
   width: 1rem;
   color: var(--k-text-color-secondary);
+}
+
+.z-avatar-label {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.875rem;
+  color: var(--k-text-color-light);
+}
+
+/* On a narrow bar only the icon shows; the label stays for screen readers. */
+@media (max-width: 600px) {
+  .z-avatar-btn {
+    padding: 0;
+    width: 2rem;
+    justify-content: center;
+  }
+
+  .z-avatar-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }

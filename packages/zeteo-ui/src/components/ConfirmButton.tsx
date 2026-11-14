@@ -1,4 +1,6 @@
-import { Button, ConfirmationModal } from "@kosmeo-ui/react";
+import { toApiError, type ApiError } from "@/lib/api";
+import { Button, Modal } from "@kosmeo-ui/react";
+import { ErrorNotice } from "./ErrorNotice";
 import { useState } from "react";
 
 interface ConfirmButtonProps {
@@ -21,14 +23,24 @@ export const ConfirmButton = ({
 }: ConfirmButtonProps) => {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  const close = () => {
+    setOpen(false);
+    setError(null);
+  };
 
   const confirm = async () => {
     setBusy(true);
+    setError(null);
     try {
       await onConfirm();
-    } finally {
       setBusy(false);
-      setOpen(false);
+      close();
+    } catch (err) {
+      // Stay open so the failure is read where the action was asked for.
+      setBusy(false);
+      setError(toApiError(err));
     }
   };
 
@@ -41,16 +53,36 @@ export const ConfirmButton = ({
       >
         {label}
       </Button>
-      <ConfirmationModal
+      <Modal
         show={open}
         title={confirmTitle}
-        body={confirmText}
-        confirmButtonText={confirmLabel}
-        isLoading={busy}
+        onClose={close}
         dismissible={!busy}
-        handleHide={() => setOpen(false)}
-        handleConfirm={() => void confirm()}
-      />
+        footerButtons={[
+          <Button
+            key="cancel"
+            variant="secondary"
+            fullWidth={false}
+            disabled={busy}
+            onClick={close}
+          >
+            Cancel
+          </Button>,
+          <Button
+            key="confirm"
+            variant={danger ? "danger" : "primary"}
+            fullWidth={false}
+            isLoading={busy}
+            disabled={busy}
+            onClick={() => void confirm()}
+          >
+            {confirmLabel}
+          </Button>,
+        ]}
+      >
+        <p>{confirmText}</p>
+        <ErrorNotice error={error} />
+      </Modal>
     </>
   );
 };

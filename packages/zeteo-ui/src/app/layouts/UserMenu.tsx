@@ -8,6 +8,8 @@ export const UserMenu = () => {
   const { me, signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const label = me.name ?? me.email ?? "Signed in";
 
   useEffect(() => {
     if (!isOpen) return;
@@ -16,19 +18,30 @@ export const UserMenu = () => {
         setIsOpen(false);
       }
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setIsOpen(false);
+      buttonRef.current?.focus();
+    };
     document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKey);
+    };
   }, [isOpen]);
 
   return (
     <div ref={menuRef} className="z-user-menu-container">
       <button
+        ref={buttonRef}
         className="z-avatar-btn"
-        aria-label="User menu"
         aria-expanded={isOpen}
+        aria-haspopup="true"
         onClick={() => setIsOpen(!isOpen)}
       >
         <FontAwesomeIcon icon={faUser} className="z-avatar-icon" />
+        <span className="z-avatar-label">{label}</span>
       </button>
 
       <div className={`z-user-menu ${isOpen ? "open" : ""}`}>

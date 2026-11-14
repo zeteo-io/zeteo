@@ -45,6 +45,13 @@ describe("PrincipalLabel", () => {
     expect(screen.getByText(ref.id)).toBeInTheDocument();
   });
 
+  it("does not call an active principal without a name orphaned", () => {
+    resolved({ name: null, email: null, status: "active" });
+    render(<PrincipalLabel refValue={ref} />);
+    expect(screen.queryByText("orphaned")).not.toBeInTheDocument();
+    expect(screen.getByText(ref.id)).toBeInTheDocument();
+  });
+
   it("shows the id and name unavailable, with no orphaned badge, when names are unavailable", () => {
     names.mockReturnValue({ get: () => undefined, unavailable: true });
     render(<PrincipalLabel refValue={ref} />);

@@ -1,6 +1,5 @@
-import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { api, toApiError, type ApiError } from "@/lib/api";
-import { useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
 
 export type PrincipalRef = { type: "user" | "group"; id: string };
 
@@ -12,6 +11,7 @@ export interface Principal extends PrincipalRef {
 
 const BATCH = 100;
 const STALE_MS = 60_000;
+const BATCH_WINDOW_MS = 10;
 
 const refKey = (ref: PrincipalRef) => ["principals", "ref", ref.type, ref.id];
 const textKey = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
@@ -29,59 +29,94 @@ export const lookupPrincipals = async (
   }
 };
 
+interface Waiter {
+  ref: PrincipalRef;
+  resolve: (principal: Principal) => void;
+  reject: (error: ApiError) => void;
+}
+
+// Every ref asked for within one window, by any component, goes out together:
+// a list of labels renders each with its own hook, yet makes one request per
+// 100 distinct principals.
+let waiting = new Map<string, Waiter[]>();
+let timer: ReturnType<typeof setTimeout> | undefined;
+
+const flush = () => {
+  timer = undefined;
+  const batch = waiting;
+  waiting = new Map();
+  const keys = [...batch.keys()];
+  for (let i = 0; i < keys.length; i += BATCH) {
+    const chunk = keys.slice(i, i + BATCH);
+    const refs = chunk.map((key) => batch.get(key)![0].ref);
+    lookupPrincipals(refs).then(
+      (found) => {
+        const byKey = new Map(found.map((p) => [textKey(p), p]));
+        for (const key of chunk) {
+          const principal = byKey.get(key);
+          for (const waiter of batch.get(key)!) {
+            if (principal) waiter.resolve(principal);
+            else {
+              waiter.reject({
+                status: 502,
+                code: "lookup_incomplete",
+                message: "The lookup did not answer for this id",
+              });
+            }
+          }
+        }
+      },
+      (error: ApiError) => {
+        for (const key of chunk) {
+          for (const waiter of batch.get(key)!) waiter.reject(error);
+        }
+      }
+    );
+  }
+};
+
+const requestPrincipal = (ref: PrincipalRef): Promise<Principal> =>
+  new Promise((resolve, reject) => {
+    const key = textKey(ref);
+    const list = waiting.get(key) ?? [];
+    list.push({ ref, resolve, reject });
+    waiting.set(key, list);
+    timer ??= setTimeout(flush, BATCH_WINDOW_MS);
+  });
+
+// Tereo did not answer (or the answer could not be had): the id can still be
+// used, only its name is missing.
+export const isUnavailable = (error: ApiError | null): boolean =>
+  error !== null &&
+  error.code !== "cancelled" &&
+  (error.status === null || error.status >= 500);
+
 /**
- * Names for principals, looked up in batches of at most 100 distinct refs.
- * Each answer is kept per ref for 60 s, so paging through a list asks only
- * for the names it does not already have.
+ * Names for principals. Each ref is its own query, kept 60 s, so a ref already
+ * known or in flight is never asked for again; the requests of all callers are
+ * merged by `requestPrincipal`.
  */
 export const usePrincipalNames = (refs: PrincipalRef[]) => {
-  const client = useQueryClient();
-
-  // Planned when the set of refs changes, not on every cache write, so the
-  // chunk queries stay mounted (and observed) until their answers are in.
-  const signature = [...new Set(refs.map(textKey))].sort().join(",");
-  const chunks = useMemo(() => {
-    const distinct = [...new Map(refs.map((r) => [textKey(r), r])).values()];
-    const missing = distinct.filter((ref) => {
-      const state = client.getQueryState(refKey(ref));
-      return (
-        !state?.dataUpdatedAt || Date.now() - state.dataUpdatedAt > STALE_MS
-      );
-    });
-    const out: PrincipalRef[][] = [];
-    for (let i = 0; i < missing.length; i += BATCH) {
-      out.push(missing.slice(i, i + BATCH));
-    }
-    return out;
-    // `refs` is represented by `signature`.
-  }, [signature, client]);
-
+  const distinct = [...new Map(refs.map((r) => [textKey(r), r])).values()];
   const results = useQueries({
-    queries: chunks.map((chunk) => ({
-      queryKey: ["principals", "lookup", chunk.map(textKey).sort()],
+    queries: distinct.map((ref) => ({
+      queryKey: refKey(ref),
       staleTime: STALE_MS,
       // Labels sharing a failed lookup must not each start it again.
       retryOnMount: false,
-      queryFn: async () => {
-        const found = await lookupPrincipals(chunk);
-        for (const principal of found) {
-          client.setQueryData(refKey(principal), principal);
-        }
-        return found;
-      },
+      queryFn: () => requestPrincipal(ref),
     })),
   });
 
-  const unavailable = results.some(
-    (r) => (r.error as ApiError | null)?.code === "tereo_unreachable"
-  );
+  const byKey = new Map(distinct.map((ref, i) => [textKey(ref), results[i]]));
+  const errors = results
+    .map((r) => (r.error as ApiError | null) ?? null)
+    .filter((e): e is ApiError => e !== null);
 
   return {
-    get: (ref: PrincipalRef) =>
-      client.getQueryData<Principal>(refKey(ref)) ??
-      results
-        .flatMap((r) => r.data ?? [])
-        .find((p) => p.type === ref.type && p.id === ref.id),
-    unavailable,
+    get: (ref: PrincipalRef): Principal | undefined =>
+      byKey.get(textKey(ref))?.data,
+    unavailable: errors.some(isUnavailable),
+    error: errors[0] ?? null,
   };
 };

@@ -42,6 +42,28 @@ describe("useCursorList", () => {
     expect(result.current.hasMore).toBe(false);
   });
 
+  it("drops a row repeated on a later page and keeps items stable", async () => {
+    get
+      .mockResolvedValueOnce({
+        data: { data: [{ id: "a" }, { id: "b" }], next_cursor: "c2" },
+      })
+      .mockResolvedValueOnce({
+        data: { data: [{ id: "b" }, { id: "c" }], next_cursor: null },
+      });
+    const { result, rerender } = renderHook(
+      () => useCursorList<{ id: string }>(["dup"], "/v1/dup"),
+      { wrapper }
+    );
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    const before = result.current.items;
+    rerender();
+    expect(result.current.items).toBe(before);
+
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.items).toHaveLength(3));
+    expect(result.current.items.map((i) => i.id)).toEqual(["a", "b", "c"]);
+  });
+
   it("passes filters and drops undefined params", async () => {
     get.mockResolvedValue({ data: { data: [], next_cursor: null } });
     renderHook(
