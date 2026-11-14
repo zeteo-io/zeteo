@@ -307,7 +307,7 @@ plain `Error` holding only the underlying message.
 | Case | Behaviour |
 |---|---|
 | 500, 503 (`temporarily_unavailable`), or a 502 or 504 without one of zeteo's codes below (from a proxy or load balancer in front of zeteo), on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
-| 502 whose body's `error` is `query_failed` or `source_unreachable`, 504 whose body's `error` is `query_timeout` | Thrown; not repeated, and other calls are not held back |
+| 502 whose body's `error` is `query_failed`, `source_unreachable` or `tereo_unreachable`, 504 whose body's `error` is `query_timeout` | Thrown; not repeated, and other calls are not held back |
 | Another 5xx, or a dropped connection, on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |
 | Export | Never repeated (the one exception: a single renewal of a rejected service token before the stream starts) |

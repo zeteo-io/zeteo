@@ -120,3 +120,47 @@ describe("principals.lookup", () => {
     });
   });
 });
+
+describe("principals when tereo is unreachable", () => {
+  const t = useStubbedClient();
+  const refs = [{ type: "user" as const, id: ID }];
+  const calls = [
+    [
+      "search",
+      (c: typeof t.client) => c.principals.search({ type: "user", q: "ad" }),
+    ],
+    ["lookup", (c: typeof t.client) => c.principals.lookup(refs)],
+  ] as const;
+
+  it.each(calls)(
+    "%s throws a 502 tereo_unreachable after one request and does not freeze the client",
+    async (_, call) => {
+      t.stub.respond((req) =>
+        req.path.startsWith("/v1/principals")
+          ? {
+              status: 502,
+              body: {
+                error: "tereo_unreachable",
+                error_description: "Tereo could not be reached",
+              },
+            }
+          : undefined
+      );
+      const started = Date.now();
+      await expect(call(t.client)).rejects.toMatchObject({
+        name: "ZeteoError",
+        status: 502,
+        code: "tereo_unreachable",
+      });
+      expect(
+        t.stub.requests.filter((r) => r.path.startsWith("/v1/principals"))
+      ).toHaveLength(1);
+
+      t.stub.respond((req) =>
+        req.path === "/v1/me" ? { body: { id: ID } } : undefined
+      );
+      await t.client.me.get();
+      expect(Date.now() - started).toBeLessThan(2000);
+    }
+  );
+});
