@@ -1,8 +1,13 @@
-import { startStub, testHandler, type Stub } from "./support/stub.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RequestConfig } from "@dianemo/core";
 import type RequestHandler from "@dianemo/core";
 import type { AxiosError } from "axios";
+import {
+  startStub,
+  testHandler,
+  type Stub,
+  type StubResponse,
+} from "./support/stub.js";
 import {
   classifyZeteoError,
   classifyZeteoWrite,
@@ -13,8 +18,8 @@ import {
 } from "../template.js";
 
 const names = clientNames("svc");
-const httpError = (status?: number) =>
-  ({ response: status ? { status } : undefined }) as AxiosError;
+const httpError = (status?: number, data?: unknown) =>
+  ({ response: status ? { status, data } : undefined }) as AxiosError;
 
 describe("zeteo template", () => {
   let stub: Stub;
@@ -117,8 +122,31 @@ describe("zeteo template", () => {
 
   it("classifies errors", () => {
     expect(classifyZeteoError(httpError(429))).toEqual({ action: "fail" });
-    expect(classifyZeteoError(httpError(502))).toEqual({ action: "fail" });
-    expect(classifyZeteoError(httpError(504))).toEqual({ action: "fail" });
+    for (const [status, error] of [
+      [502, "query_failed"],
+      [502, "source_unreachable"],
+      [504, "query_timeout"],
+    ] as const) {
+      expect(classifyZeteoError(httpError(status, { error }))).toEqual({
+        action: "fail",
+      });
+    }
+    for (const data of [
+      undefined,
+      "",
+      "<html></html>",
+      '{"error":"query_failed"}',
+      { error: "bad_gateway" },
+      ["query_failed"],
+      null,
+    ]) {
+      expect(classifyZeteoError(httpError(502, data))).toEqual({
+        action: "retry",
+      });
+      expect(classifyZeteoError(httpError(504, data))).toEqual({
+        action: "retry",
+      });
+    }
     expect(classifyZeteoError(httpError(500))).toEqual({ action: "retry" });
     expect(classifyZeteoError(httpError(503))).toEqual({ action: "retry" });
     expect(classifyZeteoError(httpError(404))).toBeUndefined();
@@ -142,11 +170,17 @@ describe("zeteo template", () => {
     expect(stub.requests.length - before).toBe(1);
   });
 
-  for (const status of [502, 504]) {
-    for (const client of ["service", "person"] as const) {
-      it(`returns a ${status} on the ${client} client at once and does not freeze it`, async () => {
+  const zeteoFailures = [
+    { status: 502, error: "query_failed" },
+    { status: 502, error: "source_unreachable" },
+    { status: 504, error: "query_timeout" },
+  ];
+
+  for (const client of ["service", "person"] as const) {
+    for (const { status, error } of zeteoFailures) {
+      it(`returns zeteo's ${status} ${error} on the ${client} client at once and does not freeze it`, async () => {
         stub.respond(() =>
-          stub.requests.length === 1 ? { status, body: {} } : undefined
+          stub.requests.length === 1 ? { status, body: { error } } : undefined
         );
         await expect(
           handler.handleRequest(req(names[client]))
@@ -158,31 +192,49 @@ describe("zeteo template", () => {
         expect(stub.requests).toHaveLength(2);
       });
     }
-  }
 
-  for (const status of [500, 503]) {
-    it(`repeats a ${status} without holding back another call on the client`, async () => {
-      stub.respond((r) =>
-        r.path === "/v1/catalog" && stub.requests.length === 1
-          ? { status, body: {} }
-          : undefined
+    // All cases run at once, each on its own path, so the backoff before the
+    // repeats is paid once.
+    it(`repeats a 500, a 503 and a gateway's 502 or 504 on the ${client} client without holding back another call`, async () => {
+      const cases: Record<string, StubResponse> = {
+        "500": { status: 500, body: {} },
+        "503": { status: 503, body: { error: "temporarily_unavailable" } },
+        "502-html": {
+          status: 502,
+          headers: { "content-type": "text/html" },
+          chunks: ["<html><body>502 Bad Gateway</body></html>"],
+        },
+        "502-empty": { status: 502, chunks: [] },
+        "504-other": { status: 504, body: { error: "gateway_timeout" } },
+      };
+      const seen = new Map<string, number>();
+      stub.respond((r) => {
+        const name = r.path.replace("/v1/r/", "");
+        const n = (seen.get(name) ?? 0) + 1;
+        seen.set(name, n);
+        return n === 1 ? cases[name] : undefined;
+      });
+      const calls = Object.keys(cases).map((name) =>
+        handler.handleRequest(req(names[client], { url: `/v1/r/${name}` }))
       );
-      const first = handler.handleRequest(req(names.service));
-      while (stub.requests.length === 0) {
+      while (stub.requests.length < calls.length) {
         await new Promise((ok) => setTimeout(ok, 5));
       }
-      // Time for the error to reach the handler and for a freeze to be set.
+      // Time for the errors to reach the handler and for a freeze to be set.
       await new Promise((ok) => setTimeout(ok, 100));
       const started = Date.now();
-      await handler.handleRequest(req(names.service, { url: "/v1/sources" }));
+      await handler.handleRequest(req(names[client], { url: "/v1/sources" }));
       expect(Date.now() - started).toBeLessThan(500);
-      const response = await first;
-      expect(response.status).toBe(200);
-      expect(stub.requests.map((r) => r.path)).toEqual([
-        "/v1/catalog",
-        "/v1/sources",
-        "/v1/catalog",
-      ]);
+      const responses = await Promise.all(calls);
+      expect(responses.map((r) => r.status)).toEqual(calls.map(() => 200));
+      expect(Object.fromEntries(seen)).toEqual({
+        "500": 2,
+        "503": 2,
+        "502-html": 2,
+        "502-empty": 2,
+        "504-other": 2,
+        "/v1/sources": 1,
+      });
     });
   }
 

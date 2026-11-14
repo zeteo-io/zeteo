@@ -38,7 +38,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@dianemo/backend-redis": "^2.0.0"
+    "@dianemo/backend-redis": "^2.0.2"
   },
   "peerDependencies": {
     "@dianemo/core": "^2.1.1",

@@ -61,14 +61,33 @@ const MUTED_STATUSES = Array.from({ length: 100 }, (_, i) => 400 + i).filter(
   (status) => status !== 429
 );
 
-// A 429, 502 or 504 is about one caller, one source or one query: repeating it
-// re-runs a failed or timed-out query, and the default retry would freeze the
-// client for every other caller. A 500 or 503 is repeated for this request
-// only; a `Retry-After` on it is still the shortest wait.
+// Zeteo's own 502 and 504 codes: one source or one query failed.
+const ZETEO_GATEWAY_ERRORS = new Set([
+  "query_failed",
+  "source_unreachable",
+  "query_timeout",
+]);
+
+// Axios has parsed a JSON body by now; anything else (text, a stream) is not
+// zeteo's.
+const errorCode = (data: unknown): unknown =>
+  typeof data === "object" && data !== null && !Array.isArray(data)
+    ? (data as { error?: unknown }).error
+    : undefined;
+
+// A 429, or zeteo's own 502 or 504, is about one caller, one source or one
+// query: repeating it re-runs a failed or timed-out query, and the default
+// retry would freeze the client for every other caller. A 500, a 503, or a 502
+// or 504 from a proxy in front of zeteo is repeated for this request only; a
+// `Retry-After` on it is still the shortest wait.
 export const classifyZeteoError: ErrorClassifier = (error) => {
   const status = error.response?.status;
-  if (status === 429 || status === 502 || status === 504) {
-    return { action: "fail" };
+  if (status === 429) return { action: "fail" };
+  if (status === 502 || status === 504) {
+    const code = errorCode(error.response?.data);
+    return typeof code === "string" && ZETEO_GATEWAY_ERRORS.has(code)
+      ? { action: "fail" }
+      : { action: "retry" };
   }
   if (status === 500 || status === 503) return { action: "retry" };
   return undefined;

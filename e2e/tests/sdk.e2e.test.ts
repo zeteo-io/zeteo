@@ -74,15 +74,16 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  try {
-    for (const id of grantsToRemove) await zeteo.grants.delete(id);
-  } finally {
-    try {
-      await zeteo.stop();
-    } finally {
-      await handler.stop();
-    }
+  const failures: unknown[] = [];
+  for (const id of grantsToRemove) {
+    await zeteo.grants.delete(id).catch((err: unknown) => failures.push(err));
   }
+  try {
+    await zeteo.stop();
+  } finally {
+    await handler.stop();
+  }
+  if (failures.length > 0) throw failures[0];
 });
 
 describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
