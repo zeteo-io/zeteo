@@ -180,3 +180,56 @@ export const zeteoAuditEntries = async (
   );
   return page.data as AuditEntry[];
 };
+
+/**
+ * Tereo's directory as zeteo's service account reads it: users by a fragment
+ * of their name or email, users by id, groups by a fragment of slug or name.
+ */
+
+export interface DirectoryUser {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+  status: string;
+}
+
+/** Users whose `field` contains `fragment`, ignoring case. */
+export const searchUsers = (
+  token: string,
+  field: "name" | "email",
+  fragment: string
+) =>
+  requestJson(
+    "GET",
+    url(
+      `/v1/admin/users?${new URLSearchParams({
+        [`filter[${field}]`]: fragment,
+        [`filter[${field}_op]`]: "contains",
+        limit: "20",
+      })}`
+    ),
+    { token }
+  );
+
+/** The users among `ids`, in one request; ids with no user are left out. */
+export const usersByIds = (token: string, ids: string[]) =>
+  requestJson(
+    "GET",
+    url(
+      `/v1/admin/users?${new URLSearchParams({
+        "filter[id]": ids.join(","),
+        "filter[id_op]": "in",
+        limit: String(ids.length),
+      })}`
+    ),
+    { token }
+  );
+
+/** Groups whose slug or name contains `q`, ignoring case. */
+export const searchGroups = (token: string, q: string) =>
+  requestJson(
+    "GET",
+    url(`/v1/admin/groups?${new URLSearchParams({ q, limit: "20" })}`),
+    { token }
+  );

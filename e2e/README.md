@@ -64,6 +64,7 @@ client, `zeteo`, with the run's `TEREO_CLIENT_SECRET`):
 |--------|------|----------|----------|
 | `e2e-web` | confidential | `zeteo` | users' tokens for `/v1` |
 | `e2e-mcp` | public, consent | `zeteo` | the MCP client's sign-in; listed in `MCP_ALLOWED_CLIENTS` |
+| `e2e-ui` | public, `offline_access` | `zeteo` | zeteo's admin UI: a page on `UI_ORIGIN` (`http://127.0.0.1:4200`, in Tereo's `CORS_ALLOWED_ORIGINS`) that exchanges and refreshes from that origin, refresh token in the body |
 | `e2e-other` | public | none | a token for another audience |
 | `tereo-ui` | Tereo's own | Tereo | the admin's calls to Tereo's admin API |
 
@@ -88,6 +89,8 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 | `tls.e2e.test.ts` | `tls: verify` against the untrusted certificate is `502 source_unreachable`; the replica with `NODE_EXTRA_CA_CERTS` registers and queries the same source; `verify` with the CA in the source's `ca` setting works; `tls: require` works without trusting the CA |
 | `audit.e2e.test.ts` | A query's `zeteo.query.run` and an export's `zeteo.export.started` and `zeteo.export.run` reach Tereo's audit log through the outbox |
 | `sdk.e2e.test.ts` | `@zeteo-io/sdk` as `e2e-app` (a `@dianemo/core` handler on a memory backend): refused before any grant; with `zeteo_admin` grants its own account `orders` (the id from Tereo's `GET /v1/account/me` with the service's token), reads the grant, queries, deletes it; `withToken` queries as alice and is refused for erin, and the run log names each as the caller; `export.rows` read to the end agrees with its end line, `export.stream` as CSV starts with its header; `paginate` over the source's tables one per page finds all of them; `withToken` of an `e2e-other` token is a `ZeteoError` with status 401 |
+| `uiSignIn.e2e.test.ts` | `e2e-ui`'s code is exchanged with `Origin: UI_ORIGIN`, Tereo answers that origin's CORS (and its preflight) and returns the refresh token in the body; the refresh from the body renews and its token reaches `/v1/catalog`; `prompt=none` gives a code with Tereo's session cookies and `login_required` without them; a revoked refresh token no longer renews |
+| `directory.e2e.test.ts` | With zeteo's own service token: users by a fragment of name and of email (`GET /v1/admin/users`, `filter[name|email]` with `_op=contains`), groups by `q` (`GET /v1/admin/groups`), users by id in one request (`filter[id]`, `filter[id_op]=in`) with a missing id left out |
 | `mcp.e2e.test.ts` | An unauthenticated `initialize` gets the 401 challenge naming the resource metadata, which names Tereo; a token from a client not in `MCP_ALLOWED_CLIENTS` is refused; a user signed in through `e2e-mcp`, found from the challenge as an MCP client finds it, lists the four tools and runs `query` |
 
 Some checks read the stack directly with `docker compose` (`e2e/support/compose.ts`): zeteo's log,
