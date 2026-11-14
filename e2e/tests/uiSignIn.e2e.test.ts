@@ -87,3 +87,34 @@ describe("signing in from a page on zeteo's origin", () => {
     expect(refreshed.body.error).toBe("invalid_grant");
   });
 });
+
+// The stack runs zeteo in production mode, which publishes only an https
+// UI_TEREO_URL, and Tereo here is reached over http: so UI_CLIENT_ID is left
+// unset and the UI is off. What stays on is checked here.
+describe("zeteo with the admin UI off", () => {
+  it("/ui-config.json is a JSON 404 and / is a JSON 404", async () => {
+    for (const path of ["/ui-config.json", "/"]) {
+      const res = await requestJson("GET", `${stack.zeteoUrl}${path}`);
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-type")).toMatch(/application\/json/);
+      expect(res.body).toMatchObject({ error: expect.any(String) });
+    }
+  });
+
+  it("every response carries the content security policy", async () => {
+    const calls = [
+      fetch(`${stack.zeteoUrl}/health`),
+      fetch(`${stack.zeteoUrl}/`),
+      fetch(`${stack.zeteoUrl}/v1/me`),
+      fetch(`${stack.zeteoUrl}/ui-config.json`),
+    ];
+    for (const res of await Promise.all(calls)) {
+      const csp = res.headers.get("content-security-policy") ?? "";
+      expect(csp).toContain("default-src 'self'");
+      expect(csp).toContain("frame-ancestors 'none'");
+      // No UI, no tereo origin for the browser to call.
+      expect(csp).toContain("connect-src 'self';");
+      expect(csp).not.toContain(stack.tereoUrl);
+    }
+  });
+});
