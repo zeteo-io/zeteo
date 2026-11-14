@@ -30,9 +30,16 @@ export interface ClientNames {
 
 const ONCE = "once";
 
-export const clientNames = (): ClientNames => {
+// The service token is cached under the client name, so the name carries the
+// client id. A name segment may not hold `:` or whitespace, and must not be
+// empty: percent-encoding removes both, keeps distinct ids distinct, and the
+// prefix keeps an empty id non-empty.
+export const instanceIdFor = (clientId: string): string =>
+  `sdk-${encodeURIComponent(clientId)}`;
+
+export const clientNames = (clientId: string): ClientNames => {
   const service = buildClientName(ZETEO_TEMPLATE, {
-    instanceId: "sdk",
+    instanceId: instanceIdFor(clientId),
     organizationId: null,
   });
   return {

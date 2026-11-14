@@ -14,6 +14,7 @@ import { zeteoPlugin } from "./plugin.js";
 import type { Redis } from "ioredis";
 import {
   clientNames,
+  instanceIdFor,
   ZETEO_TEMPLATE,
   type ZeteoCredentials,
 } from "./template.js";
@@ -101,10 +102,10 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
     instanceId: string;
     organizationId: null;
   } = {
-    instanceId: "sdk",
+    instanceId: instanceIdFor(options.clientId),
     organizationId: null,
-    baseUrl: options.url.replace(/\/+$/, ""),
-    tereoUrl: options.tereoUrl.replace(/\/+$/, ""),
+    baseUrl: options.url,
+    tereoUrl: options.tereoUrl,
     clientId: options.clientId,
     clientSecret: options.clientSecret,
   };
@@ -121,9 +122,10 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
 
   const getRequestId = options.getRequestId ?? (() => undefined);
 
+  const names = clientNames(options.clientId);
   const transport: Transport = {
     handler,
-    names: clientNames(),
+    names,
     getRequestId,
     async purgeServiceToken() {
       // `getClient` is protected in @dianemo/core's types; the client it
@@ -131,7 +133,7 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
       const h = handler as unknown as {
         getClient(name: string): { purgeCredentials(): Promise<void> };
       };
-      await h.getClient(clientNames().service).purgeCredentials();
+      await h.getClient(names.service).purgeCredentials();
     },
   };
 
@@ -147,7 +149,6 @@ export function createZeteoClient(options: ZeteoClientOptions): ZeteoClient {
       await added;
       await handler.start();
       // A hook registered while the handler was mid-start never runs.
-      const names = clientNames();
       if (!handler.getMetadata().registeredClients.includes(names.service)) {
         await addClient(handler);
       }

@@ -125,6 +125,36 @@ describe("createZeteoClient lifecycle", () => {
     await handler.stop();
   });
 
+  it("does not send one client id's cached token for another", async () => {
+    const backend = memoryBackend();
+    const handlerFor = () =>
+      new RequestHandler({ key: "k".repeat(32), backend });
+    const call = (zeteo: ReturnType<typeof createZeteoClient>) =>
+      transportOf(zeteo).handler.handleRequest({
+        clientName: transportOf(zeteo).names.service,
+        requestName: "t",
+        method: "GET",
+        url: "/v1/catalog",
+      });
+
+    const first = handlerFor();
+    const a = createZeteoClient({ ...base(), clientId: "a", handler: first });
+    await a.start();
+    await call(a);
+    expect(stub.tokensIssued).toBe(1);
+
+    const second = handlerFor();
+    const b = createZeteoClient({ ...base(), clientId: "b", handler: second });
+    await b.start();
+    await call(b);
+    expect(stub.tokensIssued).toBe(2);
+    expect(stub.requests[1].headers.authorization).toBe("Bearer svc-2");
+    expect(transportOf(a).names.service).not.toBe(transportOf(b).names.service);
+
+    await first.stop();
+    await second.stop();
+  });
+
   it("builds its own handler when handler is explicitly undefined", () => {
     const redis = new Redis({ lazyConnect: true });
     const zeteo = createZeteoClient({

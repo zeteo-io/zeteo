@@ -7,11 +7,12 @@ import {
   classifyZeteoError,
   classifyZeteoWrite,
   clientNames,
+  instanceIdFor,
   registerZeteoTemplate,
   ZETEO_TEMPLATE,
 } from "../template.js";
 
-const names = clientNames();
+const names = clientNames("svc");
 const httpError = (status?: number) =>
   ({ response: status ? { status } : undefined }) as AxiosError;
 
@@ -33,7 +34,7 @@ describe("zeteo template", () => {
     handler = testHandler();
     await registerZeteoTemplate(handler);
     await handler.addLocalTemplateClient(ZETEO_TEMPLATE, {
-      instanceId: "sdk",
+      instanceId: instanceIdFor("svc"),
       organizationId: null,
       baseUrl: `${stub.url}/`,
       tereoUrl: stub.url,
@@ -45,6 +46,16 @@ describe("zeteo template", () => {
   afterEach(async () => {
     await handler.stop();
     await stub.close();
+  });
+
+  it("names the clients after the client id", () => {
+    expect(clientNames("a").service).not.toBe(clientNames("b").service);
+    expect(clientNames("a").service).toContain(instanceIdFor("a"));
+    // Distinct ids stay distinct once encoded into a name segment.
+    const ids = ["a:b", "a%3Ab", "a b", "a_b", "", "sdk"];
+    const segments = ids.map(instanceIdFor);
+    expect(new Set(segments).size).toBe(ids.length);
+    for (const segment of segments) expect(segment).toMatch(/^[^:\s]+$/);
   });
 
   it("names the four clients", () => {
@@ -69,7 +80,7 @@ describe("zeteo template", () => {
     stub = await startStub();
     stub.onToken((auth, body) => (tokenRequest = { auth, body }));
     await handler.addLocalTemplateClient(ZETEO_TEMPLATE, {
-      instanceId: "sdk",
+      instanceId: instanceIdFor("svc"),
       organizationId: null,
       baseUrl: stub.url,
       tereoUrl: stub.url,
