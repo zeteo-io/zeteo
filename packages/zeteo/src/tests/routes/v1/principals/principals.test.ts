@@ -58,6 +58,13 @@ describe("/v1/principals", () => {
   });
 
   describe("GET /", () => {
+    it("answers with Cache-Control no-store", async () => {
+      const res = await fetch(`${app.url}/v1/principals?type=user&q=ada`, {
+        headers: { Authorization: `Bearer ${grantsReadToken()}` },
+      });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    });
+
     it("finds a seeded user by name and a group by name", async () => {
       const users = await search(`?type=user&q=ada ${tag}`);
       expect(users.status).toBe(200);
@@ -104,6 +111,18 @@ describe("/v1/principals", () => {
   });
 
   describe("POST /lookup", () => {
+    it("answers with Cache-Control no-store", async () => {
+      const res = await fetch(`${app.url}/v1/principals/lookup`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${grantsReadToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ principals: [{ type: "user", id: ADA }] }),
+      });
+      expect(res.headers.get("cache-control")).toBe("no-store");
+    });
+
     it("returns principals in order, an unknown one orphaned", async () => {
       const res = await lookup({
         principals: [
