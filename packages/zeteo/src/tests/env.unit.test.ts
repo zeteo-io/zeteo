@@ -297,4 +297,41 @@ describe("admin UI settings", () => {
       /packages\/zeteo\/web$/
     );
   });
+
+  it("refuses an http TEREO_URL in production when it becomes the UI's", () => {
+    expect(() =>
+      parseEnv({
+        ...prod,
+        TEREO_URL: "http://tereo.internal",
+        UI_CLIENT_ID: "ui",
+      })
+    ).toThrow(/UI_TEREO_URL/);
+  });
+
+  it("names UI_TEREO_URL when it is malformed in production", () => {
+    expect(() =>
+      parseEnv({ ...prod, UI_CLIENT_ID: "ui", UI_TEREO_URL: "not a url" })
+    ).toThrow(/UI_TEREO_URL/);
+  });
+
+  it.each([
+    "ftp://core.example.com",
+    "https://user:pass@core.example.com",
+    "https://core.example.com/?a=1",
+    "https://core.example.com/#frag",
+  ])("refuses UI_TEREO_URL %s", (value) => {
+    expect(() =>
+      parseEnv({ ...base, UI_CLIENT_ID: "ui", UI_TEREO_URL: value })
+    ).toThrow(/UI_TEREO_URL/);
+  });
+
+  it("keeps a path on UI_TEREO_URL, minus the trailing slash", () => {
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "https://core.example.com/base/",
+      }).UI_TEREO_URL
+    ).toBe("https://core.example.com/base");
+  });
 });

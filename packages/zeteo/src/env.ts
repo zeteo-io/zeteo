@@ -163,7 +163,27 @@ const EnvFields = z
     // (defaults to TEREO_URL; https in production). UI_DIST_PATH is the build
     // to serve; a relative path resolves from packages/zeteo.
     UI_CLIENT_ID: z.string().min(1).max(64).optional(),
-    UI_TEREO_URL: z.string().url().optional(),
+    UI_TEREO_URL: z
+      .string()
+      .url()
+      .refine(
+        (v) => {
+          if (!URL.canParse(v)) return true; // .url() reports it
+          const url = new URL(v);
+          return (
+            (url.protocol === "https:" || url.protocol === "http:") &&
+            !url.username &&
+            !url.password &&
+            !url.search &&
+            !url.hash
+          );
+        },
+        {
+          message:
+            "UI_TEREO_URL must be an http(s) URL without credentials, query string or fragment",
+        }
+      )
+      .optional(),
     UI_DIST_PATH: z.string().optional(),
     // Wraps the per-source data keys that encrypt source settings. Required
     // outside tests. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
@@ -266,6 +286,7 @@ const EnvFields = z
       val.NODE_ENV === "production" &&
       uiTereoUrl &&
       (val.UI_TEREO_URL || val.UI_CLIENT_ID) &&
+      URL.canParse(uiTereoUrl) &&
       new URL(uiTereoUrl).protocol !== "https:"
     ) {
       ctx.addIssue({
