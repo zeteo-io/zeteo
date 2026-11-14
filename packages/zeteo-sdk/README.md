@@ -254,11 +254,33 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 | `sources.relations` | `list(sourceId)`, `declare(sourceId, body)`, `delete(sourceId, relationId)` |
 | `grants` | `list`, `get`, `create`, `replace`, `delete` |
 | `principalLimits` | `list`, `get`, `create`, `update`, `delete` |
+| `me` | `get()` |
+| `principals` | `search({ type, q, limit? })`, `lookup(principals)` |
 
 `sources.get`, `sources.tables.get`, `grants.get` and `principalLimits.get` resolve `null` on a
 404; every other call, `catalog.get` included, throws on it. An id that is empty, is exactly `.`
 or `..`, or contains `/`, `\`, `?` or `#` throws `ZeteoError` with code `invalid_id` before any
 request is made.
+
+### Who is calling, and finding principals
+
+`me.get()` returns the caller's `id`, `type` (`user` or `service`), `name`, `email` (both `null`
+when tereo cannot be reached or does not know the user) and held `zeteo.` `permissions`. It needs
+only a valid token, so `zeteo.withToken(token).me.get()` tells your service what a signed-in
+person may do.
+
+```ts
+const { data } = await zeteo.principals.search({ type: "group", q: "analy", limit: 5 });
+const named = await zeteo.principals.lookup([{ type: "user", id: userId }]);
+```
+
+`principals.search` finds users or groups by name for choosing who a grant is for; `limit` is 1 to
+25 and `q` 2 to 100 characters. `principals.lookup` answers 1 to 100 `{ type, id }` pairs by id; one
+tereo does not have comes back `orphaned` with a `null` name. Both resolve `{ data: Principal[] }`,
+where a `Principal` has `type`, `id`, `name`, `status` (`active`, `inactive` or `orphaned`) and,
+for users, `email`. `search` needs `zeteo.grants.read`; `lookup` accepts `zeteo.grants.read` or
+`zeteo.runs.read`. A search past 60 a minute per caller throws `ZeteoError` with status 429 and
+`retryAfter`. `lookup` changes nothing, so it is repeated after a 5xx like a GET.
 
 ## Errors
 
@@ -284,9 +306,9 @@ plain `Error` holding only the underlying message.
 
 | Case | Behaviour |
 |---|---|
-| 500, 503 (`temporarily_unavailable`), or a 502 or 504 without one of zeteo's codes below (from a proxy or load balancer in front of zeteo), on a GET, `query.run`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
+| 500, 503 (`temporarily_unavailable`), or a 502 or 504 without one of zeteo's codes below (from a proxy or load balancer in front of zeteo), on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
 | 502 whose body's `error` is `query_failed` or `source_unreachable`, 504 whose body's `error` is `query_timeout` | Thrown; not repeated, and other calls are not held back |
-| Another 5xx, or a dropped connection, on a GET, `query.run`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
+| Another 5xx, or a dropped connection, on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |
 | Export | Never repeated (the one exception: a single renewal of a rejected service token before the stream starts) |
 | 429 (`too_many_queries`, `source_busy`) | Thrown with `retryAfter`; not repeated, and other calls are not held back |

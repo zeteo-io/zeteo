@@ -50,6 +50,9 @@ export const OPERATIONS = {
   runQuery: { method: "POST", path: "/v1/query" },
   exportQuery: { method: "POST", path: "/v1/export" },
   listRuns: { method: "GET", path: "/v1/runs" },
+  getMe: { method: "GET", path: "/v1/me" },
+  searchPrincipals: { method: "GET", path: "/v1/principals" },
+  lookupPrincipals: { method: "POST", path: "/v1/principals/lookup" },
 } as const satisfies Record<string, { method: HttpMethod; path: string }>;
 
 export type OperationId = keyof typeof OPERATIONS;
