@@ -30,6 +30,11 @@ The other package is `@zeteo-io/sdk` (`packages/zeteo-sdk`), the TypeScript clie
 published to npm in its own release group, `sdk` (see [docs/code-style.md](docs/code-style.md)).
 Nothing in `zeteo` depends on it.
 
+The admin UI is `packages/zeteo-ui` (Vite + React on `@kosmeo-ui/react`, dev server on port 4200,
+forwarding `/v1` and `/ui-config.json` to zeteo). It belongs to the release group `core`, so its
+version is zeteo's. Its `check` also runs `scripts/check-routes.mjs`, which keeps routes and
+`public/` files clear of the paths zeteo reserves. Server side: `packages/zeteo/docs/admin-ui.md`.
+
 ## Layout of `packages/zeteo`
 
 One ordinary package:

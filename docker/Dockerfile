@@ -17,6 +17,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo-sdk/package.json ./packages/zeteo-sdk/
+COPY packages/zeteo-ui/package.json ./packages/zeteo-ui/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
 
@@ -43,6 +44,7 @@ RUN apk add --no-cache dumb-init wget
 COPY package.json package-lock.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo-sdk/package.json ./packages/zeteo-sdk/
+COPY packages/zeteo-ui/package.json ./packages/zeteo-ui/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
 
