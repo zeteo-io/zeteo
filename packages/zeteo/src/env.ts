@@ -1,5 +1,7 @@
 import "./preload.js";
 import { parseAllowedHosts } from "./sources/network.js";
+import { fileURLToPath } from "url";
+import path from "path";
 import { z } from "zod";
 
 // The one env schema for the whole service.
@@ -9,6 +11,10 @@ import { z } from "zod";
 // and REDIS_URL explicitly.
 
 const DEV_PUBLIC_URL = "http://localhost:4201";
+
+// packages/zeteo, whether this file runs from src/ (tsx) or dist/ (compiled).
+const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const DEFAULT_UI_DIST_PATH = path.resolve(PACKAGE_ROOT, "../zeteo-ui/dist");
 
 const corsOrigins = z.string().transform((val) =>
   val === "*"
@@ -151,6 +157,14 @@ const EnvFields = z
     TEREO_URL: z.string().url().optional(),
     TEREO_CLIENT_ID: z.string().optional(),
     TEREO_CLIENT_SECRET: z.string().optional(),
+    // The admin UI, served from this origin. UI_CLIENT_ID is the OAuth client
+    // id of its login client in tereo (1 to 64 characters); unset, the UI is
+    // not served. UI_TEREO_URL is the tereo origin the browser reaches
+    // (defaults to TEREO_URL; https in production). UI_DIST_PATH is the build
+    // to serve; a relative path resolves from packages/zeteo.
+    UI_CLIENT_ID: z.string().min(1).max(64).optional(),
+    UI_TEREO_URL: z.string().url().optional(),
+    UI_DIST_PATH: z.string().optional(),
     // Wraps the per-source data keys that encrypt source settings. Required
     // outside tests. Generate: node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
     ZETEO_MASTER_KEY: masterKey.optional(),
@@ -239,6 +253,27 @@ const EnvFields = z
         }
       }
     }
+    const uiTereoUrl = val.UI_TEREO_URL ?? val.TEREO_URL;
+    if (val.UI_CLIENT_ID && !uiTereoUrl) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["UI_TEREO_URL"],
+        message:
+          "UI_TEREO_URL (or TEREO_URL) is required when UI_CLIENT_ID is set",
+      });
+    }
+    if (
+      val.NODE_ENV === "production" &&
+      uiTereoUrl &&
+      (val.UI_TEREO_URL || val.UI_CLIENT_ID) &&
+      new URL(uiTereoUrl).protocol !== "https:"
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["UI_TEREO_URL"],
+        message: "UI_TEREO_URL must be https in production",
+      });
+    }
     if (val.NODE_ENV === "production") {
       if (!val.PUBLIC_URL) {
         ctx.addIssue({
@@ -265,6 +300,10 @@ const EnvFields = z
       CORS_ALLOWED_ORIGINS: raw.CORS_ALLOWED_ORIGINS ?? [
         new URL(publicUrl).origin,
       ],
+      UI_TEREO_URL: (raw.UI_TEREO_URL ?? raw.TEREO_URL)?.replace(/\/+$/, ""),
+      UI_DIST_PATH: raw.UI_DIST_PATH
+        ? path.resolve(PACKAGE_ROOT, raw.UI_DIST_PATH)
+        : DEFAULT_UI_DIST_PATH,
       SERVICE_NAME: "zeteo" as const,
     };
   });

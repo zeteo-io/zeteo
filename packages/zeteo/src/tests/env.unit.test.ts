@@ -225,3 +225,76 @@ describe("env schema", () => {
     });
   });
 });
+
+describe("admin UI settings", () => {
+  const prod = {
+    ...base,
+    NODE_ENV: "production",
+    TEREO_TEST_MODE: "false",
+    PUBLIC_URL: "https://zeteo.example.com",
+    ZETEO_MASTER_KEY: Buffer.alloc(32, 9).toString("base64url"),
+    TEREO_URL: "https://tereo.example.com",
+    TEREO_CLIENT_ID: "zeteo",
+    TEREO_CLIENT_SECRET: "secret",
+    REQUEST_HANDLER_KEY: "x".repeat(40),
+  };
+
+  it("defaults UI_TEREO_URL to TEREO_URL", () => {
+    expect(
+      parseEnv({ ...base, UI_CLIENT_ID: "ui", TEREO_URL: "http://t:4001/" })
+        .UI_TEREO_URL
+    ).toBe("http://t:4001");
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        TEREO_URL: "http://t:4001",
+        UI_TEREO_URL: "https://public.example.com/",
+      }).UI_TEREO_URL
+    ).toBe("https://public.example.com");
+  });
+
+  it("refuses an http UI_TEREO_URL in production, and takes https", () => {
+    expect(() =>
+      parseEnv({
+        ...prod,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "http://x.example.com",
+      })
+    ).toThrow(/UI_TEREO_URL/);
+    expect(
+      parseEnv({
+        ...prod,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "https://x.example.com",
+      }).UI_TEREO_URL
+    ).toBe("https://x.example.com");
+  });
+
+  it("needs a Tereo URL once UI_CLIENT_ID is set", () => {
+    expect(() => parseEnv({ ...base, UI_CLIENT_ID: "ui" })).toThrow(
+      /UI_TEREO_URL/
+    );
+    expect(parseEnv(base).UI_CLIENT_ID).toBeUndefined();
+  });
+
+  it("takes a UI_CLIENT_ID of 1 to 64 characters", () => {
+    const url = { ...base, UI_TEREO_URL: "https://t.example.com" };
+    expect(
+      parseEnv({ ...url, UI_CLIENT_ID: "a".repeat(64) }).UI_CLIENT_ID
+    ).toHaveLength(64);
+    expect(() => parseEnv({ ...url, UI_CLIENT_ID: "a".repeat(65) })).toThrow(
+      /UI_CLIENT_ID/
+    );
+  });
+
+  it("resolves UI_DIST_PATH from the package root: a default, an absolute path as is", () => {
+    expect(parseEnv(base).UI_DIST_PATH).toMatch(/packages\/zeteo-ui\/dist$/);
+    expect(parseEnv({ ...base, UI_DIST_PATH: "/srv/ui" }).UI_DIST_PATH).toBe(
+      "/srv/ui"
+    );
+    expect(parseEnv({ ...base, UI_DIST_PATH: "web" }).UI_DIST_PATH).toMatch(
+      /packages\/zeteo\/web$/
+    );
+  });
+});
