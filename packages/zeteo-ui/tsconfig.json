@@ -12,7 +12,7 @@
     "sourceMap": false,
     "emitDecoratorMetadata": false,
     "experimentalDecorators": false,
-    "types": ["vite/client"],
+    "types": ["vite/client", "node"],
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -6,6 +6,7 @@
   try {
     var stored = localStorage.getItem("zeteo-theme");
     var theme = stored ? JSON.parse(stored) : "system";
+    if (theme !== "light" && theme !== "dark") theme = "system";
     var resolved =
       theme === "system"
         ? window.matchMedia("(prefers-color-scheme: dark)").matches
