@@ -65,6 +65,10 @@ done
 
 STARTED=$SECONDS
 
+# Before any image or container, so a build failure fails fast.
+log "Building @zeteo-io/sdk for the SDK's cases"
+(cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
+
 # --- Images --------------------------------------------------------------
 TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.1}"
 if ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
@@ -160,9 +164,6 @@ export E2E_CA_CERT_PATH="$CERTS/ca.crt"
 E2E_COMPOSE_ARGS="$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- \
   -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")"
 export E2E_COMPOSE_ARGS
-
-log "Building @zeteo-io/sdk for the SDK's cases"
-(cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
 
 log "Running the tests"
 status=0

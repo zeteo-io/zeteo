@@ -74,9 +74,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  for (const id of grantsToRemove) await zeteo.grants.delete(id);
-  await zeteo.stop();
-  await handler.stop();
+  try {
+    for (const id of grantsToRemove) await zeteo.grants.delete(id);
+  } finally {
+    try {
+      await zeteo.stop();
+    } finally {
+      await handler.stop();
+    }
+  }
 });
 
 describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
@@ -93,6 +99,8 @@ describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
 
   it("as the service with zeteo_admin, grants itself orders, queries, and removes the grant", async () => {
     const grant = await grantOrdersToService();
+    // Removed in afterAll should an assertion fail before this test removes it.
+    grantsToRemove.push(grant.id);
     expect(grant).toMatchObject({
       principal_type: "user",
       principal_id: serviceUserId,
@@ -105,6 +113,7 @@ describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
     expect(ids(result.rows)).toEqual(PAID_ORDER_IDS);
 
     await zeteo.grants.delete(grant.id);
+    grantsToRemove.splice(grantsToRemove.indexOf(grant.id), 1);
     expect(await zeteo.grants.get(grant.id)).toBeNull();
   });
 
@@ -125,9 +134,10 @@ describe("@zeteo-io/sdk against a real zeteo and Tereo", () => {
     const erinRuns = await zeteo.runs.list({ user_id: erin.id });
     expect(aliceRuns.data.map((run) => run.outcome)).toContain("ok");
     expect(erinRuns.data.map((run) => run.outcome)).toEqual(["refused"]);
-    expect(
-      [...aliceRuns.data, ...erinRuns.data].map((run) => run.user_id)
-    ).not.toContain(serviceUserId);
+    expect(new Set(aliceRuns.data.map((run) => run.user_id))).toEqual(
+      new Set([e2e.alice.id])
+    );
+    expect(erinRuns.data.map((run) => run.user_id)).toEqual([erin.id]);
   });
 
   it("exports as the service: rows read to the end match the end line, and CSV starts with a header", async () => {
