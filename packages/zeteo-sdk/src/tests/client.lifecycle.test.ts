@@ -86,33 +86,37 @@ describe("createZeteoClient lifecycle", () => {
   });
 
   it("adds the client on a handler that is mid-start past its hooks", async () => {
-    // Once the hooks are done, the backend answers slowly, which holds the
-    // start in "starting" long enough to create the client inside that window.
-    let slow = false;
+    // Once the hooks are done, the backend holds every call until the test
+    // opens the gate, which keeps the start in "starting" while the client is
+    // created.
+    let gated = false;
+    let open!: () => void;
+    const gate = new Promise<void>((ok) => (open = ok));
+    let reached!: () => void;
+    const held = new Promise<void>((ok) => (reached = ok));
     const mem = memoryBackend();
     const backend = new Proxy(mem, {
       get(target, prop, recv) {
         const v = Reflect.get(target, prop, recv);
         if (typeof v !== "function") return v;
         return async (...args: unknown[]) => {
-          if (slow) await new Promise((ok) => setTimeout(ok, 30));
+          if (gated) {
+            reached();
+            await gate;
+          }
           return v.apply(target, args);
         };
       },
     });
     const handler = new RequestHandler({ key: "k".repeat(32), backend });
-    let zeteo: ReturnType<typeof createZeteoClient> | undefined;
-    let statusAtCreate: string | undefined;
     handler.registerStartupHook(() => {
-      slow = true;
-      setTimeout(() => {
-        statusAtCreate = handler.getMetadata().status;
-        zeteo = createZeteoClient({ ...base(), handler });
-      }, 5);
+      gated = true;
     });
     const starting = handler.start();
-    while (!zeteo) await new Promise((ok) => setTimeout(ok, 1));
-    expect(statusAtCreate).toBe("starting");
+    await held;
+    expect(handler.getMetadata().status).toBe("starting");
+    const zeteo = createZeteoClient({ ...base(), handler });
+    open();
     await zeteo.start();
     await starting;
     await handler.handleRequest({

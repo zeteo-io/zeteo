@@ -200,7 +200,9 @@ const end = await out.done; // { status: "complete" | "truncated", rows: number 
 - If the connection is cut or the stream ends without zeteo's last line, the iterator throws
   `ExportInterruptedError` (with `runId` and `rowsRead`) and `done` rejects with the same error. A
   broken export is never reported as a finished one.
-- An export is never retried once it has started.
+- An export is never repeated. The one exception: when zeteo rejects the service's token with a
+  401, the client fetches a new token and sends the export once more, before any of the stream has
+  started.
 
 ### Stream
 
@@ -254,9 +256,9 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 | `principalLimits` | `list`, `get`, `create`, `update`, `delete` |
 
 `sources.get`, `sources.tables.get`, `grants.get` and `principalLimits.get` resolve `null` on a
-404; every other call, `catalog.get` included, throws on it. An id that is empty or
-contains `/`, `?`, `#` or `..` throws `ZeteoError` with code `invalid_id` before any request is
-made.
+404; every other call, `catalog.get` included, throws on it. An id that is empty, is exactly `.`
+or `..`, or contains `/`, `\`, `?` or `#` throws `ZeteoError` with code `invalid_id` before any
+request is made.
 
 ## Errors
 
@@ -286,7 +288,7 @@ plain `Error` holding only the underlying message.
 | 502 (`query_failed`, `source_unreachable`), 504 (`query_timeout`) | Thrown; not repeated, and other calls are not held back |
 | Another 5xx, or a dropped connection, on a GET, `query.run`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |
-| Export | Not repeated once the response has started |
+| Export | Never repeated (the one exception: a single renewal of a rejected service token before the stream starts) |
 | 429 (`too_many_queries`, `source_busy`) | Thrown with `retryAfter`; not repeated, and other calls are not held back |
 | Other 4xx | Thrown |
 

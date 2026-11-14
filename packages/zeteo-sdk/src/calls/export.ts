@@ -1,6 +1,6 @@
+import { header, isObject, sendRaw, type CallContext } from "../send.js";
 import { ExportInterruptedError, ZeteoError } from "../errors.js";
 import type { Query, QueryWarning } from "../types/query.js";
-import { sendRaw, type CallContext } from "../send.js";
 import { LineTooLongError, lines } from "../ndjson.js";
 import type { ColumnType } from "../types/common.js";
 import type { DianemoResponse } from "@dianemo/core";
@@ -43,20 +43,8 @@ export interface ExportInternals {
   maxLineBytes?: number;
 }
 
-type Body = Record<string, unknown>;
-
-const isObject = (value: unknown): value is Body =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const runIdHeader = (response: DianemoResponse): string | undefined => {
-  const headers = response.headers as
-    { get?: (n: string) => unknown; [k: string]: unknown } | undefined;
-  const value =
-    typeof headers?.get === "function"
-      ? headers.get("x-zeteo-run-id")
-      : headers?.["x-zeteo-run-id"];
-  return typeof value === "string" && value !== "" ? value : undefined;
-};
+const runIdHeader = (response: DianemoResponse): string | undefined =>
+  header(response.headers, "x-zeteo-run-id") || undefined;
 
 // Axios has already removed a gzip Content-Encoding it decoded.
 async function open(

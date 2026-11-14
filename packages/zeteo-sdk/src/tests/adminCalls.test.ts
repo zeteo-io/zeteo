@@ -2,9 +2,10 @@ import { principalLimitsCalls } from "../calls/principalLimits.js";
 import { OPERATIONS, type OperationId } from "../operations.js";
 import { useStubbedClient } from "./support/callContext.js";
 import { sourcesCalls } from "../calls/sources.js";
+import type { RequestConfig } from "@dianemo/core";
+import { describe, expect, it, vi } from "vitest";
 import { grantsCalls } from "../calls/grants.js";
 import type { CallContext } from "../send.js";
-import { describe, expect, it } from "vitest";
 
 const ID = "11111111-1111-4111-8111-111111111111";
 const ID2 = "22222222-2222-4222-8222-222222222222";
@@ -344,6 +345,87 @@ describe("admin calls", () => {
       );
     });
   }, 30_000);
+
+  it("sends writes as the service, on the client that matches their retry rule", async () => {
+    const asService = rows.filter((row) =>
+      [
+        "sources.create",
+        "grants.create",
+        "sources.update",
+        "grants.replace",
+        "grants.delete",
+        "principalLimits.delete",
+      ].includes(row.name)
+    );
+    expect(new Set(asService.map((row) => OPERATIONS[row.op].method))).toEqual(
+      new Set(["POST", "PATCH", "PUT", "DELETE"])
+    );
+
+    const ctx = t.ctx();
+    const { names } = ctx.transport;
+    const clients = new Map<string, Set<string>>();
+    const handleRequest = ctx.transport.handler.handleRequest.bind(
+      ctx.transport.handler
+    );
+    vi.spyOn(ctx.transport.handler, "handleRequest").mockImplementation(
+      (config: RequestConfig) => {
+        const key = `${config.method} ${config.url}`;
+        clients.set(
+          key,
+          (clients.get(key) ?? new Set()).add(config.clientName)
+        );
+        return handleRequest(config);
+      }
+    );
+    const seen = new Map<string, number>();
+    t.stub.respond((req) => {
+      const key = `${req.method} ${req.path}`;
+      const n = (seen.get(key) ?? 0) + 1;
+      seen.set(key, n);
+      return n === 1
+        ? { status: 500, body: { error: "boom" } }
+        : { status: 200, body: { id: ID } };
+    });
+
+    const outcomes = await Promise.all(
+      asService.map((row) =>
+        row.call(ctx).then(
+          () => "success",
+          (error: { status?: number }) => `status ${error.status}`
+        )
+      )
+    );
+    asService.forEach((row, i) => {
+      const key = `${OPERATIONS[row.op].method} ${expectedPath(row)}`;
+      expect(
+        {
+          name: row.name,
+          outcome: outcomes[i],
+          requests: seen.get(key),
+          clients: [...(clients.get(key) ?? [])],
+        },
+        row.name
+      ).toEqual(
+        row.retried
+          ? {
+              name: row.name,
+              outcome: "success",
+              requests: 2,
+              clients: [names.service],
+            }
+          : {
+              name: row.name,
+              outcome: "status 500",
+              requests: 1,
+              clients: [names.serviceOnce],
+            }
+      );
+    });
+    expect(t.stub.tokensIssued).toBe(1);
+    for (const request of t.stub.requests) {
+      expect(request.headers.authorization).toBe("Bearer svc-1");
+    }
+  });
 
   const bad = "a/b";
   it.each([

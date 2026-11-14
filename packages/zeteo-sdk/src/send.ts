@@ -36,16 +36,16 @@ export interface SendOptions {
   acceptStatus?: number[];
 }
 
-type Body = Record<string, unknown>;
+export type Body = Record<string, unknown>;
 
-const isObject = (value: unknown): value is Body =>
+export const isObject = (value: unknown): value is Body =>
   typeof value === "object" &&
   value !== null &&
   !Array.isArray(value) &&
   typeof (value as { pipe?: unknown }).pipe !== "function";
 
 // Axios headers are an AxiosHeaders instance or a plain object, by version.
-function header(headers: unknown, name: string): string | undefined {
+export function header(headers: unknown, name: string): string | undefined {
   if (!headers || typeof headers !== "object") return undefined;
   const h = headers as { get?: (n: string) => unknown } & Record<
     string,
@@ -60,7 +60,7 @@ const str = (value: unknown): string | undefined =>
 
 // Everything thrown is built from these fields only: an axios error carries
 // the request's Authorization header and the client's oauth config.
-function fromResponse(response: {
+export function fromResponse(response: {
   status: number;
   statusText?: string;
   data?: unknown;

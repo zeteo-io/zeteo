@@ -45,6 +45,40 @@ describe("query-side calls", () => {
       });
     });
 
+    it("carries the request id of a 503 without a health body", async () => {
+      t.stub.respond(() => ({
+        status: 503,
+        headers: { "x-request-id": "req-h" },
+        body: {},
+      }));
+      await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
+        status: 503,
+        code: "http_503",
+        requestId: "req-h",
+      });
+      t.stub.respond(() => ({
+        status: 503,
+        body: { error: "temporarily_unavailable", request_id: "req-b" },
+      }));
+      await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
+        status: 503,
+        code: "temporarily_unavailable",
+        requestId: "req-b",
+      });
+    });
+
+    it("throws invalid_response on a 200 without a health body", async () => {
+      t.stub.respond(() => ({
+        headers: { "x-request-id": "req-o" },
+        body: {},
+      }));
+      await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
+        status: 200,
+        code: "invalid_response",
+        requestId: "req-o",
+      });
+    });
+
     it("throws on a 500 after one request", async () => {
       t.stub.respond(() => ({ status: 500, body: { error: "boom" } }));
       await expect(healthCalls(t.ctx()).get()).rejects.toMatchObject({
