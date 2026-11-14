@@ -40,7 +40,10 @@ vi.mock("@/features/principals", async () => {
       value: unknown;
       onChange: (v: { type: "user"; id: string }) => void;
     }) => (
-      <button onClick={() => onChange({ type: "user", id: USER_ID })}>
+      <button
+        type="button"
+        onClick={() => onChange({ type: "user", id: USER_ID })}
+      >
         {value ? "principal chosen" : "Choose principal"}
       </button>
     ),
@@ -96,7 +99,11 @@ const chooseTable = async (user: ReturnType<typeof userEvent.setup>) => {
 describe("GrantForm", () => {
   beforeEach(() => {
     held.permissions = ["zeteo.grants.write", "zeteo.sources.read"];
-    post.mockReset().mockResolvedValue({ data: makeGrant() });
+    post
+      .mockReset()
+      .mockImplementation(async (url: string) =>
+        url === "/v1/grants" ? { data: makeGrant() } : { data: { data: [] } }
+      );
     put.mockReset().mockResolvedValue({ data: makeGrant() });
     get
       .mockReset()
@@ -327,20 +334,67 @@ describe("GrantForm", () => {
     expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
   });
 
-  it("keeps a held but missing column through Select all and a plain Save", async () => {
-    const user = userEvent.setup();
-    const partial = makeGrant({
-      all_columns: false,
-      columns: [
-        { id: COL(1), name: "id", missing: false },
-        { id: COL(9), name: "dropped", missing: true },
-      ],
+  describe("after a 409 grant_exists", () => {
+    const conflict = async (user: ReturnType<typeof userEvent.setup>) => {
+      post.mockImplementation(async (url: string) => {
+        if (url !== "/v1/grants") return { data: { data: [] } };
+        throw { status: 409, code: "grant_exists", message: "exists" };
+      });
+      renderForm();
+      await chooseTable(user);
+      await user.click(screen.getByRole("button", { name: "Create grant" }));
+      await screen.findByText("exists");
+    };
+
+    it("drops the notice when the principal changes", async () => {
+      const user = userEvent.setup();
+      await conflict(user);
+      await user.click(
+        screen.getByRole("button", { name: "principal chosen" })
+      );
+      expect(screen.queryByText("exists")).not.toBeInTheDocument();
+      expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
     });
-    renderForm(partial);
-    await user.click(await screen.findByRole("button", { name: "Select all" }));
-    expect(screen.getByLabelText(/dropped/)).toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Select none" }));
-    expect(screen.getByLabelText(/dropped/)).not.toBeChecked();
+
+    it("drops the notice when the source changes", async () => {
+      const user = userEvent.setup();
+      await conflict(user);
+      await user.selectOptions(screen.getByLabelText("Source"), "");
+      expect(screen.queryByText("exists")).not.toBeInTheDocument();
+      expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("a held but missing column", () => {
+    const partial = () =>
+      makeGrant({
+        all_columns: false,
+        columns: [
+          { id: COL(1), name: "id", missing: false },
+          { id: COL(9), name: "dropped", missing: true },
+        ],
+      });
+
+    it("is kept through Select all and a plain Save", async () => {
+      const user = userEvent.setup();
+      renderForm(partial());
+      await user.click(
+        await screen.findByRole("button", { name: "Select all" })
+      );
+      expect(screen.getByLabelText(/dropped/)).toBeChecked();
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      await waitFor(() => expect(put).toHaveBeenCalled());
+      expect(put.mock.calls[0][1].column_ids).toContain(COL(9));
+    });
+
+    it("is released by Select none", async () => {
+      const user = userEvent.setup();
+      renderForm(partial());
+      await user.click(
+        await screen.findByRole("button", { name: "Select none" })
+      );
+      expect(screen.getByLabelText(/dropped/)).not.toBeChecked();
+    });
   });
 
   it("keeps a missing column in column_ids when saved unchanged", async () => {

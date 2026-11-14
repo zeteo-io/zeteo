@@ -45,3 +45,23 @@
   border: 1px solid currentColor;
   border-radius: 0.375rem;
 }
+
+.z-run-query-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.z-run-query-head h3 {
+  margin: 0;
+}
+
+.z-runs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}

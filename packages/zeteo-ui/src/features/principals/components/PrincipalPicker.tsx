@@ -10,6 +10,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 interface PrincipalPickerProps {
   value: PrincipalRef | null;
   onChange: (value: PrincipalRef) => void;
+  /** The kinds that can be chosen; with one, there is no switch. */
+  types?: PrincipalRef["type"][];
 }
 
 // Own component so the lookup runs only once there is an id to look up.
@@ -60,8 +62,13 @@ const PastedId = ({
   );
 };
 
-export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
-  const [type, setType] = useState<"user" | "group">("user");
+export const PrincipalPicker = ({
+  value,
+  onChange,
+  types = ["user", "group"],
+}: PrincipalPickerProps) => {
+  const [chosenType, setType] = useState<"user" | "group">(types[0]);
+  const type = types.includes(chosenType) ? chosenType : types[0];
   const [query, setQuery] = useState("");
   const [pasted, setPasted] = useState("");
   // kosmeo's Input is uncontrolled: a new key empties the field.
@@ -76,20 +83,22 @@ export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
           Selected: <PrincipalLabel refValue={value} />
         </p>
       )}
-      <div role="group" aria-label="Kind of principal">
-        {(["user", "group"] as const).map((kind) => (
-          <Button
-            key={kind}
-            size="sm"
-            fullWidth={false}
-            variant={type === kind ? "primary" : "light"}
-            aria-pressed={type === kind}
-            onClick={() => setType(kind)}
-          >
-            {kind === "user" ? "Users" : "Groups"}
-          </Button>
-        ))}
-      </div>
+      {types.length > 1 && (
+        <div role="group" aria-label="Kind of principal">
+          {types.map((kind) => (
+            <Button
+              key={kind}
+              size="sm"
+              fullWidth={false}
+              variant={type === kind ? "primary" : "light"}
+              aria-pressed={type === kind}
+              onClick={() => setType(kind)}
+            >
+              {kind === "user" ? "Users" : "Groups"}
+            </Button>
+          ))}
+        </div>
+      )}
 
       <Input
         label={
@@ -130,7 +139,11 @@ export const PrincipalPicker = ({ value, onChange }: PrincipalPickerProps) => {
         key={pasteKey}
         label="Or paste an id"
         placeholder="A user, group or service account id"
-        helperText={`Looked up as a ${type}; switch above for a group.`}
+        helperText={
+          types.length > 1
+            ? `Looked up as a ${type}; switch above for a group.`
+            : `Looked up as a ${type}.`
+        }
         onChange={(e) => setPasted(e.target.value)}
         autoComplete="off"
       />

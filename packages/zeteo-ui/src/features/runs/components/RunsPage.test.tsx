@@ -1,6 +1,7 @@
 import { makeSource, SOURCE_ID } from "@/features/sources/testFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useLocation, useNavigate } from "react-router-dom";
 import { RUN_USER_ID, makeRun } from "../testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
@@ -38,6 +39,16 @@ const running = makeRun({
   source_id: null,
   query: null,
 });
+
+const Probe = () => {
+  const navigate = useNavigate();
+  return (
+    <>
+      <p data-testid="search">{useLocation().search}</p>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+};
 
 const runParams = () =>
   get.mock.calls
@@ -95,7 +106,8 @@ describe("RunsPage", () => {
     held.permissions = ["zeteo.runs.read"];
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    expect(screen.getAllByText(SOURCE_ID).length).toBeGreaterThan(0);
+    const cell = screen.getAllByRole("row")[1].querySelectorAll("td")[2];
+    expect(cell).toHaveTextContent(SOURCE_ID);
     expect(get.mock.calls.some(([url]) => url === "/v1/sources")).toBe(false);
     expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
   });
@@ -121,6 +133,79 @@ describe("RunsPage", () => {
     expect(params).not.toHaveProperty("user_id");
     expect(params).not.toHaveProperty("source_id");
     expect(params).not.toHaveProperty("outcome");
+  });
+
+  it("drops invalid address values from the address itself", async () => {
+    renderWithProviders(
+      <>
+        <Probe />
+        <RunsPage />
+      </>,
+      { route: `/runs?user_id=nope&source_id=%3Cx%3E&outcome=ok` }
+    );
+    await screen.findAllByText("Ada Lovelace");
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent("?outcome=ok")
+    );
+    expect(screen.getByTestId("search")).not.toHaveTextContent("user_id");
+  });
+
+  it("shows an active source filter as a chip without zeteo.sources.read, clearable", async () => {
+    held.permissions = ["zeteo.runs.read"];
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />, {
+      route: `/runs?source_id=${SOURCE_ID}&outcome=failed`,
+    });
+    await screen.findAllByText("Ada Lovelace");
+    const chips = screen.getByRole("list", { name: "Active filters" });
+    expect(chips).toHaveTextContent(SOURCE_ID);
+    expect(chips).toHaveTextContent("failed");
+    await user.click(screen.getByRole("button", { name: "Clear source" }));
+    await waitFor(() =>
+      expect(runParams().at(-1)).not.toHaveProperty("source_id")
+    );
+    expect(runParams().at(-1)).toMatchObject({ outcome: "failed" });
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    await waitFor(() =>
+      expect(runParams().at(-1)).not.toHaveProperty("outcome")
+    );
+  });
+
+  it("names the source in its chip by slug when sources are readable", async () => {
+    renderWithProviders(<RunsPage />, {
+      route: `/runs?source_id=${SOURCE_ID}`,
+    });
+    const chips = await screen.findByRole("list", { name: "Active filters" });
+    await waitFor(() => expect(chips).toHaveTextContent("orders"));
+    expect(chips).not.toHaveTextContent(SOURCE_ID);
+  });
+
+  it("offers users only in the person picker", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />);
+    await screen.findAllByText("Ada Lovelace");
+    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    expect(screen.getByLabelText("Search by name or email")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Groups" })).toBeNull();
+  });
+
+  it("makes a person's filter change a history step", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Probe />
+        <RunsPage />
+      </>
+    );
+    await screen.findAllByText("Ada Lovelace");
+    await user.selectOptions(screen.getByLabelText("Outcome"), "refused");
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent("outcome=refused")
+    );
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
+    );
   });
 
   it("filters by outcome and by source with the selects", async () => {
@@ -202,12 +287,43 @@ describe("RunsPage", () => {
     expect(screen.getByTestId("run-query")).toBeVisible();
   });
 
-  it("is read-only", async () => {
+  it("is read-only: the only controls are the filters, rows' Details and Load more", async () => {
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    for (const name of [/new|create|add/i, /edit/i, /delete|remove/i]) {
-      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
-      expect(screen.queryByRole("link", { name })).not.toBeInTheDocument();
+    const allowed =
+      /^(Details|Load more|Clear.*|Filter by person|Hide person filter)$/;
+    const controls = [
+      ...screen.getAllByRole("button"),
+      ...screen.queryAllByRole("link"),
+    ].map((el) => el.getAttribute("aria-label") ?? el.textContent ?? "");
+    expect(controls.filter((name) => !allowed.test(name.trim()))).toEqual([]);
+    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    expect(screen.getAllByRole("button", { name: "Details" })).toHaveLength(3);
+  });
+
+  it("forgets 'Copied' after two seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      Object.defineProperty(navigator, "clipboard", {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+      });
+      renderWithProviders(<RunsPage />);
+      await screen.findAllByText("Ada Lovelace");
+      await user.click(
+        within(screen.getAllByRole("row")[1]).getByRole("button", {
+          name: "Details",
+        })
+      );
+      await user.click(await screen.findByRole("button", { name: "Copy" }));
+      expect(await screen.findByText("Copied")).toBeVisible();
+      await vi.advanceTimersByTimeAsync(2100);
+      await waitFor(() =>
+        expect(screen.queryByText("Copied")).not.toBeInTheDocument()
+      );
+    } finally {
+      vi.useRealTimers();
     }
   });
 });

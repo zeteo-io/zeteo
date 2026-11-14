@@ -4,7 +4,7 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useDeleteLimit } from "../api/useDeleteLimit";
 import { PageHeader } from "@/components/PageHeader";
-import { useSearchParams } from "react-router-dom";
+import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useLimits } from "../api/useLimits";
 import { useEffect, useState } from "react";
 import { LimitForm } from "./LimitForm";
@@ -12,17 +12,23 @@ import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
   PrincipalCell,
+  PrincipalLabel,
   PrincipalPicker,
   usePrincipalNames,
   type PrincipalRef,
 } from "@/features/principals";
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The principal filter only counts as a complete, valid pair. */
 const filtersOf = (params: URLSearchParams): LimitFilters => {
   const type = params.get("principal_type");
-  return {
-    principal_type: type === "user" || type === "group" ? type : undefined,
-    principal_id: params.get("principal_id") || undefined,
-  };
+  const id = params.get("principal_id");
+  const valid =
+    (type === "user" || type === "group") && id !== null && UUID.test(id);
+  return valid
+    ? { principal_type: type, principal_id: id.toLowerCase() }
+    : { principal_type: undefined, principal_id: undefined };
 };
 
 const value = (n: number | null) => (n === null ? <em>Default</em> : n);
@@ -46,8 +52,10 @@ const DeleteLimit = ({ limit }: { limit: PrincipalLimit }) => {
 
 export const LimitsPage = () => {
   const { can } = useAuth();
-  const [params, setParams] = useSearchParams();
-  const filters = filtersOf(params);
+  const [filters, setFilters] = useUrlFilters(
+    ["principal_type", "principal_id"],
+    filtersOf
+  );
   const { items, isLoading, error, hasMore, loadMore } = useLimits(filters);
   const [pickingPrincipal, setPickingPrincipal] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -62,9 +70,10 @@ export const LimitsPage = () => {
       : null;
 
   const filterTo = (next: PrincipalRef | null) =>
-    setParams(
-      next ? { principal_type: next.type, principal_id: next.id } : {},
-      { replace: true }
+    setFilters(
+      next
+        ? { principal_type: next.type, principal_id: next.id }
+        : { principal_type: undefined, principal_id: undefined }
     );
 
   return (
@@ -83,10 +92,7 @@ export const LimitsPage = () => {
       <div className="z-limits-filter">
         {principal && (
           <p>
-            Principal:{" "}
-            <code>
-              {principal.type} {principal.id}
-            </code>{" "}
+            Principal: <PrincipalLabel refValue={principal} />{" "}
             <Button
               size="sm"
               variant="secondary"

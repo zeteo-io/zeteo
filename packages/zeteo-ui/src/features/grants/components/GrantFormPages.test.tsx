@@ -1,6 +1,6 @@
+import { GRANT_ID, USER_ID, makeGrant } from "../testFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { GRANT_ID, makeGrant } from "../testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
@@ -35,6 +35,44 @@ describe("GrantEditPage", () => {
     get.mockRejectedValue({ status: 404, code: "not_found", message: "no" });
     renderEdit();
     expect(await screen.findByText("Grant not found")).toBeInTheDocument();
+  });
+
+  it("names the principal and the table in the confirmation", async () => {
+    post.mockReset().mockResolvedValue({
+      data: {
+        data: [
+          { type: "user", id: USER_ID, name: "Ada Lovelace", status: "active" },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderEdit();
+    await user.click(
+      await screen.findByRole("button", { name: "Delete grant" })
+    );
+    expect(
+      await screen.findByText(
+        "Remove Ada Lovelace's grant on orders · public.orders? They will no longer be able to query this table through this grant."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("falls back to the principal's type and id when the lookup is unavailable", async () => {
+    post
+      .mockReset()
+      .mockRejectedValue({ status: 502, code: "x", message: "x" });
+    const user = userEvent.setup();
+    renderEdit();
+    await user.click(
+      await screen.findByRole("button", { name: "Delete grant" })
+    );
+    expect(
+      await screen.findByText(
+        new RegExp(
+          `^Remove user ${USER_ID}'s grant on orders · public\\.orders\\?`
+        )
+      )
+    ).toBeInTheDocument();
   });
 
   it("deletes after confirming and goes back to the list", async () => {

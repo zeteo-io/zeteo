@@ -1,11 +1,13 @@
 import { Badge, Button, Modal } from "@kosmeo-ui/react";
 import { formatDuration } from "@/utils/formatDuration";
 import { PrincipalLabel } from "@/features/principals";
+import { useEffect, useRef, useState } from "react";
 import { formatDate } from "@/utils/formatDate";
 import { OutcomeBadge } from "./OutcomeBadge";
 import type { Run } from "../api/types";
-import { useState } from "react";
 import "./styles.css";
+
+const COPIED_MS = 2000;
 
 interface RunDetailProps {
   run: Run;
@@ -19,13 +21,20 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
   const recorded = run.query !== null && run.query !== undefined;
   const json = recorded ? (JSON.stringify(run.query, null, 2) ?? "") : "";
 
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+
   const copy = async () => {
+    let done: boolean;
     try {
       await navigator.clipboard.writeText(json);
-      setCopied(true);
+      done = true;
     } catch {
-      setCopied(false);
+      done = false;
     }
+    setCopied(done);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(null), COPIED_MS);
   };
 
   return (
@@ -84,25 +93,29 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
           <dt>Error code</dt>
           <dd>{run.error_code ? <code>{run.error_code}</code> : "—"}</dd>
         </dl>
-        <h3>Query</h3>
+        <div className="z-run-query-head">
+          <h3>Query</h3>
+          {recorded && (
+            <>
+              <Button
+                size="sm"
+                variant="secondary"
+                fullWidth={false}
+                onClick={() => void copy()}
+              >
+                Copy
+              </Button>
+              {copied === true && <small role="status">Copied</small>}
+              {copied === false && (
+                <small role="status">Copying is not available here</small>
+              )}
+            </>
+          )}
+        </div>
         {recorded ? (
-          <>
-            <pre className="z-run-query" data-testid="run-query">
-              {json}
-            </pre>
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => void copy()}
-            >
-              Copy
-            </Button>{" "}
-            {copied === true && <small role="status">Copied</small>}
-            {copied === false && (
-              <small role="status">Copying is not available here</small>
-            )}
-          </>
+          <pre className="z-run-query" data-testid="run-query">
+            {json}
+          </pre>
         ) : (
           <p>No query recorded</p>
         )}

@@ -21,7 +21,7 @@ vi.mock("@/lib/api", async () => ({
 
 const ID = "00000000-0000-4000-8000-0000000000aa";
 
-const setup = () => {
+const setup = (types?: ("user" | "group")[]) => {
   const onChange = vi.fn();
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   render(
@@ -30,7 +30,7 @@ const setup = () => {
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <PrincipalPicker value={null} onChange={onChange} />
+      <PrincipalPicker value={null} onChange={onChange} types={types} />
     </QueryClientProvider>
   );
   return { onChange, user };
@@ -60,6 +60,38 @@ describe("PrincipalPicker", () => {
     post.mockReset();
   });
   afterEach(() => vi.useRealTimers());
+
+  it("with one type has no switch and searches and looks up that type only", async () => {
+    post.mockResolvedValue({
+      data: { data: [{ type: "user", id: ID, name: "Ada", status: "active" }] },
+    });
+    const { user } = setup(["user"]);
+    expect(
+      screen.queryByRole("button", { name: "Groups" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Users" })
+    ).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Search by name or email"), "ada");
+    await advance(350);
+    expect(get.mock.calls[0][1].params.type).toBe("user");
+    paste(ID);
+    await advance(50);
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    expect(post.mock.calls[0][1]).toEqual({
+      principals: [{ type: "user", id: ID }],
+    });
+  });
+
+  it("can be limited to groups", async () => {
+    const { user } = setup(["group"]);
+    expect(
+      screen.queryByRole("button", { name: "Users" })
+    ).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Search by group name"), "ana");
+    await advance(350);
+    expect(get.mock.calls[0][1].params.type).toBe("group");
+  });
 
   it("searches nothing for one character", async () => {
     const { user } = setup();

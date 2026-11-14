@@ -1,6 +1,7 @@
 import { LIMIT_GROUP_ID, LIMIT_USER_ID, makeLimit } from "../testFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useLocation, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { LimitsPage } from "./LimitsPage";
@@ -37,6 +38,16 @@ const lookupAnswer = async (_url: string, body: { principals: unknown[] }) => ({
     })),
   },
 });
+
+const Probe = () => {
+  const navigate = useNavigate();
+  return (
+    <>
+      <p data-testid="search">{useLocation().search}</p>
+      <button onClick={() => navigate(-1)}>Back</button>
+    </>
+  );
+};
 
 const limitParams = () =>
   get.mock.calls
@@ -84,11 +95,80 @@ describe("LimitsPage", () => {
     renderWithProviders(<LimitsPage />, {
       route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
     });
-    await screen.findByText("Ada Lovelace");
+    await screen.findAllByText("Ada Lovelace");
     expect(limitParams()[0]).toMatchObject({
       principal_type: "user",
       principal_id: LIMIT_USER_ID,
     });
+  });
+
+  it("drops a principal_id that is not a UUID, from the request and the address", async () => {
+    renderWithProviders(
+      <>
+        <Probe />
+        <LimitsPage />
+      </>,
+      { route: "/limits?principal_type=user&principal_id=nope" }
+    );
+    await screen.findByText("Ada Lovelace");
+    expect(limitParams().every((p) => !("principal_id" in p))).toBe(true);
+    expect(limitParams().every((p) => !("principal_type" in p))).toBe(true);
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
+    );
+    expect(screen.queryByText("Clear principal")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["type alone", "principal_type=user"],
+    ["id alone", `principal_id=${LIMIT_USER_ID}`],
+  ])("ignores half a pair (%s)", async (_name, query) => {
+    renderWithProviders(
+      <>
+        <Probe />
+        <LimitsPage />
+      </>,
+      { route: `/limits?${query}` }
+    );
+    await screen.findByText("Ada Lovelace");
+    for (const p of limitParams()) {
+      expect(p).not.toHaveProperty("principal_type");
+      expect(p).not.toHaveProperty("principal_id");
+    }
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
+    );
+  });
+
+  it("shows the active filter as a chip with the resolved name", async () => {
+    renderWithProviders(<LimitsPage />, {
+      route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
+    });
+    const chip = (await screen.findByText(/Principal:/)).closest("p")!;
+    await waitFor(() => expect(chip).toHaveTextContent("Ada Lovelace"));
+    expect(chip).not.toHaveTextContent(LIMIT_USER_ID);
+  });
+
+  it("makes clearing a history step: Back returns to the filtered list", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Probe />
+        <LimitsPage />
+      </>,
+      {
+        route: `/limits?principal_type=group&principal_id=${LIMIT_GROUP_ID}`,
+      }
+    );
+    await screen.findByText("Analysts");
+    await user.click(screen.getByRole("button", { name: "Clear principal" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
+    );
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(LIMIT_GROUP_ID)
+    );
   });
 
   it("clears the principal filter", async () => {
@@ -114,7 +194,8 @@ describe("LimitsPage", () => {
   it("has no write control with only zeteo.grants.read", async () => {
     held.permissions = ["zeteo.grants.read"];
     renderWithProviders(<LimitsPage />);
-    await screen.findByText("Ada Lovelace");
+    expect(await screen.findByText("Ada Lovelace")).toBeVisible();
+    expect(screen.getAllByRole("row")).toHaveLength(3);
     expect(
       screen.queryByRole("button", { name: "New limit" })
     ).not.toBeInTheDocument();

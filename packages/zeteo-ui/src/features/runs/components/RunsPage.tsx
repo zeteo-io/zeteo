@@ -2,8 +2,8 @@ import { PrincipalLabel, PrincipalPicker } from "@/features/principals";
 import { formatDuration } from "@/utils/formatDuration";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
+import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
-import { useSearchParams } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
 import { OutcomeBadge } from "./OutcomeBadge";
 import { useEffect, useState } from "react";
@@ -45,8 +45,10 @@ const filtersOf = (params: URLSearchParams): RunFilters => {
 
 export const RunsPage = () => {
   const { can } = useAuth();
-  const [params, setParams] = useSearchParams();
-  const filters = filtersOf(params);
+  const [filters, setFilters] = useUrlFilters(
+    ["user_id", "source_id", "outcome"],
+    filtersOf
+  );
   const canReadSources = can("zeteo.sources.read");
   const { items, isLoading, error, hasMore, loadMore } = useRuns(filters);
   const sources = useAllSources(canReadSources);
@@ -54,14 +56,6 @@ export const RunsPage = () => {
   const [open, setOpen] = useState<Run | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
-
-  const setFilters = (next: RunFilters) => {
-    const query = new URLSearchParams();
-    for (const [key, value] of Object.entries(next)) {
-      if (value) query.set(key, value);
-    }
-    setParams(query, { replace: true });
-  };
 
   const sourceLabel = (id: string | null) => {
     if (!id) return null;
@@ -112,19 +106,70 @@ export const RunsPage = () => {
         </Alert>
       )}
       <div className="z-runs-person">
-        {filters.user_id && (
-          <p>
-            Person:{" "}
-            <PrincipalLabel refValue={{ type: "user", id: filters.user_id }} />{" "}
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setFilters({ ...filters, user_id: undefined })}
-            >
-              Clear person
-            </Button>
-          </p>
+        {(filters.user_id || filters.source_id || filters.outcome) && (
+          <ul className="z-runs-chips" aria-label="Active filters">
+            {filters.user_id && (
+              <li>
+                Person:{" "}
+                <PrincipalLabel
+                  refValue={{ type: "user", id: filters.user_id }}
+                />{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear person"
+                  onClick={() => setFilters({ ...filters, user_id: undefined })}
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            {filters.source_id && (
+              <li>
+                Source:{" "}
+                <code>
+                  {sources.sources.find((x) => x.id === filters.source_id)
+                    ?.slug ?? filters.source_id}
+                </code>{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear source"
+                  onClick={() =>
+                    setFilters({ ...filters, source_id: undefined })
+                  }
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            {filters.outcome && (
+              <li>
+                Outcome: <code>{filters.outcome}</code>{" "}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  aria-label="Clear outcome"
+                  onClick={() => setFilters({ ...filters, outcome: undefined })}
+                >
+                  Clear
+                </Button>
+              </li>
+            )}
+            <li>
+              <Button
+                size="sm"
+                variant="secondary"
+                fullWidth={false}
+                onClick={() => setFilters({})}
+              >
+                Clear all
+              </Button>
+            </li>
+          </ul>
         )}
         <Button
           size="sm"
@@ -136,18 +181,13 @@ export const RunsPage = () => {
           {pickingPerson ? "Hide person filter" : "Filter by person"}
         </Button>
         {pickingPerson && (
-          <>
-            <small>Runs belong to users; groups cannot be chosen here.</small>
-            <PrincipalPicker
-              value={
-                filters.user_id ? { type: "user", id: filters.user_id } : null
-              }
-              onChange={(p) => {
-                if (p.type === "user")
-                  setFilters({ ...filters, user_id: p.id });
-              }}
-            />
-          </>
+          <PrincipalPicker
+            types={["user"]}
+            value={
+              filters.user_id ? { type: "user", id: filters.user_id } : null
+            }
+            onChange={(p) => setFilters({ ...filters, user_id: p.id })}
+          />
         )}
       </div>
       <ErrorNotice error={error} />
