@@ -33,15 +33,17 @@ export const uiRouter = (): Router => {
     })
   );
 
-  const isPageRequest = (req: Request) =>
+  const isPageRoute = (req: Request) =>
     (req.method === "GET" || req.method === "HEAD") &&
-    (req.headers.accept ?? "").includes("text/html") &&
     !isReserved(req.path) &&
     !path.posix.basename(req.path).includes(".") &&
     !req.path.split("/").some((segment) => segment.startsWith("."));
 
   const appShell: RequestHandler = (req, res, next) => {
-    if (!isPageRequest(req)) return next();
+    if (!isPageRoute(req)) return next();
+    // A page route answers the shell or the JSON 404 by Accept alone.
+    res.vary("Accept");
+    if (!(req.headers.accept ?? "").includes("text/html")) return next();
     res
       .set("Cache-Control", "no-cache")
       .type("text/html; charset=utf-8")

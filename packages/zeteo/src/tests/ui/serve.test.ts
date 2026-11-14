@@ -63,6 +63,7 @@ describe("the app shell", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
       expect(res.headers.get("cache-control")).toBe("no-cache");
+      expect(res.headers.get("vary")).toMatch(/\bAccept\b/);
       expect(res.headers.get("content-security-policy")).toContain(
         "default-src 'self'"
       );
@@ -94,6 +95,7 @@ describe("the app shell", () => {
       headers: { Accept: "application/json" },
     });
     expect(res.status).toBe(404);
+    expect(res.headers.get("vary")).toMatch(/\bAccept\b/);
     expect(JSON.stringify(await res.json())).toContain("not_found");
   });
 
