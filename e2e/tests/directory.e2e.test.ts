@@ -199,7 +199,21 @@ describe("zeteo's principals endpoints", () => {
     expect(found).toMatchObject({ id: serviceUserId, status: "active" });
 
     // Search by what the service account is called: it is not a person.
+    const field = found.name !== null ? "name" : "email";
     const fragment = (found.name ?? found.email ?? "e2e-app").slice(0, 6);
+
+    // Control: Tereo itself, asked without zeteo's userType filter, does find
+    // it by that fragment, so its absence below is the filter's doing.
+    const direct = await searchUsers(
+      await serviceToken(stack.zeteo.clientId, stack.zeteo.clientSecret),
+      field,
+      fragment
+    );
+    expect(direct.status).toBe(200);
+    expect((direct.body.data as DirectoryUser[]).map((u) => u.id)).toContain(
+      serviceUserId
+    );
+
     const searched = await search(e2e.admin.zeteoToken, "user", fragment);
     expect(searched.status).toBe(200);
     expect(

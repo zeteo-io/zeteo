@@ -48,11 +48,25 @@ token. Tereo's `CORS_ALLOWED_ORIGINS` must list zeteo's public origin
 (`https://zeteo.example.com`): the browser exchanges its code and renews its token at Tereo from
 that origin, and without the entry it cannot do either.
 
+## Development setup
+
+In development the UI runs on its own dev server, on port 4200, and calls zeteo and Tereo from
+that origin, so both must allow it:
+
+- zeteo's `CORS_ALLOWED_ORIGINS` lists the dev server's origin, for example
+  `CORS_ALLOWED_ORIGINS=http://localhost:4201,http://localhost:4200` (the value replaces the
+  default, `PUBLIC_URL`'s origin, so list that too if you still need it).
+- Tereo's `CORS_ALLOWED_ORIGINS` lists it as well, for the code exchange and token renewal.
+- The login client's `redirectUris` and `postLogoutRedirectUris` in Tereo include the dev
+  server's `/callback` and `/`.
+
 ## Reserved paths and the content security policy
 
 The UI may not use these prefixes, which zeteo answers itself: `/v1`, `/health`, `/mcp`,
 `/.well-known`, `/assets` and `/ui-config.json`. Any other path that is not a file of the build
-gets the UI's `index.html`.
+gets the UI's `index.html`. Page routes whose last path segment contains a dot (`/sources/a.b`)
+are not answered by the app shell: they are taken for files and answer `404` when the build has no
+such file, so the UI must not give its routes such segments.
 
 Every response, API included, carries a `Content-Security-Policy`:
 
@@ -80,7 +94,14 @@ Search limits: `q` is 2 to 100 characters, `limit` 1 to 25 (default 10), and a c
 times a minute across all replicas (`429` after that). Search finds people only: service accounts
 are not in its results, and are found by id through `lookup`.
 
-When zeteo cannot reach Tereo's directory, these calls answer `502 tereo_unreachable`.
+When zeteo cannot reach Tereo's directory, these calls answer `502 tereo_unreachable`. A search
+or a lookup waits on Tereo for at most five seconds in all, retries included; past that it is
+`502 tereo_unreachable` too, never a partial answer and never `orphaned`. (`GET /v1/me` stops
+waiting for the name at two seconds and answers without it.)
+
+Lookup reads each group from Tereo on its own, at most eight at a time, and caches a group's
+name and status in Redis for 60 seconds (users are not cached). A group renamed or archived in
+Tereo can therefore show its old name or status for up to a minute.
 
 The SDK has the same calls: `zeteo.me.get()`, `zeteo.principals.search()` and
 `zeteo.principals.lookup()`.
@@ -94,5 +115,6 @@ service account. Give those permissions accordingly.
 Known limitation. zeteo's own log lines never carry the search text, a name or an email. The
 request handler underneath (`@dianemo/core`, reached through `@tereo-io/sdk`) logs a failed request
 to Tereo (a 5xx, a 429, a timeout, a dropped connection) with its parameters, so during a Tereo
-outage a search fragment can appear in zeteo's error log. The current versions have no option to
-suppress it.
+outage a search fragment can appear in zeteo's error log. It also logs Tereo's 4xx answers with
+their parameters at debug level, and a request zeteo abandons at the five-second directory budget
+may be logged with its parameters as well. The current versions have no option to suppress it.
