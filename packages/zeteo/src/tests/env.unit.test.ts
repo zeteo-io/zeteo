@@ -334,4 +334,38 @@ describe("admin UI settings", () => {
       }).UI_TEREO_URL
     ).toBe("https://core.example.com/base");
   });
+
+  const unsafe = [
+    "ftp://core.example.com",
+    "https://user:pass@core.example.com",
+    "https://core.example.com/?token=1",
+    "https://core.example.com/#frag",
+  ];
+
+  it.each(unsafe)(
+    "refuses an inherited TEREO_URL %s once UI_CLIENT_ID is set",
+    (value) => {
+      expect(() =>
+        parseEnv({ ...base, UI_CLIENT_ID: "ui", TEREO_URL: value })
+      ).toThrow(/TEREO_URL is published to browsers/);
+    }
+  );
+
+  it.each(unsafe)(
+    "still takes TEREO_URL %s with no UI variable set",
+    (value) => {
+      expect(parseEnv({ ...base, TEREO_URL: value }).TEREO_URL).toBe(value);
+    }
+  );
+
+  it("does not check TEREO_URL when UI_TEREO_URL supplies the value", () => {
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        TEREO_URL: "https://user:pass@tereo.internal",
+        UI_TEREO_URL: "https://core.example.com",
+      }).UI_TEREO_URL
+    ).toBe("https://core.example.com");
+  });
 });

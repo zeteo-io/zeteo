@@ -120,6 +120,22 @@ const originList = commaList.superRefine((origins, ctx) => {
   }
 });
 
+/** An http(s) URL with no credentials, query string or fragment: safe to publish to browsers. Unparseable values pass; `.url()` reports those. */
+const isBrowserSafeUrl = (v: string): boolean => {
+  if (!URL.canParse(v)) return true;
+  const url = new URL(v);
+  return (
+    (url.protocol === "https:" || url.protocol === "http:") &&
+    !url.username &&
+    !url.password &&
+    !url.search &&
+    !url.hash
+  );
+};
+
+const BROWSER_URL_MESSAGE = (name: string) =>
+  `${name} is published to browsers and must be an http(s) URL without credentials, query string or fragment`;
+
 /** An integer setting within [min, max]: a duration, a count or a port. */
 const int = (min: number, max: number, fallback: number) =>
   z.coerce.number().int().min(min).max(max).default(fallback);
@@ -166,23 +182,9 @@ const EnvFields = z
     UI_TEREO_URL: z
       .string()
       .url()
-      .refine(
-        (v) => {
-          if (!URL.canParse(v)) return true; // .url() reports it
-          const url = new URL(v);
-          return (
-            (url.protocol === "https:" || url.protocol === "http:") &&
-            !url.username &&
-            !url.password &&
-            !url.search &&
-            !url.hash
-          );
-        },
-        {
-          message:
-            "UI_TEREO_URL must be an http(s) URL without credentials, query string or fragment",
-        }
-      )
+      .refine(isBrowserSafeUrl, {
+        message: BROWSER_URL_MESSAGE("UI_TEREO_URL"),
+      })
       .optional(),
     UI_DIST_PATH: z.string().optional(),
     // Wraps the per-source data keys that encrypt source settings. Required
@@ -280,6 +282,18 @@ const EnvFields = z
         path: ["UI_TEREO_URL"],
         message:
           "UI_TEREO_URL (or TEREO_URL) is required when UI_CLIENT_ID is set",
+      });
+    }
+    if (
+      val.UI_CLIENT_ID &&
+      !val.UI_TEREO_URL &&
+      val.TEREO_URL &&
+      !isBrowserSafeUrl(val.TEREO_URL)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["TEREO_URL"],
+        message: `${BROWSER_URL_MESSAGE("TEREO_URL")} while UI_TEREO_URL is unset: set UI_TEREO_URL`,
       });
     }
     if (
