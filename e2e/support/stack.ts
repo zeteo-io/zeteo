@@ -31,6 +31,13 @@ export const stack = {
   get webClientSecret() {
     return required("E2E_WEB_CLIENT_SECRET");
   },
+  /** zeteo's own service credentials, as its provisioning document names them. */
+  get zeteo() {
+    return {
+      clientId: "zeteo",
+      clientSecret: required("E2E_ZETEO_CLIENT_SECRET"),
+    };
+  },
   /** The calling app service of e2e/provisioning/e2e-app.json: audience zeteo, role zeteo_admin. */
   get app() {
     return {
@@ -51,6 +58,13 @@ export const stack = {
   },
 };
 
+/**
+ * The origin zeteo's admin UI is served from, listed in Tereo's
+ * CORS_ALLOWED_ORIGINS. Nothing listens there: requests only carry it as
+ * their `Origin`, as the page's would.
+ */
+export const UI_ORIGIN = "http://127.0.0.1:4200";
+
 /** The login clients of e2e/provisioning/e2e-clients.json. */
 export const CLIENTS = {
   /** Confidential, audience zeteo: an app whose users call zeteo's /v1. */
@@ -62,6 +76,11 @@ export const CLIENTS = {
   mcp: {
     clientId: "e2e-mcp",
     redirectUri: "http://127.0.0.1/e2e-mcp/callback",
+  },
+  /** Public, audience zeteo, offline_access: zeteo's admin UI. */
+  ui: {
+    clientId: "e2e-ui",
+    redirectUri: "http://127.0.0.1/e2e-ui/callback",
   },
   /** Public, no zeteo in its audience. */
   other: {

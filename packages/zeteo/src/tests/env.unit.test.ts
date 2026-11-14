@@ -225,3 +225,200 @@ describe("env schema", () => {
     });
   });
 });
+
+describe("admin UI settings", () => {
+  const prod = {
+    ...base,
+    NODE_ENV: "production",
+    TEREO_TEST_MODE: "false",
+    PUBLIC_URL: "https://zeteo.example.com",
+    ZETEO_MASTER_KEY: Buffer.alloc(32, 9).toString("base64url"),
+    TEREO_URL: "https://tereo.example.com",
+    TEREO_CLIENT_ID: "zeteo",
+    TEREO_CLIENT_SECRET: "secret",
+    REQUEST_HANDLER_KEY: "x".repeat(40),
+  };
+
+  it("defaults UI_TEREO_URL to TEREO_URL", () => {
+    expect(
+      parseEnv({ ...base, UI_CLIENT_ID: "ui", TEREO_URL: "http://t:4001/" })
+        .UI_TEREO_URL
+    ).toBe("http://t:4001");
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        TEREO_URL: "http://t:4001",
+        UI_TEREO_URL: "https://public.example.com/",
+      }).UI_TEREO_URL
+    ).toBe("https://public.example.com");
+  });
+
+  it.each(["production", "development"])(
+    "refuses an http UI_TEREO_URL under an https PUBLIC_URL (NODE_ENV=%s)",
+    (NODE_ENV) => {
+      expect(() =>
+        parseEnv({
+          ...prod,
+          NODE_ENV,
+          UI_CLIENT_ID: "ui",
+          UI_TEREO_URL: "http://x.example.com",
+        })
+      ).toThrow(/UI_TEREO_URL must be https when PUBLIC_URL is https/);
+    }
+  );
+
+  it("applies the https rule by PUBLIC_URL, including its default", () => {
+    expect(() =>
+      parseEnv({
+        ...base,
+        PUBLIC_URL: "https://zeteo.example.com",
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "http://x.example.com",
+      })
+    ).toThrow(/must be https when PUBLIC_URL is https/);
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "http://x.example.com",
+      }).UI_TEREO_URL
+    ).toBe("http://x.example.com");
+  });
+
+  it("refuses an inherited http TEREO_URL under an https PUBLIC_URL", () => {
+    expect(() =>
+      parseEnv({
+        ...prod,
+        TEREO_URL: "http://tereo.internal",
+        UI_CLIENT_ID: "ui",
+      })
+    ).toThrow(/UI_TEREO_URL must be https when PUBLIC_URL is https/);
+  });
+
+  it("takes an http UI_TEREO_URL under an http PUBLIC_URL in production", () => {
+    expect(
+      parseEnv({
+        ...prod,
+        PUBLIC_URL: "http://zeteo.example.com",
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "http://x.example.com",
+      }).UI_TEREO_URL
+    ).toBe("http://x.example.com");
+  });
+
+  it("takes an inherited http TEREO_URL under an http PUBLIC_URL in production", () => {
+    expect(
+      parseEnv({
+        ...prod,
+        PUBLIC_URL: "http://zeteo.example.com",
+        TEREO_URL: "http://tereo.internal",
+        UI_CLIENT_ID: "ui",
+      }).UI_TEREO_URL
+    ).toBe("http://tereo.internal");
+  });
+
+  it("takes an https UI_TEREO_URL under an https PUBLIC_URL", () => {
+    expect(
+      parseEnv({
+        ...prod,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "https://x.example.com",
+      }).UI_TEREO_URL
+    ).toBe("https://x.example.com");
+  });
+
+  it("leaves an http TEREO_URL under an https PUBLIC_URL alone when no UI is configured", () => {
+    expect(
+      parseEnv({ ...prod, TEREO_URL: "http://tereo.internal" }).TEREO_URL
+    ).toBe("http://tereo.internal");
+  });
+
+  it("needs a Tereo URL once UI_CLIENT_ID is set", () => {
+    expect(() => parseEnv({ ...base, UI_CLIENT_ID: "ui" })).toThrow(
+      /UI_TEREO_URL/
+    );
+    expect(parseEnv(base).UI_CLIENT_ID).toBeUndefined();
+  });
+
+  it("takes a UI_CLIENT_ID of 1 to 64 characters", () => {
+    const url = { ...base, UI_TEREO_URL: "https://t.example.com" };
+    expect(
+      parseEnv({ ...url, UI_CLIENT_ID: "a".repeat(64) }).UI_CLIENT_ID
+    ).toHaveLength(64);
+    expect(() => parseEnv({ ...url, UI_CLIENT_ID: "a".repeat(65) })).toThrow(
+      /UI_CLIENT_ID/
+    );
+  });
+
+  it("resolves UI_DIST_PATH from the package root: a default, an absolute path as is", () => {
+    expect(parseEnv(base).UI_DIST_PATH).toMatch(/packages\/zeteo-ui\/dist$/);
+    expect(parseEnv({ ...base, UI_DIST_PATH: "/srv/ui" }).UI_DIST_PATH).toBe(
+      "/srv/ui"
+    );
+    expect(parseEnv({ ...base, UI_DIST_PATH: "web" }).UI_DIST_PATH).toMatch(
+      /packages\/zeteo\/web$/
+    );
+  });
+
+  it("names UI_TEREO_URL when it is malformed in production", () => {
+    expect(() =>
+      parseEnv({ ...prod, UI_CLIENT_ID: "ui", UI_TEREO_URL: "not a url" })
+    ).toThrow(/UI_TEREO_URL/);
+  });
+
+  it.each([
+    "ftp://core.example.com",
+    "https://user:pass@core.example.com",
+    "https://core.example.com/?a=1",
+    "https://core.example.com/#frag",
+  ])("refuses UI_TEREO_URL %s", (value) => {
+    expect(() =>
+      parseEnv({ ...base, UI_CLIENT_ID: "ui", UI_TEREO_URL: value })
+    ).toThrow(/UI_TEREO_URL/);
+  });
+
+  it("keeps a path on UI_TEREO_URL, minus the trailing slash", () => {
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        UI_TEREO_URL: "https://core.example.com/base/",
+      }).UI_TEREO_URL
+    ).toBe("https://core.example.com/base");
+  });
+
+  const unsafe = [
+    "ftp://core.example.com",
+    "https://user:pass@core.example.com",
+    "https://core.example.com/?token=1",
+    "https://core.example.com/#frag",
+  ];
+
+  it.each(unsafe)(
+    "refuses an inherited TEREO_URL %s once UI_CLIENT_ID is set",
+    (value) => {
+      expect(() =>
+        parseEnv({ ...base, UI_CLIENT_ID: "ui", TEREO_URL: value })
+      ).toThrow(/TEREO_URL is published to browsers/);
+    }
+  );
+
+  it.each(unsafe)(
+    "still takes TEREO_URL %s with no UI variable set",
+    (value) => {
+      expect(parseEnv({ ...base, TEREO_URL: value }).TEREO_URL).toBe(value);
+    }
+  );
+
+  it("does not check TEREO_URL when UI_TEREO_URL supplies the value", () => {
+    expect(
+      parseEnv({
+        ...base,
+        UI_CLIENT_ID: "ui",
+        TEREO_URL: "https://user:pass@tereo.internal",
+        UI_TEREO_URL: "https://core.example.com",
+      }).UI_TEREO_URL
+    ).toBe("https://core.example.com");
+  });
+});

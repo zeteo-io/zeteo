@@ -49,7 +49,9 @@ info:
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
     replacing and removing them needs `zeteo.grants.write`, which includes read. The same
     permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
-    many queries and exports it runs at once. See `docs/grants.md`.
+    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller)
+    and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
+    both need `zeteo.grants.read`, and the lookup also takes `zeteo.runs.read`. See `docs/grants.md`.
 
     ## Queries
 
@@ -91,7 +93,7 @@ tags:
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
-    description: Health
+    description: Health and the signed-in caller
 paths:
   /health:
     get:
@@ -115,6 +117,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthStatus'
+  /v1/me:
+    get:
+      tags:
+        - Platform
+      summary: Who is signed in, and which zeteo permissions they hold
+      description: |
+        Describes the caller for the admin UI. `permissions` lists the caller's permissions that start
+        with `zeteo.`, sorted, exactly as held: a permission is not expanded along its ladder, so a
+        holder of `zeteo.grants.write` is not shown `zeteo.grants.read`, and the UI applies the ladder
+        itself (`write` includes `read`, `archive` includes `write`, `delete` includes `archive`,
+        `admin` includes all on its base). A bare `admin` permission covers every zeteo permission
+        and is listed too when held, verbatim. `name` and `email` come from tereo's directory and
+        are `null` when it cannot be reached or does not know the user; the answer is still `200`.
+
+        **Required permissions:** none beyond a valid token.
+      operationId: getMe
+      responses:
+        '200':
+          description: The caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/sources:
     get:
       tags:
@@ -1098,6 +1127,124 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/principals:
+    get:
+      tags:
+        - Grants
+      summary: Search tereo's users or groups by name
+      description: |
+        Finds users (human ones, by name or email) or groups (by name) whose text contains `q`, at
+        most `limit`, for choosing who a grant or limit is for. Each caller may search 60 times a
+        minute; over it the answer is `429 too_many_requests` with `Retry-After`.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (`q` not 2 to 100 characters, `limit` outside 1 to 25, an
+        unknown `type` or query key), `429 too_many_requests`, `502 tereo_unreachable`.
+      operationId: searchPrincipals
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: q
+          in: query
+          required: true
+          description: Text the name (or a user's email) contains, case-insensitively
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            default: 10
+      responses:
+        '200':
+          description: The matches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDirectoryPrincipalsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+          headers:
+            Retry-After:
+              description: Seconds to wait before searching again
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`, tereo did not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/principals/lookup:
+    post:
+      tags:
+        - Grants
+      summary: Look up users and groups of tereo by id
+      description: |
+        Answers one principal per requested one, in the request's order; a repeated one is answered
+        once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
+        the search limit.
+
+        **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read` (`403 forbidden` without
+        either).
+
+        **Errors:** `400 invalid_request` (not 1 to 100 principals, an id that is no UUID),
+        `502 tereo_unreachable`.
+      operationId: lookupPrincipals
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LookupPrincipalsRequest'
+            example:
+              principals:
+                - type: user
+                  id: 0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a
+      responses:
+        '200':
+          description: The principals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDirectoryPrincipalsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`, tereo did not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/catalog:
     get:
       tags:
@@ -1748,6 +1895,37 @@ components:
           enum:
             - ok
             - fail
+    Me:
+      type: object
+      required:
+        - id
+        - type
+        - name
+        - email
+        - permissions
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The caller's user id (a service account's own user id)
+        type:
+          type: string
+          enum:
+            - user
+            - service
+        name:
+          type:
+            - string
+            - 'null'
+        email:
+          type:
+            - string
+            - 'null'
+        permissions:
+          type: array
+          description: Held permissions starting with `zeteo.` (and a bare `admin`, if held), sorted, not expanded along their ladders
+          items:
+            type: string
     SourceType:
       type: string
       enum:
@@ -2729,6 +2907,72 @@ components:
             - 'null'
           minimum: 1
           maximum: 10
+    DirectoryPrincipalStatus:
+      type: string
+      enum:
+        - active
+        - inactive
+        - orphaned
+      description: |
+        `active` or `inactive` (a deactivated user, an archived group) as tereo has it, or `orphaned`
+        when tereo has no such user or group.
+    DirectoryPrincipal:
+      type: object
+      description: A user or group of tereo, by name. A group has no `email` key.
+      required:
+        - type
+        - id
+        - name
+        - status
+      properties:
+        type:
+          $ref: '#/components/schemas/PrincipalType'
+        id:
+          type: string
+          format: uuid
+        name:
+          type:
+            - string
+            - 'null'
+          description: Null when the principal is orphaned
+        email:
+          type:
+            - string
+            - 'null'
+          description: Users only; null when the user is orphaned. Absent on a group.
+        status:
+          $ref: '#/components/schemas/DirectoryPrincipalStatus'
+    ListDirectoryPrincipalsResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectoryPrincipal'
+    LookupPrincipalsRequest:
+      type: object
+      required:
+        - principals
+      additionalProperties: false
+      properties:
+        principals:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            required:
+              - type
+              - id
+            additionalProperties: false
+            properties:
+              type:
+                $ref: '#/components/schemas/PrincipalType'
+              id:
+                type: string
+                format: uuid
     Query:
       type: object
       additionalProperties: false

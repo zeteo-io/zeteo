@@ -14,7 +14,9 @@ per-user and per-group concurrency limits ([docs/grants.md](packages/zeteo/docs/
 querying: the catalogue of what a caller may query, the query language, `POST /v1/query` and the
 run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming export
 ([docs/export.md](packages/zeteo/docs/export.md)) and the MCP endpoint
-([docs/mcp.md](packages/zeteo/docs/mcp.md)). Azure SQL's particulars are in
+([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI's server side (`/v1/me`, the people and
+groups search, the login client it needs) is in
+[docs/admin-ui.md](packages/zeteo/docs/admin-ui.md). Azure SQL's particulars are in
 [docs/azure-sql.md](packages/zeteo/docs/azure-sql.md). The HTTP API's reference is
 `packages/zeteo/openapi/openapi.yaml`. The design spec and its plans are under `docs/superpowers/`
 (kept out of version control).

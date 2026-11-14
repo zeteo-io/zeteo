@@ -130,6 +130,17 @@ export class SourceUnreachableError extends AppError {
   }
 }
 
+/**
+ * Tereo, which names the users and groups, could not be asked. The message is
+ * fixed: what went wrong goes to the log, never to the caller.
+ */
+export class TereoUnreachableError extends AppError {
+  constructor() {
+    super(502, "tereo_unreachable", "Tereo could not be reached");
+    this.name = "TereoUnreachableError";
+  }
+}
+
 /** A query that ran past its time limit on the source; it was cancelled there. */
 export class QueryTimeoutError extends AppError {
   constructor() {

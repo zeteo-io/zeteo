@@ -1,4 +1,5 @@
 import { principalLimitsCalls } from "./calls/principalLimits.js";
+import { principalsCalls } from "./calls/principals.js";
 import { redisBackend } from "@dianemo/backend-redis";
 import { catalogCalls } from "./calls/catalog.js";
 import { sourcesCalls } from "./calls/sources.js";
@@ -11,6 +12,7 @@ import { runsCalls } from "./calls/runs.js";
 import RequestHandler from "@dianemo/core";
 import type { Transport } from "./send.js";
 import { zeteoPlugin } from "./plugin.js";
+import { meCalls } from "./calls/me.js";
 import type { Redis } from "ioredis";
 import {
   clientNames,
@@ -40,6 +42,8 @@ const buildCalls = (ctx: CallContext) => ({
   query: queryCalls(ctx),
   export: exportCalls(ctx),
   runs: runsCalls(ctx),
+  me: meCalls(ctx),
+  principals: principalsCalls(ctx),
   sources: sourcesCalls(ctx),
   grants: grantsCalls(ctx),
   principalLimits: principalLimitsCalls(ctx),

@@ -133,7 +133,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         name: GRANTS_READ,
         displayName: "Read grants",
         description:
-          "List and read who may query which tables and columns, and users' and groups' concurrency limits",
+          "List and read who may query which tables and columns, and users' and groups' concurrency limits; also lets the holder look up users' names and email addresses",
         orgAssignable: false,
       },
       {
@@ -159,7 +159,8 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
       {
         name: RUNS_READ,
         displayName: "Read query runs",
-        description: "List the record of queries that were run",
+        description:
+          "List the record of queries that were run; also lets the holder look up users' names and email addresses",
         orgAssignable: false,
       },
       {

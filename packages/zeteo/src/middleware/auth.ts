@@ -55,3 +55,15 @@ export const requirePermission =
     }
     next();
   };
+
+/** Refuses (403) a caller holding none of `permissions` (each on its ladder, as in `requirePermission`); needs `authenticate` before it. */
+export const requireAnyPermission = (permissions: string[]): RequestHandler => {
+  const message = `Requires one of: ${permissions.join(", ")}`;
+  return (req, _res, next) => {
+    const held = callerOf(req).permissions;
+    if (!permissions.some((p) => hasPermission(held, p))) {
+      return next(new ForbiddenError(message));
+    }
+    next();
+  };
+};

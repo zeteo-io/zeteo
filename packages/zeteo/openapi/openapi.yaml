@@ -49,7 +49,9 @@ info:
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
     replacing and removing them needs `zeteo.grants.write`, which includes read. The same
     permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
-    many queries and exports it runs at once. See `docs/grants.md`.
+    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller)
+    and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
+    both need `zeteo.grants.read`, and the lookup also takes `zeteo.runs.read`. See `docs/grants.md`.
 
     ## Queries
 
@@ -91,7 +93,7 @@ tags:
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Platform
-    description: Health
+    description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
     tags: [Sources, Catalogue]
@@ -104,6 +106,8 @@ x-tagGroups:
 paths:
   /health:
     $ref: './paths/platform/health.yaml#/~1health'
+  /v1/me:
+    $ref: './paths/platform/me.yaml#/~1v1~1me'
   /v1/sources:
     $ref: './paths/sources/sources.yaml#/~1v1~1sources'
   /v1/sources/{sourceId}:
@@ -130,6 +134,10 @@ paths:
     $ref: './paths/grants/principal-limits.yaml#/~1v1~1principal-limits'
   /v1/principal-limits/{principalLimitId}:
     $ref: './paths/grants/principal-limit.yaml#/~1v1~1principal-limits~1{principalLimitId}'
+  /v1/principals:
+    $ref: './paths/principals/principals.yaml#/~1v1~1principals'
+  /v1/principals/lookup:
+    $ref: './paths/principals/lookup.yaml#/~1v1~1principals~1lookup'
   /v1/catalog:
     $ref: './paths/queries/catalog.yaml#/~1v1~1catalog'
   /v1/query:
@@ -179,6 +187,8 @@ components:
       $ref: './components/responses.yaml#/Error'
     HealthStatus:
       $ref: './components/platform/schemas.yaml#/HealthStatus'
+    Me:
+      $ref: './components/platform/schemas.yaml#/Me'
     SourceType:
       $ref: './components/sources/schemas.yaml#/SourceType'
     PostgresSettings:
@@ -237,6 +247,14 @@ components:
       $ref: './components/grants/schemas.yaml#/CreatePrincipalLimitRequest'
     UpdatePrincipalLimitRequest:
       $ref: './components/grants/schemas.yaml#/UpdatePrincipalLimitRequest'
+    DirectoryPrincipalStatus:
+      $ref: './components/principals/schemas.yaml#/DirectoryPrincipalStatus'
+    DirectoryPrincipal:
+      $ref: './components/principals/schemas.yaml#/DirectoryPrincipal'
+    ListDirectoryPrincipalsResponse:
+      $ref: './components/principals/schemas.yaml#/ListDirectoryPrincipalsResponse'
+    LookupPrincipalsRequest:
+      $ref: './components/principals/schemas.yaml#/LookupPrincipalsRequest'
     Query:
       $ref: './components/queries/schemas.yaml#/Query'
     QueryResult:

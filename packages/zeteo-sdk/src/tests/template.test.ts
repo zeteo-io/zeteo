@@ -125,6 +125,7 @@ describe("zeteo template", () => {
     for (const [status, error] of [
       [502, "query_failed"],
       [502, "source_unreachable"],
+      [502, "tereo_unreachable"],
       [504, "query_timeout"],
     ] as const) {
       expect(classifyZeteoError(httpError(status, { error }))).toEqual({
@@ -173,6 +174,7 @@ describe("zeteo template", () => {
   const zeteoFailures = [
     { status: 502, error: "query_failed" },
     { status: 502, error: "source_unreachable" },
+    { status: 502, error: "tereo_unreachable" },
     { status: 504, error: "query_timeout" },
   ];
 
