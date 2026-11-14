@@ -2,9 +2,9 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { makeSource, SOURCE_ID } from "../../sources/testFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeRelation } from "../../relations/testFixtures";
+import { Link, Route, Routes } from "react-router-dom";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router-dom";
 import { TablePage } from "./TablePage";
 import {
   makeTableDetail,
@@ -28,14 +28,22 @@ vi.mock("@/lib/auth", async () => {
 
 const TABLE_URL = `/v1/sources/${SOURCE_ID}/tables/${ORDERS_ID}`;
 
+const OTHER_URL = `/v1/sources/${SOURCE_ID}/tables/${CUSTOMERS_ID}`;
+const live = vi.hoisted(() => ({ table: null as unknown }));
+
 const renderPage = () =>
   renderWithProviders(
-    <Routes>
-      <Route
-        path="/sources/:sourceId/tables/:tableId"
-        element={<TablePage />}
-      />
-    </Routes>,
+    <>
+      <Link to={`/sources/${SOURCE_ID}/tables/${CUSTOMERS_ID}`}>
+        other table
+      </Link>
+      <Routes>
+        <Route
+          path="/sources/:sourceId/tables/:tableId"
+          element={<TablePage />}
+        />
+      </Routes>
+    </>,
     { route: `/sources/${SOURCE_ID}/tables/${ORDERS_ID}` }
   );
 
@@ -48,13 +56,19 @@ const openEditor = async (user: ReturnType<typeof userEvent.setup>) => {
 describe("TablePage", () => {
   beforeEach(() => {
     held.permissions = ["zeteo.sources.write"];
+    live.table = null;
     sourceOver.archived_at = null;
     patch.mockReset().mockResolvedValue({ data: makeTableDetail() });
     get.mockReset().mockImplementation(async (url: string) => {
       if (url === `/v1/sources/${SOURCE_ID}`) {
         return { data: makeSource({ archived_at: sourceOver.archived_at }) };
       }
-      if (url === TABLE_URL) return { data: makeTableDetail() };
+      if (url === TABLE_URL) return { data: live.table ?? makeTableDetail() };
+      if (url === OTHER_URL) {
+        return {
+          data: makeTableDetail({ id: CUSTOMERS_ID, name: "customers" }),
+        };
+      }
       return {
         data: {
           data: [
@@ -227,5 +241,81 @@ describe("TablePage", () => {
     expect(
       screen.queryByRole("button", { name: "Edit descriptions" })
     ).not.toBeInTheDocument();
+  });
+
+  it("compares with what editing started from, not with a refetch", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openEditor(user);
+    const base = makeTableDetail();
+    live.table = makeTableDetail({
+      columns: [
+        { ...base.columns[0], description: "Changed elsewhere" },
+        base.columns[1],
+        base.columns[2],
+        {
+          ...base.columns[2],
+          id: "c0000000-1c7a-4a53-9d0e-6a3b1f2c4d77",
+          name: "added_by_refresh",
+          description: "New",
+        },
+      ],
+    });
+    window.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() =>
+      expect(
+        get.mock.calls.filter(([url]) => url === TABLE_URL).length
+      ).toBeGreaterThan(1)
+    );
+    await user.type(screen.getByLabelText("Description of column note"), "x");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch).toHaveBeenCalledWith(TABLE_URL, {
+      columns: [{ name: "note", description: "x" }],
+    });
+  });
+
+  it("clears a description emptied to whitespace and ignores whitespace on an empty one", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openEditor(user);
+    await user.type(screen.getByLabelText("Description of column note"), "   ");
+    fireEvent.change(screen.getByLabelText("Table description"), {
+      target: { value: "   " },
+    });
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    expect(patch).toHaveBeenCalledWith(TABLE_URL, { description: null });
+  });
+
+  it("drops edit state when another table is opened", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openEditor(user);
+    await user.type(screen.getByLabelText("Description of column note"), "x");
+    await user.click(screen.getByRole("link", { name: "other table" }));
+    expect(
+      await screen.findByRole("heading", { name: "public.customers" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edit descriptions" })
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Description of column note")).toBeNull();
+  });
+
+  it("links back to the tables list when the table cannot be read", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === `/v1/sources/${SOURCE_ID}`) return { data: makeSource() };
+      if (url === TABLE_URL) {
+        throw { status: 404, code: "not_found", message: "No such table" };
+      }
+      return { data: { data: [], next_cursor: null } };
+    });
+    renderPage();
+    expect(await screen.findByText("No such table")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "All tables" })).toHaveAttribute(
+      "href",
+      `/sources/${SOURCE_ID}/tables`
+    );
   });
 });

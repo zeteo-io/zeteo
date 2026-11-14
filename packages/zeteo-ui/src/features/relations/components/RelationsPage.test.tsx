@@ -6,6 +6,7 @@ import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
 import { RelationsPage } from "./RelationsPage";
 import { makeRelation } from "../testFixtures";
+import { AxiosError } from "axios";
 import {
   CUSTOMERS_ID,
   GONE_ID,
@@ -120,11 +121,18 @@ describe("RelationsPage", () => {
   });
 
   it("shows the API's description when the delete is refused", async () => {
-    del.mockRejectedValue({
-      status: 409,
-      code: "relation_discovered",
-      message: "A discovered relation cannot be removed",
-    });
+    del.mockRejectedValue(
+      new AxiosError("Conflict", "ERR_BAD_REQUEST", undefined, undefined, {
+        status: 409,
+        statusText: "Conflict",
+        headers: {},
+        config: {} as never,
+        data: {
+          error: "relation_discovered",
+          error_description: "A discovered relation cannot be removed",
+        },
+      })
+    );
     const user = userEvent.setup();
     renderPage();
     const row = (await screen.findByText("customer")).closest("tr")!;
@@ -135,6 +143,22 @@ describe("RelationsPage", () => {
     expect(
       await screen.findByText("A discovered relation cannot be removed")
     ).toBeInTheDocument();
+  });
+
+  it("shows a placeholder, not raw ids, while table names load", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === `/v1/sources/${SOURCE_ID}`) return { data: makeSource() };
+      if (url.endsWith("/relations")) {
+        return { data: { data: [declared], next_cursor: null } };
+      }
+      return new Promise(() => {});
+    });
+    renderPage();
+    const row = (await screen.findByText("customer")).closest("tr")!;
+    expect(row).not.toHaveTextContent(CUSTOMERS_ID);
+    expect(
+      screen.getByRole("button", { name: "Declare relation" })
+    ).toBeDisabled();
   });
 
   it("has no write controls without zeteo.sources.write", async () => {

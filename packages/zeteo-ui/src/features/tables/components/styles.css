@@ -36,3 +36,8 @@
   flex-wrap: wrap;
   gap: 0.25rem;
 }
+
+.z-wrap td,
+.z-wrap th {
+  overflow-wrap: anywhere;
+}

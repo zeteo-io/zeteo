@@ -34,47 +34,49 @@ export const TablesPage = () => {
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <DataTable<Table>
-          rowKey={(table) => table.id}
-          emptyMessage={
-            error ? undefined : (
-              <EmptyState>
-                No tables yet. Refresh the source to read its catalogue.
-              </EmptyState>
-            )
-          }
-          columns={[
-            { title: "Schema", dataKey: "schema_name" },
-            {
-              title: "Name",
-              cellElement: (table) => (
-                <>
-                  <TableCellLink
-                    as={Link}
-                    to={`/sources/${sourceId}/tables/${table.id}`}
-                  >
-                    {table.name}
-                  </TableCellLink>{" "}
-                  {table.missing_since && (
-                    <Badge size="sm" variant="warning">
-                      Missing
-                    </Badge>
-                  )}
-                </>
-              ),
-            },
-            {
-              title: "Kind",
-              cellElement: (table) =>
-                table.kind === "view" ? "View" : "Table",
-            },
-            {
-              title: "Description",
-              cellElement: (table) => table.description ?? "",
-            },
-          ]}
-          rows={items}
-        />
+        <div className="z-wrap">
+          <DataTable<Table>
+            rowKey={(table) => table.id}
+            emptyMessage={
+              error ? undefined : (
+                <EmptyState>
+                  No tables yet. Refresh the source to read its catalogue.
+                </EmptyState>
+              )
+            }
+            columns={[
+              { title: "Schema", dataKey: "schema_name" },
+              {
+                title: "Name",
+                cellElement: (table) => (
+                  <>
+                    <TableCellLink
+                      as={Link}
+                      to={`/sources/${sourceId}/tables/${table.id}`}
+                    >
+                      {table.name}
+                    </TableCellLink>{" "}
+                    {table.missing_since && (
+                      <Badge size="sm" variant="warning">
+                        Missing
+                      </Badge>
+                    )}
+                  </>
+                ),
+              },
+              {
+                title: "Kind",
+                cellElement: (table) =>
+                  table.kind === "view" ? "View" : "Table",
+              },
+              {
+                title: "Description",
+                cellElement: (table) => table.description ?? "",
+              },
+            ]}
+            rows={items}
+          />
+        </div>
       )}
       {hasMore && (
         <div className="z-tables-more">

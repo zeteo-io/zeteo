@@ -5,6 +5,7 @@ import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { makeRelation } from "../testFixtures";
 import { RelationForm } from "./RelationForm";
+import { AxiosError } from "axios";
 import {
   CUSTOMERS_ID,
   makeColumn,
@@ -196,5 +197,40 @@ describe("RelationForm", () => {
       await screen.findByText("customer_id and id differ in type")
     ).toBeInTheDocument();
     expect(onDeclared).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["relation_name_taken", "A relation named customer already exists"],
+    ["invalid_relation", "The column types differ"],
+  ])("shows the API's description for %s", async (code, description) => {
+    post.mockRejectedValue(
+      new AxiosError("Conflict", "ERR_BAD_REQUEST", undefined, undefined, {
+        status: code === "invalid_relation" ? 422 : 409,
+        statusText: "x",
+        headers: {},
+        config: {} as never,
+        data: { error: code, error_description: description },
+      })
+    );
+    const user = userEvent.setup();
+    renderForm();
+    await user.type(field("Name"), "customer");
+    await chooseTables(user);
+    await user.selectOptions(field("From column 1"), "customer_id");
+    await user.selectOptions(field("To column 1"), "id");
+    await user.click(screen.getByRole("button", { name: "Declare relation" }));
+    expect(await screen.findByText(description)).toBeInTheDocument();
+  });
+
+  it("says so when a table's columns cannot be loaded", async () => {
+    get.mockRejectedValue({
+      status: 404,
+      code: "not_found",
+      message: "No such table",
+    });
+    const user = userEvent.setup();
+    renderForm();
+    await user.selectOptions(field("From table"), ORDERS_ID);
+    expect(await screen.findByText("No such table")).toBeInTheDocument();
   });
 });

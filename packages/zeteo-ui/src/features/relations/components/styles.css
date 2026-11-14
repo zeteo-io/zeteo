@@ -35,3 +35,8 @@
   gap: 0.5rem;
   align-items: end;
 }
+
+.z-wrap td,
+.z-wrap th {
+  overflow-wrap: anywhere;
+}

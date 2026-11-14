@@ -45,8 +45,14 @@ export const RelationForm = ({
   const [toMany, setToMany] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const fromTable = useTable(sourceId, fromTableId || undefined).data;
-  const toTable = useTable(sourceId, toTableId || undefined).data;
+  const { data: fromTable, error: fromError } = useTable(
+    sourceId,
+    fromTableId || undefined
+  );
+  const { data: toTable, error: toError } = useTable(
+    sourceId,
+    toTableId || undefined
+  );
   const tableOptions = tables.map((t) => ({
     value: t.id,
     label: tableLabel(t),
@@ -128,6 +134,7 @@ export const RelationForm = ({
           onChange={(id) => chooseFromTable(id ?? "")}
         />
         {errors.from_table && <p role="alert">{errors.from_table}</p>}
+        <ErrorNotice error={fromError} />
         <Select
           label="To table"
           required
@@ -137,6 +144,7 @@ export const RelationForm = ({
           onChange={(id) => chooseToTable(id ?? "")}
         />
         {errors.to_table && <p role="alert">{errors.to_table}</p>}
+        <ErrorNotice error={toError} />
 
         <div className="z-relation-pairs">
           {pairs.map((pair, index) => (
