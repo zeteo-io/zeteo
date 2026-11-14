@@ -58,7 +58,7 @@ describe("signing in from a page on zeteo's origin", () => {
     const catalog = await requestJson("GET", `${stack.zeteoUrl}/v1/catalog`, {
       token: refreshed.body.access_token,
     });
-    expect(catalog.status).not.toBe(401);
+    expect(catalog.status).toBe(200);
   });
 
   it("prompt=none returns a code while the Tereo session is live, and login_required without one", async () => {
@@ -83,6 +83,7 @@ describe("signing in from a page on zeteo's origin", () => {
     const refreshed = await refreshPublic(UI, signedIn.refreshToken, {
       origin: UI_ORIGIN,
     });
-    expect([400, 401]).toContain(refreshed.status);
+    expect(refreshed.status).toBe(400);
+    expect(refreshed.body.error).toBe("invalid_grant");
   });
 });

@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, inject, it } from "vitest";
 import { serviceToken } from "../support/oauth.js";
 import { stack } from "../support/stack.js";
 import {
+  createGroup,
   searchGroups,
   searchUsers,
   usersByIds,
@@ -38,19 +39,31 @@ describe("Tereo's directory as zeteo's service account reads it", () => {
         status: "active",
       });
     }
-    // bob matches neither fragment.
-    expect(
-      (byEmail.body.data as DirectoryUser[]).map((u) => u.id)
-    ).not.toContain(e2e.bob.id);
+    // bob matches neither fragment: the filters are applied, not ignored.
+    for (const res of [byName, byEmail]) {
+      expect((res.body.data as DirectoryUser[]).map((u) => u.id)).not.toContain(
+        e2e.bob.id
+      );
+    }
   });
 
   it("zeteo's service account can search groups by name", async () => {
+    // A second group the query must leave out, so an ignored `q` would show.
+    const otherId = await createGroup(
+      e2e.admin.coreToken,
+      `e2e-ops-${randomUUID().slice(0, 8)}`
+    );
+
     const res = await searchGroups(token, "ANALYST");
 
     expect(res.status).toBe(200);
-    expect(
-      (res.body.data as Array<{ id: string; slug: string }>).map((g) => g.id)
-    ).toContain(e2e.groupId);
+    const ids = (res.body.data as Array<{ id: string }>).map((g) => g.id);
+    expect(ids).toContain(e2e.groupId);
+    expect(ids).not.toContain(otherId);
+
+    const none = await searchGroups(token, "no-such-group");
+    expect(none.status).toBe(200);
+    expect(none.body.data).toEqual([]);
   });
 
   it("users are read by id in one request, missing ids left out", async () => {
