@@ -119,8 +119,10 @@ services:
       REQUEST_HANDLER_KEY: ${E2E_REQUEST_HANDLER_KEY:?}
       SOURCE_ALLOWED_HOSTS: source-pg
       MCP_ALLOWED_CLIENTS: e2e-mcp
-      # UI_CLIENT_ID is left unset: production mode wants an https UI_TEREO_URL,
-      # and this Tereo is reached over http (see e2e/README.md).
+      # The admin UI: PUBLIC_URL is http here, so the browser-facing Tereo URL
+      # may be http too. It is Tereo as the host reaches it, not TEREO_URL.
+      UI_CLIENT_ID: e2e-ui
+      UI_TEREO_URL: http://127.0.0.1:${E2E_TEREO_PORT:?}
     ports:
       - "127.0.0.1:${E2E_ZETEO_PORT:?}:4201"
     healthcheck: &zeteo-healthcheck

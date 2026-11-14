@@ -176,7 +176,8 @@ const EnvFields = z
     // The admin UI, served from this origin. UI_CLIENT_ID is the OAuth client
     // id of its login client in tereo (1 to 64 characters); unset, the UI is
     // not served. UI_TEREO_URL is the tereo origin the browser reaches
-    // (defaults to TEREO_URL; https in production). UI_DIST_PATH is the build
+    // (defaults to TEREO_URL; must be https when PUBLIC_URL is https, since
+    // a page served over https cannot call an http origin). UI_DIST_PATH is the build
     // to serve; a relative path resolves from packages/zeteo.
     UI_CLIENT_ID: z.string().min(1).max(64).optional(),
     UI_TEREO_URL: z
@@ -297,7 +298,7 @@ const EnvFields = z
       });
     }
     if (
-      val.NODE_ENV === "production" &&
+      (val.PUBLIC_URL ?? DEV_PUBLIC_URL).startsWith("https:") &&
       uiTereoUrl &&
       (val.UI_TEREO_URL || val.UI_CLIENT_ID) &&
       URL.canParse(uiTereoUrl) &&
@@ -306,7 +307,8 @@ const EnvFields = z
       ctx.addIssue({
         code: "custom",
         path: ["UI_TEREO_URL"],
-        message: "UI_TEREO_URL must be https in production",
+        message:
+          "UI_TEREO_URL must be https when PUBLIC_URL is https: a page served over https cannot call an http origin",
       });
     }
     if (val.NODE_ENV === "production") {
