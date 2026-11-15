@@ -15,13 +15,13 @@ vi.mock("@/lib/auth", async () => {
   return mockAuth({ permissions: ["zeteo.grants.write"] });
 });
 
-const renderEdit = () =>
+const renderEdit = (route = `/grants/${GRANT_ID}/edit`) =>
   renderWithProviders(
     <Routes>
       <Route path="/grants" element={<p>list</p>} />
       <Route path="/grants/:grantId/edit" element={<GrantEditPage />} />
     </Routes>,
-    { route: `/grants/${GRANT_ID}/edit` }
+    { route }
   );
 
 describe("GrantEditPage", () => {
@@ -29,6 +29,12 @@ describe("GrantEditPage", () => {
     del.mockReset().mockResolvedValue({ data: undefined });
     post.mockReset().mockResolvedValue({ data: { data: [] } });
     get.mockReset().mockResolvedValue({ data: makeGrant() });
+  });
+
+  it("shows not found for an id that is not a UUID, asking zeteo nothing", async () => {
+    renderEdit("/grants/abc/edit");
+    expect(await screen.findByText("Page not found")).toBeInTheDocument();
+    expect(get).not.toHaveBeenCalled();
   });
 
   it("says so when the grant does not exist", async () => {

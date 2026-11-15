@@ -181,12 +181,51 @@ describe("RunsPage", () => {
   });
 
   it("offers users only in the person picker", async () => {
+    held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
     await user.click(screen.getByRole("button", { name: "Filter by person" }));
     expect(screen.getByLabelText("Search by name or email")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Groups" })).toBeNull();
+  });
+
+  it("hides the person search, and says why, without zeteo.grants.read", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />);
+    await screen.findAllByText("Ada Lovelace");
+    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    expect(screen.queryByLabelText("Search by name or email")).toBeNull();
+    expect(
+      screen.getByText(
+        "Searching by name needs the Read grants permission; paste a user id instead."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Or paste an id")).toBeInTheDocument();
+  });
+
+  it("offers the person search with zeteo.grants.read, without the hint", async () => {
+    held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />);
+    await screen.findAllByText("Ada Lovelace");
+    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    expect(screen.getByLabelText("Search by name or email")).toBeVisible();
+    expect(screen.queryByText(/Searching by name needs/)).toBeNull();
+  });
+
+  it("says no run matches when filters are active, and no runs recorded when none are", async () => {
+    get.mockImplementation(async () => ({
+      data: { data: [], next_cursor: null },
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />, { route: "/runs?outcome=refused" });
+    expect(
+      await screen.findByText("No run matches these filters.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No runs recorded.")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(await screen.findByText("No runs recorded.")).toBeInTheDocument();
   });
 
   it("makes a person's filter change a history step", async () => {

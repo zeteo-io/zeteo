@@ -24,3 +24,6 @@ vitest.config.*.timestamp*
 .superpowers/
 # The e2e run's generated certificates (its .env.run is covered by .env*)
 e2e/certs/
+# The e2e run: files generated for its ports, and the browser test's output
+e2e/.run/
+e2e/browser-results/

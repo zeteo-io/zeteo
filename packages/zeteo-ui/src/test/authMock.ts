@@ -49,6 +49,8 @@ export const mockAuth = ({
     renew: vi.fn(async () => TEST_TOKENS),
     signOut: vi.fn(async () => undefined),
     startLogin: vi.fn(async () => undefined),
+    sessionEnded: vi.fn(() => false),
+    setSessionEnded: vi.fn(),
     completeLogin: vi.fn(async () => ({ returnTo: "/" })),
     fetchMe: vi.fn(async () => fullMe),
     AuthError: class AuthError extends Error {

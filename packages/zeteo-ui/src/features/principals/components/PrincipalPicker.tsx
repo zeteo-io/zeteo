@@ -12,6 +12,8 @@ interface PrincipalPickerProps {
   onChange: (value: PrincipalRef) => void;
   /** The kinds that can be chosen; with one, there is no switch. */
   types?: PrincipalRef["type"][];
+  /** False hides the name search (it needs zeteo.grants.read), leaving the paste-an-id path. */
+  search?: boolean;
 }
 
 // Own component so the lookup runs only once there is an id to look up.
@@ -66,6 +68,7 @@ export const PrincipalPicker = ({
   value,
   onChange,
   types = ["user", "group"],
+  search: searchable = true,
 }: PrincipalPickerProps) => {
   const [chosenType, setType] = useState<"user" | "group">(types[0]);
   const type = types.includes(chosenType) ? chosenType : types[0];
@@ -73,7 +76,7 @@ export const PrincipalPicker = ({
   const [pasted, setPasted] = useState("");
   // kosmeo's Input is uncontrolled: a new key empties the field.
   const [pasteKey, setPasteKey] = useState(0);
-  const search = usePrincipalSearch(type, query);
+  const search = usePrincipalSearch(type, searchable ? query : "");
   const pastedId = pasted.trim().toLowerCase();
 
   return (
@@ -100,39 +103,45 @@ export const PrincipalPicker = ({
         </div>
       )}
 
-      <Input
-        label={
-          type === "user" ? "Search by name or email" : "Search by group name"
-        }
-        onChange={(e) => setQuery(e.target.value)}
-        autoComplete="off"
-      />
-      {search.isLoading && <Spinner size="sm" />}
-      <ErrorNotice error={search.error} />
-      {search.results.length > 0 && (
-        <ul>
-          {search.results.map((p) => (
-            <li key={`${p.type}:${p.id}`}>
-              <Button
-                variant="light"
-                fullWidth
-                align="left"
-                onClick={() => onChange({ type: p.type, id: p.id })}
-              >
-                {p.name}
-                {p.email ? ` (${p.email})` : ""}
-                {p.status === "inactive" && (
-                  <>
-                    {" "}
-                    <Badge size="sm" variant="secondary">
-                      inactive
-                    </Badge>
-                  </>
-                )}
-              </Button>
-            </li>
-          ))}
-        </ul>
+      {searchable && (
+        <>
+          <Input
+            label={
+              type === "user"
+                ? "Search by name or email"
+                : "Search by group name"
+            }
+            onChange={(e) => setQuery(e.target.value)}
+            autoComplete="off"
+          />
+          {search.isLoading && <Spinner size="sm" />}
+          <ErrorNotice error={search.error} />
+          {search.results.length > 0 && (
+            <ul>
+              {search.results.map((p) => (
+                <li key={`${p.type}:${p.id}`}>
+                  <Button
+                    variant="light"
+                    fullWidth
+                    align="left"
+                    onClick={() => onChange({ type: p.type, id: p.id })}
+                  >
+                    {p.name}
+                    {p.email ? ` (${p.email})` : ""}
+                    {p.status === "inactive" && (
+                      <>
+                        {" "}
+                        <Badge size="sm" variant="secondary">
+                          inactive
+                        </Badge>
+                      </>
+                    )}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
 
       <Input

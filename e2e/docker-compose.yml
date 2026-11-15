@@ -51,9 +51,11 @@ services:
       PORT: "4001"
       PUBLIC_URL: *tereo-public-url
       UI_BASE_URL: *tereo-public-url
-      # The origin of zeteo's admin UI as e2e/support/stack.ts names it
-      # (UI_ORIGIN): its page exchanges codes and refreshes from there.
-      CORS_ALLOWED_ORIGINS: http://127.0.0.1:4200
+      # The admin UI's origins: UI_ORIGIN of e2e/support/stack.ts, which the
+      # HTTP-only tests send as their Origin, and zeteo's own, where the
+      # browser test loads the UI. Its page exchanges codes and refreshes
+      # from there.
+      CORS_ALLOWED_ORIGINS: http://127.0.0.1:4200,http://127.0.0.1:${E2E_ZETEO_PORT:?}
       DATABASE_URL: *tereo-database-url
       REDIS_URL: *tereo-redis-url
       SETUP_TOKEN: ${E2E_SETUP_TOKEN:?}
@@ -63,7 +65,9 @@ services:
       E2E_APP_CLIENT_SECRET: ${E2E_APP_CLIENT_SECRET:?}
     volumes:
       - ../packages/zeteo/tereo-provisioning.json:/etc/tereo/provisioning/zeteo.json:ro
-      - ./provisioning/e2e-clients.json:/etc/tereo/provisioning/e2e-clients.json:ro
+      # e2e/provisioning/e2e-clients.json with the run's zeteo origin added
+      # to e2e-ui's redirect URIs, written by run.sh.
+      - ./.run/e2e-clients.json:/etc/tereo/provisioning/e2e-clients.json:ro
       - ./provisioning/e2e-app.json:/etc/tereo/provisioning/e2e-app.json:ro
       - tereo-storage:/app/storage
     ports:
@@ -119,8 +123,9 @@ services:
       REQUEST_HANDLER_KEY: ${E2E_REQUEST_HANDLER_KEY:?}
       SOURCE_ALLOWED_HOSTS: source-pg
       MCP_ALLOWED_CLIENTS: e2e-mcp
-      # The admin UI: PUBLIC_URL is http here, so the browser-facing Tereo URL
-      # may be http too. It is Tereo as the host reaches it, not TEREO_URL.
+      # The admin UI, served from the image's build: PUBLIC_URL is http here,
+      # so the browser-facing Tereo URL may be http too. It is Tereo as the
+      # host reaches it, not TEREO_URL.
       UI_CLIENT_ID: e2e-ui
       UI_TEREO_URL: http://127.0.0.1:${E2E_TEREO_PORT:?}
     ports:

@@ -291,6 +291,23 @@ describe("completeLogin", () => {
     );
   });
 
+  it("gives up on a code exchange Tereo never answers after 15 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const login = storeLogin();
+      fetchMock.mockReturnValue(new Promise<Response>(() => {}));
+      const url = callbackUrl({ code: nextCode(), state: login.state });
+      const outcome = completeLogin(CFG, url).catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const err = await outcome;
+      expect(err).toBeInstanceOf(AuthError);
+      expect((err as AuthError).code).toBe("timeout");
+      expect(getTokens()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects a callback with no stored login", async () => {
     await rejects(
       callbackUrl({ code: nextCode(), state: "s" }),
@@ -421,6 +438,48 @@ describe("renew", () => {
     expect(getTokens()).toBe(held);
   });
 
+  it("gives up on a refresh Tereo never answers after 15 seconds, keeping the tokens", async () => {
+    vi.useFakeTimers();
+    try {
+      const held = someTokens();
+      setTokens(held);
+      let aborted = false;
+      fetchMock.mockImplementation(
+        (_url, init) =>
+          new Promise<Response>(() => {
+            init?.signal?.addEventListener("abort", () => (aborted = true));
+          })
+      );
+
+      const outcomes: unknown[] = [];
+      const a = renew(CFG).catch((e: unknown) => outcomes.push(e));
+      const b = renew(CFG).catch((e: unknown) => outcomes.push(e));
+      await vi.advanceTimersByTimeAsync(14_900);
+      expect(outcomes).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(200);
+      await Promise.all([a, b]);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(outcomes).toHaveLength(2);
+      for (const err of outcomes) {
+        expect(err).toBeInstanceOf(AuthError);
+        expect((err as AuthError).code).toBe("timeout");
+      }
+      expect(aborted).toBe(true);
+      expect(getTokens()).toBe(held);
+
+      // The next renewal is a fresh attempt, not the hung one.
+      fetchMock.mockResolvedValue(
+        jsonResponse(200, tokenBody({ suffix: "2" }))
+      );
+      await expect(renew(CFG)).resolves.toMatchObject({
+        refreshToken: tokenBody({ suffix: "2" }).refresh_token,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rejects without a request when signed out", async () => {
     await expect(renew(CFG)).rejects.toBeInstanceOf(AuthError);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -544,6 +603,42 @@ describe("signOut", () => {
       rotated.refresh_token
     );
     expect(getTokens()).toBeNull();
+  });
+
+  it("waits at most 5 seconds for a renewal that hangs, then signs out with the held token", async () => {
+    vi.useFakeTimers();
+    try {
+      setTokens(someTokens());
+      let answer!: (r: Response) => void;
+      fetchMock.mockImplementation(async (url) => {
+        if (String(url).endsWith("/oauth/token"))
+          return new Promise<Response>((r) => (answer = r));
+        return new Response(null, { status: 200 });
+      });
+
+      const renewing = renew(CFG).catch((e: unknown) => e);
+      let done = false;
+      const out = signOut(CFG).then(() => (done = true));
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(done).toBe(false);
+      expect(assign).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(200);
+      await out;
+      expect(getTokens()).toBeNull();
+      const revoke = fetchMock.mock.calls.find(([url]) =>
+        String(url).endsWith("/oauth/revoke")
+      );
+      expect(bodyOf(revoke?.[1]).token).toBe("rt-old");
+      expect(navigatedTo().pathname).toBe("/oauth/end-session");
+
+      // The renewal answering afterwards does not bring the session back.
+      answer(jsonResponse(200, tokenBody({ suffix: "2" })));
+      expect(await renewing).toBeInstanceOf(AuthError);
+      expect(getTokens()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("ends the session even when signed out already", async () => {

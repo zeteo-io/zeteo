@@ -322,6 +322,38 @@ describe("GrantsPage", () => {
       );
     });
 
+    it("applies an upper-case UUID in lower case, in the request and the address", async () => {
+      renderPage(
+        `/grants?principal_type=user&principal_id=${USER_ID.toUpperCase()}&table_id=${ORDERS_ID.toUpperCase()}`
+      );
+      await screen.findAllByText("Ada Lovelace");
+      expect(grantParams()[0]).toMatchObject({
+        principal_id: USER_ID,
+        table_id: ORDERS_ID,
+      });
+      await waitFor(() =>
+        expect(screen.getByTestId("where")).toHaveTextContent(
+          `?table_id=${ORDERS_ID}&principal_type=user&principal_id=${USER_ID}`
+        )
+      );
+    });
+
+    it("says no grant matches when filters are active, and no grants yet when none are", async () => {
+      get.mockImplementation(async () => ({
+        data: { data: [], next_cursor: null },
+      }));
+      renderPage(`/grants?table_id=${ORDERS_ID}`);
+      expect(
+        await screen.findByText("No grant matches these filters.")
+      ).toBeInTheDocument();
+      expect(screen.queryByText("No grants yet.")).toBeNull();
+
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Clear all" }));
+      expect(await screen.findByText("No grants yet.")).toBeInTheDocument();
+      expect(screen.queryByText("No grant matches these filters.")).toBeNull();
+    });
+
     it("steps through filter states with Back", async () => {
       const user = userEvent.setup();
       renderPage();

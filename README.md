@@ -14,9 +14,10 @@ per-user and per-group concurrency limits ([docs/grants.md](packages/zeteo/docs/
 querying: the catalogue of what a caller may query, the query language, `POST /v1/query` and the
 run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming export
 ([docs/export.md](packages/zeteo/docs/export.md)) and the MCP endpoint
-([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI's server side (`/v1/me`, the people and
-groups search, the login client it needs) is in
-[docs/admin-ui.md](packages/zeteo/docs/admin-ui.md). Azure SQL's particulars are in
+([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI (`packages/zeteo-ui`) ships in the image
+and is served at `/` once `UI_CLIENT_ID` names its login client in tereo; how to turn it on, what
+each screen does, its local development and its server side (`/v1/me`, the people and groups
+search, the login client it needs) are in [docs/admin-ui.md](packages/zeteo/docs/admin-ui.md). Azure SQL's particulars are in
 [docs/azure-sql.md](packages/zeteo/docs/azure-sql.md). The HTTP API's reference is
 `packages/zeteo/openapi/openapi.yaml`. The design spec and its plans are under `docs/superpowers/`
 (kept out of version control).
@@ -33,6 +34,7 @@ Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRI
 |------|----------|
 | `packages/zeteo` | The service: an Express app on port 4201 with Prisma + Postgres and Redis |
 | `packages/zeteo-sdk` | `@zeteo-io/sdk`: the TypeScript client for zeteo's API, published to npm ([README](packages/zeteo-sdk/README.md)) |
+| `packages/zeteo-ui` | The admin UI, a Vite + React app; its build ships in zeteo's image ([README](packages/zeteo-ui/README.md)) |
 | `e2e/` | Not a package: a local end-to-end run against a real tereo ([e2e/README.md](e2e/README.md)) |
 
 ## Develop
@@ -55,7 +57,8 @@ npm run format && npm run sort-imports && npm run lint && npm run check
 
 The tests: `npm run test:unit` and `npm run test:int` in `packages/zeteo` (the int suite needs the
 three containers above), `docker/test/run.sh` for the whole suite in isolated stacks, as CI runs
-it, and `e2e/run.sh` for the end-to-end run against a released tereo image, which CI does not run.
+it, and `e2e/run.sh` for the end-to-end run against a released tereo image, which CI does not run
+(it ends with a Playwright test of the admin UI in Chromium; `npx playwright install chromium` once).
 
 ## Current state
 

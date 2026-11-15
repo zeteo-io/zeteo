@@ -5,8 +5,10 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { useUpdateTable } from "../api/useUpdateTable";
 import type { Column, PatchTable } from "../api/types";
 import { PageHeader } from "@/components/PageHeader";
-import { Link, useParams } from "react-router-dom";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
 import { useTable } from "../api/useTable";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -41,12 +43,19 @@ const yesNo = (value: boolean) => (value ? "Yes" : "No");
 
 /** Keyed by table, so edit state never carries over to another table. */
 export const TablePage = () => {
-  const { tableId = "" } = useParams();
-  return <TableView key={tableId} />;
+  const sourceId = useUuidParam("sourceId");
+  const tableId = useUuidParam("tableId");
+  if (!sourceId || !tableId) return <NotFound />;
+  return <TableView key={tableId} sourceId={sourceId} tableId={tableId} />;
 };
 
-const TableView = () => {
-  const { sourceId = "", tableId = "" } = useParams();
+const TableView = ({
+  sourceId,
+  tableId,
+}: {
+  sourceId: string;
+  tableId: string;
+}) => {
   const { data: table, error, isLoading } = useTable(sourceId, tableId);
   const { labelFor } = useAllTables(sourceId);
   const canEdit = useCanEditCatalogue(sourceId);

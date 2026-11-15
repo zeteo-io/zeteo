@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { sessionEnded, setSessionEnded } from "./session";
 import { ConfigError, loadConfig } from "@/lib/config";
 import userEvent from "@testing-library/user-event";
 import { getTokens, setTokens } from "./tokens";
@@ -34,8 +35,8 @@ const ME = {
 const fetchMock = vi.fn<typeof fetch>();
 let assign: ReturnType<typeof vi.spyOn>;
 let meAnswers: Array<() => Response>;
-let tokenAnswers: Array<() => Response>;
-let defaultToken: () => Response;
+let tokenAnswers: Array<() => Response | Promise<Response>>;
+let defaultToken: () => Response | Promise<Response>;
 let tokenTimes: number[];
 
 const callsTo = (url: string) =>
@@ -48,6 +49,7 @@ const Probe = () => {
       <p>signed in as {me.name}</p>
       <p>{can("zeteo.sources.read") ? "can read sources" : "cannot"}</p>
       <button onClick={signOut}>probe sign out</button>
+      <input aria-label="draft" />
     </div>
   );
 };
@@ -68,6 +70,7 @@ const lastNavigation = () =>
 
 beforeEach(() => {
   setTokens(null);
+  setSessionEnded(false);
   sessionStorage.clear();
   vi.mocked(loadConfig).mockReset().mockResolvedValue(CFG);
   meAnswers = [];
@@ -267,9 +270,9 @@ describe("AuthProvider", () => {
     );
   });
 
-  it("starts a silent login when a scheduled renewal is refused", async () => {
+  it("keeps the page and shows a notice, without leaving, when a scheduled renewal is refused", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const login = storeLogin({ returnTo: "/sources" });
+    const login = storeLogin({ returnTo: "/sources?q=a" });
     tokenAnswers.push(
       () => jsonResponse(200, tokenBody({ suffix: "1", expiresIn: 61 })),
       () => jsonResponse(400, { error: "invalid_grant" })
@@ -278,14 +281,38 @@ describe("AuthProvider", () => {
     expect(
       await screen.findByText("signed in as Ada Lovelace")
     ).toBeInTheDocument();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await user.type(screen.getByLabelText("draft"), "half a form");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(31_000);
     });
+    const notice = await screen.findByRole("dialog", {
+      name: "Your session ended",
+    });
+    expect(notice).toHaveTextContent(
+      "Sign in again to continue. Anything you have not saved on this page will need to be entered again after signing in."
+    );
+    expect(assign).not.toHaveBeenCalled();
+    expect(getTokens()).toBeNull();
+    expect(sessionEnded()).toBe(true);
+    expect(screen.getByText("signed in as Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByLabelText("draft")).toHaveValue("half a form");
+
+    // Not dismissible, and the scheduler has stopped.
+    await user.keyboard("{Escape}");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300_000);
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(tokenTimes).toHaveLength(2);
+    expect(assign).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
-    expect(lastNavigation().searchParams.get("prompt")).toBe("none");
+    expect(lastNavigation().pathname).toBe("/oauth/authorize");
     expect(JSON.parse(sessionStorage.getItem(LOGIN_KEY)!).returnTo).toBe(
-      "/sources"
+      "/sources?q=a"
     );
   });
 
@@ -364,7 +391,7 @@ describe("AuthProvider", () => {
     expect(assign).not.toHaveBeenCalled();
   });
 
-  it("starts one sign-in, not a loop, when a 30-second token's renewal is refused", async () => {
+  it("shows the notice once, not a loop, when a 30-second token's renewal is refused", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     tokenAnswers.push(() => jsonResponse(200, tokenBody({ expiresIn: 30 })));
     defaultToken = () => jsonResponse(400, { error: "invalid_grant" });
@@ -379,9 +406,40 @@ describe("AuthProvider", () => {
     });
 
     expect(tokenTimes).toHaveLength(2);
-    expect(assign).toHaveBeenCalledTimes(1);
-    expect(lastNavigation().searchParams.get("prompt")).toBe("none");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(assign).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["a 503", () => jsonResponse(503, { error: "temporarily_unavailable" })],
+    ["a timeout", () => new Promise<Response>(() => {})],
+  ])(
+    "keeps the session, with no notice, when a scheduled renewal meets %s",
+    async (what, answer) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      tokenAnswers.push(() =>
+        jsonResponse(200, tokenBody({ suffix: "1", expiresIn: 120 }))
+      );
+      defaultToken = answer;
+      const login = storeLogin();
+      renderAt(
+        `/callback?code=c12-${encodeURIComponent(what)}&state=${login.state}`
+      );
+      expect(
+        await screen.findByText("signed in as Ada Lovelace")
+      ).toBeInTheDocument();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100_000);
+      });
+
+      expect(tokenTimes.length).toBeGreaterThanOrEqual(3);
+      expect(getTokens()).not.toBeNull();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(sessionEnded()).toBe(false);
+      expect(assign).not.toHaveBeenCalled();
+    }
+  );
 
   it("retries a renewal Tereo keeps refusing with 429 on a bounded cadence, keeping the session", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
@@ -402,6 +460,7 @@ describe("AuthProvider", () => {
       expect(tokenTimes[i] - tokenTimes[i - 1]).toBeGreaterThanOrEqual(5_000);
     }
     expect(getTokens()).not.toBeNull();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(assign).not.toHaveBeenCalled();
   });
 

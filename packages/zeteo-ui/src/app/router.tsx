@@ -2,10 +2,10 @@ import { Suspense, lazy, useState, type ComponentType } from "react";
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
-import { EmptyState, Spinner } from "@kosmeo-ui/react";
 import { RouteError } from "@/components/RouteError";
-import { PageHeader } from "@/components/PageHeader";
 import { RootLayout } from "./layouts/RootLayout";
+import { NotFound } from "@/components/NotFound";
+import { Spinner } from "@kosmeo-ui/react";
 import { SECTIONS } from "./sections";
 import { useAuth } from "@/lib/auth";
 import {
@@ -41,23 +41,6 @@ const DefaultSection = () => {
   );
 };
 
-const NotFound = () => (
-  <>
-    <PageHeader title="Page not found" />
-    <EmptyState layout="block">There is nothing at this address.</EmptyState>
-  </>
-);
-
-const tablesPage = lazy(() =>
-  import("@/features/tables").then((m) => ({ default: m.TablesPage }))
-);
-const tablePage = lazy(() =>
-  import("@/features/tables").then((m) => ({ default: m.TablePage }))
-);
-const relationsPage = lazy(() =>
-  import("@/features/relations").then((m) => ({ default: m.RelationsPage }))
-);
-
 const grantNewPage = lazy(() =>
   import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
 );
@@ -69,27 +52,6 @@ const inSuspense = (Page: ComponentType) => (
   <Suspense fallback={<Spinner size="lg" />}>
     <Page />
   </Suspense>
-);
-
-/** A source's tables and relations pages, in place of the source routes' placeholders. */
-const catalogueRoutes = [
-  { path: "tables", element: inSuspense(tablesPage) },
-  { path: "tables/:tableId", element: inSuspense(tablePage) },
-  { path: "relations", element: inSuspense(relationsPage) },
-];
-
-const sourceRoutesWithCatalogue = sourceRoutes.map((route) =>
-  route.children
-    ? {
-        ...route,
-        children: [
-          ...route.children.filter(
-            (child) => child.path !== "tables" && child.path !== "relations"
-          ),
-          ...catalogueRoutes,
-        ],
-      }
-    : route
 );
 
 const grantWriteRoutes = [
@@ -124,7 +86,7 @@ export const routes = [
           ),
         };
       }),
-      ...sourceRoutesWithCatalogue,
+      ...sourceRoutes,
       ...grantWriteRoutes,
       { path: "*", element: <NotFound /> },
     ],

@@ -3,9 +3,10 @@ import { useDeleteRelation } from "../api/useDeleteRelation";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useRelations } from "../api/useRelations";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
 import { RelationForm } from "./RelationForm";
 import type { Relation } from "../api/types";
-import { useParams } from "react-router-dom";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -17,7 +18,11 @@ import {
 } from "@kosmeo-ui/react";
 
 export const RelationsPage = () => {
-  const { sourceId = "" } = useParams();
+  const sourceId = useUuidParam("sourceId");
+  return sourceId ? <Relations sourceId={sourceId} /> : <NotFound />;
+};
+
+const Relations = ({ sourceId }: { sourceId: string }) => {
   const { items, isLoading, error, hasMore, loadMore } = useRelations(sourceId);
   const {
     tables,

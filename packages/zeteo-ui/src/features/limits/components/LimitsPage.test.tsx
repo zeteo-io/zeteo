@@ -91,6 +91,22 @@ describe("LimitsPage", () => {
     expect(within(row).queryByText(/orphaned/i)).not.toBeInTheDocument();
   });
 
+  it("says no limit matches with a principal filter, and no limits yet without one", async () => {
+    get.mockImplementation(async () => ({
+      data: { data: [], next_cursor: null },
+    }));
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsPage />, {
+      route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
+    });
+    expect(
+      await screen.findByText("No limit matches this filter.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("No limits yet.")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Clear principal" }));
+    expect(await screen.findByText("No limits yet.")).toBeInTheDocument();
+  });
+
   it("sends the filters of the address", async () => {
     renderWithProviders(<LimitsPage />, {
       route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,

@@ -2,7 +2,9 @@
 
 zeteo's unit and int suites run with Tereo in the SDK's test mode, so nothing in them talks to a
 Tereo. This run does: it starts a Tereo, zeteo from this checkout's image (not in test mode), and a
-source Postgres serving TLS, signs real users in, and checks what only a real Tereo can show.
+source Postgres serving TLS, signs real users in, and checks what only a real Tereo can show. It
+ends with a browser test: the admin UI from zeteo's image, in Chromium, signing in through Tereo's
+own pages.
 
 It is a local script, not a CI job:
 
@@ -10,11 +12,14 @@ It is a local script, not a CI job:
 e2e/run.sh                 # or: npm run test:e2e
 KEEP=1 e2e/run.sh          # leave the stack running afterwards (e2e/run.sh down removes it)
 e2e/run.sh -t "MCP"        # extra arguments go to vitest
+e2e/run.sh --browser       # only the browser test; extra arguments go to playwright
+PLAYWRIGHT=0 e2e/run.sh    # only the Vitest files
 ```
 
-It needs Docker (with Compose), Node and `openssl` on the host, and `npm install` at the root.
-A run takes about a minute and a half once the images are built, a minute of it in the group case,
-which waits out zeteo's 30 s group cache twice.
+It needs Docker (with Compose), Node and `openssl` on the host, `npm install` at the root, and
+Playwright's Chromium, installed once with `npx playwright install chromium`.
+A run takes under two minutes once the images are built (the browser test about 15 s of it), a
+minute of it in the group case, which waits out zeteo's 30 s group cache twice.
 
 ## The stack
 
@@ -22,8 +27,8 @@ which waits out zeteo's 30 s group cache twice.
 
 | Service | What |
 |---------|------|
-| `tereo`, with `tereo-postgres`, `tereo-redis`, `tereo-migrate` | Tereo in development mode (its production mode refuses a loopback `http` issuer), set up unattended with `SETUP_TOKEN`, provisioned with `packages/zeteo/tereo-provisioning.json`, `e2e/provisioning/e2e-clients.json` and `e2e/provisioning/e2e-app.json` |
-| `zeteo`, with `zeteo-postgres`, `zeteo-redis`, `zeteo-migrate` | zeteo's image in production mode, signed in to Tereo as the `zeteo` service, MCP on for `e2e-mcp`, `SOURCE_ALLOWED_HOSTS=source-pg` |
+| `tereo`, with `tereo-postgres`, `tereo-redis`, `tereo-migrate` | Tereo in development mode (its production mode refuses a loopback `http` issuer), set up unattended with `SETUP_TOKEN`, provisioned with `packages/zeteo/tereo-provisioning.json`, `e2e/provisioning/e2e-clients.json` (as run.sh writes it for the run, see below) and `e2e/provisioning/e2e-app.json`; `CORS_ALLOWED_ORIGINS` lists `UI_ORIGIN` and zeteo's origin |
+| `zeteo`, with `zeteo-postgres`, `zeteo-redis`, `zeteo-migrate` | zeteo's image in production mode, signed in to Tereo as the `zeteo` service, MCP on for `e2e-mcp`, `SOURCE_ALLOWED_HOSTS=source-pg`, the admin UI on for `e2e-ui` |
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
 
@@ -38,8 +43,13 @@ which waits out zeteo's 30 s group cache twice.
 - **Secrets**: the setup token, user password, client secrets, master key, request handler key and
   the source login's password are generated for each run into `e2e/.env.run` (git-ignored); the
   databases' own passwords are fixed `*-e2e-only` constants on networks nothing outside reaches.
+- **Generated provisioning**: Tereo matches redirect URIs exactly, port included, and zeteo's
+  port is chosen per run. The script writes `e2e/.run/e2e-clients.json` (git-ignored), the
+  committed `e2e/provisioning/e2e-clients.json` with `http://127.0.0.1:<zeteo port>/callback` added
+  to `e2e-ui`'s redirect URIs and `http://127.0.0.1:<zeteo port>/` as its post-logout URI, and
+  Tereo mounts that copy.
 - **Teardown**: at the end, pass or fail, the script removes the project's containers, networks
-  and volumes, then `e2e/.env.run` and `e2e/certs/`, unless `KEEP=1`. If `down` fails, the env file
+  and volumes, then `e2e/.env.run`, `e2e/certs/` and `e2e/.run/`, unless `KEEP=1`. If `down` fails, the env file
   is kept and `e2e/run.sh down` tries again; without the env file it still uses the compose file, so
   the named volumes are found. The script refuses to start while any container or volume of the
   `zeteo-e2e` project exists. It touches no other compose project.
@@ -51,9 +61,9 @@ which waits out zeteo's 30 s group cache twice.
 - **The SDK**: before the tests start, the script builds `@zeteo-io/sdk`
   (`npx nx run @zeteo-io/sdk:build`), which `sdk.e2e.test.ts` imports through the workspace link.
 
-Sign-in is scripted over HTTP, as Tereo's own tests do it: `GET /oauth/authorize`, the password
-step the login page posts, consent when the client asks for it, and the code exchange with PKCE
-(`e2e/support/oauth.ts`). No browser is involved.
+In the Vitest files sign-in is scripted over HTTP, as Tereo's own tests do it: `GET /oauth/authorize`,
+the password step the login page posts, consent when the client asks for it, and the code exchange
+with PKCE (`e2e/support/oauth.ts`). No browser is involved there; the browser test is below.
 
 ## Login clients
 
@@ -64,7 +74,7 @@ client, `zeteo`, with the run's `TEREO_CLIENT_SECRET`):
 |--------|------|----------|----------|
 | `e2e-web` | confidential | `zeteo` | users' tokens for `/v1` |
 | `e2e-mcp` | public, consent | `zeteo` | the MCP client's sign-in; listed in `MCP_ALLOWED_CLIENTS` |
-| `e2e-ui` | public, `offline_access` | `zeteo` | zeteo's admin UI: a page on `UI_ORIGIN` (`http://127.0.0.1:4200`, in Tereo's `CORS_ALLOWED_ORIGINS`) that exchanges and refreshes from that origin, refresh token in the body |
+| `e2e-ui` | public, `offline_access` | `zeteo` | zeteo's admin UI: the HTTP-only tests act as a page on `UI_ORIGIN` (`http://127.0.0.1:4200`, redirect URI `http://127.0.0.1/e2e-ui/callback`); the browser test loads it from zeteo's origin (`/callback` there). Both origins are in Tereo's `CORS_ALLOWED_ORIGINS`; the refresh token comes in the body |
 | `e2e-other` | public | none | a token for another audience |
 | `tereo-ui` | Tereo's own | Tereo | the admin's calls to Tereo's admin API |
 
@@ -89,7 +99,7 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 | `tls.e2e.test.ts` | `tls: verify` against the untrusted certificate is `502 source_unreachable`; the replica with `NODE_EXTRA_CA_CERTS` registers and queries the same source; `verify` with the CA in the source's `ca` setting works; `tls: require` works without trusting the CA |
 | `audit.e2e.test.ts` | A query's `zeteo.query.run` and an export's `zeteo.export.started` and `zeteo.export.run` reach Tereo's audit log through the outbox |
 | `sdk.e2e.test.ts` | `@zeteo-io/sdk` as `e2e-app` (a `@dianemo/core` handler on a memory backend): refused before any grant; with `zeteo_admin` grants its own account `orders` (the id from Tereo's `GET /v1/account/me` with the service's token), reads the grant, queries, deletes it; `withToken` queries as alice and is refused for erin, and the run log names each as the caller; `export.rows` read to the end agrees with its end line, `export.stream` as CSV starts with its header; `paginate` over the source's tables one per page finds all of them; `withToken` of an `e2e-other` token is a `ZeteoError` with status 401 |
-| `uiSignIn.e2e.test.ts` | `e2e-ui`'s code is exchanged with `Origin: UI_ORIGIN`, Tereo answers that origin's CORS (and its preflight) and returns the refresh token in the body; the refresh from the body renews and its token reaches `/v1/catalog`; `prompt=none` gives a code with Tereo's session cookies and `login_required` without them; a revoked refresh token no longer renews; zeteo with the UI configured: `/ui-config.json` publishes Tereo's host-facing URL and `e2e-ui`, `/` is a JSON 404 (no UI build) and every response carries the content security policy naming Tereo's origin |
+| `uiSignIn.e2e.test.ts` | `e2e-ui`'s code is exchanged with `Origin: UI_ORIGIN`, Tereo answers that origin's CORS (and its preflight) and returns the refresh token in the body; the refresh from the body renews and its token reaches `/v1/catalog`; `prompt=none` gives a code with Tereo's session cookies and `login_required` without them; a revoked refresh token no longer renews; zeteo with the UI configured: `/ui-config.json` publishes Tereo's host-facing URL and `e2e-ui`, `/` and `/sources` serve the UI's app shell, and every response carries the content security policy naming Tereo's origin |
 | `directory.e2e.test.ts` | With zeteo's own service token: users by a fragment of name and of email (`GET /v1/admin/users`, `filter[name|email]` with `_op=contains`), groups by `q` (`GET /v1/admin/groups`), users by id in one request (`filter[id]`, `filter[id_op]=in`) with a missing id left out; then zeteo's own `GET /v1/principals` and `POST /v1/principals/lookup` as the admin (alice by email fragment, the group by name, a random id `orphaned`, no refusal of `/v1/admin/users` or `/v1/admin/groups` in Tereo's log), bob refused with 403, and a service account found by lookup but not by search |
 | `me.e2e.test.ts` | `GET /v1/me`: the admin signed in through `e2e-ui` gets name, email and permissions; bob gets only `zeteo.data.read`; `e2e-app`'s token is `type: "service"`; no token is 401 |
 | `mcp.e2e.test.ts` | An unauthenticated `initialize` gets the 401 challenge naming the resource metadata, which names Tereo; a token from a client not in `MCP_ALLOWED_CLIENTS` is refused; a user signed in through `e2e-mcp`, found from the challenge as an MCP client finds it, lists the four tools and runs `query` |
@@ -98,10 +108,35 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 `PUBLIC_URL`, where an `http` `UI_TEREO_URL` is accepted (it must be `https` only when `PUBLIC_URL`
 is), so the stack sets `UI_CLIENT_ID: e2e-ui` and `UI_TEREO_URL` to Tereo as the host reaches it
 (`http://127.0.0.1:$E2E_TEREO_PORT`, not the in-network `TEREO_URL`). `/ui-config.json` answers with
-them and the content security policy's `connect-src` names Tereo's origin; the image has no UI
-build, so `/` stays a JSON `404`. What the UI needs of Tereo (the `e2e-ui` client, its CORS origin,
-the refresh token in the body) is tested through `uiSignIn.e2e.test.ts` and `me.e2e.test.ts`. The `UI_*` rules themselves are covered by zeteo's
-unit and int suites; see [packages/zeteo/docs/admin-ui.md](../packages/zeteo/docs/admin-ui.md).
+them, the content security policy's `connect-src` names Tereo's origin, and the image's UI build is
+served at `/`. The `UI_*` rules themselves are covered by zeteo's unit and int suites; see
+[packages/zeteo/docs/admin-ui.md](../packages/zeteo/docs/admin-ui.md).
+
+## The browser test
+
+`e2e/browser/admin.spec.ts`, run by Playwright (`e2e/playwright.config.ts`: Chromium, headless,
+one worker, no retries) after the Vitest files pass, against the same stack. It opens zeteo at
+`http://127.0.0.1:<port>`, a loopback address and so a secure context, which the UI's PKCE needs.
+It makes alice and bob itself when they do not exist yet, so `e2e/run.sh --browser` works alone.
+
+| Test | Case |
+|------|------|
+| an admin administers zeteo | `/` leads to Tereo's sign-in page; the admin signs in there and lands on `/sources`; creates a Postgres source on `source-pg` (TLS `verify` with the run's CA pasted), sees it listed as active, runs Test and Refresh and sees its tables; describes `orders` and reloads: the page goes to Tereo's `/oauth/authorize` with `prompt=none`, back to `/callback` with a code, and to the table again without Tereo's form, with no `code=` left and the description kept; grants alice `orders` with all columns (found by part of her email) and sees the grant with her name; creates a limit for her and deletes it; after alice queries through the API, the run shows with her name, outcome `ok`, and the query JSON in its details; no access, refresh or ID token from Tereo's token answers is in `localStorage`, `sessionStorage` or any cookie, zeteo sets no cookie, and no address after the callback carries `code=`; signing out revokes the refresh token (`/oauth/revoke` answers 200, and refreshing with that token is then `400 invalid_grant`), lands on Tereo's sign-in form, and `/sources` leads there again |
+| a user without admin permissions | bob signs in and sees the "No access" page with no sections |
+
+Both record every request: only zeteo's and Tereo's origins may appear, and the console must show
+no content security policy violation ("Refused to …") and the pages no uncaught error. Tereo's and
+zeteo's cookies share a jar (cookies are kept per host, not per port), so the cookie check is that
+no cookie carries a token and zeteo's responses set none.
+
+No token renewal (`grant_type=refresh_token`) happens during the test: Tereo's access-token
+lifetime (`JWT_ACCESS_TOKEN_TTL`, an hour) applies to every token of the run, and shortening it
+enough to see a renewal would expire the tokens the Vitest files hold for their whole run.
+
+The script checks for Playwright's Chromium before it starts the stack, unless `PLAYWRIGHT=0`.
+
+On failure, a trace and a screenshot are kept under `e2e/browser-results/` (git-ignored);
+`npx playwright show-trace e2e/browser-results/<test>/trace.zip` opens one.
 
 Some checks read the stack directly with `docker compose` (`e2e/support/compose.ts`): zeteo's log,
 for failures a response would hide, and the count of zeteo's undelivered outbox rows.

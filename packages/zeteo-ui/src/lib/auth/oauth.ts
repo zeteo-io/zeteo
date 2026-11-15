@@ -149,6 +149,29 @@ const postForm = async (
   }
 };
 
+// Tereo can accept a connection and never answer. renew is single-flight and
+// every API request near expiry waits on it, so a token request must end.
+const TOKEN_TIMEOUT_MS = 15_000;
+
+/** Runs `request` with a signal it must pass on; past the limit it is aborted and this rejects with `timeout`. */
+const withTimeout = async <T>(
+  request: (signal: AbortSignal) => Promise<T>
+): Promise<T> => {
+  const abort = new AbortController();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      abort.abort();
+      reject(new AuthError("timeout"));
+    }, TOKEN_TIMEOUT_MS);
+  });
+  try {
+    return await Promise.race([request(abort.signal), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const errorCodeOf = async (res: Response): Promise<string> => {
   try {
     const body = (await res.json()) as { error?: unknown };
@@ -240,15 +263,22 @@ const exchange = async (
   const code = params.get("code");
   if (!code) throw new AuthError("missing_code");
 
-  const res = await postForm(cfg, "/oauth/token", {
-    grant_type: "authorization_code",
-    code,
-    redirect_uri: redirectUri(),
-    client_id: cfg.clientId,
-    code_verifier: login.verifier,
+  const tokens = await withTimeout(async (signal) => {
+    const res = await postForm(
+      cfg,
+      "/oauth/token",
+      {
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri(),
+        client_id: cfg.clientId,
+        code_verifier: login.verifier,
+      },
+      signal
+    );
+    if (!res.ok) throw new AuthError(await errorCodeOf(res));
+    return readTokens(res);
   });
-  if (!res.ok) throw new AuthError(await errorCodeOf(res));
-  const tokens = await readTokens(res);
 
   const claims = decodeClaims(tokens.idToken);
   if (!claims) throw new AuthError("invalid_id_token");
@@ -280,21 +310,33 @@ const refresh = async (cfg: UiConfig): Promise<Tokens> => {
   const held = getTokens();
   if (!held) throw new AuthError("signed_out");
 
-  const res = await postForm(cfg, "/oauth/token", {
-    grant_type: "refresh_token",
-    refresh_token: held.refreshToken,
-    client_id: cfg.clientId,
-  });
-  if (!res.ok) {
-    const code = await errorCodeOf(res);
-    // 400 invalid_grant (revoked, expired, or its family ended) or 401: the
-    // refresh token is dead. A 429, a 5xx and the like leave it for another try.
-    if ((res.status === 400 || res.status === 401) && getTokens() === held) {
-      setTokens(null);
+  // A timeout, like a 429 or a 5xx, leaves the tokens for another try.
+  const tokens = await withTimeout(async (signal) => {
+    const res = await postForm(
+      cfg,
+      "/oauth/token",
+      {
+        grant_type: "refresh_token",
+        refresh_token: held.refreshToken,
+        client_id: cfg.clientId,
+      },
+      signal
+    );
+    if (!res.ok) {
+      const code = await errorCodeOf(res);
+      // 400 invalid_grant (revoked, expired, or its family ended) or 401: the
+      // refresh token is dead. A 429, a 5xx and the like leave it for another try.
+      if (
+        (res.status === 400 || res.status === 401) &&
+        !signal.aborted &&
+        getTokens() === held
+      ) {
+        setTokens(null);
+      }
+      throw new AuthError(code);
     }
-    throw new AuthError(code);
-  }
-  const tokens = await readTokens(res, held);
+    return readTokens(res, held);
+  });
   // Signed out (or signed in afresh) while this was in flight.
   if (getTokens() !== held) throw new AuthError("signed_out");
   setTokens(tokens);
@@ -323,9 +365,26 @@ const usableHint = (idToken: string): string | null => {
   return Date.now() - exp * 1000 > HINT_GRACE_MS ? null : idToken;
 };
 
+/** Settles when `promise` does or after `ms`, whichever is first; never rejects. */
+const settledWithin = async (promise: Promise<unknown>, ms: number) => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    promise.then(
+      () => undefined,
+      () => undefined
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]);
+  clearTimeout(timer);
+};
+
 export const signOut = async (cfg: UiConfig): Promise<void> => {
-  // Revoke the refresh token a renewal in flight is about to hand back.
-  if (renewing) await renewing.catch(() => undefined);
+  // Revoke the refresh token a renewal in flight is about to hand back, but
+  // not wait forever on it: past the limit the token held now is revoked,
+  // and a renewal that lands later finds the tokens cleared and keeps none.
+  if (renewing) await settledWithin(renewing, REVOKE_TIMEOUT_MS);
   const held = getTokens();
   setTokens(null);
   try {
@@ -337,28 +396,20 @@ export const signOut = async (cfg: UiConfig): Promise<void> => {
   if (held) {
     // Best effort, and bounded: end-session below still ends Tereo's session.
     const abort = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timedOut = new Promise<void>((resolve) => {
-      timer = setTimeout(() => {
-        abort.abort();
-        resolve();
-      }, REVOKE_TIMEOUT_MS);
-    });
-    const revoked = postForm(
-      cfg,
-      "/oauth/revoke",
-      {
-        token: held.refreshToken,
-        token_type_hint: "refresh_token",
-        client_id: cfg.clientId,
-      },
-      abort.signal
-    ).then(
-      () => undefined,
-      () => undefined
+    await settledWithin(
+      postForm(
+        cfg,
+        "/oauth/revoke",
+        {
+          token: held.refreshToken,
+          token_type_hint: "refresh_token",
+          client_id: cfg.clientId,
+        },
+        abort.signal
+      ),
+      REVOKE_TIMEOUT_MS
     );
-    await Promise.race([revoked, timedOut]);
-    clearTimeout(timer);
+    abort.abort();
   }
 
   const params = new URLSearchParams({

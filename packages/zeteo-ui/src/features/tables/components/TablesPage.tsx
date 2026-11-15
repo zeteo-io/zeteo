@@ -1,7 +1,9 @@
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { Link, useParams } from "react-router-dom";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
 import { useTables } from "../api/useTables";
 import type { Table } from "../api/types";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -15,7 +17,11 @@ import {
 } from "@kosmeo-ui/react";
 
 export const TablesPage = () => {
-  const { sourceId = "" } = useParams();
+  const sourceId = useUuidParam("sourceId");
+  return sourceId ? <TablesList sourceId={sourceId} /> : <NotFound />;
+};
+
+const TablesList = ({ sourceId }: { sourceId: string }) => {
   const [includeMissing, setIncludeMissing] = useState(false);
   const { items, isLoading, error, hasMore, loadMore } = useTables(sourceId, {
     includeMissing,

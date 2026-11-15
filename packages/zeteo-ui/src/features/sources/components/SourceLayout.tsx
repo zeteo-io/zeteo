@@ -1,6 +1,8 @@
 import { NavLink, Outlet, useOutletContext, useParams } from "react-router-dom";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
 import { SourceStatus } from "./SourceStatus";
 import { useSource } from "../api/useSource";
 import { Spinner } from "@kosmeo-ui/react";
@@ -20,9 +22,19 @@ const TABS = [
   { to: "relations", label: "Relations", end: false },
 ];
 
-/** Loads one source and gives its pages a header and tabs. */
+/**
+ * Loads one source and gives its pages a header and tabs. An id that is not
+ * a UUID, here or a table's below, is not found, and zeteo is not asked.
+ */
 export const SourceLayout = () => {
-  const { sourceId = "" } = useParams();
+  const sourceId = useUuidParam("sourceId");
+  const rawTableId = useParams().tableId;
+  const tableId = useUuidParam("tableId");
+  if (!sourceId || (rawTableId !== undefined && !tableId)) return <NotFound />;
+  return <SourceLoader sourceId={sourceId} />;
+};
+
+const SourceLoader = ({ sourceId }: { sourceId: string }) => {
   const { data: source, error, isLoading } = useSource(sourceId);
 
   if (isLoading) return <Spinner size="lg" />;

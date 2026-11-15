@@ -16,7 +16,8 @@ interface Page {
 
 const loadAll = async (
   sourceId: string,
-  includeMissing: boolean
+  includeMissing: boolean,
+  signal: AbortSignal
 ): Promise<Table[]> => {
   const tables: Table[] = [];
   let cursor: string | undefined;
@@ -30,6 +31,7 @@ const loadAll = async (
             ...(includeMissing ? { include_missing: true } : {}),
             ...(cursor ? { cursor } : {}),
           },
+          signal,
         })
       ).data;
     } catch (err) {
@@ -59,7 +61,8 @@ export const useAllTables = (
     queryKey: ["sources", sourceId, "tables", "all", { includeMissing }],
     enabled: sourceId !== undefined,
     retry: false,
-    queryFn: () => loadAll(sourceId as string, includeMissing),
+    queryFn: ({ signal }) =>
+      loadAll(sourceId as string, includeMissing, signal),
   });
   const tables = query.data ?? [];
   const byId = new Map(tables.map((t) => [t.id, t]));

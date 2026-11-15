@@ -50,6 +50,9 @@ export const RunsPage = () => {
     filtersOf
   );
   const canReadSources = can("zeteo.sources.read");
+  // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only runs.
+  const canSearchPeople = can("zeteo.grants.read");
+  const anyFilter = !!(filters.user_id || filters.source_id || filters.outcome);
   const { items, isLoading, error, hasMore, loadMore } = useRuns(filters);
   const sources = useAllSources(canReadSources);
   const [pickingPerson, setPickingPerson] = useState(false);
@@ -106,7 +109,7 @@ export const RunsPage = () => {
         </Alert>
       )}
       <div className="z-runs-person">
-        {(filters.user_id || filters.source_id || filters.outcome) && (
+        {anyFilter && (
           <ul className="z-runs-chips" aria-label="Active filters">
             {filters.user_id && (
               <li>
@@ -180,9 +183,16 @@ export const RunsPage = () => {
         >
           {pickingPerson ? "Hide person filter" : "Filter by person"}
         </Button>
+        {pickingPerson && !canSearchPeople && (
+          <p>
+            Searching by name needs the Read grants permission; paste a user id
+            instead.
+          </p>
+        )}
         {pickingPerson && (
           <PrincipalPicker
             types={["user"]}
+            search={canSearchPeople}
             value={
               filters.user_id ? { type: "user", id: filters.user_id } : null
             }
@@ -200,7 +210,13 @@ export const RunsPage = () => {
         <Table<Run>
           rowKey={(run) => run.id}
           emptyMessage={
-            error ? undefined : <EmptyState>No runs recorded.</EmptyState>
+            error ? undefined : (
+              <EmptyState>
+                {anyFilter
+                  ? "No run matches these filters."
+                  : "No runs recorded."}
+              </EmptyState>
+            )
           }
           columns={[
             { title: "When", cellElement: (run) => formatDate(run.created_at) },

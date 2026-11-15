@@ -1,11 +1,13 @@
-# Admin UI: the server side
+# Admin UI
 
-The admin UI is a web page served from zeteo's own origin. This document covers what zeteo
-provides for it; the UI package itself is not in the image yet, so `/` is still a JSON `404`
-until it is. What exists today: `GET /v1/me`, `GET /v1/principals`, `POST /v1/principals/lookup`,
-the public `GET /ui-config.json`, a content security policy on every response, and the code that
-serves a UI build at `/` once one is present. Everything below is exercised end to end by
-`e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and `uiSignIn.e2e.test.ts`.
+The admin UI is a web page served from zeteo's own origin. Its build (`packages/zeteo-ui`) ships
+in zeteo's image, and zeteo serves it at `/` once `UI_CLIENT_ID` names its login client in Tereo;
+without `UI_CLIENT_ID` the image runs as an API only and `/` is a JSON `404`. This document covers
+turning it on, what each screen does, local development, and what zeteo provides for it:
+`GET /v1/me`, `GET /v1/principals`, `POST /v1/principals/lookup`, the public `GET /ui-config.json`,
+a content security policy on every response, and the serving of the build. The server side is
+exercised end to end by `e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and
+`uiSignIn.e2e.test.ts`, and the UI itself in Chromium by `e2e/browser/admin.spec.ts`.
 
 ## Turning it on
 
@@ -48,17 +50,84 @@ token. Tereo's `CORS_ALLOWED_ORIGINS` must list zeteo's public origin
 (`https://zeteo.example.com`): the browser exchanges its code and renews its token at Tereo from
 that origin, and without the entry it cannot do either.
 
+## The screens
+
+Sign-in goes through Tereo's own sign-in page and back to `/callback`. The UI holds its tokens in
+memory only (never in `localStorage`, `sessionStorage`, a cookie or the address), so a reload or a
+new tab goes through Tereo and straight back while Tereo's session lasts, without asking for the
+password. Each section shows only to someone holding its permission; a person with no zeteo admin
+permission at all sees a "No access" page and no sections.
+
+- **Sources** (`zeteo.sources.read`, changes with `.write`): the registered databases with their
+  status. A new source takes its connection (host, port, database, login, TLS mode and an optional
+  CA certificate), its schemas and its limits. A source's page runs **Test** (does the login hold
+  rights a read-only one would not), **Refresh** (reads the catalogue again and says what changed),
+  edits and archives it.
+- **Tables** and **Relations**, tabs of a source: the catalogue as zeteo last read it. A table's
+  page shows its columns and relations and edits the table's and columns' descriptions; Relations
+  lists the relations read from the database and declares or removes the ones it lacks.
+- **Grants** (`zeteo.grants.read`, changes with `.write`): who may query which table, filtered by
+  source, table or person. A grant names a user or group (searched by name or email, or pasted as
+  an id) and a table, with all of its columns or a chosen few.
+- **Limits** (`zeteo.grants.read`, changes with `.write`): how many queries and exports a user or
+  group may run at once, in place of the source's defaults.
+- **Runs** (`zeteo.runs.read`): the record of every query and export, newest first, filtered by
+  person, source or outcome; a run's details show the query as it was sent. It is read-only, and
+  the UI has no query screen of its own. Searching for a person by name needs
+  `zeteo.grants.read` too; without it the filter takes a pasted user id.
+
+The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, so the
+next visit asks for the password again.
+
+The UI reads the person's permissions (`GET /v1/me`) once, when it signs in; renewing the token
+does not read them again. A permission granted or removed in Tereo shows in the UI after a reload
+(zeteo itself decides each request from the token it is sent, whatever the UI shows).
+The UI applies the same ladder as zeteo (`admin` covers everything, `x.admin` everything under
+`x.`, and read < write < archive < delete within one area), so it never hides a control zeteo
+would allow.
+
+The UI renews its access token in the background before it expires. Every request to Tereo's token
+endpoint gives up after 15 seconds, so a Tereo that accepts the connection and never answers makes
+a request fail with an error rather than hang, and keeps the session for the next try. Signing out
+waits at most 5 seconds for a renewal in flight.
+
+When a background renewal is refused (another tab signed out, or the session reached its end in
+Tereo), the UI does not leave the page: it shows a "Your session ended" notice over it, which
+cannot be dismissed, and requests from the page fail until the person signs in. Its **Sign in**
+button goes through Tereo and back to the same page; anything not saved on it has to be entered
+again. A request the person makes that finds the session over at that moment goes to Tereo's
+sign-in straight away.
+
 ## Development setup
 
-In development the UI runs on its own dev server, on port 4200, and calls zeteo and Tereo from
-that origin, so both must allow it:
+In development the UI runs on its own dev server, on port 4200, and zeteo in development mode on
+4201:
 
-- zeteo's `CORS_ALLOWED_ORIGINS` lists the dev server's origin, for example
+```sh
+# packages/zeteo/.env: UI_CLIENT_ID=<the login client's id>, and UI_TEREO_URL if TEREO_URL is
+# not the address a browser reaches Tereo at
+cd packages/zeteo && npm run dev           # http://localhost:4201
+npm run dev -w zeteo-ui                    # http://localhost:4200, from the root
+```
+
+The dev server forwards `/v1` and `/ui-config.json` to zeteo, so `/ui-config.json` answers only
+with `UI_CLIENT_ID` set. The page calls Tereo from the dev server's origin, so:
+
+- The login client's `redirectUris` include `http://localhost:4200/callback` and its
+  `postLogoutRedirectUris` `http://localhost:4200/`.
+- Tereo's `CORS_ALLOWED_ORIGINS` lists `http://localhost:4200`, for the code exchange and token
+  renewal.
+- zeteo's `CORS_ALLOWED_ORIGINS` lists it as well, for example
   `CORS_ALLOWED_ORIGINS=http://localhost:4201,http://localhost:4200` (the value replaces the
   default, `PUBLIC_URL`'s origin, so list that too if you still need it).
-- Tereo's `CORS_ALLOWED_ORIGINS` lists it as well, for the code exchange and token renewal.
-- The login client's `redirectUris` and `postLogoutRedirectUris` in Tereo include the dev
-  server's `/callback` and `/`.
+
+Open the UI as `http://localhost:4200` (or `127.0.0.1`), or over https. Sign-in uses PKCE, whose
+hash comes from the browser's `crypto.subtle`, which browsers offer only in a secure context:
+https, or `localhost` and loopback addresses over plain http. Opened over plain http under any
+other host name (a LAN address, a container name), the page says sign-in needs https and stops.
+
+The root `docker-compose.yml` runs zeteo in test mode, with no Tereo to sign in to; its zeteo
+service lists the two UI variables, commented out, for a stack that has one.
 
 ## Reserved paths and the content security policy
 

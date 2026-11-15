@@ -1,9 +1,10 @@
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { tableLabel, useAllTables } from "@/features/tables";
 import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
+import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { useGrants } from "../api/useGrants";
 import { useEffect, useState } from "react";
@@ -33,7 +34,7 @@ const columnsText = (grant: Grant) =>
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidParam = (params: URLSearchParams, key: string) => {
   const value = params.get(key);
-  return value && UUID.test(value) ? value : undefined;
+  return value && UUID.test(value) ? value.toLowerCase() : undefined;
 };
 
 /** The filters the address asks for, minus anything invalid or half a principal. */
@@ -50,19 +51,13 @@ const filtersOf = (params: URLSearchParams): GrantFilters => {
   };
 };
 
-const queryOf = (filters: GrantFilters) => {
-  const query = new URLSearchParams();
-  for (const [key, value] of Object.entries(filters)) {
-    if (value) query.set(key, value);
-  }
-  return query;
-};
-
 export const GrantsPage = () => {
   const { can } = useAuth();
   const navigate = useNavigate();
-  const [params, setParams] = useSearchParams();
-  const filters = filtersOf(params);
+  const [filters, setFilters] = useUrlFilters(
+    ["source_id", "table_id", "principal_type", "principal_id"],
+    filtersOf
+  );
   const canReadSources = can("zeteo.sources.read");
   const { items, isLoading, error, hasMore, loadMore } = useGrants(filters);
   const sources = useAllSources(canReadSources);
@@ -72,22 +67,6 @@ export const GrantsPage = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
 
-  // Dropping what is invalid rewrites the address in place; a person's own
-  // change is a step of its own in the history.
-  const cleaned = queryOf(filters).toString();
-  const current = queryOf({
-    source_id: params.get("source_id") ?? undefined,
-    table_id: params.get("table_id") ?? undefined,
-    principal_type:
-      (params.get("principal_type") as GrantFilters["principal_type"]) ??
-      undefined,
-    principal_id: params.get("principal_id") ?? undefined,
-  }).toString();
-  useEffect(() => {
-    if (cleaned !== current)
-      setParams(new URLSearchParams(cleaned), { replace: true });
-  }, [cleaned, current, setParams]);
-  const setFilters = (next: GrantFilters) => setParams(queryOf(next));
   const principal: PrincipalRef | null =
     filters.principal_type && filters.principal_id
       ? { type: filters.principal_type, id: filters.principal_id }
@@ -257,7 +236,13 @@ export const GrantsPage = () => {
         <Table<Grant>
           rowKey={(grant) => grant.id}
           emptyMessage={
-            error ? undefined : <EmptyState>No grants yet.</EmptyState>
+            error ? undefined : (
+              <EmptyState>
+                {anyFilter
+                  ? "No grant matches these filters."
+                  : "No grants yet."}
+              </EmptyState>
+            )
           }
           columns={[
             {

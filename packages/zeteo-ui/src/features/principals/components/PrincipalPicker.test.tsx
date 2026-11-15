@@ -21,7 +21,7 @@ vi.mock("@/lib/api", async () => ({
 
 const ID = "00000000-0000-4000-8000-0000000000aa";
 
-const setup = (types?: ("user" | "group")[]) => {
+const setup = (types?: ("user" | "group")[], search?: boolean) => {
   const onChange = vi.fn();
   const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
   render(
@@ -30,7 +30,12 @@ const setup = (types?: ("user" | "group")[]) => {
         new QueryClient({ defaultOptions: { queries: { retry: false } } })
       }
     >
-      <PrincipalPicker value={null} onChange={onChange} types={types} />
+      <PrincipalPicker
+        value={null}
+        onChange={onChange}
+        types={types}
+        search={search}
+      />
     </QueryClientProvider>
   );
   return { onChange, user };
@@ -60,6 +65,19 @@ describe("PrincipalPicker", () => {
     post.mockReset();
   });
   afterEach(() => vi.useRealTimers());
+
+  it("without search, has no search box and sends no search, but still looks up a pasted id", async () => {
+    post.mockResolvedValue({
+      data: { data: [{ type: "user", id: ID, name: "Ada", status: "active" }] },
+    });
+    const { onChange, user } = setup(["user"], false);
+    expect(screen.queryByLabelText("Search by name or email")).toBeNull();
+    paste(ID);
+    await advance(350);
+    await user.click(await screen.findByRole("button", { name: "Select" }));
+    expect(onChange).toHaveBeenCalledWith({ type: "user", id: ID });
+    expect(get).not.toHaveBeenCalled();
+  });
 
   it("with one type has no switch and searches and looks up that type only", async () => {
     post.mockResolvedValue({

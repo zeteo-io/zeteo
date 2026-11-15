@@ -1,6 +1,6 @@
 import { RequirePermission } from "@/components/RequirePermission";
 import { Suspense, lazy, type ReactNode } from "react";
-import { EmptyState, Spinner } from "@kosmeo-ui/react";
+import { Spinner } from "@kosmeo-ui/react";
 
 const SourceLayout = lazy(() =>
   import("./components/SourceLayout").then((m) => ({ default: m.SourceLayout }))
@@ -20,19 +20,25 @@ const SourceEditPage = lazy(() =>
     default: m.SourceEditPage,
   }))
 );
+const TablesPage = lazy(() =>
+  import("@/features/tables").then((m) => ({ default: m.TablesPage }))
+);
+const TablePage = lazy(() =>
+  import("@/features/tables").then((m) => ({ default: m.TablePage }))
+);
+const RelationsPage = lazy(() =>
+  import("@/features/relations").then((m) => ({ default: m.RelationsPage }))
+);
 
 const READ = "zeteo.sources.read";
 const WRITE = "zeteo.sources.write";
 
-const guarded = (permission: string, page: ReactNode) => (
-  <RequirePermission permission={permission}>
-    <Suspense fallback={<Spinner size="lg" />}>{page}</Suspense>
-  </RequirePermission>
+const loading = (page: ReactNode) => (
+  <Suspense fallback={<Spinner size="lg" />}>{page}</Suspense>
 );
 
-// Replaced by the tables and relations pages.
-const Soon = ({ what }: { what: string }) => (
-  <EmptyState layout="block">The {what} page is not built yet.</EmptyState>
+const guarded = (permission: string, page: ReactNode) => (
+  <RequirePermission permission={permission}>{loading(page)}</RequirePermission>
 );
 
 /** A source's pages, beside the `/sources` list route. */
@@ -44,8 +50,9 @@ export const sourceRoutes = [
     children: [
       { index: true, element: <SourceDetailPage /> },
       { path: "edit", element: guarded(WRITE, <SourceEditPage />) },
-      { path: "tables", element: <Soon what="tables" /> },
-      { path: "relations", element: <Soon what="relations" /> },
+      { path: "tables", element: loading(<TablesPage />) },
+      { path: "tables/:tableId", element: loading(<TablePage />) },
+      { path: "relations", element: loading(<RelationsPage />) },
     ],
   },
 ];

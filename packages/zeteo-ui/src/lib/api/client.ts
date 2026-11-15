@@ -1,7 +1,13 @@
-import { AuthError, getTokens, renew, startLogin } from "@/lib/auth";
 import axios, { type InternalAxiosRequestConfig } from "axios";
 import { toApiError, type ApiError } from "./errors";
 import { loadConfig } from "@/lib/config";
+import {
+  AuthError,
+  getTokens,
+  renew,
+  sessionEnded,
+  startLogin,
+} from "@/lib/auth";
 
 const RENEW_BEFORE_EXPIRY_MS = 60_000;
 
@@ -25,12 +31,25 @@ const sameOrigin = (config: InternalAxiosRequestConfig): boolean => {
 
 const renewNow = async () => renew(await loadConfig());
 
+const renewFailed = (err: unknown): ApiError => {
+  const code = err instanceof AuthError ? err.code : "renew_failed";
+  return {
+    status: null,
+    code,
+    message:
+      code === "timeout"
+        ? "Tereo did not answer while renewing your sign-in. Try again in a moment."
+        : "Renewing your sign-in failed. Try again in a moment.",
+  };
+};
+
 // The session is over (no tokens, or Tereo refused the refresh token, or kept
 // refusing the access token): leave for Tereo's sign-in page, silently first
 // as AuthProvider does, once. If leaving fails the next 401 may try again.
 let signingIn = false;
 const beginSignIn = async (): Promise<void> => {
-  if (signingIn) return;
+  // AuthProvider's notice offers the sign-in, once the person is ready.
+  if (signingIn || sessionEnded()) return;
   signingIn = true;
   try {
     const cfg = await loadConfig();
@@ -54,13 +73,23 @@ const sentToken = (config: InternalAxiosRequestConfig): string | undefined => {
 
 api.interceptors.request.use(async (config) => {
   if (!sameOrigin(config)) return config;
+  if (sessionEnded()) {
+    throw {
+      status: null,
+      code: "session_ended",
+      message: "Your session ended. Sign in again to continue.",
+    } satisfies ApiError;
+  }
   let tokens = getTokens();
   if (tokens && tokens.expiresAt - Date.now() < RENEW_BEFORE_EXPIRY_MS) {
     try {
       tokens = await renewNow();
-    } catch {
-      // Send what is held: the 401 path below decides what happens next.
+    } catch (err) {
       tokens = getTokens();
+      // Kept but already expired: zeteo would refuse it, and the 401 path
+      // would wait on Tereo again.
+      if (tokens && tokens.expiresAt <= Date.now()) throw renewFailed(err);
+      // Otherwise send what is held: the 401 path below decides what happens next.
     }
   }
   if (tokens)
@@ -94,11 +123,7 @@ api.interceptors.response.use(undefined, async (error: unknown) => {
       await beginSignIn();
       throw error;
     }
-    throw {
-      status: null,
-      code: err instanceof AuthError ? err.code : "renew_failed",
-      message: "Renewing your sign-in failed. Try again in a moment.",
-    } satisfies ApiError;
+    throw renewFailed(err);
   }
   return api.request({ ...config, zeteoRetried: true });
 });

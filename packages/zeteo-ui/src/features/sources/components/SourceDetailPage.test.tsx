@@ -169,7 +169,11 @@ describe("SourceDetailPage", () => {
     post.mockResolvedValue({ data: undefined });
     renderDetail();
     await user.click(await screen.findByRole("button", { name: "Archive" }));
-    expect(screen.getByText(/cannot be undone/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Archiving closes the source's connections and stops all further changes to it. Grants on its tables stop working: no one can query them any more. It cannot be undone."
+      )
+    ).toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Archive source" }));

@@ -2,9 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { MAX_PAGES, useAllTables } from "./useAllTables";
+import { AxiosError, CanceledError } from "axios";
 import { makeTable } from "../testFixtures";
 import type { ReactNode } from "react";
-import { AxiosError } from "axios";
 
 const get = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/client", () => ({ api: { get } }));
@@ -77,5 +77,28 @@ describe("useAllTables", () => {
       expect(result.current.error?.code).toBe("too_many_tables")
     );
     expect(get).toHaveBeenCalledTimes(MAX_PAGES);
+  });
+
+  it("stops reading pages once unmounted", async () => {
+    // Like axios: an aborted signal sends nothing.
+    const sent: { signal?: AbortSignal }[] = [];
+    let answer!: (value: unknown) => void;
+    get.mockImplementation((_url: string, config: { signal?: AbortSignal }) => {
+      if (config.signal?.aborted) return Promise.reject(new CanceledError());
+      sent.push(config);
+      return sent.length === 1
+        ? new Promise((r) => (answer = r))
+        : Promise.resolve(page(sent.length, "more"));
+    });
+    const { unmount } = renderHook(() => useAllTables("s1"), {
+      wrapper: makeWrapper(),
+    });
+    await waitFor(() => expect(sent).toHaveLength(1));
+
+    unmount();
+    expect(sent[0].signal?.aborted).toBe(true);
+    answer(page(1, "c1"));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toHaveLength(1);
   });
 });

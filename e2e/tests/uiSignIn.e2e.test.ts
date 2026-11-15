@@ -88,8 +88,9 @@ describe("signing in from a page on zeteo's origin", () => {
   });
 });
 
-// The stack sets UI_CLIENT_ID and UI_TEREO_URL (Tereo as the host reaches it);
-// the image has no UI build, so only the config and the policy are served.
+// The stack sets UI_CLIENT_ID and UI_TEREO_URL (Tereo as the host reaches it),
+// and the image carries the UI's build. The browser test (e2e/browser/) signs
+// in through it.
 describe("zeteo with the admin UI configured", () => {
   it("/ui-config.json publishes Tereo's host-facing URL and the client id", async () => {
     const res = await requestJson("GET", `${stack.zeteoUrl}/ui-config.json`);
@@ -101,13 +102,17 @@ describe("zeteo with the admin UI configured", () => {
     });
   });
 
-  it("/ is a JSON 404 for a browser: there is no UI build", async () => {
-    const res = await fetch(`${stack.zeteoUrl}/`, {
-      headers: { Accept: "text/html" },
-    });
-    expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toMatch(/application\/json/);
-    expect(await res.json()).toMatchObject({ error: expect.any(String) });
+  it("/ and a page route serve the UI's app shell", async () => {
+    for (const path of ["/", "/sources"]) {
+      const res = await fetch(`${stack.zeteoUrl}${path}`, {
+        headers: { Accept: "text/html" },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toMatch(/text\/html/);
+      const html = await res.text();
+      expect(html).toContain('<div id="root"></div>');
+      expect(html).toMatch(/<script type="module" [^>]*src="\/assets\//);
+    }
   });
 
   it("every response carries the content security policy naming Tereo", async () => {

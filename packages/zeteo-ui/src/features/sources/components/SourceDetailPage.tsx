@@ -107,7 +107,7 @@ export const SourceDetailPage = () => {
             danger
             label="Archive"
             confirmTitle="Archive this source?"
-            confirmText="Archiving closes the source's connections and stops all further changes to it. It cannot be undone."
+            confirmText="Archiving closes the source's connections and stops all further changes to it. Grants on its tables stop working: no one can query them any more. It cannot be undone."
             confirmLabel="Archive source"
             onConfirm={() => archive.mutateAsync()}
           />

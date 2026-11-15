@@ -238,6 +238,54 @@ describe("api client", () => {
     expect(authHeader(seen[0])).toBe("Bearer new");
   });
 
+  it("rejects, without starting sign-in, a request waiting on a renewal Tereo never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const { auth, api } = await load();
+      auth.setTokens(tokens("old", Date.now() - 1));
+      fetchMock.mockReturnValue(new Promise<Response>(() => {}));
+      const seen: InternalAxiosRequestConfig[] = [];
+      stubAdapter(api, () => 200, seen);
+
+      const outcome = api.get("/v1/a").catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await outcome).toMatchObject({ status: null, code: "timeout" });
+      expect(seen).toHaveLength(0);
+      expect(startLogin).not.toHaveBeenCalled();
+      expect(auth.getTokens()).not.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails fast, sending nothing and starting no sign-in, while the session-ended notice shows", async () => {
+    const { auth, api } = await load();
+    auth.setSessionEnded(true);
+    const seen: InternalAxiosRequestConfig[] = [];
+    stubAdapter(api, () => 200, seen);
+
+    await expect(api.get("/v1/a")).rejects.toMatchObject({
+      status: null,
+      code: "session_ended",
+    });
+    expect(seen).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(startLogin).not.toHaveBeenCalled();
+  });
+
+  it("does not start sign-in for a 401 that lands after the session-ended notice shows", async () => {
+    const { auth, api } = await load();
+    auth.setTokens(tokens("old", Date.now() + 3_600_000));
+    stubAdapter(api, () => {
+      auth.setTokens(null);
+      auth.setSessionEnded(true);
+      return 401;
+    });
+
+    await expect(api.get("/v1/a")).rejects.toBeDefined();
+    expect(startLogin).not.toHaveBeenCalled();
+  });
+
   it("sends no Authorization header to another origin", async () => {
     const { auth, api } = await load();
     auth.setTokens(tokens("old", Date.now() + 3_600_000));

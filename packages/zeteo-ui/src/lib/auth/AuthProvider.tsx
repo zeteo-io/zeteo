@@ -1,9 +1,10 @@
 import { Callback, NoAccess, SignedOut, StartupError } from "@/features/auth";
 import { ConfigError, loadConfig, type UiConfig } from "@/lib/config";
+import { Button, Centered, Modal, Spinner } from "@kosmeo-ui/react";
 import { getTokens, subscribeTokens, type Tokens } from "./tokens";
 import { AuthContext, type AuthValue, type Me } from "./useAuth";
-import { Centered, Spinner } from "@kosmeo-ui/react";
 import { hasPermission } from "./permissions";
+import { setSessionEnded } from "./session";
 import { fetchMe, MeError } from "./me";
 import {
   AuthError,
@@ -49,6 +50,9 @@ type State =
 const currentPath = () =>
   `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
+const pathAndQuery = () =>
+  `${window.location.pathname}${window.location.search}`;
+
 const messageOf = (err: unknown) =>
   err instanceof Error ? err.message : String(err);
 
@@ -58,7 +62,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const started = useRef(false);
   const signingOut = useRef(false);
   const lastRenewal = useRef(Number.NEGATIVE_INFINITY);
-  const reloginStarted = useRef(false);
+  // The background renewal found the session over. The page stays mounted
+  // under a notice, so what was typed is not thrown away unasked.
+  const [ended, setEnded] = useState(false);
   const onCallback = useRef(window.location.pathname === CALLBACK_PATH);
 
   const redirect = useCallback(
@@ -165,7 +171,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signedIn = state.status === "signed-in";
   useEffect(() => {
     const cfg = cfgRef.current;
-    if (!signedIn || !cfg) return;
+    if (!signedIn || ended || !cfg) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const runIn = (delay: number) => {
@@ -181,9 +187,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (tokens) {
           const remaining = Math.max(0, tokens.expiresAt - Date.now());
           runIn(Math.min(RENEW_RETRY_MS, remaining / 2));
-        } else if (!reloginStarted.current) {
-          reloginStarted.current = true;
-          void redirect(cfg, { silent: true, returnTo: currentPath() });
+        } else {
+          setSessionEnded(true);
+          setEnded(true);
         }
       });
     };
@@ -201,7 +207,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       clearTimeout(timer);
       unsubscribe();
     };
-  }, [signedIn, redirect]);
+  }, [signedIn, ended]);
 
   const doSignOut = useCallback(() => {
     const cfg = cfgRef.current;
@@ -210,6 +216,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setState({ status: "loading" });
     void signOut(cfg);
   }, []);
+
+  const signInAgain = useCallback(() => {
+    const cfg = cfgRef.current;
+    if (cfg) void redirect(cfg, { silent: true, returnTo: pathAndQuery() });
+  }, [redirect]);
 
   const signIn = useCallback(() => {
     const cfg = cfgRef.current;
@@ -251,7 +262,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       );
     case "signed-in":
       return (
-        <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+        <>
+          <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+          <Modal
+            show={ended}
+            dismissible={false}
+            onClose={() => undefined}
+            title="Your session ended"
+            footerButtons={[
+              <Button key="sign-in" fullWidth={false} onClick={signInAgain}>
+                Sign in
+              </Button>,
+            ]}
+          >
+            <p>
+              Sign in again to continue. Anything you have not saved on this
+              page will need to be entered again after signing in.
+            </p>
+          </Modal>
+        </>
       );
   }
 };

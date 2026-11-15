@@ -123,7 +123,11 @@ export const LimitsPage = () => {
         <Table<PrincipalLimit>
           rowKey={(limit) => limit.id}
           emptyMessage={
-            error ? undefined : <EmptyState>No limits yet.</EmptyState>
+            error ? undefined : (
+              <EmptyState>
+                {principal ? "No limit matches this filter." : "No limits yet."}
+              </EmptyState>
+            )
           }
           columns={[
             {

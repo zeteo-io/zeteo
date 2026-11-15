@@ -1,8 +1,10 @@
-import { useNavigate, useParams } from "react-router-dom";
 import { GrantDeleteButton } from "./GrantDeleteButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { EmptyState, Spinner } from "@kosmeo-ui/react";
 import { PageHeader } from "@/components/PageHeader";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
+import { useNavigate } from "react-router-dom";
 import { useGrant } from "../api/useGrant";
 import { GrantForm } from "./GrantForm";
 
@@ -17,7 +19,11 @@ export const GrantNewPage = () => (
 );
 
 export const GrantEditPage = () => {
-  const { grantId = "" } = useParams();
+  const grantId = useUuidParam("grantId");
+  return grantId ? <GrantEdit grantId={grantId} /> : <NotFound />;
+};
+
+const GrantEdit = ({ grantId }: { grantId: string }) => {
   const navigate = useNavigate();
   const { data: grant, isLoading, error } = useGrant(grantId);
 
