@@ -91,6 +91,37 @@ export interface SqlDialect {
    * rows are distinct already.
    */
   distinct(qb: AnySelect, items: SelectItemRef[], grouped: boolean): AnySelect;
+  /**
+   * A calculation's literal, bound: an integer in bigint's range as bigint,
+   * any other number as an exact decimal where one holds it, text as text.
+   */
+  literal(value: number | string, type: "number" | "text"): Expression<unknown>;
+  /** A text column as a calculation's text functions take it (a uuid as its text). */
+  text(
+    expression: Expression<unknown>,
+    nativeType: string
+  ): Expression<unknown>;
+  /** Whether a number column of this type holds binary floating point. */
+  isFloat(nativeType: string): boolean;
+  /**
+   * `a / b` as a decimal rounded half away from zero to exactly 6 places,
+   * null when `b` is 0. `a` is read to 18 places, `b` to 10, so integers
+   * never truncate and both engines compute the same value.
+   */
+  divide(a: Expression<unknown>, b: Expression<unknown>): Expression<unknown>;
+  /** Rounds half away from zero to exactly `places` (0–10) decimal places. */
+  round(a: Expression<unknown>, places: number): Expression<unknown>;
+  /**
+   * A number as text, the same on every engine: no exponent, and a decimal's
+   * own scale. A float (`approximate`) is written to at most 10 places with
+   * no trailing zeros.
+   */
+  numberToText(
+    a: Expression<unknown>,
+    approximate: boolean
+  ): Expression<unknown>;
+  /** Text parts joined, a null part as empty text; all nulls give `''`. */
+  concat(parts: Expression<unknown>[]): Expression<unknown>;
   /** `"*"` only for `count`. `nativeType` is the column's own type name. */
   aggregate(
     fn: AggregateFn,

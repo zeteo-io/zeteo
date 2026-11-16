@@ -5,6 +5,7 @@ import type {
   CompareOp,
   HavingSubject,
   PlanValue,
+  ResolvedExpr,
   ResolvedFilter,
   ResolvedSelect,
   SqlPlan,
@@ -45,6 +46,95 @@ const table = (t: TableName) => sql.id(t.schemaName, t.name);
 const column = (c: ColumnRef, dialect: SqlDialect) =>
   dialect.column(sql.id(c.alias, c.name), c.nativeType);
 
+const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
+
+/** Whether an expression's value is a binary float on the engine (a float column, an average, arithmetic over either). */
+const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
+  switch (expr.kind) {
+    case "column":
+      return (
+        expr.column.type === "number" && dialect.isFloat(expr.column.nativeType)
+      );
+    case "literal":
+      return false;
+    case "aggregate":
+      if (expr.fn === "avg") return true;
+      if (expr.fn === "count" || expr.fn === "countDistinct") return false;
+      return expr.arg !== "*" && isApproximate(expr.arg, dialect);
+    case "op":
+      return (
+        (expr.op === "add" ||
+          expr.op === "sub" ||
+          expr.op === "mul" ||
+          expr.op === "abs" ||
+          expr.op === "coalesce") &&
+        expr.args.some((arg) => isApproximate(arg, dialect))
+      );
+  }
+};
+
+const typeOf = (expr: ResolvedExpr) =>
+  expr.kind === "column" ? expr.column.type : expr.type;
+
+/** A planned calculation as SQL; literals are bound by the dialect. */
+export const compileExpr = (
+  expr: ResolvedExpr,
+  dialect: SqlDialect
+): Expression<unknown> => {
+  switch (expr.kind) {
+    case "column": {
+      const read = column(expr.column, dialect);
+      return expr.column.type === "text"
+        ? dialect.text(read, expr.column.nativeType)
+        : read;
+    }
+    case "literal":
+      return dialect.literal(expr.value, expr.type);
+    case "aggregate":
+      if (expr.arg === "*") return dialect.aggregate(expr.fn, "*");
+      return expr.arg.kind === "column"
+        ? dialect.aggregate(
+            expr.fn,
+            column(expr.arg.column, dialect),
+            expr.arg.column.nativeType
+          )
+        : dialect.aggregate(expr.fn, compileExpr(expr.arg, dialect));
+    case "op": {
+      const args = expr.args.map((arg) => compileExpr(arg, dialect));
+      switch (expr.op) {
+        case "add":
+        case "sub":
+        case "mul":
+          return sql`(${sql.join(args, ARITHMETIC[expr.op])})`;
+        case "div":
+          return dialect.divide(args[0]!, args[1]!);
+        case "round":
+          return dialect.round(args[0]!, expr.places ?? 0);
+        case "abs":
+          return sql`abs(${args[0]!})`;
+        case "lower":
+          return sql`lower(${args[0]!})`;
+        case "upper":
+          return sql`upper(${args[0]!})`;
+        case "coalesce":
+          return sql`coalesce(${sql.join(args)})`;
+        case "concat":
+          return dialect.concat(
+            expr.args.map((arg, i) =>
+              typeOf(arg) === "number"
+                ? dialect.numberToText(args[i]!, isApproximate(arg, dialect))
+                : args[i]!
+            )
+          );
+      }
+    }
+  }
+};
+
+/** Whether a select item is computed per group rather than per row. */
+const perGroup = (item: ResolvedSelect) =>
+  item.kind === "aggregate" || (item.kind === "calc" && item.level === "group");
+
 const selectExpression = (
   item: ResolvedSelect,
   dialect: SqlDialect
@@ -68,7 +158,7 @@ const selectExpression = (
         item.column.nativeType
       );
     case "calc":
-      throw new Error("calculations are not compiled yet");
+      return compileExpr(item.expr, dialect);
   }
 };
 
@@ -165,8 +255,7 @@ export const compileSql = (
     qb = dialect.distinct(
       qb,
       selected.map((expression, index) => ({ expression, index })),
-      plan.groupBy.length > 0 ||
-        plan.select.some((item) => item.kind === "aggregate")
+      plan.groupBy.length > 0 || plan.select.some(perGroup)
     );
   }
 

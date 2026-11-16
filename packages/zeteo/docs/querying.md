@@ -360,7 +360,8 @@ root of the query) and `suggestions` (up to three close names, closest first).
   `invalid_operator`, `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
   `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's `max_joins`), `too_many_parameters` (the query binds more
   values than the source's engine takes; see *Filters*).
-- From running: `502 query_failed` (the source refused or failed to run the query),
+- From running: `502 query_failed` (the source refused or failed to run the query, an
+  arithmetic overflow included),
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
   `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable;
   for an export, also one started while the service shuts down, which is not recorded).
