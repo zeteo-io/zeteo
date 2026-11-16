@@ -26,13 +26,15 @@ afterEach(async () => {
 });
 
 describe("createApp's content security policy", () => {
-  it("names the Tereo origin in connect-src and upgrades requests on https", async () => {
+  it("names the Tereo origin and its socket in connect-src and upgrades requests on https", async () => {
     const csp = await headerOf({
       UI_CLIENT_ID: "zeteo-ui",
       UI_TEREO_URL: "https://core.example.com/base/",
       PUBLIC_URL: "https://zeteo.example.com",
     });
-    expect(csp).toContain("connect-src 'self' https://core.example.com;");
+    expect(csp).toContain(
+      "connect-src 'self' https://core.example.com wss://core.example.com;"
+    );
     expect(csp).toMatch(/(^|;)upgrade-insecure-requests(;|$)/);
   });
 
@@ -43,5 +45,16 @@ describe("createApp's content security policy", () => {
     });
     expect(csp).toContain("connect-src 'self';");
     expect(csp).not.toContain("upgrade-insecure-requests");
+  });
+
+  it("allows Tereo's socket over ws when Tereo is on http", async () => {
+    const csp = await headerOf({
+      UI_CLIENT_ID: "zeteo-ui",
+      UI_TEREO_URL: "http://localhost:4001",
+      PUBLIC_URL: "http://localhost:4201",
+    });
+    expect(csp).toContain(
+      "connect-src 'self' http://localhost:4001 ws://localhost:4001;"
+    );
   });
 });
