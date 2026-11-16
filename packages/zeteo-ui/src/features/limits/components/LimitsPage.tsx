@@ -1,9 +1,11 @@
-import { Button, EmptyState, Spinner, Table } from "@kosmeo-ui/react";
+import { faTrash, faUser } from "@fortawesome/free-solid-svg-icons";
 import type { LimitFilters, PrincipalLimit } from "../api/types";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useDeleteLimit } from "../api/useDeleteLimit";
 import { PageHeader } from "@/components/PageHeader";
+import { EditButton } from "@/components/EditButton";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useLimits } from "../api/useLimits";
 import { useEffect, useState } from "react";
@@ -17,6 +19,14 @@ import {
   usePrincipalNames,
   type PrincipalRef,
 } from "@/features/principals";
+import {
+  Button,
+  EmptyState,
+  Modal,
+  RowActions,
+  Spinner,
+  Table,
+} from "@kosmeo-ui/react";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -31,7 +41,8 @@ const filtersOf = (params: URLSearchParams): LimitFilters => {
     : { principal_type: undefined, principal_id: undefined };
 };
 
-const value = (n: number | null) => (n === null ? <em>Default</em> : n);
+const value = (n: number | null) =>
+  n === null ? <span className="z-muted">Default</span> : n;
 
 const DeleteLimit = ({ limit }: { limit: PrincipalLimit }) => {
   const del = useDeleteLimit();
@@ -41,6 +52,8 @@ const DeleteLimit = ({ limit }: { limit: PrincipalLimit }) => {
   return (
     <ConfirmButton
       danger
+      size="sm"
+      icon={faTrash}
       label="Delete"
       confirmTitle="Delete this limit?"
       confirmText={`${name} falls back to its groups' limits or the defaults for runs that start after this.`}
@@ -78,98 +91,103 @@ export const LimitsPage = () => {
 
   return (
     <>
-      <PageHeader
-        title="Limits"
-        subtitle="How many queries and exports each user and group may run at once"
-        actions={
-          canWrite && (
-            <Button fullWidth={false} onClick={() => setCreating(true)}>
-              New limit
-            </Button>
-          )
-        }
-      />
-      <div className="z-limits-filter">
-        {principal && (
-          <p>
-            Principal: <PrincipalLabel refValue={principal} />{" "}
+      <PageHeader title="Limits" divider={false} />
+      <div className="z-list-toolbar">
+        <div className="z-list-toolbar-filters z-limits-toolbar">
+          {principal ? (
+            <span className="z-filter-chip">
+              <PrincipalLabel refValue={principal} />
+              <button
+                type="button"
+                className="z-chip-clear"
+                aria-label="Clear person or group"
+                onClick={() => filterTo(null)}
+              >
+                ×
+              </button>
+            </span>
+          ) : (
             <Button
               size="sm"
               variant="secondary"
               fullWidth={false}
-              onClick={() => filterTo(null)}
+              onClick={() => setPickingPrincipal(true)}
             >
-              Clear principal
+              <FontAwesomeIcon icon={faUser} /> Person or group
             </Button>
-          </p>
-        )}
-        <Button
-          size="sm"
-          variant="secondary"
-          fullWidth={false}
-          aria-expanded={pickingPrincipal}
-          onClick={() => setPickingPrincipal((open) => !open)}
-        >
-          {pickingPrincipal ? "Hide principal filter" : "Filter by principal"}
-        </Button>
-        {pickingPrincipal && (
-          <PrincipalPicker value={principal} onChange={filterTo} />
+          )}
+        </div>
+        {canWrite && (
+          <Button size="sm" fullWidth={false} onClick={() => setCreating(true)}>
+            New limit
+          </Button>
         )}
       </div>
+      <Modal
+        show={pickingPrincipal}
+        title="Show the limit of a person or group"
+        onClose={() => setPickingPrincipal(false)}
+      >
+        <PrincipalPicker
+          value={principal}
+          onChange={(p) => {
+            filterTo(p);
+            setPickingPrincipal(false);
+          }}
+        />
+      </Modal>
       <ErrorNotice error={error} />
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <Table<PrincipalLimit>
-          rowKey={(limit) => limit.id}
-          emptyMessage={
-            error ? undefined : (
-              <EmptyState>
-                {principal ? "No limit matches this filter." : "No limits yet."}
-              </EmptyState>
-            )
-          }
-          columns={[
-            {
-              title: "Principal",
-              cellElement: (limit) => (
-                <PrincipalCell
-                  principal_type={limit.principal_type}
-                  principal_id={limit.principal_id}
-                  status={limit.principal_status}
-                />
-              ),
-            },
-            {
-              title: "Query concurrency",
-              cellElement: (limit) => value(limit.query_concurrency),
-            },
-            {
-              title: "Export concurrency",
-              cellElement: (limit) => value(limit.export_concurrency),
-            },
-            ...(canWrite
-              ? [
-                  {
-                    title: "",
-                    cellElement: (limit: PrincipalLimit) => (
-                      <div className="z-limits-actions">
-                        <Button
-                          variant="secondary"
-                          fullWidth={false}
-                          onClick={() => setEditing(limit)}
-                        >
-                          Edit
-                        </Button>
-                        <DeleteLimit limit={limit} />
-                      </div>
-                    ),
-                  },
-                ]
-              : []),
-          ]}
-          rows={items}
-        />
+        <div className={canWrite ? "z-actions-last" : undefined}>
+          <Table<PrincipalLimit>
+            rowKey={(limit) => limit.id}
+            emptyMessage={
+              error ? undefined : (
+                <EmptyState>
+                  {principal
+                    ? "This person or group has no limit of its own."
+                    : "No limits yet. Without one, a person's queries and exports are held only by each source's own limits. Add a limit to cap how many a person or group can run at once."}
+                </EmptyState>
+              )
+            }
+            columns={[
+              {
+                title: "Principal",
+                cellElement: (limit) => (
+                  <PrincipalCell
+                    principal_type={limit.principal_type}
+                    principal_id={limit.principal_id}
+                    status={limit.principal_status}
+                  />
+                ),
+              },
+              {
+                title: "Queries at once",
+                cellElement: (limit) => value(limit.query_concurrency),
+              },
+              {
+                title: "Exports at once",
+                cellElement: (limit) => value(limit.export_concurrency),
+              },
+              ...(canWrite
+                ? [
+                    {
+                      title: "",
+                      cellElement: (limit: PrincipalLimit) => (
+                        <RowActions align="end">
+                          <EditButton onClick={() => setEditing(limit)} />
+                          <DeleteLimit limit={limit} />
+                        </RowActions>
+                      ),
+                    },
+                  ]
+                : []),
+            ]}
+            rows={items}
+          />
+        </div>
       )}
       {hasMore && (
         <div className="z-limits-more">

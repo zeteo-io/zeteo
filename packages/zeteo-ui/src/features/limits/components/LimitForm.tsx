@@ -148,8 +148,7 @@ export const LimitForm = ({ limit, onClose, onConflict }: LimitFormProps) => {
           <p>
             <PrincipalLabel
               refValue={{ type: limit.principal_type, id: limit.principal_id }}
-            />{" "}
-            <small>{limit.principal_type}</small>
+            />
           </p>
         ) : (
           <div>
@@ -167,19 +166,21 @@ export const LimitForm = ({ limit, onClose, onConflict }: LimitFormProps) => {
             )}
           </div>
         )}
-        {LIMIT_FIELDS.map((field) => (
-          <Input
-            key={field.key}
-            label={field.label}
-            value={values[field.key]}
-            error={errors[field.key]}
-            helperText={`${field.min} to ${field.max}. Leave empty to use the default.`}
-            onChange={(e) => {
-              setValues((prev) => ({ ...prev, [field.key]: e.target.value }));
-              edited(field.key);
-            }}
-          />
-        ))}
+        <div className="z-limits-fields">
+          {LIMIT_FIELDS.map((field) => (
+            <Input
+              key={field.key}
+              label={field.label}
+              value={values[field.key]}
+              error={errors[field.key]}
+              helperText={`${field.min}–${field.max}. Empty: the default.`}
+              onChange={(e) => {
+                setValues((prev) => ({ ...prev, [field.key]: e.target.value }));
+                edited(field.key);
+              }}
+            />
+          ))}
+        </div>
         {errors.form && <Alert variant="warning">{errors.form}</Alert>}
         <ErrorNotice error={failure} />
       </div>

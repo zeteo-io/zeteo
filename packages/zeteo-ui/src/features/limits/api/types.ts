@@ -32,6 +32,6 @@ export interface LimitFilters {
 }
 
 export const LIMIT_FIELDS = [
-  { key: "query_concurrency", label: "Query concurrency", min: 1, max: 100 },
-  { key: "export_concurrency", label: "Export concurrency", min: 1, max: 10 },
+  { key: "query_concurrency", label: "Queries at once", min: 1, max: 100 },
+  { key: "export_concurrency", label: "Exports at once", min: 1, max: 10 },
 ] as const;

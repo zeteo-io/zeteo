@@ -65,3 +65,38 @@
   padding: 0;
   list-style: none;
 }
+
+.z-runs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-runs-select {
+  min-width: 11rem;
+}
+
+.z-runs-rows {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-runs-list td,
+.z-runs-list th {
+  white-space: nowrap;
+}
+
+/* Person first, then the outcome and source filters with Reset at the end. */
+.z-runs-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.z-runs-tablefilters {
+  flex: 1;
+  min-width: 0;
+}

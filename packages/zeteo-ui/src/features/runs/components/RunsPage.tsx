@@ -1,24 +1,36 @@
-import { PrincipalLabel, PrincipalPicker } from "@/features/principals";
+import { formatCount } from "@/features/sources/components/sourceLabels";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { OUTCOME_LABEL, OutcomeBadge } from "./OutcomeBadge";
+import { faUser } from "@fortawesome/free-solid-svg-icons";
 import { formatDuration } from "@/utils/formatDuration";
+import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
+import { FilterChip } from "@/components/FilterChip";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { formatDate } from "@/utils/formatDate";
-import { OutcomeBadge } from "./OutcomeBadge";
 import { useEffect, useState } from "react";
 import { useAuth } from "@tereo-io/react";
 import { useRuns } from "../api/useRuns";
+import { Link } from "react-router-dom";
 import { RunDetail } from "./RunDetail";
 import "./styles.css";
+import {
+  PrincipalCell,
+  PrincipalLabel,
+  PrincipalPicker,
+} from "@/features/principals";
 import {
   Alert,
   Button,
   EmptyState,
-  Select,
+  Modal,
   Spinner,
   Table,
+  TableFilters,
   Badge,
+  type InfiniteScrollMenuFilter,
 } from "@kosmeo-ui/react";
 import {
   RUN_OUTCOMES,
@@ -26,6 +38,12 @@ import {
   type RunFilters,
   type RunOutcome,
 } from "../api/types";
+
+const ENTRY_LABEL: Record<Run["entry_point"], string> = {
+  api: "API",
+  mcp: "MCP",
+  export: "Export",
+};
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -63,44 +81,98 @@ export const RunsPage = () => {
   const sourceLabel = (id: string | null) => {
     if (!id) return null;
     const source = sources.sources.find((s) => s.id === id);
-    return source ? `${source.name} (${source.slug})` : null;
+    return source ? source.name : null;
   };
   const sourcesRefused = sources.error?.status === 403;
 
+  const userRef = filters.user_id
+    ? ({ type: "user", id: filters.user_id } as const)
+    : null;
+
+  const sourceSelect = canReadSources && !sourcesRefused;
+  // A source from the address that the filter cannot show is a chip.
+  const sourceChip =
+    filters.source_id && !sourceSelect ? filters.source_id : null;
+
+  // The current choices go into the definitions, so TableFilters, which
+  // starts over whenever they change, starts over where it already was.
+  const filterDefs: InfiniteScrollMenuFilter[] = [
+    {
+      type: "SELECT",
+      title: "Outcome",
+      dataKey: "outcome",
+      options: RUN_OUTCOMES.map((o) => ({
+        id: o,
+        name: OUTCOME_LABEL[o],
+        selected: o === filters.outcome,
+      })),
+    },
+    ...(sourceSelect
+      ? [
+          {
+            type: "SELECT" as const,
+            title: "Source",
+            dataKey: "source_id",
+            options: sources.sources.map((s) => ({
+              id: s.id,
+              name: `${s.name}${s.archived_at ? " (archived)" : ""}`,
+              selected: s.id === filters.source_id,
+            })),
+          },
+        ]
+      : []),
+  ];
+  // It reports its choices as soon as it mounts, so it waits for the options
+  // that hold the current choices; otherwise it would report them gone.
+  const filtersReady = !(sourceSelect && sources.isLoading);
+
+  const onFiltersChange = (params: Record<string, string>) => {
+    const outcome = (params["filter[outcome]"] || undefined) as
+      RunOutcome | undefined;
+    const source_id = sourceSelect
+      ? params["filter[source_id]"] || undefined
+      : filters.source_id;
+    if (outcome !== filters.outcome || source_id !== filters.source_id) {
+      setFilters({ ...filters, outcome, source_id });
+    }
+  };
+
   return (
     <>
-      <PageHeader
-        title="Runs"
-        subtitle="Every query and export, newest first"
-      />
-      <div className="z-runs-filters">
-        <Select
-          label="Outcome"
-          placeholder="Any outcome"
-          value={filters.outcome ?? ""}
-          options={RUN_OUTCOMES.map((o) => ({ value: o, label: o }))}
-          onChange={(o) =>
-            setFilters({
-              ...filters,
-              outcome: (o || undefined) as RunOutcome | undefined,
-            })
-          }
-        />
-        {canReadSources && !sourcesRefused && (
-          <Select
-            label="Source"
-            placeholder="All sources"
-            value={filters.source_id ?? ""}
-            disabled={sources.isLoading}
-            options={sources.sources.map((s) => ({
-              value: s.id,
-              label: `${s.name} (${s.slug})${s.archived_at ? " (archived)" : ""}`,
-            }))}
-            onChange={(id) =>
-              setFilters({ ...filters, source_id: id || undefined })
-            }
-          />
-        )}
+      <PageHeader title="Runs" divider={false} />
+      <div className="z-list-toolbar">
+        <div className="z-list-toolbar-filters z-runs-toolbar">
+          {userRef ? (
+            <FilterChip
+              clearLabel="Clear person"
+              onClear={() => setFilters({ ...filters, user_id: undefined })}
+            >
+              <PrincipalLabel refValue={userRef} />
+            </FilterChip>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() => setPickingPerson(true)}
+            >
+              <FontAwesomeIcon icon={faUser} /> Person
+            </Button>
+          )}
+          {sourceChip && (
+            <FilterChip
+              clearLabel="Clear source"
+              onClear={() => setFilters({ ...filters, source_id: undefined })}
+            >
+              Source: {sourceChip}
+            </FilterChip>
+          )}
+          {filtersReady && (
+            <div className="z-runs-tablefilters">
+              <TableFilters filters={filterDefs} onChange={onFiltersChange} />
+            </div>
+          )}
+        </div>
       </div>
       {!canReadSources && (
         <Alert variant="warning">
@@ -108,98 +180,27 @@ export const RunsPage = () => {
           permission.
         </Alert>
       )}
-      <div className="z-runs-person">
-        {anyFilter && (
-          <ul className="z-runs-chips" aria-label="Active filters">
-            {filters.user_id && (
-              <li>
-                Person:{" "}
-                <PrincipalLabel
-                  refValue={{ type: "user", id: filters.user_id }}
-                />{" "}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  aria-label="Clear person"
-                  onClick={() => setFilters({ ...filters, user_id: undefined })}
-                >
-                  Clear
-                </Button>
-              </li>
-            )}
-            {filters.source_id && (
-              <li>
-                Source:{" "}
-                <code>
-                  {sources.sources.find((x) => x.id === filters.source_id)
-                    ?.slug ?? filters.source_id}
-                </code>{" "}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  aria-label="Clear source"
-                  onClick={() =>
-                    setFilters({ ...filters, source_id: undefined })
-                  }
-                >
-                  Clear
-                </Button>
-              </li>
-            )}
-            {filters.outcome && (
-              <li>
-                Outcome: <code>{filters.outcome}</code>{" "}
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  aria-label="Clear outcome"
-                  onClick={() => setFilters({ ...filters, outcome: undefined })}
-                >
-                  Clear
-                </Button>
-              </li>
-            )}
-            <li>
-              <Button
-                size="sm"
-                variant="secondary"
-                fullWidth={false}
-                onClick={() => setFilters({})}
-              >
-                Clear all
-              </Button>
-            </li>
-          </ul>
-        )}
-        <Button
-          size="sm"
-          variant="secondary"
-          fullWidth={false}
-          aria-expanded={pickingPerson}
-          onClick={() => setPickingPerson((o) => !o)}
-        >
-          {pickingPerson ? "Hide person filter" : "Filter by person"}
-        </Button>
-        {pickingPerson && !canSearchPeople && (
+      <Modal
+        show={pickingPerson}
+        title="Show the runs of a person"
+        onClose={() => setPickingPerson(false)}
+      >
+        {!canSearchPeople && (
           <p>
             Searching by name needs the Read grants permission; paste a user id
             instead.
           </p>
         )}
-        {pickingPerson && (
-          <PrincipalPicker
-            types={["user"]}
-            search={canSearchPeople}
-            value={
-              filters.user_id ? { type: "user", id: filters.user_id } : null
-            }
-            onChange={(p) => setFilters({ ...filters, user_id: p.id })}
-          />
-        )}
-      </div>
+        <PrincipalPicker
+          types={["user"]}
+          search={canSearchPeople}
+          value={userRef}
+          onChange={(p) => {
+            setFilters({ ...filters, user_id: p.id });
+            setPickingPerson(false);
+          }}
+        />
+      </Modal>
       <ErrorNotice error={error} />
       <ErrorNotice
         error={sources.error?.status === 403 ? null : sources.error}
@@ -207,77 +208,109 @@ export const RunsPage = () => {
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <Table<Run>
-          rowKey={(run) => run.id}
-          emptyMessage={
-            error ? undefined : (
-              <EmptyState>
-                {anyFilter
-                  ? "No run matches these filters."
-                  : "No runs recorded."}
-              </EmptyState>
-            )
-          }
-          columns={[
-            { title: "When", cellElement: (run) => formatDate(run.created_at) },
-            {
-              title: "Person",
-              cellElement: (run) => (
-                <PrincipalLabel refValue={{ type: "user", id: run.user_id }} />
-              ),
-            },
-            {
-              title: "Source",
-              cellElement: (run) =>
-                run.source_id
-                  ? (sourceLabel(run.source_id) ?? <code>{run.source_id}</code>)
-                  : "—",
-            },
-            { title: "Entry point", cellElement: (run) => run.entry_point },
-            {
-              title: "Outcome",
-              cellElement: (run) => <OutcomeBadge outcome={run.outcome} />,
-            },
-            {
-              title: "Duration",
-              cellElement: (run) =>
-                run.outcome === "running"
-                  ? "—"
-                  : formatDuration(run.duration_ms),
-            },
-            { title: "Rows", cellElement: (run) => run.row_count ?? "—" },
-            {
-              title: "Truncated",
-              cellElement: (run) =>
-                run.truncated ? (
-                  <Badge variant="warning" size="sm">
-                    Truncated
-                  </Badge>
-                ) : (
-                  ""
+        <div className="z-actions-last z-runs-list">
+          <Table<Run>
+            rowKey={(run) => run.id}
+            emptyMessage={
+              error ? undefined : (
+                <EmptyState>
+                  {anyFilter
+                    ? "No run matches these filters."
+                    : "No runs recorded."}
+                </EmptyState>
+              )
+            }
+            columns={[
+              {
+                title: "When",
+                cellElement: (run) => (
+                  <time title={formatDate(run.created_at)}>
+                    {formatRelative(run.created_at)}
+                  </time>
                 ),
-            },
-            {
-              title: "Error",
-              cellElement: (run) =>
-                run.error_code ? <code>{run.error_code}</code> : "—",
-            },
-            {
-              title: "",
-              cellElement: (run) => (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  onClick={() => setOpen(run)}
-                >
-                  Details
-                </Button>
-              ),
-            },
-          ]}
-          rows={items}
-        />
+              },
+              {
+                title: "Person",
+                cellElement: (run) => (
+                  <PrincipalCell
+                    principal_type="user"
+                    principal_id={run.user_id}
+                    status="active"
+                  />
+                ),
+              },
+              {
+                title: "Source",
+                cellElement: (run) =>
+                  run.source_id ? (
+                    <Link
+                      className="z-plain-link"
+                      to={`/sources/${run.source_id}`}
+                    >
+                      {sourceLabel(run.source_id) ?? (
+                        <code>{run.source_id}</code>
+                      )}
+                    </Link>
+                  ) : (
+                    <span className="z-muted">—</span>
+                  ),
+              },
+              {
+                title: "Entry point",
+                cellElement: (run) => ENTRY_LABEL[run.entry_point],
+              },
+              {
+                title: "Outcome",
+                width: "1%",
+                cellElement: (run) => <OutcomeBadge outcome={run.outcome} />,
+              },
+              {
+                title: "Duration",
+                cellElement: (run) =>
+                  run.outcome === "running"
+                    ? "—"
+                    : formatDuration(run.duration_ms),
+              },
+              {
+                title: "Rows",
+                cellElement: (run) =>
+                  run.row_count === null ? (
+                    <span className="z-muted">—</span>
+                  ) : (
+                    <span className="z-runs-rows">
+                      {formatCount(run.row_count)}
+                      {run.truncated && (
+                        <Badge variant="warning" size="sm">
+                          Truncated
+                        </Badge>
+                      )}
+                    </span>
+                  ),
+              },
+              {
+                title: "Error",
+                cellElement: (run) =>
+                  run.error_code ? (
+                    <code className="z-muted">{run.error_code}</code>
+                  ) : null,
+              },
+              {
+                title: "",
+                cellElement: (run) => (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    fullWidth={false}
+                    onClick={() => setOpen(run)}
+                  >
+                    Details
+                  </Button>
+                ),
+              },
+            ]}
+            rows={items}
+          />
+        </div>
       )}
       {hasMore && (
         <div className="z-runs-more">

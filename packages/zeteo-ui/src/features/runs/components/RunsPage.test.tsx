@@ -48,6 +48,18 @@ const Probe = () => {
   );
 };
 
+// Outcome and Source are kosmeo TableFilters menus: a button, then a checkbox.
+const chooseFilter = async (
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+  option: string
+) => {
+  await user.click(
+    await screen.findByRole("button", { name: new RegExp(`^${title}`) })
+  );
+  await user.click(await screen.findByRole("checkbox", { name: option }));
+};
+
 const runParams = () =>
   get.mock.calls
     .filter(([url]) => url === "/v1/runs")
@@ -90,14 +102,23 @@ describe("RunsPage", () => {
     await screen.findAllByText("Ada Lovelace");
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows).toHaveLength(3);
-    expect(rows[0]).toHaveTextContent("orders");
-    expect(rows[0]).toHaveTextContent("ok");
+    await waitFor(() => expect(rows[0]).toHaveTextContent("Orders DB"));
+    expect(
+      within(rows[0]).getByRole("link", { name: "Orders DB" })
+    ).toHaveAttribute("href", `/sources/${SOURCE_ID}`);
+    expect(rows[0]).toHaveTextContent("OK");
+    expect(rows[0]).toHaveTextContent("API");
     expect(rows[0]).toHaveTextContent("1.5 s");
+    expect(rows[0].querySelector("time")).toHaveAttribute(
+      "title",
+      expect.stringContaining("2026")
+    );
+    expect(rows[1]).toHaveTextContent("Failed");
     expect(rows[1]).toHaveTextContent("query_failed");
     expect(rows[1]).toHaveTextContent("Truncated");
-    expect(rows[1]).toHaveTextContent("mcp");
-    expect(rows[2]).toHaveTextContent("running");
-    expect(rows[2]).toHaveTextContent("export");
+    expect(rows[1]).toHaveTextContent("MCP");
+    expect(rows[2]).toHaveTextContent("Running");
+    expect(rows[2]).toHaveTextContent("Export");
   });
 
   it("shows the raw source id without zeteo.sources.read", async () => {
@@ -107,7 +128,9 @@ describe("RunsPage", () => {
     const cell = screen.getAllByRole("row")[1].querySelectorAll("td")[2];
     expect(cell).toHaveTextContent(SOURCE_ID);
     expect(get.mock.calls.some(([url]) => url === "/v1/sources")).toBe(false);
-    expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^Source/ })
+    ).not.toBeInTheDocument();
   });
 
   it("maps the filters of the address to user_id, source_id and outcome", async () => {
@@ -155,27 +178,39 @@ describe("RunsPage", () => {
       route: `/runs?source_id=${SOURCE_ID}&outcome=failed`,
     });
     await screen.findAllByText("Ada Lovelace");
-    const chips = screen.getByRole("list", { name: "Active filters" });
-    expect(chips).toHaveTextContent(SOURCE_ID);
-    expect(chips).toHaveTextContent("failed");
+    const chip = screen
+      .getByRole("button", { name: "Clear source" })
+      .closest(".z-filter-chip")!;
+    expect(chip).toHaveTextContent(`Source: ${SOURCE_ID}`);
+    expect(runParams()[0]).toMatchObject({
+      source_id: SOURCE_ID,
+      outcome: "failed",
+    });
     await user.click(screen.getByRole("button", { name: "Clear source" }));
     await waitFor(() =>
       expect(runParams().at(-1)).not.toHaveProperty("source_id")
     );
     expect(runParams().at(-1)).toMatchObject({ outcome: "failed" });
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
-    await waitFor(() =>
-      expect(runParams().at(-1)).not.toHaveProperty("outcome")
-    );
   });
 
-  it("names the source in its chip by slug when sources are readable", async () => {
-    renderWithProviders(<RunsPage />, {
-      route: `/runs?source_id=${SOURCE_ID}`,
-    });
-    const chips = await screen.findByRole("list", { name: "Active filters" });
-    await waitFor(() => expect(chips).toHaveTextContent("orders"));
-    expect(chips).not.toHaveTextContent(SOURCE_ID);
+  it("keeps a source from the address in the Source filter, by name, when sources are readable", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Probe />
+        <RunsPage />
+      </>,
+      { route: `/runs?source_id=${SOURCE_ID}` }
+    );
+    await screen.findAllByText("Ada Lovelace");
+    expect(
+      screen.queryByRole("button", { name: "Clear source" })
+    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /^Source/ }));
+    expect(screen.getByRole("checkbox", { name: "Orders DB" })).toBeChecked();
+    expect(screen.getByTestId("search")).toHaveTextContent(
+      `?source_id=${SOURCE_ID}`
+    );
   });
 
   it("offers users only in the person picker", async () => {
@@ -183,7 +218,7 @@ describe("RunsPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    await user.click(screen.getByRole("button", { name: "Person" }));
     expect(screen.getByLabelText("Search by name or email")).toBeVisible();
     expect(screen.queryByRole("button", { name: "Groups" })).toBeNull();
   });
@@ -192,7 +227,7 @@ describe("RunsPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    await user.click(screen.getByRole("button", { name: "Person" }));
     expect(screen.queryByLabelText("Search by name or email")).toBeNull();
     expect(
       screen.getByText(
@@ -207,7 +242,7 @@ describe("RunsPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Filter by person" }));
+    await user.click(screen.getByRole("button", { name: "Person" }));
     expect(screen.getByLabelText("Search by name or email")).toBeVisible();
     expect(screen.queryByText(/Searching by name needs/)).toBeNull();
   });
@@ -222,7 +257,7 @@ describe("RunsPage", () => {
       await screen.findByText("No run matches these filters.")
     ).toBeInTheDocument();
     expect(screen.queryByText("No runs recorded.")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
+    await user.click(screen.getByRole("button", { name: "Reset" }));
     expect(await screen.findByText("No runs recorded.")).toBeInTheDocument();
   });
 
@@ -235,7 +270,7 @@ describe("RunsPage", () => {
       </>
     );
     await screen.findAllByText("Ada Lovelace");
-    await user.selectOptions(screen.getByLabelText("Outcome"), "refused");
+    await chooseFilter(user, "Outcome", "Refused");
     await waitFor(() =>
       expect(screen.getByTestId("search")).toHaveTextContent("outcome=refused")
     );
@@ -245,15 +280,15 @@ describe("RunsPage", () => {
     );
   });
 
-  it("filters by outcome and by source with the selects", async () => {
+  it("filters by outcome and by source", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.selectOptions(screen.getByLabelText("Outcome"), "refused");
+    await chooseFilter(user, "Outcome", "Refused");
     await waitFor(() =>
       expect(runParams().at(-1)).toMatchObject({ outcome: "refused" })
     );
-    await user.selectOptions(screen.getByLabelText("Source"), SOURCE_ID);
+    await chooseFilter(user, "Source", "Orders DB");
     await waitFor(() =>
       expect(runParams().at(-1)).toMatchObject({
         outcome: "refused",
@@ -324,17 +359,19 @@ describe("RunsPage", () => {
     expect(screen.getByTestId("run-query")).toBeVisible();
   });
 
-  it("is read-only: the only controls are the filters, rows' Details and Load more", async () => {
+  it("is read-only: the only controls are the filters, rows' Details and source links", async () => {
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
+    await screen.findByRole("button", { name: /^Source/ });
     const allowed =
-      /^(Details|Load more|Clear.*|Filter by person|Hide person filter)$/;
-    const controls = [
-      ...screen.getAllByRole("button"),
-      ...screen.queryAllByRole("link"),
-    ].map((el) => el.getAttribute("aria-label") ?? el.textContent ?? "");
+      /^(Details|Load more|Clear.*|Person|Filters|Outcome|Source|Reset)$/;
+    const controls = screen
+      .getAllByRole("button")
+      .map((el) => el.getAttribute("aria-label") ?? el.textContent ?? "");
     expect(controls.filter((name) => !allowed.test(name.trim()))).toEqual([]);
-    expect(screen.queryAllByRole("link")).toHaveLength(0);
+    for (const link of screen.queryAllByRole("link")) {
+      expect(link.getAttribute("href")).toMatch(/^\/sources\//);
+    }
     expect(screen.getAllByRole("button", { name: "Details" })).toHaveLength(3);
   });
 

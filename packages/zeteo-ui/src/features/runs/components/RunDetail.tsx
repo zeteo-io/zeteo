@@ -1,3 +1,4 @@
+import { formatCount } from "@/features/sources/components/sourceLabels";
 import { Badge, Button, Modal } from "@kosmeo-ui/react";
 import { formatDuration } from "@/utils/formatDuration";
 import { PrincipalLabel } from "@/features/principals";
@@ -6,6 +7,8 @@ import { formatDate } from "@/utils/formatDate";
 import { OutcomeBadge } from "./OutcomeBadge";
 import type { Run } from "../api/types";
 import "./styles.css";
+
+const ENTRY_LABEL = { api: "API", mcp: "MCP", export: "Export" } as const;
 
 const COPIED_MS = 2000;
 
@@ -56,10 +59,6 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
     >
       <div className="z-run-detail">
         <dl>
-          <dt>Id</dt>
-          <dd>
-            <code>{run.id}</code>
-          </dd>
           <dt>When</dt>
           <dd>{formatDate(run.created_at)}</dd>
           <dt>Person</dt>
@@ -69,7 +68,7 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
           <dt>Source</dt>
           <dd>{run.source_id ? (sourceLabel ?? run.source_id) : "None"}</dd>
           <dt>Entry point</dt>
-          <dd>{run.entry_point}</dd>
+          <dd>{ENTRY_LABEL[run.entry_point]}</dd>
           <dt>Outcome</dt>
           <dd>
             <OutcomeBadge outcome={run.outcome} />
@@ -79,19 +78,26 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
             {run.outcome === "running" ? "—" : formatDuration(run.duration_ms)}
           </dd>
           <dt>Rows</dt>
-          <dd>{run.row_count ?? "—"}</dd>
-          <dt>Truncated</dt>
-          <dd>
-            {run.truncated ? (
+          <dd className="z-runs-rows">
+            {run.row_count === null ? "—" : formatCount(run.row_count)}
+            {run.truncated && (
               <Badge variant="warning" size="sm">
                 Truncated
               </Badge>
-            ) : (
-              "No"
             )}
           </dd>
-          <dt>Error code</dt>
-          <dd>{run.error_code ? <code>{run.error_code}</code> : "—"}</dd>
+          {run.error_code && (
+            <>
+              <dt>Error</dt>
+              <dd>
+                <code>{run.error_code}</code>
+              </dd>
+            </>
+          )}
+          <dt>Run id</dt>
+          <dd>
+            <code className="z-muted">{run.id}</code>
+          </dd>
         </dl>
         <div className="z-run-query-head">
           <h3>Query</h3>

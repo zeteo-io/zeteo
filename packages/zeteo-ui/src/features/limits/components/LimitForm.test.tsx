@@ -76,7 +76,7 @@ describe("LimitForm", () => {
     it("needs a principal", async () => {
       const user = userEvent.setup();
       renderCreate();
-      await user.type(screen.getByLabelText("Query concurrency"), "5");
+      await user.type(screen.getByLabelText("Queries at once"), "5");
       await user.click(screen.getByRole("button", { name: "Create limit" }));
       expect(screen.getByText("Choose a user or group.")).toBeInTheDocument();
       expect(createCalls()).toHaveLength(0);
@@ -88,11 +88,11 @@ describe("LimitForm", () => {
       await user.click(
         screen.getByRole("button", { name: "Choose principal" })
       );
-      await user.type(screen.getByLabelText("Query concurrency"), "101");
-      await user.type(screen.getByLabelText("Export concurrency"), "x");
+      await user.type(screen.getByLabelText("Queries at once"), "101");
+      await user.type(screen.getByLabelText("Exports at once"), "x");
       await user.click(screen.getByRole("button", { name: "Create limit" }));
       expect(
-        screen.getByText("Query concurrency is 1 to 100.")
+        screen.getByText("Queries at once is 1 to 100.")
       ).toBeInTheDocument();
       expect(screen.getByText("Enter a number.")).toBeInTheDocument();
       expect(createCalls()).toHaveLength(0);
@@ -104,7 +104,7 @@ describe("LimitForm", () => {
       await user.click(
         screen.getByRole("button", { name: "Choose principal" })
       );
-      await user.type(screen.getByLabelText("Export concurrency"), "4");
+      await user.type(screen.getByLabelText("Exports at once"), "4");
       await user.click(screen.getByRole("button", { name: "Create limit" }));
       await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
       expect(post).toHaveBeenCalledWith("/v1/principal-limits", {
@@ -128,7 +128,7 @@ describe("LimitForm", () => {
       await user.click(
         screen.getByRole("button", { name: "Choose principal" })
       );
-      await user.type(screen.getByLabelText("Query concurrency"), "4");
+      await user.type(screen.getByLabelText("Queries at once"), "4");
       await user.click(screen.getByRole("button", { name: "Create limit" }));
       expect(
         await screen.findByText("A limit already exists for this principal")
@@ -154,7 +154,7 @@ describe("LimitForm", () => {
     it("sends null for a cleared value and leaves the other out", async () => {
       const user = userEvent.setup();
       renderEdit();
-      await user.clear(screen.getByLabelText("Export concurrency"));
+      await user.clear(screen.getByLabelText("Exports at once"));
       await user.click(screen.getByRole("button", { name: "Save" }));
       await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
       expect(patch).toHaveBeenCalledWith(
@@ -166,8 +166,8 @@ describe("LimitForm", () => {
     it("sends only a changed value", async () => {
       const user = userEvent.setup();
       renderEdit();
-      await user.clear(screen.getByLabelText("Query concurrency"));
-      await user.type(screen.getByLabelText("Query concurrency"), "20");
+      await user.clear(screen.getByLabelText("Queries at once"));
+      await user.type(screen.getByLabelText("Queries at once"), "20");
       await user.click(screen.getByRole("button", { name: "Save" }));
       await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
       expect(patch.mock.calls[0][1]).toEqual({ query_concurrency: 20 });
@@ -176,8 +176,8 @@ describe("LimitForm", () => {
     it("blocks clearing both and says to delete the limit", async () => {
       const user = userEvent.setup();
       renderEdit();
-      await user.clear(screen.getByLabelText("Query concurrency"));
-      await user.clear(screen.getByLabelText("Export concurrency"));
+      await user.clear(screen.getByLabelText("Queries at once"));
+      await user.clear(screen.getByLabelText("Exports at once"));
       await user.click(screen.getByRole("button", { name: "Save" }));
       expect(screen.getByText(/delete the limit instead/i)).toBeInTheDocument();
       expect(patch).not.toHaveBeenCalled();

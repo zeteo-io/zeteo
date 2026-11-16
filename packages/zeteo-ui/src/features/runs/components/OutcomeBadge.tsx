@@ -9,8 +9,16 @@ const VARIANT = {
   running: "secondary",
 } as const;
 
+export const OUTCOME_LABEL: Record<RunOutcome, string> = {
+  ok: "OK",
+  refused: "Refused",
+  failed: "Failed",
+  timeout: "Timed out",
+  running: "Running",
+};
+
 export const OutcomeBadge = ({ outcome }: { outcome: RunOutcome }) => (
   <Badge variant={VARIANT[outcome]} size="sm">
-    {outcome}
+    {OUTCOME_LABEL[outcome]}
   </Badge>
 );
