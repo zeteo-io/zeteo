@@ -1,11 +1,13 @@
 import { faSignOutAlt, faUser } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useRef, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@tereo-io/react";
+import { useMe } from "@/lib/auth";
 import "./UserMenu.css";
 
 export const UserMenu = () => {
-  const { me, signOut } = useAuth();
+  const me = useMe();
+  const { signOut } = useAuth();
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -51,7 +53,7 @@ export const UserMenu = () => {
             <div className="z-user-menu-email">{me.email}</div>
           )}
         </div>
-        <button className="z-user-menu-item" onClick={signOut}>
+        <button className="z-user-menu-item" onClick={() => void signOut()}>
           <FontAwesomeIcon icon={faSignOutAlt} />
           <span>Sign out</span>
         </button>

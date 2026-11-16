@@ -6,10 +6,10 @@ import { makeSource, SOURCE_ID } from "./testFixtures";
 import { sourceRoutes } from "./routes";
 
 const get = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { get, post: vi.fn() } }));
-vi.mock("@/lib/auth", async () =>
-  (await import("@/test/authMock")).mockAuth({
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
     permissions: ["zeteo.sources.read"],
+    api: { get, post: vi.fn() },
   })
 );
 

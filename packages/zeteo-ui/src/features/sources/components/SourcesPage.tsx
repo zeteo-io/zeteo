@@ -6,7 +6,7 @@ import { useSources } from "../api/useSources";
 import { SourceStatus } from "./SourceStatus";
 import { useEffect, useState } from "react";
 import type { Source } from "../api/types";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@tereo-io/react";
 import "./styles.css";
 import {
   Button,
@@ -18,7 +18,7 @@ import {
 } from "@kosmeo-ui/react";
 
 export const SourcesPage = () => {
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   const navigate = useNavigate();
   const [includeArchived, setIncludeArchived] = useState(false);
   const { items, isLoading, error, hasMore, loadMore } = useSources({
@@ -35,7 +35,7 @@ export const SourcesPage = () => {
         title="Sources"
         subtitle="The databases zeteo can query"
         actions={
-          can("zeteo.sources.write") && (
+          hasPermission("zeteo.sources.write") && (
             <Button fullWidth={false} onClick={() => navigate("/sources/new")}>
               New source
             </Button>

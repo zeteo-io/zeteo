@@ -1,16 +1,17 @@
-import type { Me } from "./useAuth";
+import type { AxiosInstance } from "axios";
+import { useAuth } from "@tereo-io/react";
+import { ZETEO_API } from "@/lib/api";
 
-export class MeError extends Error {
-  readonly status: number;
-
-  constructor(status: number, message: string) {
-    super(message);
-    this.name = "MeError";
-    this.status = status;
-  }
+export interface Me {
+  id: string;
+  type: "user" | "service";
+  name: string | null;
+  email: string | null;
+  permissions: string[];
+  [key: string]: unknown;
 }
 
-const parseMe = (body: unknown): Me => {
+export const parseMe = (body: unknown): Me => {
   const b = (body ?? {}) as Record<string, unknown>;
   const nullableString = (v: unknown) => typeof v === "string" || v === null;
   if (
@@ -21,7 +22,7 @@ const parseMe = (body: unknown): Me => {
     !Array.isArray(b.permissions) ||
     !b.permissions.every((p) => typeof p === "string")
   ) {
-    throw new MeError(0, "GET /v1/me answered with an unexpected body");
+    throw new Error("GET /v1/me answered with an unexpected body");
   }
   return {
     id: b.id,
@@ -32,28 +33,14 @@ const parseMe = (body: unknown): Me => {
   };
 };
 
-/** `GET /v1/me` on zeteo, with the given access token. */
-export const fetchMe = async (accessToken: string): Promise<Me> => {
-  let res: Response;
-  try {
-    res = await fetch("/v1/me", {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-      credentials: "same-origin",
-    });
-  } catch {
-    throw new MeError(0, "zeteo could not be reached");
-  }
-  if (!res.ok) {
-    throw new MeError(res.status, `GET /v1/me answered ${res.status}`);
-  }
-  let body: unknown;
-  try {
-    body = await res.json();
-  } catch {
-    throw new MeError(0, "GET /v1/me did not answer JSON");
-  }
-  return parseMe(body);
+/** The provider's `loadUser`: `GET /v1/me` on zeteo. */
+export const loadMe = async (
+  apis: Record<string, AxiosInstance>
+): Promise<Me> => parseMe((await apis[ZETEO_API].get<unknown>("/v1/me")).data);
+
+/** The signed-in person. Only for components under the auth gate, which renders them signed in. */
+export const useMe = (): Me => {
+  const { user } = useAuth<Me>();
+  if (!user) throw new Error("useMe is used before sign-in");
+  return user;
 };

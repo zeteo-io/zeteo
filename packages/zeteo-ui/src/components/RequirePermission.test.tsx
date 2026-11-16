@@ -2,8 +2,8 @@ import { render, screen } from "@testing-library/react";
 import { RequirePermission } from "./RequirePermission";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/auth", async () =>
-  (await import("@/test/authMock")).mockAuth({
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
     permissions: ["zeteo.grants.write"],
   })
 );

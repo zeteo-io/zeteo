@@ -1,4 +1,4 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { PrincipalRef } from "@/features/principals";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useQuery } from "@tanstack/react-query";
@@ -19,6 +19,7 @@ export const ExistingGrantNotice = ({
   tableId,
   error,
 }: ExistingGrantNoticeProps) => {
+  const api = useZeteoApi();
   const existing = useQuery({
     queryKey: ["grants", "existing", principal.type, principal.id, tableId],
     queryFn: async () => {

@@ -7,7 +7,9 @@ import { LimitForm } from "./LimitForm";
 
 const post = vi.hoisted(() => vi.fn());
 const patch = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { post, patch } }));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { post, patch } })
+);
 // Searching is not under test: a picker that chooses the user on one click.
 vi.mock("@/features/principals", async () => {
   const actual = await vi.importActual<object>("@/features/principals");

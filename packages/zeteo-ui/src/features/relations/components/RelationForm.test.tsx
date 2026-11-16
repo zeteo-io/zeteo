@@ -16,7 +16,9 @@ import {
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { get, post } }));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get, post } })
+);
 
 const ordersCols = ["id", "customer_id", "tenant_id"].map((name, i) =>
   makeColumn({

@@ -1,9 +1,10 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { Source } from "./types";
 
-export const useSource = (sourceId: string) =>
-  useQuery<Source, ApiError>({
+export const useSource = (sourceId: string) => {
+  const api = useZeteoApi();
+  return useQuery<Source, ApiError>({
     queryKey: ["sources", sourceId],
     queryFn: async () => {
       try {
@@ -13,3 +14,4 @@ export const useSource = (sourceId: string) =>
       }
     },
   });
+};

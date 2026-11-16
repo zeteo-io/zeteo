@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 
 export const useDeleteGrant = () => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<void, ApiError, string>({
     mutationFn: async (grantId) => {

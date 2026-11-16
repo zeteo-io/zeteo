@@ -20,5 +20,9 @@ origin besides Tereo.
 
 Tests: component tests here (Vitest + jsdom), and a browser test of the built image against a real
 Tereo, `e2e/browser/admin.spec.ts` (`e2e/run.sh --browser` from the root; see
-[e2e/README.md](../../e2e/README.md)). Tokens are held in memory only, so a reload signs in again
-through Tereo, silently while its session lasts.
+[e2e/README.md](../../e2e/README.md)). Feature tests mock `@tereo-io/react` with
+`src/test/authMock.ts` (signed in, with zeteo's client answering what the test gives it).
+
+Sign-in is [`@tereo-io/react`](https://www.npmjs.com/package/@tereo-io/react): access and ID tokens
+in `localStorage`, the refresh token in Tereo's httpOnly cookie, one session shared by tabs, and
+permissions reloaded live when Tereo pushes a change.

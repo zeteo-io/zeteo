@@ -8,8 +8,9 @@ import { screen } from "@testing-library/react";
 import { TablesPage } from "./TablesPage";
 
 const get = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { get } }));
-vi.mock("@/lib/auth", async () => (await import("@/test/authMock")).mockAuth());
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get } })
+);
 
 const orders = makeTable();
 const customers = makeTable({

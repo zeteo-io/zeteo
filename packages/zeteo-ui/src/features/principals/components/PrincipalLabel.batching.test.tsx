@@ -5,12 +5,9 @@ import type { PrincipalRef } from "../api/usePrincipalNames";
 import { PrincipalLabel } from "./PrincipalLabel";
 
 const post = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api", async () => ({
-  ...(await vi.importActual<typeof import("@/lib/api/errors")>(
-    "@/lib/api/errors"
-  )),
-  api: { post },
-}));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { post } })
+);
 
 const uuid = (n: number) =>
   `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;

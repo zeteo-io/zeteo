@@ -8,7 +8,7 @@ import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { useGrants } from "../api/useGrants";
 import { useEffect, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@tereo-io/react";
 import "./styles.css";
 import {
   PrincipalCell,
@@ -52,13 +52,13 @@ const filtersOf = (params: URLSearchParams): GrantFilters => {
 };
 
 export const GrantsPage = () => {
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   const navigate = useNavigate();
   const [filters, setFilters] = useUrlFilters(
     ["source_id", "table_id", "principal_type", "principal_id"],
     filtersOf
   );
-  const canReadSources = can("zeteo.sources.read");
+  const canReadSources = hasPermission("zeteo.sources.read");
   const { items, isLoading, error, hasMore, loadMore } = useGrants(filters);
   const sources = useAllSources(canReadSources);
   const tables = useAllTables(canReadSources ? filters.source_id : undefined);
@@ -86,7 +86,7 @@ export const GrantsPage = () => {
       })()
     : "";
   const selectsUnavailable = !canReadSources || sources.error?.status === 403;
-  const canWrite = can("zeteo.grants.write");
+  const canWrite = hasPermission("zeteo.grants.write");
 
   return (
     <>

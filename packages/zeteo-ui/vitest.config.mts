@@ -15,7 +15,12 @@ export default defineConfig({
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
     server: {
-      deps: { inline: [/@testing-library/, /@kosmeo-ui\//, /@tanstack\//] },
+      deps: { inline: [
+          /@testing-library/,
+          /@kosmeo-ui\//,
+          /@tanstack\//,
+          /@tereo-io\//,
+        ] },
     },
     include: ["src/**/*.test.{ts,tsx}"],
   },

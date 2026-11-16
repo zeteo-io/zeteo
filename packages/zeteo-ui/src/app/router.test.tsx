@@ -1,22 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/app";
 
-vi.mock("@/lib/auth", async () =>
-  (await import("@/test/authMock")).mockAuth({
+// Pages wait on zeteo forever: these tests are about routing.
+const get = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
     permissions: ["zeteo.runs.read"],
+    api: { get },
   })
+);
+vi.mock("@/lib/config", async () =>
+  (await import("@/test/uiConfig")).mockConfig()
 );
 
 describe("app routes", () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => new Promise(() => {}))
-    );
-  });
   afterEach(() => {
-    vi.unstubAllGlobals();
     window.history.replaceState(null, "", "/");
   });
 

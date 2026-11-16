@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { PatchTable, TableDetail } from "./types";
 
 export const useUpdateTable = (sourceId: string, tableId: string) => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<TableDetail, ApiError, PatchTable>({
     mutationFn: async (body) => {

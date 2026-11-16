@@ -12,12 +12,9 @@ import {
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api", async () => ({
-  ...(await vi.importActual<typeof import("@/lib/api/errors")>(
-    "@/lib/api/errors"
-  )),
-  api: { get, post },
-}));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get, post } })
+);
 
 const ID = "00000000-0000-4000-8000-0000000000aa";
 

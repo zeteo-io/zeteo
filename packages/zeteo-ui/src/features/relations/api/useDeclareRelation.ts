@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { DeclareRelation, Relation } from "./types";
 
 export const useDeclareRelation = (sourceId: string) => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<Relation, ApiError, DeclareRelation>({
     mutationFn: async (body) => {

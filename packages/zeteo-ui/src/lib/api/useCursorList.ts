@@ -5,8 +5,8 @@
 // `["sources", id]` therefore refreshes the source and everything under it.
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { toApiError, type ApiError } from "./errors";
+import { useZeteoApi } from "./client";
 import { useMemo } from "react";
-import { api } from "./client";
 
 const PAGE_SIZE = 50;
 
@@ -29,6 +29,7 @@ export const useCursorList = <T>(
   params: ListParams = {},
   opts: { enabled?: boolean } = {}
 ) => {
+  const api = useZeteoApi();
   const query = useInfiniteQuery({
     queryKey: [...key, params],
     enabled: opts.enabled ?? true,

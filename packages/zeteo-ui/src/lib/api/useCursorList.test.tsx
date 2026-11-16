@@ -6,7 +6,9 @@ import { useCursorList } from "./useCursorList";
 import type { ReactNode } from "react";
 
 const get = vi.hoisted(() => vi.fn());
-vi.mock("./client", () => ({ api: { get } }));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get } })
+);
 
 let client: QueryClient;
 const wrapper = ({ children }: { children: ReactNode }) => (

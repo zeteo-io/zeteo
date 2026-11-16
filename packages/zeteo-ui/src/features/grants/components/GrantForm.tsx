@@ -9,7 +9,7 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { PrincipalCell } from "@/features/principals";
 import { Link, useNavigate } from "react-router-dom";
 import { useAllSources } from "@/features/sources";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@tereo-io/react";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -35,8 +35,8 @@ interface GrantFormProps {
 
 export const GrantForm = ({ grant }: GrantFormProps) => {
   const navigate = useNavigate();
-  const { can } = useAuth();
-  const canReadSources = can("zeteo.sources.read");
+  const { hasPermission } = useAuth();
+  const canReadSources = hasPermission("zeteo.sources.read");
   const create = useCreateGrant();
   const replace = useReplaceGrant(grant?.id ?? "");
   const mutation = grant ? replace : create;

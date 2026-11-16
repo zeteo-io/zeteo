@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { jsonResponse } from "@/test/oauthFixtures";
+
+const jsonResponse = (status: number, body: unknown) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
 
 // loadConfig caches its answer for the page's life: a fresh module per test.
 const load = async () => import("./config");

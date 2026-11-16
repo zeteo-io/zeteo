@@ -17,14 +17,12 @@ const get = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: ["zeteo.sources.write"] }));
 const sourceOver = vi.hoisted(() => ({ archived_at: null as string | null }));
-vi.mock("@/lib/api/client", () => ({ api: { get, delete: del } }));
-vi.mock("@/lib/auth", async () => {
-  const { mockAuth } = await import("@/test/authMock");
-  return {
-    ...mockAuth(),
-    useAuth: () => mockAuth({ permissions: held.permissions }).useAuth(),
-  };
-});
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    permissions: () => held.permissions,
+    api: { get, delete: del },
+  })
+);
 
 const discovered = makeRelation({
   id: "d2222222-1c7a-4a53-9d0e-6a3b1f2c4d02",

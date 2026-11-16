@@ -10,14 +10,12 @@ import { SourceLayout } from "./SourceLayout";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: ["zeteo.sources.write"] }));
-vi.mock("@/lib/api/client", () => ({ api: { get, post } }));
-vi.mock("@/lib/auth", async () => {
-  const { mockAuth } = await import("@/test/authMock");
-  return {
-    ...mockAuth(),
-    useAuth: () => mockAuth({ permissions: held.permissions }).useAuth(),
-  };
-});
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    permissions: () => held.permissions,
+    api: { get, post },
+  })
+);
 
 const SOURCE_URL = `/v1/sources/${SOURCE_ID}`;
 

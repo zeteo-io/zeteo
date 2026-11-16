@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { UserMenu } from "./UserMenu";
 
-vi.mock("@/lib/auth", async () =>
-  (await import("@/test/authMock")).mockAuth({
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
     permissions: ["admin"],
     me: { name: "Ada Lovelace", email: "ada@x.test" },
   })

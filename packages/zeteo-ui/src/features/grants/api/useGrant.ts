@@ -1,9 +1,10 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { Grant } from "./types";
 
-export const useGrant = (grantId: string) =>
-  useQuery<Grant, ApiError>({
+export const useGrant = (grantId: string) => {
+  const api = useZeteoApi();
+  return useQuery<Grant, ApiError>({
     queryKey: ["grants", grantId],
     queryFn: async () => {
       try {
@@ -13,3 +14,4 @@ export const useGrant = (grantId: string) =>
       }
     },
   });
+};

@@ -1,5 +1,6 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
+import type { AxiosInstance } from "axios";
 import type { Source } from "./types";
 
 // The API's largest page.
@@ -11,7 +12,10 @@ interface Page {
   next_cursor: string | null;
 }
 
-const loadAll = async (signal: AbortSignal): Promise<Source[]> => {
+const loadAll = async (
+  api: AxiosInstance,
+  signal: AbortSignal
+): Promise<Source[]> => {
   const sources: Source[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
@@ -48,11 +52,12 @@ const loadAll = async (signal: AbortSignal): Promise<Source[]> => {
  * someone without `zeteo.sources.read`, whose request would only be refused.
  */
 export const useAllSources = (enabled: boolean) => {
+  const api = useZeteoApi();
   const query = useQuery<Source[], ApiError>({
     queryKey: ["sources", "all", { includeArchived: true }],
     enabled,
     retry: false,
-    queryFn: ({ signal }) => loadAll(signal),
+    queryFn: ({ signal }) => loadAll(api, signal),
   });
   return {
     sources: query.data ?? [],

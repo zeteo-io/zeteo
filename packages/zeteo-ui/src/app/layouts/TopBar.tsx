@@ -1,12 +1,12 @@
 import { AppTopBar, AppTopBarLink } from "@kosmeo-ui/react";
 import { ThemeToggleButton } from "./ThemeToggleButton";
 import { NavLink } from "react-router-dom";
+import { useAuth } from "@tereo-io/react";
 import { SECTIONS } from "../sections";
 import { UserMenu } from "./UserMenu";
-import { useAuth } from "@/lib/auth";
 
 export const TopBar = () => {
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   return (
     <AppTopBar
       navLabel="Sections"
@@ -18,7 +18,7 @@ export const TopBar = () => {
         </>
       }
     >
-      {SECTIONS.filter((s) => can(s.permission)).map((s) => (
+      {SECTIONS.filter((s) => hasPermission(s.permission)).map((s) => (
         <AppTopBarLink key={s.path} as={NavLink} to={s.path}>
           {s.label}
         </AppTopBarLink>

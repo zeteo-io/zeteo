@@ -1,7 +1,7 @@
-import type { AuthValue, Me } from "@/lib/auth/useAuth";
-import { hasPermission } from "@/lib/auth/permissions";
-import type { Tokens } from "@/lib/auth/tokens";
+import type { AuthState } from "@tereo-io/react";
+import type { AxiosInstance } from "axios";
 import type { ReactNode } from "react";
+import type { Me } from "@/lib/auth";
 import { vi } from "vitest";
 
 export const TEST_ME: Me = {
@@ -12,49 +12,64 @@ export const TEST_ME: Me = {
   permissions: [],
 };
 
-export const TEST_TOKENS: Tokens = {
-  accessToken: "test-access-token",
-  refreshToken: "test-refresh-token",
-  idToken: "test-id-token",
-  expiresAt: Number.MAX_SAFE_INTEGER,
-};
+type Permissions = string[] | (() => string[]);
+
+/** The HTTP methods a test answers on zeteo's client. */
+export type ApiMock = Partial<
+  Record<
+    "get" | "post" | "put" | "patch" | "delete",
+    (...args: never[]) => unknown
+  >
+>;
 
 /**
- * A stand-in for `@/lib/auth`, signed in with `permissions`:
+ * A stand-in for `@tereo-io/react`, signed in with `permissions` (a list, or
+ * a function read at every render for tests that change them), with `api` as
+ * zeteo's client:
  *
- *   vi.mock("@/lib/auth", async () =>
- *     (await import("@/test/authMock")).mockAuth({
+ *   const get = vi.hoisted(() => vi.fn());
+ *   vi.mock("@tereo-io/react", async () =>
+ *     (await import("@/test/authMock")).mockTereo({
  *       permissions: ["zeteo.sources.read"],
+ *       api: { get },
  *     })
  *   );
  *
- * `useAuth().signOut` is a `vi.fn()`; `can` is the real `hasPermission`.
+ * `hasPermission` is the package's own; `signIn` and `signOut` are `vi.fn()`.
+ * Everything not replaced is the real package.
  */
-export const mockAuth = ({
+export const mockTereo = async ({
   permissions = ["admin"],
   me = {},
-}: { permissions?: string[]; me?: Partial<Me> } = {}) => {
-  const fullMe: Me = { ...TEST_ME, permissions, ...me };
-  const auth: AuthValue = {
-    me: fullMe,
-    can: (permission) => hasPermission(fullMe.permissions, permission),
-    signOut: vi.fn(),
+  api = {},
+}: { permissions?: Permissions; me?: Partial<Me>; api?: ApiMock } = {}) => {
+  const actual =
+    await vi.importActual<typeof import("@tereo-io/react")>("@tereo-io/react");
+  const held = () =>
+    typeof permissions === "function" ? permissions() : permissions;
+  const signIn = vi.fn(async () => undefined);
+  const signOut = vi.fn(async () => undefined);
+  const useAuth = (): AuthState<Me> => {
+    const user: Me = { ...TEST_ME, ...me, permissions: held() };
+    return {
+      user,
+      isLoading: false,
+      isSignedIn: true,
+      isLive: true,
+      hasPermission: (required) =>
+        actual.hasPermission(user.permissions, required),
+      signIn,
+      signOut,
+      switchOrganization: vi.fn(async () => undefined),
+      reloadUser: vi.fn(async () => undefined),
+    };
   };
   return {
-    useAuth: () => auth,
-    AuthProvider: ({ children }: { children: ReactNode }) => children,
-    hasPermission,
-    getTokens: vi.fn(() => TEST_TOKENS),
-    setTokens: vi.fn(),
-    renew: vi.fn(async () => TEST_TOKENS),
-    signOut: vi.fn(async () => undefined),
-    startLogin: vi.fn(async () => undefined),
-    sessionEnded: vi.fn(() => false),
-    setSessionEnded: vi.fn(),
-    completeLogin: vi.fn(async () => ({ returnTo: "/" })),
-    fetchMe: vi.fn(async () => fullMe),
-    AuthError: class AuthError extends Error {
-      code = "mocked";
-    },
+    ...actual,
+    useAuth,
+    useApi: () => api as unknown as AxiosInstance,
+    TereoAuthProvider: ({ children }: { children: ReactNode }) => children,
+    signIn,
+    signOut,
   };
 };

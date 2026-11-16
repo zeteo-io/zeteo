@@ -10,7 +10,7 @@ import { Alert, Button } from "@kosmeo-ui/react";
 import { formatDate } from "@/utils/formatDate";
 import { useNavigate } from "react-router-dom";
 import type { ApiError } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import { useAuth } from "@tereo-io/react";
 import { useState } from "react";
 import "./styles.css";
 
@@ -25,7 +25,7 @@ const Counts = ({ label, counts }: { label: string; counts: object }) => (
 
 export const SourceDetailPage = () => {
   const { source } = useSourceContext();
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   const navigate = useNavigate();
   const test = useTestSource(source.id);
   const refresh = useRefreshSource(source.id);
@@ -34,7 +34,7 @@ export const SourceDetailPage = () => {
   const [summary, setSummary] = useState<RefreshSummary | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
-  const canWrite = can("zeteo.sources.write") && !source.archived_at;
+  const canWrite = hasPermission("zeteo.sources.write") && !source.archived_at;
   const busy = test.isPending || refresh.isPending || archive.isPending;
 
   const runTest = () => {

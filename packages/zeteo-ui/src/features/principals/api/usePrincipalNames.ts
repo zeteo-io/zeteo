@@ -1,5 +1,6 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQueries } from "@tanstack/react-query";
+import type { AxiosInstance } from "axios";
 
 export type PrincipalRef = { type: "user" | "group"; id: string };
 
@@ -17,6 +18,7 @@ const refKey = (ref: PrincipalRef) => ["principals", "ref", ref.type, ref.id];
 const textKey = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
 
 export const lookupPrincipals = async (
+  api: AxiosInstance,
   refs: PrincipalRef[]
 ): Promise<Principal[]> => {
   try {
@@ -30,6 +32,7 @@ export const lookupPrincipals = async (
 };
 
 interface Waiter {
+  api: AxiosInstance;
   ref: PrincipalRef;
   resolve: (principal: Principal) => void;
   reject: (error: ApiError) => void;
@@ -49,7 +52,9 @@ const flush = () => {
   for (let i = 0; i < keys.length; i += BATCH) {
     const chunk = keys.slice(i, i + BATCH);
     const refs = chunk.map((key) => batch.get(key)![0].ref);
-    lookupPrincipals(refs).then(
+    // One provider, so one client: every waiter carries the same one.
+    const api = batch.get(chunk[0])![0].api;
+    lookupPrincipals(api, refs).then(
       (found) => {
         const byKey = new Map(found.map((p) => [textKey(p), p]));
         for (const key of chunk) {
@@ -75,11 +80,14 @@ const flush = () => {
   }
 };
 
-const requestPrincipal = (ref: PrincipalRef): Promise<Principal> =>
+const requestPrincipal = (
+  api: AxiosInstance,
+  ref: PrincipalRef
+): Promise<Principal> =>
   new Promise((resolve, reject) => {
     const key = textKey(ref);
     const list = waiting.get(key) ?? [];
-    list.push({ ref, resolve, reject });
+    list.push({ api, ref, resolve, reject });
     waiting.set(key, list);
     timer ??= setTimeout(flush, BATCH_WINDOW_MS);
   });
@@ -97,6 +105,7 @@ export const isUnavailable = (error: ApiError | null): boolean =>
  * merged by `requestPrincipal`.
  */
 export const usePrincipalNames = (refs: PrincipalRef[]) => {
+  const api = useZeteoApi();
   const distinct = [...new Map(refs.map((r) => [textKey(r), r])).values()];
   const results = useQueries({
     queries: distinct.map((ref) => ({
@@ -104,7 +113,7 @@ export const usePrincipalNames = (refs: PrincipalRef[]) => {
       staleTime: STALE_MS,
       // Labels sharing a failed lookup must not each start it again.
       retryOnMount: false,
-      queryFn: () => requestPrincipal(ref),
+      queryFn: () => requestPrincipal(api, ref),
     })),
   });
 

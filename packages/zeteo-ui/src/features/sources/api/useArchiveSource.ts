@@ -1,7 +1,8 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 
 export const useArchiveSource = (sourceId: string) => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<void, ApiError, void>({
     mutationFn: async () => {

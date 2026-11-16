@@ -9,11 +9,12 @@ import { GrantEditPage } from "./GrantFormPages";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { get, post, delete: del } }));
-vi.mock("@/lib/auth", async () => {
-  const { mockAuth } = await import("@/test/authMock");
-  return mockAuth({ permissions: ["zeteo.grants.write"] });
-});
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    permissions: ["zeteo.grants.write"],
+    api: { get, post, delete: del },
+  })
+);
 
 const renderEdit = (route = `/grants/${GRANT_ID}/edit`) =>
   renderWithProviders(

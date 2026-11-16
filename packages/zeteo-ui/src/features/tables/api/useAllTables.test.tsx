@@ -7,7 +7,9 @@ import { makeTable } from "../testFixtures";
 import type { ReactNode } from "react";
 
 const get = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { get } }));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get } })
+);
 
 const makeWrapper = () => {
   const client = new QueryClient();

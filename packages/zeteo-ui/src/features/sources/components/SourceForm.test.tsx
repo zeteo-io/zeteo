@@ -10,7 +10,11 @@ import { SourceForm } from "./SourceForm";
 
 const post = vi.hoisted(() => vi.fn());
 const patch = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/client", () => ({ api: { post, patch, get: vi.fn() } }));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    api: { post, patch, get: vi.fn() },
+  })
+);
 
 // Required fields carry a visually hidden-from-AT " *" in their label text.
 const labelPattern = (label: string) =>

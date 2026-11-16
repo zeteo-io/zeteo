@@ -1,23 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { routes } from "./router";
 import { App } from "@/app";
 
-vi.mock("@/lib/auth", async () =>
-  (await import("@/test/authMock")).mockAuth({
+// Pages wait on zeteo forever: these tests are about routing.
+const get = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
     permissions: ["zeteo.data.read"],
+    api: { get },
   })
+);
+vi.mock("@/lib/config", async () =>
+  (await import("@/test/uiConfig")).mockConfig()
 );
 
 describe("signed in with no section permission", () => {
-  beforeEach(() => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(() => new Promise(() => {}))
-    );
-  });
   afterEach(() => {
-    vi.unstubAllGlobals();
     window.history.replaceState(null, "", "/");
   });
 
@@ -29,6 +28,6 @@ describe("signed in with no section permission", () => {
   });
 
   it("guards the root route with an error page", () => {
-    expect(routes[0].errorElement).toBeDefined();
+    expect(routes.find((r) => r.path === "/")?.errorElement).toBeDefined();
   });
 });

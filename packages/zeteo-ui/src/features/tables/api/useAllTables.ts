@@ -1,5 +1,6 @@
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
+import type { AxiosInstance } from "axios";
 import type { Table } from "./types";
 
 export const tableLabel = (table: Pick<Table, "schema_name" | "name">) =>
@@ -15,6 +16,7 @@ interface Page {
 }
 
 const loadAll = async (
+  api: AxiosInstance,
   sourceId: string,
   includeMissing: boolean,
   signal: AbortSignal
@@ -57,12 +59,13 @@ export const useAllTables = (
   sourceId: string | undefined,
   { includeMissing = true }: { includeMissing?: boolean } = {}
 ) => {
+  const api = useZeteoApi();
   const query = useQuery<Table[], ApiError>({
     queryKey: ["sources", sourceId, "tables", "all", { includeMissing }],
     enabled: sourceId !== undefined,
     retry: false,
     queryFn: ({ signal }) =>
-      loadAll(sourceId as string, includeMissing, signal),
+      loadAll(api, sourceId as string, includeMissing, signal),
   });
   const tables = query.data ?? [];
   const byId = new Map(tables.map((t) => [t.id, t]));

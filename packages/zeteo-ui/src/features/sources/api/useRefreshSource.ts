@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { RefreshSummary } from "./types";
 
 export const useRefreshSource = (sourceId: string) => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<RefreshSummary, ApiError, void>({
     mutationFn: async () => {

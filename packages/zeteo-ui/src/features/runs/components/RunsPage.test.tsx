@@ -12,14 +12,12 @@ const post = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({
   permissions: ["zeteo.runs.read", "zeteo.sources.read"],
 }));
-vi.mock("@/lib/api/client", () => ({ api: { get, post } }));
-vi.mock("@/lib/auth", async () => {
-  const { mockAuth } = await import("@/test/authMock");
-  return {
-    ...mockAuth(),
-    useAuth: () => mockAuth({ permissions: held.permissions }).useAuth(),
-  };
-});
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    permissions: () => held.permissions,
+    api: { get, post },
+  })
+);
 
 const XSS = "<img src=x onerror=alert(1)>";
 const hostile = makeRun({

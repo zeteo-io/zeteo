@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { Source, UpdateSource } from "./types";
 
 export const useUpdateSource = (sourceId: string) => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<Source, ApiError, UpdateSource>({
     // The body may hold the password: keep nothing once the form is gone.

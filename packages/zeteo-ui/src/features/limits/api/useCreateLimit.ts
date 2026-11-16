@@ -1,8 +1,9 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { CreatePrincipalLimit, PrincipalLimit } from "./types";
-import { api, toApiError, type ApiError } from "@/lib/api";
+import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 
 export const useCreateLimit = () => {
+  const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<PrincipalLimit, ApiError, CreatePrincipalLimit>({
     mutationFn: async (body) => {

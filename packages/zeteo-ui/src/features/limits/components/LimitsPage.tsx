@@ -7,8 +7,8 @@ import { PageHeader } from "@/components/PageHeader";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useLimits } from "../api/useLimits";
 import { useEffect, useState } from "react";
+import { useAuth } from "@tereo-io/react";
 import { LimitForm } from "./LimitForm";
-import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
   PrincipalCell,
@@ -51,7 +51,7 @@ const DeleteLimit = ({ limit }: { limit: PrincipalLimit }) => {
 };
 
 export const LimitsPage = () => {
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   const [filters, setFilters] = useUrlFilters(
     ["principal_type", "principal_id"],
     filtersOf
@@ -63,7 +63,7 @@ export const LimitsPage = () => {
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
 
-  const canWrite = can("zeteo.grants.write");
+  const canWrite = hasPermission("zeteo.grants.write");
   const principal: PrincipalRef | null =
     filters.principal_type && filters.principal_id
       ? { type: filters.principal_type, id: filters.principal_id }

@@ -20,14 +20,12 @@ const put = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({
   permissions: ["zeteo.grants.write", "zeteo.sources.read"],
 }));
-vi.mock("@/lib/api/client", () => ({ api: { get, post, put } }));
-vi.mock("@/lib/auth", async () => {
-  const { mockAuth } = await import("@/test/authMock");
-  return {
-    ...mockAuth(),
-    useAuth: () => mockAuth({ permissions: held.permissions }).useAuth(),
-  };
-});
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({
+    permissions: () => held.permissions,
+    api: { get, post, put },
+  })
+);
 // Searching is not under test: a picker that chooses the user on one click.
 vi.mock("@/features/principals", async () => {
   const actual = await vi.importActual<object>("@/features/principals");

@@ -7,9 +7,9 @@ import { useAllSources } from "@/features/sources";
 import { formatDate } from "@/utils/formatDate";
 import { OutcomeBadge } from "./OutcomeBadge";
 import { useEffect, useState } from "react";
+import { useAuth } from "@tereo-io/react";
 import { useRuns } from "../api/useRuns";
 import { RunDetail } from "./RunDetail";
-import { useAuth } from "@/lib/auth";
 import "./styles.css";
 import {
   Alert,
@@ -44,14 +44,14 @@ const filtersOf = (params: URLSearchParams): RunFilters => {
 };
 
 export const RunsPage = () => {
-  const { can } = useAuth();
+  const { hasPermission } = useAuth();
   const [filters, setFilters] = useUrlFilters(
     ["user_id", "source_id", "outcome"],
     filtersOf
   );
-  const canReadSources = can("zeteo.sources.read");
+  const canReadSources = hasPermission("zeteo.sources.read");
   // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only runs.
-  const canSearchPeople = can("zeteo.grants.read");
+  const canSearchPeople = hasPermission("zeteo.grants.read");
   const anyFilter = !!(filters.user_id || filters.source_id || filters.outcome);
   const { items, isLoading, error, hasMore, loadMore } = useRuns(filters);
   const sources = useAllSources(canReadSources);

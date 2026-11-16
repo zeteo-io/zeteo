@@ -2,12 +2,14 @@ import { Suspense, lazy, useState, type ComponentType } from "react";
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
+import { Callback, SignedOut } from "@/features/auth";
 import { RouteError } from "@/components/RouteError";
 import { RootLayout } from "./layouts/RootLayout";
 import { NotFound } from "@/components/NotFound";
 import { Spinner } from "@kosmeo-ui/react";
+import { useAuth } from "@tereo-io/react";
+import { AuthGate } from "./AuthGate";
 import { SECTIONS } from "./sections";
-import { useAuth } from "@/lib/auth";
 import {
   createBrowserRouter,
   Navigate,
@@ -31,8 +33,8 @@ const pages = {
 
 /** `/` goes to the first section the person can read. */
 const DefaultSection = () => {
-  const { can } = useAuth();
-  const section = SECTIONS.find((s) => can(s.permission));
+  const { hasPermission } = useAuth();
+  const section = SECTIONS.find((s) => hasPermission(s.permission));
   // Holding none of the sections' permissions: say what is missing.
   return section ? (
     <Navigate to={section.path} replace />
@@ -67,9 +69,20 @@ const grantWriteRoutes = [
 }));
 
 export const routes = [
+  // Public: the provider lets these render without a session.
+  { path: "/callback", element: <Callback />, errorElement: <RouteError /> },
+  {
+    path: "/signed-out",
+    element: <SignedOut />,
+    errorElement: <RouteError />,
+  },
   {
     path: "/",
-    element: <RootLayout />,
+    element: (
+      <AuthGate>
+        <RootLayout />
+      </AuthGate>
+    ),
     errorElement: <RouteError />,
     children: [
       { index: true, element: <DefaultSection /> },
@@ -93,11 +106,7 @@ export const routes = [
   },
 ];
 
-/**
- * The router is made when this first renders, which is after sign-in: the
- * auth provider rewrites /callback?code=… before it renders its children, and
- * a router made at import time would start on that stale address.
- */
+/** Made at first render, so tests that set the address first start there. */
 export const AppRouter = () => {
   const [router] = useState(() =>
     createBrowserRouter(routes, { basename: "/" })

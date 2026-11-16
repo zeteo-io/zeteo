@@ -1,6 +1,6 @@
 import { NoAccessSection } from "./NoAccessSection";
+import { useAuth } from "@tereo-io/react";
 import type { ReactNode } from "react";
-import { useAuth } from "@/lib/auth";
 
 interface RequirePermissionProps {
   permission: string;
@@ -11,8 +11,8 @@ export const RequirePermission = ({
   permission,
   children,
 }: RequirePermissionProps) => {
-  const { can } = useAuth();
-  return can(permission) ? (
+  const { hasPermission } = useAuth();
+  return hasPermission(permission) ? (
     children
   ) : (
     <NoAccessSection permission={permission} />
