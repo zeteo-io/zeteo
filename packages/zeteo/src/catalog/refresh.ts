@@ -519,7 +519,9 @@ const applySnapshot = async (
       !same(found.toColumns, side.otherColumns)
     ) {
       changes.push({ side, found, name });
-      if (found.name !== name) renames.push({ id: found.id, name });
+      if (found.name !== name || found.fromTableId !== side.tableId) {
+        renames.push({ id: found.id, name });
+      }
     }
   }
   // Names can swap between two relations of a table, which the unique index

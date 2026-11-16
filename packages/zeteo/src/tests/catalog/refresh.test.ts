@@ -407,6 +407,48 @@ describe("refreshSource", () => {
       expect(added.name).toBe("accounts_2");
     });
 
+    it("moves two relations of the same name between tables without tripping the unique index", async () => {
+      await fixture.run(`
+        CREATE TABLE sales.suppliers (id integer PRIMARY KEY);
+        CREATE TABLE sales.refunds (id integer PRIMARY KEY, a_id integer, b_id integer);
+        GRANT SELECT ON sales.suppliers, sales.refunds TO zeteo_ro;
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_a FOREIGN KEY (a_id) REFERENCES sales.customers (id);
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_b FOREIGN KEY (b_id) REFERENCES sales.suppliers (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      const reverse = async () =>
+        Object.fromEntries(
+          await Promise.all(
+            (
+              await prisma.relation.findMany({
+                where: { sourceId, toMany: true, name: "refunds" },
+              })
+            ).map(async (r) => [
+              r.constraintName,
+              (
+                await prisma.sourceTable.findUniqueOrThrow({
+                  where: { id: r.fromTableId },
+                })
+              ).name,
+            ])
+          )
+        );
+      expect(await reverse()).toEqual({
+        refunds_fk_a: "customers",
+        refunds_fk_b: "suppliers",
+      });
+      await fixture.run(`
+        ALTER TABLE sales.refunds DROP CONSTRAINT refunds_fk_a, DROP CONSTRAINT refunds_fk_b;
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_a FOREIGN KEY (a_id) REFERENCES sales.suppliers (id);
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_b FOREIGN KEY (b_id) REFERENCES sales.customers (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      expect(await reverse()).toEqual({
+        refunds_fk_a: "suppliers",
+        refunds_fk_b: "customers",
+      });
+    });
+
     it("names repeated names in constraint-name order, swapping names between existing relations without tripping the unique index", async () => {
       await refreshSource(sourceId, ACTOR);
       await fixture.run(`
