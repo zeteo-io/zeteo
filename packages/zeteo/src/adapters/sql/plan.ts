@@ -479,6 +479,14 @@ const aggregateFnOf = (
 
 /** Resolves `query` against `catalog`, the caller's view of the source. */
 export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
+  const maxJoins = catalog.source.maxJoins;
+  if ((query.join?.length ?? 0) > maxJoins) {
+    throw new QueryError(
+      "too_many_joins",
+      `This source allows at most ${maxJoins} ${maxJoins === 1 ? "join" : "joins"}`,
+      ["join"]
+    );
+  }
   const planner = new Planner(catalog);
   const from = planner.resolveFrom(query.from);
 

@@ -28,6 +28,7 @@ export const sourceView = (row: Source) => ({
   schemas: row.schemas,
   timeout_ms: row.timeoutMs,
   row_cap: row.rowCap,
+  max_joins: row.maxJoins,
   export_enabled: row.exportEnabled,
   export_row_cap: row.exportRowCap,
   query_concurrency: row.queryConcurrency,

@@ -78,7 +78,7 @@ describe("sqlQuerySchema", () => {
   it.each([
     ["51 select items", { select: Array(51).fill("id") }, 50],
     ["no select items", { select: [] }, 1],
-    ["5 joins", { join: ["a", "b", "c", "d", "e"] }, 4],
+    ["9 joins", { join: ["a", "b", "c", "d", "e", "f", "g", "h", "i"] }, 8],
     ["a filter 6 deep", { where: nested(6) }, 5],
     [
       "1,001 values in `in`",
@@ -107,7 +107,7 @@ describe("sqlQuerySchema", () => {
 
   it.each([
     ["50 select items", { select: Array(50).fill("id") }],
-    ["4 joins", { join: ["a", "b", "c", "d"] }],
+    ["8 joins", { join: ["a", "b", "c", "d", "e", "f", "g", "h"] }],
     ["a filter 5 deep", { where: nested(5) }],
     ["1,000 values in `in`", { where: { id: { in: Array(1000).fill(1) } } }],
     ["offset 1,000,000", { offset: 1_000_000 }],

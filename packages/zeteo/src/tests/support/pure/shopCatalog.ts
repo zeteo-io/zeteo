@@ -124,6 +124,8 @@ export interface ShopOptions {
   uniqueNames?: boolean;
   /** Whose type names `nativeType` holds; Postgres's unless SQL Server's are asked for. */
   engine?: "postgres" | "mssql";
+  /** The source's join limit; 4 unless given. */
+  maxJoins?: number;
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -152,6 +154,7 @@ const SOURCE = {
   type: "postgres",
   timeoutMs: 30_000,
   rowCap: 50_000,
+  maxJoins: 4,
 } as Source;
 
 /**
@@ -222,5 +225,13 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
       !hidden.has(tableId) && !hidden.has(columnId),
     tableAccess: () => "all",
   };
-  return buildVisibleCatalog(SOURCE, tables, columns, relations, access);
+  return buildVisibleCatalog(
+    options.maxJoins === undefined
+      ? SOURCE
+      : ({ ...SOURCE, maxJoins: options.maxJoins } as Source),
+    tables,
+    columns,
+    relations,
+    access
+  );
 };

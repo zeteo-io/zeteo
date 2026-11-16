@@ -53,6 +53,7 @@ export const visibleCatalogView = (
         source
       ).maxRows,
       timeout_ms: source.timeoutMs,
+      max_joins: source.maxJoins,
       export: {
         enabled: exports,
         max_rows: exports ? source.exportRowCap : 0,

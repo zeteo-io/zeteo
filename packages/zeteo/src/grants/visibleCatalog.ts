@@ -49,6 +49,7 @@ export interface VisibleCatalog {
     type: SourceType;
     timeoutMs: number;
     rowCap: number;
+    maxJoins: number;
     exportEnabled: boolean;
     exportRowCap: number;
     queryConcurrency: number;
@@ -139,6 +140,7 @@ export const buildVisibleCatalog = (
       type: typeOf(source),
       timeoutMs: source.timeoutMs,
       rowCap: source.rowCap,
+      maxJoins: source.maxJoins,
       exportEnabled: source.exportEnabled,
       exportRowCap: source.exportRowCap,
       queryConcurrency: source.queryConcurrency,

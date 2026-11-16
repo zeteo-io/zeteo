@@ -7,7 +7,8 @@ import { z } from "zod";
 // is strict; there are no expressions, only the closed sets below.
 
 export const MAX_SELECT_ITEMS = 50;
-export const MAX_JOINS = 4;
+/** The hard ceiling on joins in one query; each source's own `max_joins` (at most this) is checked by the planner. */
+export const MAX_JOINS = 8;
 export const MAX_FILTER_DEPTH = 5;
 export const MAX_IN_VALUES = 1000;
 export const MAX_OFFSET = 1_000_000;

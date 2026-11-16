@@ -19,8 +19,8 @@ validated.
 
 ## The source
 
-`{ id, slug, name, type, settings, schemas, timeout_ms, row_cap, export_enabled, export_row_cap,
-query_concurrency, export_concurrency, writable_login_allowed, status, last_refreshed_at,
+`{ id, slug, name, type, settings, schemas, timeout_ms, row_cap, max_joins, export_enabled,
+export_row_cap, query_concurrency, export_concurrency, writable_login_allowed, status, last_refreshed_at,
 created_at, archived_at }`.
 
 - `slug`: `^[a-z][a-z0-9-]{1,62}$`, unique, fixed after create. `type` is fixed too.
@@ -29,6 +29,7 @@ created_at, archived_at }`.
   source whose stored settings cannot be decrypted (the master key changed); list and get still
   work, and using the source fails as a `500 server_error` with the generic body.
 - Limits: `timeout_ms` 1000 to 120000 (default 30000), `row_cap` 1 to 50000 (default 50000),
+  `max_joins` 1 to 8 (default 4; see below),
   `export_row_cap` 0 to 1000000 (default 0), `export_enabled` (default false). A source takes
   exports only with `export_enabled` and an `export_row_cap` above 0 ([export.md](export.md)).
 - Concurrency: `query_concurrency` 1 to 50 (default 5), the queries the source runs at once
@@ -39,6 +40,16 @@ created_at, archived_at }`.
   ([connection pools](#connection-pools)), so the database's own limit (Postgres
   `max_connections`, the concurrent requests or workers of an Azure SQL tier) must allow the number
   of Zeteo replicas times that, on top of its other clients.
+
+### Join limit
+
+`max_joins` is how many relations one query on the source may join: 1 to 8, 4 unless set. The query
+language itself takes at most 8 joins (a ninth is `400 invalid_request`); a query over the source's
+own limit is `422 too_many_joins` at path `["join"]`, and the limit is in the catalog's `limits` and
+in MCP `list_sources`. The ceiling is 8 because Postgres reorders joins exhaustively only up to 8
+tables (`join_collapse_limit`); past that it falls back to the written order and plans get worse.
+Joins that can match many rows (`toMany`) also multiply rows, so every extra one raises the cost and
+the risk of double counting (the `join_multiplies_rows` warning, see [querying.md](querying.md)).
 
 ## Settings per type
 
@@ -211,7 +222,7 @@ with the process.
 in the change's transaction. A refresh, a table description change and a relation declared, renamed or
 removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an
 update the names of the fields changed, under `limits` the source's `timeout_ms`, `row_cap`,
-`export_enabled`, `export_row_cap`, `query_concurrency` and `export_concurrency` as they stand after
+`max_joins`, `export_enabled`, `export_row_cap`, `query_concurrency` and `export_concurrency` as they stand after
 the change, and for an override the finding codes. A create, and an update that carries `settings`,
 also records the settings as the adapter redacts them (for `postgres` and `azure-sql`: `host`,
 `port`, `database`, `user` and `tls`), so relaxing TLS or pointing a source elsewhere is on the

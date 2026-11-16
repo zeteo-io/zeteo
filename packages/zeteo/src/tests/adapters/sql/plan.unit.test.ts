@@ -762,3 +762,30 @@ describe("planSql: json columns", () => {
     expect(plan({ from: "customers", select: ["prefs"] }).orderBy).toEqual([]);
   });
 });
+
+describe("planSql: the source's join limit", () => {
+  const joins = ["customer", "lines", "customer.account"];
+
+  it("refuses more joins than the source allows, at join, naming the limit", () => {
+    expect(refusal({ join: joins }, { maxJoins: 2 })).toMatchObject({
+      code: "too_many_joins",
+      path: ["join"],
+      message: "This source allows at most 2 joins",
+    });
+  });
+
+  it("says join in the singular for a limit of 1", () => {
+    expect(
+      refusal({ join: ["customer", "lines"] }, { maxJoins: 1 })
+    ).toMatchObject({
+      code: "too_many_joins",
+      message: "This source allows at most 1 join",
+    });
+  });
+
+  it("plans as many joins as the source allows", () => {
+    expect(
+      plan({ join: joins.slice(0, 2) }, shopCatalog({ maxJoins: 2 })).joins
+    ).toHaveLength(2);
+  });
+});

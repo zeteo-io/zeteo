@@ -91,7 +91,7 @@ enum RelationOrigin {
 }
 
 // A registered database. Archived, never deleted. CHECK constraints in the
-// migrations: slug format, timeout_ms, row_cap, export_row_cap,
+// migrations: slug format, timeout_ms, row_cap, max_joins, export_row_cap,
 // query_concurrency and export_concurrency ranges.
 model Source {
   id                   String       @id @default(uuid(7)) @db.Uuid
@@ -102,6 +102,7 @@ model Source {
   schemas              String[]
   timeoutMs            Int          @default(30000) @map("timeout_ms")
   rowCap               Int          @default(50000) @map("row_cap")
+  maxJoins             Int          @default(4) @map("max_joins")
   exportEnabled        Boolean      @default(false) @map("export_enabled")
   exportRowCap         Int          @default(0) @map("export_row_cap")
   queryConcurrency     Int          @default(5) @map("query_concurrency")

@@ -41,6 +41,7 @@ const SOURCE = {
   type: "postgres",
   timeoutMs: 30_000,
   rowCap: 50_000,
+  maxJoins: 4,
 } as Source;
 
 const table = (id: string, name: string, schemaName: string = HOSTILE.schema) =>

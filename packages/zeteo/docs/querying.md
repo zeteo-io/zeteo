@@ -43,7 +43,7 @@ results for the same data:
   of a joined table, and `customers.accounts.plan` one reached through two relations.
 - **`join`** lists relations by name (see `docs/catalog.md`), `inner` by default or
   `{ "relation": "...", "type": "left" }`. A relation reached through another is joined after it:
-  `["customers", "customers.accounts"]`. At most 4 joins. A relation can be used only when every key
+  `["customers", "customers.accounts"]`. At most the source's `max_joins` joins (4 unless the source sets more, up to 8; a query over the source's limit is `422 too_many_joins`). A relation can be used only when every key
   column on both sides is granted.
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
@@ -358,7 +358,7 @@ root of the query) and `suggestions` (up to three close names, closest first).
 - Other `422` codes: `missing_in_source` (the last refresh no longer found a table, column or
   relation the caller is granted), `column_not_queryable` (a column of type `other`),
   `invalid_operator`, `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-  `duplicate_output_name`, `join_parent_missing`, `too_many_parameters` (the query binds more
+  `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's `max_joins`), `too_many_parameters` (the query binds more
   values than the source's engine takes; see *Filters*).
 - From running: `502 query_failed` (the source refused or failed to run the query),
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,

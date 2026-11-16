@@ -124,12 +124,35 @@ describe("/v1/sources", () => {
     expect(entry?.payload.metadata.limits).toEqual({
       timeout_ms: 4000,
       row_cap: 50_000,
+      max_joins: 4,
       export_enabled: false,
       export_row_cap: 0,
       query_concurrency: 12,
       export_concurrency: 3,
     });
   });
+
+  it("takes max_joins, 4 by default, and reports it", async () => {
+    expect((await create()).body.max_joins).toBe(4);
+    const res = await create({ max_joins: 7 });
+    expect(res.status).toBe(201);
+    expect(res.body.max_joins).toBe(7);
+    expect((await get(`/${res.body.id}`)).body.max_joins).toBe(7);
+  });
+
+  it.each([{ max_joins: 0 }, { max_joins: 9 }])(
+    "refuses %o with 400 invalid_request, storing nothing",
+    async (limit) => {
+      const slug = uniqueSlug("joins");
+      const res = await post(
+        sourceBody(sourceSettings("ro"), { slug, ...limit })
+      );
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_request");
+      expect(res.body.error_description).toContain("max_joins");
+      expect(await prisma.source.count({ where: { slug } })).toBe(0);
+    }
+  );
 
   it.each([
     { query_concurrency: 0 },
