@@ -14,6 +14,17 @@ routes is `openapi/openapi.yaml`.
 
 ## The SQL query language
 
+Every example in this page, and in the MCP instructions, runs on one small source, `sales-db`.
+Relation names follow the discovery rules: a single foreign key is named after its target table
+(`orders` to `customers` is `customers`), and the reverse side after the table holding the key
+(`customers` to `orders` is `orders`).
+
+- `customers` (id, name, first_name, last_name, email, region); relation `orders`
+- `orders` (id, customer_id, status, total, created_at); relations `customers` and `order_lines`
+- `order_lines` (id, order_id, product_id, unit_price, quantity, discount, unit_cost); relations
+  `orders` and `products`
+- `products` (id, name, category); relation `order_lines`
+
 Every SQL source, Postgres and Azure SQL alike, takes the same language and returns the same
 results for the same data:
 
@@ -72,7 +83,7 @@ under *Calculations*; there are no other function calls, subqueries or raw fragm
 
 ## Calculations
 
-An **expression** is a column path (`"unitprice"`, `"product.name"`), a number, a text literal
+An **expression** is a column path (`"unit_price"`, `"products.name"`), a number, a text literal
 `{ "value": "text" }` (a bare string is a path), an aggregate, or an object with exactly one
 operation key:
 
@@ -93,7 +104,7 @@ takes a column path only.
 **Where calculations go**
 
 - A select item: `{ "calc": expression, "as": "name" }`; `as` is required.
-- An aggregate's argument: `{ "sum": { "mul": ["unitprice", "orderqty"] }, "as": "revenue" }`.
+- An aggregate's argument: `{ "sum": { "mul": ["unit_price", "quantity"] }, "as": "revenue" }`.
   `sum`, `avg`, `min` and `max` take an expression where they took a path, and then need `as`;
   `count` and `countDistinct` stay paths.
 - By name elsewhere: a calculation's `as` works in `groupBy` and `orderBy`, in `having` when it
@@ -129,15 +140,6 @@ Literals are bound parameters and count towards the parameter limit.
 **Limits.** An expression nests at most 5 levels (an aggregate counts as one), a query holds at
 most 100 operation and aggregate objects in all, `add`, `mul`, `concat` and `coalesce` take 2 to
 10 operands, and `round` places are 0 to 10.
-
-The examples below use one small schema, with relation names as the discovery rules give them (a
-single key is named after its target table):
-
-- `orders` (id, customer_id, status, created_at); relation `customers`
-- `order_lines` (id, order_id, product_id, unit_price, quantity, discount, unit_cost); relations
-  `orders` and `products`
-- `products` (id, name, category)
-- `customers` (id, first_name, last_name, email)
 
 Value of each order line (row-level); `line_value` is not a column, so `where` can name it:
 
