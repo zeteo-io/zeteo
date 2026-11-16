@@ -64,6 +64,30 @@ describeEachEngine("MCP query tool", (engine) => {
     }
   });
 
+  // A model client types each argument from the schema; one the schema does
+  // not declare arrives as a string ("5", "[\"id\"]"), which the engine refuses.
+  it("declares every clause with its JSON type, requiring only source", async () => {
+    const { tools } = await session.client.listTools();
+    const schema = tools.find((t) => t.name === "query")?.inputSchema as {
+      properties: Record<string, { type?: string }>;
+      required?: string[];
+    };
+    expect(schema.required).toEqual(["source"]);
+    const typeOf = (key: string) => schema.properties[key]?.type;
+    expect(typeOf("source")).toBe("string");
+    expect(typeOf("from")).toBe("string");
+    for (const key of ["join", "select", "groupBy", "orderBy"]) {
+      expect(typeOf(key), key).toBe("array");
+    }
+    for (const key of ["where", "having"]) {
+      expect(typeOf(key), key).toBe("object");
+    }
+    for (const key of ["limit", "offset"]) {
+      expect(typeOf(key), key).toBe("integer");
+    }
+    expect(typeOf("distinct")).toBe("boolean");
+  });
+
   it("returns the rows POST /v1/query returns, recorded with entry point mcp", async () => {
     const body = {
       source: source.slug,
