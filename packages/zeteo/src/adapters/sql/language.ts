@@ -122,7 +122,8 @@ const nestedAggregate = z.never({
  */
 const dispatching = <T>(
   check: (value: unknown) => z.ZodSafeParseResult<unknown> | undefined,
-  description: string
+  description: string,
+  jsonSchema: Record<string, unknown> = {}
 ): z.ZodType<T> =>
   z
     .unknown()
@@ -138,7 +139,7 @@ const dispatching = <T>(
         }
       }
     })
-    .meta({ description }) as unknown as z.ZodType<T>;
+    .meta({ ...jsonSchema, description }) as unknown as z.ZodType<T>;
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -214,7 +215,8 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
       }
       return node.safeParse(value);
     },
-    `A column path, a number, { value: "text" }, or an object with exactly one of ${[...CALC_OPS, ...AGGREGATE_KEYS].join(", ")}`
+    `A column path, a number, { value: "text" }, or an object with exactly one of ${[...CALC_OPS, ...AGGREGATE_KEYS].join(", ")}`,
+    { $ref: "#/$defs/CalcExpr" }
   );
 };
 
@@ -274,15 +276,145 @@ const SELECT_ITEM_ERROR =
   'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column } or { calc: expression, as }; "as" is optional except on calc';
 
 /** Dispatched by key rather than a union, so an issue keeps its exact path. */
-const selectItemSchema = dispatching<SelectItem>((value) => {
-  if (typeof value === "string") return pathSchema.safeParse(value);
-  const form = isPlainObject(value)
-    ? Object.keys(value).find((k) => k in selectForms)
-    : undefined;
-  return form
-    ? selectForms[form]!.safeParse(value)
-    : z.never({ error: SELECT_ITEM_ERROR }).safeParse(value);
-}, SELECT_ITEM_ERROR);
+const selectItemSchema = dispatching<SelectItem>(
+  (value) => {
+    if (typeof value === "string") return pathSchema.safeParse(value);
+    const form = isPlainObject(value)
+      ? Object.keys(value).find((k) => k in selectForms)
+      : undefined;
+    return form
+      ? selectForms[form]!.safeParse(value)
+      : z.never({ error: SELECT_ITEM_ERROR }).safeParse(value);
+  },
+  SELECT_ITEM_ERROR,
+  { $ref: "#/$defs/SelectItem" }
+);
+
+const operands = (min: number, max: number) => ({
+  type: "array",
+  items: { $ref: "#/$defs/CalcExpr" },
+  minItems: min,
+  maxItems: max,
+});
+const operation = (key: string, operand: object, description?: string) => ({
+  type: "object",
+  properties: { [key]: operand },
+  required: [key],
+  additionalProperties: false,
+  ...(description ? { description } : {}),
+});
+const calcRef = { $ref: "#/$defs/CalcExpr" };
+const pathJson = { type: "string", minLength: 1 };
+const asJson = { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" };
+
+/**
+ * The structured shape of expressions and select items, which the Zod
+ * schemas cannot show (they dispatch by key to keep exact error paths).
+ * Published by `describe()` beside the query schema; validation never reads it.
+ */
+const CALC_JSON_SCHEMA_DEFS = {
+  CalcExpr: {
+    description: `An expression nests at most ${MAX_CALC_DEPTH} levels (an aggregate counts as one); a query holds at most ${MAX_CALC_NODES} operations and aggregates`,
+    anyOf: [
+      { ...pathJson, description: "A column path" },
+      { type: "number", description: "A number literal" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", maxLength: MAX_TEXT_LITERAL_CHARS },
+        },
+        required: ["value"],
+        additionalProperties: false,
+        description: "A text literal; a bare string is a column path",
+      },
+      operation("add", operands(2, MAX_CALC_OPERANDS), "Sum of numbers"),
+      operation("sub", operands(2, 2), "First minus second"),
+      operation("mul", operands(2, MAX_CALC_OPERANDS), "Product of numbers"),
+      operation(
+        "div",
+        operands(2, 2),
+        "First over second; division by zero gives null; keeps at least 6 decimal places"
+      ),
+      operation("abs", calcRef),
+      operation(
+        "round",
+        {
+          anyOf: [
+            calcRef,
+            {
+              type: "array",
+              prefixItems: [
+                calcRef,
+                { type: "integer", minimum: 0, maximum: MAX_ROUND_PLACES },
+              ],
+              minItems: 2,
+              maxItems: 2,
+            },
+          ],
+        },
+        "An expression (0 places) or [expression, places], places an integer 0 to 10; half away from zero"
+      ),
+      operation(
+        "concat",
+        operands(2, MAX_CALC_OPERANDS),
+        "Text or number operands joined; null counts as empty text"
+      ),
+      operation("lower", calcRef),
+      operation("upper", calcRef),
+      operation(
+        "coalesce",
+        operands(2, MAX_CALC_OPERANDS),
+        "The first non-null of operands of one type"
+      ),
+      ...(["sum", "avg", "min", "max"] as const).map((key) =>
+        operation(
+          key,
+          calcRef,
+          "Aggregate over an expression; not nested in another aggregate"
+        )
+      ),
+      operation("count", { ...pathJson, description: 'A path or "*"' }),
+      operation("countDistinct", pathJson),
+    ],
+  },
+  SelectItem: {
+    description: SELECT_ITEM_ERROR,
+    anyOf: [
+      { ...pathJson, description: "A column path" },
+      ...(["count", "countDistinct"] as const).map((key) => ({
+        type: "object",
+        properties: { [key]: pathJson, as: asJson },
+        required: [key],
+        additionalProperties: false,
+      })),
+      ...(["sum", "avg", "min", "max"] as const).map((key) => ({
+        type: "object",
+        properties: { [key]: calcRef, as: asJson },
+        required: [key],
+        additionalProperties: false,
+        description: `A path, or an expression, in which case "as" is required`,
+      })),
+      {
+        type: "object",
+        properties: {
+          bucket: { enum: [...BUCKET_UNITS] },
+          column: pathJson,
+          as: asJson,
+        },
+        required: ["bucket", "column"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: { calc: calcRef, as: asJson },
+        required: ["calc", "as"],
+        additionalProperties: false,
+        description:
+          "A calculation: row-level (no aggregate) or group-level (every column inside an aggregate), not mixed",
+      },
+    ],
+  },
+};
 
 /** Operation and aggregate objects in one expression. */
 const countNodes = (expr: unknown): number => {
@@ -482,8 +614,13 @@ export type JoinItem = NonNullable<SqlQuery["join"]>[number];
 export const sqlLanguage: QueryLanguage<SqlQuery, SqlPlan> = {
   id: "sql",
   schema: sqlQuerySchema,
-  describe: () =>
-    z.toJSONSchema(sqlQuerySchema, { reused: "ref", unrepresentable: "any" }),
+  describe: () => {
+    const schema = z.toJSONSchema(sqlQuerySchema, {
+      reused: "ref",
+      unrepresentable: "any",
+    });
+    return { ...schema, $defs: { ...schema.$defs, ...CALC_JSON_SCHEMA_DEFS } };
+  },
   plan: planSql,
   tableName: queryNameOf,
 };

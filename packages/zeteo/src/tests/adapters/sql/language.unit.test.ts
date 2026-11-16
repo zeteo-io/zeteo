@@ -427,3 +427,93 @@ describe("calculations", () => {
     expect(language.CALC_OPS).toHaveLength(10);
   });
 });
+
+// A JSON Schema walked by path; its shape is what the tests assert.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Json = Record<string, any>;
+
+const described = () => sqlLanguage.describe() as Json;
+const forms = (def: Json): Json[] => def.anyOf;
+const operationNamed = (key: string): Json =>
+  forms(described().$defs.CalcExpr).find((f) => f.properties?.[key])!;
+
+describe("sqlLanguage.describe, calculations", () => {
+  it("points select items and calculations at structured definitions", () => {
+    const schema = described();
+    const select = schema.$defs[schema.properties.select.$ref.split("/").pop()];
+    expect(select.items.$ref).toBe("#/$defs/SelectItem");
+    expect(Object.keys(schema.$defs)).toEqual(
+      expect.arrayContaining(["CalcExpr", "SelectItem"])
+    );
+    expect(() => JSON.stringify(schema)).not.toThrow();
+  });
+
+  it("shows every select item form, with calc requiring its name", () => {
+    const items = forms(described().$defs.SelectItem);
+    const keys = items
+      .filter((i) => i.type === "object")
+      .map(
+        (i) =>
+          Object.keys(i.properties).filter(
+            (k) => k !== "as" && k !== "column"
+          )[0]
+      );
+    expect(keys).toEqual([
+      "count",
+      "countDistinct",
+      "sum",
+      "avg",
+      "min",
+      "max",
+      "bucket",
+      "calc",
+    ]);
+    const calc = items.find((i) => i.properties?.calc)!;
+    expect(calc.required).toEqual(["calc", "as"]);
+    expect(calc.properties.calc.$ref).toBe("#/$defs/CalcExpr");
+  });
+
+  it("shows paths, numbers and text literals as expressions", () => {
+    const expr = forms(described().$defs.CalcExpr);
+    expect(expr.map((f) => f.type).slice(0, 3)).toEqual([
+      "string",
+      "number",
+      "object",
+    ]);
+    expect(expr[2]!.required).toEqual(["value"]);
+  });
+
+  it("gives operations their operand counts", () => {
+    for (const key of ["add", "mul", "concat", "coalesce"]) {
+      expect(operationNamed(key).properties[key]).toMatchObject({
+        type: "array",
+        minItems: 2,
+        maxItems: 10,
+      });
+    }
+    for (const key of ["sub", "div"]) {
+      expect(operationNamed(key).properties[key]).toMatchObject({
+        minItems: 2,
+        maxItems: 2,
+      });
+    }
+    expect(operationNamed("abs").properties.abs.$ref).toBe("#/$defs/CalcExpr");
+    expect(operationNamed("lower").additionalProperties).toBe(false);
+  });
+
+  it("shows round's two forms and its places", () => {
+    const [single, pair] = operationNamed("round").properties.round.anyOf;
+    expect(single.$ref).toBe("#/$defs/CalcExpr");
+    expect(pair.prefixItems[1]).toMatchObject({
+      type: "integer",
+      minimum: 0,
+      maximum: 10,
+    });
+  });
+
+  it("shows aggregates inside expressions", () => {
+    for (const key of ["sum", "avg", "min", "max", "count", "countDistinct"]) {
+      expect(operationNamed(key)).toBeDefined();
+    }
+  });
+});

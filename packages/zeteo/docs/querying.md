@@ -50,7 +50,9 @@ results for the same data:
   `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year",
   "column": path }`, truncated in UTC, weeks starting on Monday. Each takes an optional `"as"`
   (a lowercase letter, then up to 62 of `a-z`, `0-9`, `_`). Without one an item is named by its
-  path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on.
+  path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on. A calculation
+  (`{ "calc": expression, "as": name }`) and an aggregate over an expression always need one
+  (see *Calculations*).
 - **`distinct: true`** returns each row once.
 - **`where`** is a filter (below) over columns.
 - **`groupBy`** names select items, by output name or by column path. A query with an aggregate
@@ -65,8 +67,133 @@ results for the same data:
   above 0 and no `orderBy` is refused (`422 invalid_order` at path `["offset"]`).
 - **`limit`** (default 1,000) and **`offset`** (at most 1,000,000) page the result.
 
-Every object is strict: an unknown key is refused. There are no expressions, function calls,
-subqueries or raw fragments.
+Every object is strict: an unknown key is refused. Expressions are the closed set of operations
+under *Calculations*; there are no other function calls, subqueries or raw fragments.
+
+## Calculations
+
+An **expression** is a column path (`"unitprice"`, `"product.name"`), a number, a text literal
+`{ "value": "text" }` (a bare string is a path), an aggregate, or an object with exactly one
+operation key:
+
+| Operation | Operands | Result |
+|---|---|---|
+| `add`, `mul` | array of 2 to 10 numbers | number |
+| `sub`, `div` | array of exactly 2 numbers | number; `div` by zero gives null and never truncates |
+| `abs` | one number | number |
+| `round` | `[number, places]` (places an integer literal, 0 to 10), or one number (0 places) | number; half away from zero on both databases |
+| `concat` | array of 2 to 10 text or number expressions | text; null counts as empty text |
+| `lower`, `upper` | one text | text |
+| `coalesce` | array of 2 to 10 expressions of one type | that type; the first non-null |
+
+Aggregates (`sum`, `avg`, `min`, `max` over an expression; `count`, `countDistinct` over a path)
+may sit inside operations, and an aggregate may not contain another aggregate. `bucket` still
+takes a column path only.
+
+**Where calculations go**
+
+- A select item: `{ "calc": expression, "as": "name" }`; `as` is required.
+- An aggregate's argument: `{ "sum": { "mul": ["unitprice", "orderqty"] }, "as": "revenue" }`.
+  `sum`, `avg`, `min` and `max` take an expression where they took a path, and then need `as`;
+  `count` and `countDistinct` stay paths.
+- By name elsewhere: a calculation's `as` works in `groupBy` and `orderBy`, in `having` when it
+  is group-level, and in `where` when it is row-level (zeteo puts the calculation itself into the
+  WHERE clause, since SQL cannot name a select alias there). A `where` key is read as a select
+  name first, then as a column path; a name that is both is `422 duplicate_output_name`: pick
+  another `as`.
+
+**Row-level and group-level**
+
+- A calculation with no aggregate is **row-level**: computed per row, it behaves like a column. In
+  a grouped query it must be listed in `groupBy`.
+- A calculation in which **every column sits inside an aggregate** is **group-level**
+  (`{ "div": [{ "sum": "profit" }, { "sum": "linetotal" }] }`): it behaves like an aggregate, needs
+  no `groupBy` entry, and can be named in `having` and `orderBy`, never in `where` (`422
+  invalid_grouping`). Literals may appear outside the aggregates.
+- A calculation that mixes the two (a bare column beside an aggregate) is refused with
+  `422 invalid_grouping`, at the bare column.
+
+**Types.** Arithmetic takes `number` columns, `lower` and `upper` take `text`; `concat` takes text
+or numbers (numbers are converted to text). Dates, booleans, json and `other` columns are refused
+with `422 invalid_operator`, at the path of the operand (`select.2.sum.mul.1`). `coalesce` operands
+must share one type. Every column an expression reads goes through the usual column resolution, so
+grants, joins and `not_found_or_not_accessible` work as for a plain path, and the run record lists
+the columns read. A result is typed in `columns` like any select item; decimals arrive as strings.
+
+**Precision.** Both databases give the same value, not necessarily the same digits after the
+point. `div` is a decimal division that keeps at least 6 decimal places (the most SQL Server
+guarantees); wrap it in `round` to get exactly the places you want, which is also the way to
+identical text on both. Integer `add`, `sub` and `mul` can overflow, which is `502 query_failed`.
+Literals are bound parameters and count towards the parameter limit.
+
+**Limits.** An expression nests at most 5 levels (an aggregate counts as one), a query holds at
+most 100 operation and aggregate objects in all, `add`, `mul`, `concat` and `coalesce` take 2 to
+10 operands, and `round` places are 0 to 10.
+
+Line total per order line (row-level):
+
+```json
+{
+  "source": "adventureworks",
+  "from": "salesorderdetail",
+  "select": [
+    "salesorderid",
+    { "calc": { "mul": ["unitprice", "orderqty"] }, "as": "linetotal" }
+  ],
+  "where": { "linetotal": { "gt": 1000 } }
+}
+```
+
+Margin percentage by product category (group-level, rounded to one place):
+
+```json
+{
+  "source": "adventureworks",
+  "from": "salesorderdetail",
+  "join": ["product"],
+  "select": [
+    "product.category",
+    {
+      "calc": {
+        "round": [{ "mul": [100, { "div": [{ "sum": "profit" }, { "sum": "linetotal" }] }] }, 1]
+      },
+      "as": "margin_pct"
+    }
+  ],
+  "groupBy": ["product.category"],
+  "orderBy": [{ "margin_pct": "desc" }]
+}
+```
+
+Average order value, orders counted once however many lines they have:
+
+```json
+{
+  "source": "adventureworks",
+  "from": "salesorderdetail",
+  "select": [
+    {
+      "calc": { "div": [{ "sum": "linetotal" }, { "countDistinct": "salesorderid" }] },
+      "as": "average_order_value"
+    }
+  ]
+}
+```
+
+Full name, with a missing middle name counted as empty text:
+
+```json
+{
+  "source": "adventureworks",
+  "from": "person",
+  "select": [
+    {
+      "calc": { "concat": ["firstname", { "value": " " }, "middlename", { "value": " " }, "lastname"] },
+      "as": "fullname"
+    }
+  ]
+}
+```
 
 ### Filters
 

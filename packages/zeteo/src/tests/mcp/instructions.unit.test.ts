@@ -45,14 +45,24 @@ describe("MCP_INSTRUCTIONS", () => {
     }
   });
 
-  it("holds three worked examples, each a query the SQL language accepts", () => {
+  it("describes calculations and no longer denies expressions", () => {
+    expect(MCP_INSTRUCTIONS).not.toContain("no expressions");
+    for (const text of ["`calc`", "`div`", "`round`", "6 decimal places"]) {
+      expect(MCP_INSTRUCTIONS).toContain(text);
+    }
+  });
+
+  it("holds five worked examples, each a query the SQL language accepts", () => {
     const examples = jsonBlocks(MCP_INSTRUCTIONS);
-    expect(examples).toHaveLength(3);
+    expect(examples).toHaveLength(5);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
-    const [filtered, joined, ranked] = examples as Record<string, unknown>[];
+    const [filtered, joined, ranked, lineTotal, margin] = examples as Record<
+      string,
+      unknown
+    >[];
     expect(filtered).toHaveProperty("where");
     expect(joined).toHaveProperty("join");
     expect(joined).toHaveProperty("groupBy");
@@ -60,5 +70,8 @@ describe("MCP_INSTRUCTIONS", () => {
     for (const clause of ["having", "orderBy", "limit"]) {
       expect(ranked).toHaveProperty(clause);
     }
+    expect(JSON.stringify(lineTotal)).toContain('"calc"');
+    expect(JSON.stringify(margin)).toContain('"div"');
+    expect(JSON.stringify(margin)).toContain('"sum"');
   });
 });

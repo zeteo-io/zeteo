@@ -3501,8 +3501,105 @@ components:
       type: string
       pattern: ^[a-z][a-z0-9_]{0,62}$
       description: An output name for a select item
+    CalcExpr:
+      description: |
+        An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
+        with exactly one operation key. It nests at most 5 levels (an aggregate counts as one) and a
+        query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
+        `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
+        one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;
+        `round` gives exactly the places asked, half away from zero. Aggregates do not nest.
+      oneOf:
+        - $ref: '#/components/schemas/Path'
+        - type: number
+        - type: object
+          additionalProperties: false
+          required:
+            - value
+          properties:
+            value:
+              type: string
+              maxLength: 1000
+              description: A text literal; a bare string is a path
+        - $ref: '#/components/schemas/CalcOperation'
+    CalcOperation:
+      type: object
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
+      description: Exactly one of these keys
+      properties:
+        add:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        mul:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        sub:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        div:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        abs:
+          $ref: '#/components/schemas/CalcExpr'
+        round:
+          description: An expression (0 places), or `[expression, places]` with places an integer 0 to 10
+          oneOf:
+            - $ref: '#/components/schemas/CalcExpr'
+            - type: array
+              minItems: 2
+              maxItems: 2
+              prefixItems:
+                - $ref: '#/components/schemas/CalcExpr'
+                - type: integer
+                  minimum: 0
+                  maximum: 10
+        concat:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        lower:
+          $ref: '#/components/schemas/CalcExpr'
+        upper:
+          $ref: '#/components/schemas/CalcExpr'
+        coalesce:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        sum:
+          $ref: '#/components/schemas/CalcExpr'
+        avg:
+          $ref: '#/components/schemas/CalcExpr'
+        min:
+          $ref: '#/components/schemas/CalcExpr'
+        max:
+          $ref: '#/components/schemas/CalcExpr'
+        count:
+          type: string
+          description: A path, or `"*"`
+        countDistinct:
+          $ref: '#/components/schemas/Path'
     SelectItem:
-      description: A column path, or one aggregate or date bucket with an optional `as`
+      description: |
+        A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
+        `sum`, `avg`, `min` and `max` over an expression, and `calc`, need `as`.
       oneOf:
         - $ref: '#/components/schemas/Path'
         - type: object
@@ -3530,36 +3627,40 @@ components:
             - sum
           properties:
             sum:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - avg
           properties:
             avg:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - min
           properties:
             min:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - max
           properties:
             max:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
@@ -3579,6 +3680,20 @@ components:
               $ref: '#/components/schemas/Path'
             as:
               $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - calc
+            - as
+          properties:
+            calc:
+              $ref: '#/components/schemas/CalcExpr'
+            as:
+              $ref: '#/components/schemas/Alias'
+          description: |
+            A calculation. Row-level when it holds no aggregate (computed per row, nameable in `where`
+            and `groupBy`); group-level when every column sits inside an aggregate (nameable in `having`
+            and `orderBy`). A mix of the two is refused (`invalid_grouping`).
     Filter:
       type: object
       description: |
