@@ -1,17 +1,31 @@
-import { Alert, Button, Form, FormActions, Select } from "@kosmeo-ui/react";
 import { PrincipalPicker, type PrincipalRef } from "@/features/principals";
-import { tableLabel, useAllTables, useTable } from "@/features/tables";
+import { useAllSources, type Source } from "@/features/sources";
 import { ExistingGrantNotice } from "./ExistingGrantNotice";
 import { useReplaceGrant } from "../api/useReplaceGrant";
 import type { Grant, ReplaceGrant } from "../api/types";
 import { useCreateGrant } from "../api/useCreateGrant";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PrincipalCell } from "@/features/principals";
-import { Link, useNavigate } from "react-router-dom";
-import { useAllSources } from "@/features/sources";
+import { PageHeader } from "@/components/PageHeader";
+import { useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@tereo-io/react";
-import { useState } from "react";
 import "./styles.css";
+import {
+  tableLabel,
+  useAllTables,
+  useTable,
+  type Table,
+} from "@/features/tables";
+import {
+  Alert,
+  BorderedSection,
+  Button,
+  Form,
+  FormGrid,
+  SearchSelect,
+  Switch,
+} from "@kosmeo-ui/react";
 import {
   ColumnChooser,
   isValidChoice,
@@ -31,9 +45,15 @@ const toRequest = ({ allColumns, selected }: ColumnChoice): ReplaceGrant =>
 interface GrantFormProps {
   /** Present when editing: its principal and table are shown, not chosen. */
   grant?: Grant;
+  /** The page title, shown with the form's buttons. */
+  title: string;
+  /** More header buttons, before Cancel (the edit page's Delete). */
+  extraActions?: ReactNode;
 }
 
-export const GrantForm = ({ grant }: GrantFormProps) => {
+const FORM_ID = "z-grant-form";
+
+export const GrantForm = ({ grant, title, extraActions }: GrantFormProps) => {
   const navigate = useNavigate();
   const { hasPermission } = useAuth();
   const canReadSources = hasPermission("zeteo.sources.read");
@@ -108,91 +128,140 @@ export const GrantForm = ({ grant }: GrantFormProps) => {
     }
   };
 
-  const sourceOptions = sources.sources
-    .filter((s) => !s.archived_at)
-    .map((s) => ({ value: s.id, label: `${s.name} (${s.slug})` }));
-  const tableOptions = tables.tables
-    .filter((t) => !t.missing_since)
-    .map((t) => ({ value: t.id, label: tableLabel(t) }));
   const selectsFailed = !canReadSources || sources.error?.status === 403;
+
+  const sourceName = (id: string, slug: string) =>
+    sources.sources.find((x) => x.id === id)?.name ?? slug;
 
   return (
     <div className="z-grant-form">
-      <Form onSubmit={submit}>
-        {grant ? (
-          <>
-            <div>
-              <h2>Principal</h2>
-              <PrincipalCell
-                principal_type={grant.principal_type}
-                principal_id={grant.principal_id}
-                status={grant.principal_status}
-              />
-            </div>
-            <div>
-              <h2>Table</h2>
-              <code>{grant.source.slug}</code>{" "}
-              <span>{tableLabel(grant.table)}</span>
+      <PageHeader
+        title={title}
+        divider={false}
+        actions={
+          <div className="z-header-actions">
+            {extraActions}
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() => navigate("/grants")}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="submit"
+              form={FORM_ID}
+              fullWidth={false}
+              isLoading={mutation.isPending}
+              disabled={!canSubmit}
+            >
+              {grant ? "Save grant" : "Create grant"}
+            </Button>
+          </div>
+        }
+      />
+      <Form id={FORM_ID} onSubmit={submit}>
+        <BorderedSection title="Who" as="h2">
+          {grant ? (
+            <PrincipalCell
+              principal_type={grant.principal_type}
+              principal_id={grant.principal_id}
+              status={grant.principal_status}
+            />
+          ) : (
+            <PrincipalPicker value={principal} onChange={choosePrincipal} />
+          )}
+        </BorderedSection>
+
+        <BorderedSection title="Table" as="h2">
+          {grant ? (
+            <>
+              <p className="z-grant-table">
+                {sourceName(grant.source.id, grant.source.slug)}
+                <span className="z-muted"> · </span>
+                <span className="z-muted">{grant.table.schema_name}.</span>
+                {grant.table.name}
+              </p>
               {grant.table.missing && (
                 <Alert variant="warning">
                   The last refresh no longer found this table. The grant is
                   kept.
                 </Alert>
               )}
-            </div>
-          </>
-        ) : (
-          <>
-            <div>
-              <h2>Principal</h2>
-              <PrincipalPicker value={principal} onChange={choosePrincipal} />
-            </div>
-            <div>
-              <h2>Table</h2>
-              {selectsFailed ? (
-                <Alert variant="warning">{NEEDS_SOURCES}</Alert>
-              ) : (
-                <>
-                  <ErrorNotice error={sources.error} />
-                  <Select
-                    label="Source"
-                    placeholder="Choose a source"
-                    value={sourceId}
-                    options={sourceOptions}
-                    disabled={sources.isLoading}
-                    onChange={(id) => chooseSource(id ?? "")}
-                  />
-                  <Select
-                    label="Table"
-                    placeholder="Choose a table"
-                    value={tableId}
-                    options={tableOptions}
-                    disabled={!sourceId || tables.isLoading}
-                    onChange={(id) => chooseTable(id ?? "")}
-                  />
-                  <ErrorNotice error={tables.error} />
-                </>
-              )}
-            </div>
-          </>
-        )}
+            </>
+          ) : selectsFailed ? (
+            <Alert variant="warning">{NEEDS_SOURCES}</Alert>
+          ) : (
+            <>
+              <ErrorNotice error={sources.error} />
+              <FormGrid columns={2}>
+                <SearchSelect<Source>
+                  label="Source"
+                  placeholder="Search sources"
+                  value={sources.sources.find((x) => x.id === sourceId) ?? null}
+                  options={sources.sources.filter((x) => !x.archived_at)}
+                  getOptionLabel={(x) => x.name}
+                  getOptionKey={(x) => x.id}
+                  disabled={sources.isLoading}
+                  onSelect={(x) => chooseSource(x.id)}
+                />
+                <SearchSelect<Table>
+                  label="Table"
+                  placeholder={
+                    sourceId ? "Search tables" : "Choose a source first"
+                  }
+                  value={tables.tables.find((t) => t.id === tableId) ?? null}
+                  options={tables.tables.filter((t) => !t.missing_since)}
+                  getOptionLabel={(t) => tableLabel(t)}
+                  getOptionKey={(t) => t.id}
+                  disabled={!sourceId || tables.isLoading}
+                  longDropDown
+                  onSelect={(t) => chooseTable(t.id)}
+                />
+              </FormGrid>
+              <ErrorNotice error={tables.error} />
+            </>
+          )}
+        </BorderedSection>
 
         {(grant || tableId) && (
-          <>
-            <ColumnChooser
-              value={choice}
-              onChange={setChoice}
-              columns={columns}
-              loading={table.isLoading}
-              unavailable={
-                !canReadSources
-                  ? NO_COLUMN_LIST
-                  : table.error
-                    ? table.error.message
-                    : undefined
-              }
-            />
-          </>
+          <BorderedSection
+            title="Columns"
+            as="h2"
+            actions={
+              <Switch
+                size="sm"
+                label="All columns"
+                checked={choice.allColumns}
+                onChange={(e) =>
+                  setChoice({ ...choice, allColumns: e.target.checked })
+                }
+              />
+            }
+          >
+            {choice.allColumns ? (
+              <p className="z-muted z-grant-note">
+                Every column of the table, including columns added later.
+              </p>
+            ) : (
+              <ColumnChooser
+                showMode={false}
+                value={choice}
+                onChange={setChoice}
+                columns={columns}
+                loading={table.isLoading}
+                unavailable={
+                  !canReadSources
+                    ? NO_COLUMN_LIST
+                    : table.error
+                      ? table.error.message
+                      : undefined
+                }
+              />
+            )}
+          </BorderedSection>
         )}
 
         {!grant && mutation.error?.code === "grant_exists" && principal ? (
@@ -204,17 +273,6 @@ export const GrantForm = ({ grant }: GrantFormProps) => {
         ) : (
           <ErrorNotice error={mutation.error} />
         )}
-        <FormActions>
-          <Link to="/grants">Cancel</Link>
-          <Button
-            type="submit"
-            fullWidth={false}
-            isLoading={mutation.isPending}
-            disabled={!canSubmit}
-          >
-            {grant ? "Save grant" : "Create grant"}
-          </Button>
-        </FormActions>
       </Form>
     </div>
   );

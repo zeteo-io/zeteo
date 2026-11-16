@@ -1,8 +1,9 @@
 import { makeSource, SOURCE_ID } from "@/features/sources/testFixtures";
-import { screen, waitFor, within } from "@testing-library/react";
 import { GRANT_ID, USER_ID, makeGrant } from "../testFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router-dom";
+import { optionTexts, pickOption } from "@/test/searchSelect";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { GrantForm } from "./GrantForm";
@@ -55,6 +56,11 @@ vi.mock("@/features/principals", async () => {
 
 const Where = () => <p data-testid="where">{useLocation().pathname}</p>;
 
+const billing = makeSource({
+  id: "8b2e1c1f-2d8b-4b64-8e1f-7b4c2d3e5f77",
+  slug: "billing",
+  name: "Billing",
+});
 const archived = makeSource({
   id: "7a1d0b0e-1c7a-4a53-9d0e-6a3b1f2c4d66",
   slug: "legacy",
@@ -80,18 +86,25 @@ const renderForm = (grant?: ReturnType<typeof makeGrant>) =>
       <Where />
       <Routes>
         <Route path="/grants" element={<p>list</p>} />
-        <Route path="*" element={<GrantForm grant={grant} />} />
+        <Route path="*" element={<GrantForm grant={grant} title="Grant" />} />
       </Routes>
     </>,
     { route: "/grants/new" }
   );
 
-const chooseTable = async (user: ReturnType<typeof userEvent.setup>) => {
+type User = ReturnType<typeof userEvent.setup>;
+
+const options = optionTexts;
+const pick = (user: User, label: string, option: string) =>
+  pickOption(user, screen.getByLabelText(label), option);
+const allColumns = () => screen.getByLabelText("All columns");
+
+const chooseTable = async (user: User) => {
   await user.click(screen.getByRole("button", { name: "Choose principal" }));
-  await screen.findByRole("option", { name: /orders/ });
-  await user.selectOptions(screen.getByLabelText("Source"), SOURCE_ID);
+  await waitFor(() => expect(screen.getByLabelText("Source")).toBeEnabled());
+  await pick(user, "Source", "Orders DB");
   await waitFor(() => expect(screen.getByLabelText("Table")).toBeEnabled());
-  await user.selectOptions(screen.getByLabelText("Table"), ORDERS_ID);
+  await pick(user, "Table", "public.orders");
 };
 
 describe("GrantForm", () => {
@@ -109,8 +122,14 @@ describe("GrantForm", () => {
         async (url: string, cfg?: { params?: Record<string, unknown> }) => {
           if (url === "/v1/sources") {
             return {
-              data: { data: [makeSource(), archived], next_cursor: null },
+              data: {
+                data: [makeSource(), billing, archived],
+                next_cursor: null,
+              },
             };
+          }
+          if (url === `/v1/sources/${billing.id}/tables`) {
+            return { data: { data: [], next_cursor: null } };
           }
           if (url === `/v1/sources/${SOURCE_ID}/tables`) {
             return {
@@ -149,26 +168,30 @@ describe("GrantForm", () => {
       );
   });
 
-  it("offers non-archived sources and non-missing tables", async () => {
+  it("offers non-archived sources by name and non-missing tables", async () => {
     const user = userEvent.setup();
     renderForm();
     const source = await screen.findByLabelText("Source");
-    await waitFor(() =>
-      expect(
-        within(source).getByRole("option", { name: /orders/ })
-      ).toBeInTheDocument()
-    );
-    expect(
-      within(source).queryByRole("option", { name: /legacy/i })
-    ).toBeNull();
+    await waitFor(() => expect(source).toBeEnabled());
     expect(screen.getByLabelText("Table")).toBeDisabled();
-    await user.selectOptions(source, SOURCE_ID);
+    await user.click(source);
+    await waitFor(() => expect(options()).toEqual(["Orders DB", "Billing"]));
+    await pick(user, "Source", "Orders DB");
     await waitFor(() => expect(screen.getByLabelText("Table")).toBeEnabled());
-    expect(
-      within(screen.getByLabelText("Table")).queryByRole("option", {
-        name: /gone/,
-      })
-    ).toBeNull();
+    await user.click(screen.getByLabelText("Table"));
+    await waitFor(() =>
+      expect(options()).toEqual(["public.orders", "public.customers"])
+    );
+  });
+
+  it("narrows the tables as you type", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await waitFor(() => expect(screen.getByLabelText("Source")).toBeEnabled());
+    await pick(user, "Source", "Orders DB");
+    await waitFor(() => expect(screen.getByLabelText("Table")).toBeEnabled());
+    await user.type(screen.getByLabelText("Table"), "cust");
+    await waitFor(() => expect(options()).toEqual(["public.customers"]));
   });
 
   it("sends all_columns true and no column_ids for All columns", async () => {
@@ -190,11 +213,10 @@ describe("GrantForm", () => {
     const user = userEvent.setup();
     renderForm();
     await chooseTable(user);
-    await user.click(screen.getByLabelText("Choose columns"));
-    expect(screen.queryByLabelText(/dropped/)).not.toBeInTheDocument();
+    await user.click(allColumns());
     await user.click(await screen.findByLabelText("id"));
+    expect(screen.queryByLabelText(/dropped/)).not.toBeInTheDocument();
     await user.click(screen.getByLabelText("note"));
-    expect(screen.getByText("2 of 3 columns chosen")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Create grant" }));
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(post.mock.calls[0][1]).toEqual({
@@ -210,11 +232,18 @@ describe("GrantForm", () => {
     const user = userEvent.setup();
     renderForm();
     await chooseTable(user);
-    await user.click(screen.getByLabelText("Choose columns"));
+    await user.click(allColumns());
     const submit = screen.getByRole("button", { name: "Create grant" });
     expect(submit).toBeDisabled();
+    expect(
+      await screen.findByText(
+        "Choose at least one column, or grant all columns."
+      )
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Select all" }));
-    expect(screen.getByText("3 of 3 columns chosen")).toBeInTheDocument();
+    for (const name of ["id", "customer_id", "note"]) {
+      expect(screen.getByLabelText(name)).toBeChecked();
+    }
     expect(submit).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Select none" }));
     expect(submit).toBeDisabled();
@@ -225,8 +254,11 @@ describe("GrantForm", () => {
     const user = userEvent.setup();
     renderForm();
     await chooseTable(user);
-    await user.selectOptions(screen.getByLabelText("Source"), "");
-    expect(screen.getByLabelText("Table")).toBeDisabled();
+    await pick(user, "Source", "Billing");
+    expect(screen.getByLabelText("Table")).toHaveValue("");
+    expect(
+      screen.queryByRole("heading", { name: "Columns" })
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create grant" })).toBeDisabled();
   });
 
@@ -287,7 +319,7 @@ describe("GrantForm", () => {
     const user = userEvent.setup();
     renderForm();
     await chooseTable(user);
-    await user.click(screen.getByLabelText("Choose columns"));
+    await user.click(allColumns());
     for (const name of ["id", "customer_id", "note"]) {
       await user.click(await screen.findByLabelText(name));
     }
@@ -303,9 +335,9 @@ describe("GrantForm", () => {
     const user = userEvent.setup();
     renderForm();
     await chooseTable(user);
-    await user.click(screen.getByLabelText("Choose columns"));
+    await user.click(allColumns());
     await user.click(await screen.findByLabelText("id"));
-    await user.selectOptions(screen.getByLabelText("Table"), CUSTOMERS_ID);
+    await pick(user, "Table", "public.customers");
     expect(screen.getByRole("button", { name: "Create grant" })).toBeDisabled();
     await user.click(await screen.findByLabelText("email"));
     await user.click(screen.getByRole("button", { name: "Create grant" }));
@@ -327,7 +359,7 @@ describe("GrantForm", () => {
     await chooseTable(user);
     await user.click(screen.getByRole("button", { name: "Create grant" }));
     await screen.findByText("exists");
-    await user.selectOptions(screen.getByLabelText("Table"), CUSTOMERS_ID);
+    await pick(user, "Table", "public.customers");
     expect(screen.queryByText("exists")).not.toBeInTheDocument();
     expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
   });
@@ -357,7 +389,7 @@ describe("GrantForm", () => {
     it("drops the notice when the source changes", async () => {
       const user = userEvent.setup();
       await conflict(user);
-      await user.selectOptions(screen.getByLabelText("Source"), "");
+      await pick(user, "Source", "Billing");
       expect(screen.queryByText("exists")).not.toBeInTheDocument();
       expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
     });
@@ -427,7 +459,9 @@ describe("GrantForm", () => {
     it("shows the table read-only and sends columns only in a PUT", async () => {
       const user = userEvent.setup();
       renderForm(partial);
-      expect(screen.getByText("public.orders")).toBeInTheDocument();
+      expect(screen.getByText(/public\./).closest("p")).toHaveTextContent(
+        "orders · public.orders"
+      );
       expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
       expect(await screen.findByLabelText("note")).toBeInTheDocument();
       expect(screen.getByLabelText("id")).toBeChecked();

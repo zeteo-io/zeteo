@@ -39,6 +39,12 @@ const setup = (types?: ("user" | "group")[], search?: boolean) => {
 };
 
 const pasteBox = () => screen.getByLabelText("Or paste an id");
+const openPaste = () =>
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: "Paste an id instead (for a service account)",
+    })
+  );
 const paste = (value: string) =>
   fireEvent.change(pasteBox(), { target: { value } });
 const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
@@ -88,8 +94,9 @@ describe("PrincipalPicker", () => {
       screen.queryByRole("button", { name: "Users" })
     ).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Search by name or email"), "ada");
-    await advance(350);
+    await advance(550);
     expect(get.mock.calls[0][1].params.type).toBe("user");
+    openPaste();
     paste(ID);
     await advance(50);
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
@@ -104,21 +111,21 @@ describe("PrincipalPicker", () => {
       screen.queryByRole("button", { name: "Users" })
     ).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("Search by group name"), "ana");
-    await advance(350);
+    await advance(550);
     expect(get.mock.calls[0][1].params.type).toBe("group");
   });
 
-  it("searches nothing for one character", async () => {
+  it("searches nothing for two characters", async () => {
     const { user } = setup();
-    await user.type(screen.getByLabelText("Search by name or email"), "a");
+    await user.type(screen.getByLabelText("Search by name or email"), "ad");
     await advance(1000);
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("searches once, 300 ms after typing 'ada', and calls onChange on a pick", async () => {
+  it("searches once, 500 ms after typing 'ada', and calls onChange on a pick", async () => {
     const { user, onChange } = setup();
     await user.type(screen.getByLabelText("Search by name or email"), "ada");
-    await advance(200);
+    await advance(400);
     expect(get).not.toHaveBeenCalled();
     await advance(150);
     expect(get).toHaveBeenCalledTimes(1);
@@ -129,9 +136,30 @@ describe("PrincipalPicker", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: /Ada Lovelace/ })
+      await screen.findByRole("option", { name: /Ada Lovelace/ })
     );
     expect(onChange).toHaveBeenCalledWith({ type: "user", id: ID });
+  });
+
+  it("says why when the search fails", async () => {
+    get.mockRejectedValue({
+      status: 502,
+      code: "tereo_unreachable",
+      message: "Tereo could not be reached",
+    });
+    const { user } = setup();
+    await user.type(screen.getByLabelText("Search by name or email"), "ada");
+    await advance(550);
+    expect(
+      await screen.findByText("Tereo could not be reached")
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the paste-an-id field behind a link while search is offered", () => {
+    setup();
+    expect(screen.queryByLabelText("Or paste an id")).not.toBeInTheDocument();
+    openPaste();
+    expect(pasteBox()).toBeInTheDocument();
   });
 
   it("looks up a pasted UUID with the chosen type, selects it, and clears the field", async () => {
@@ -142,6 +170,7 @@ describe("PrincipalPicker", () => {
     });
     const { user, onChange } = setup();
     await user.click(screen.getByRole("button", { name: "Groups" }));
+    openPaste();
     paste(ID);
     await advance(50);
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
@@ -164,6 +193,7 @@ describe("PrincipalPicker", () => {
       },
     });
     setup();
+    openPaste();
     paste(ID);
     await advance(50);
     expect(await screen.findByText(/orphaned/i)).toBeInTheDocument();
@@ -179,6 +209,7 @@ describe("PrincipalPicker", () => {
       message: "down",
     });
     const { user, onChange } = setup();
+    openPaste();
     paste(ID);
     await advance(50);
     expect(await screen.findByText(/name unavailable/i)).toBeInTheDocument();
@@ -193,6 +224,7 @@ describe("PrincipalPicker", () => {
       message: "You may not look this up",
     });
     setup();
+    openPaste();
     paste(ID);
     await advance(50);
     expect(
@@ -211,6 +243,7 @@ describe("PrincipalPicker", () => {
       message: "zeteo could not be reached",
     });
     const { user, onChange } = setup();
+    openPaste();
     paste(ID);
     await advance(50);
     expect(await screen.findByText(/name unavailable/i)).toBeInTheDocument();

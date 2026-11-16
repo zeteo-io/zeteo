@@ -27,6 +27,7 @@ const Where = () => {
   return (
     <>
       <p data-testid="where">{location.search}</p>
+      <p data-testid="path">{location.pathname}</p>
       <button onClick={() => navigate(-1)}>Back</button>
     </>
   );
@@ -63,6 +64,18 @@ const lookupAnswer = async (_url: string, body: { principals: unknown[] }) => ({
     })),
   },
 });
+
+// Source and Table are kosmeo TableFilters menus: a button, then a checkbox.
+const chooseFilter = async (
+  user: ReturnType<typeof userEvent.setup>,
+  title: string,
+  option: string
+) => {
+  await user.click(
+    await screen.findByRole("button", { name: new RegExp(`^${title}`) })
+  );
+  await user.click(await screen.findByRole("checkbox", { name: option }));
+};
 
 const grantParams = () =>
   get.mock.calls
@@ -101,7 +114,9 @@ describe("GrantsPage", () => {
 
   it("counts the columns of a partial grant and flags a missing table", async () => {
     renderWithProviders(<GrantsPage />);
-    const row = (await screen.findByText("public.gone")).closest("tr")!;
+    const row = (
+      await screen.findByRole("link", { name: "public.gone" })
+    ).closest("tr")!;
     expect(row).toHaveTextContent("2 columns");
     expect(row).toHaveTextContent(/missing/i);
   });
@@ -123,7 +138,9 @@ describe("GrantsPage", () => {
 
   it("shows one badge for a grant whose principal both sources call orphaned", async () => {
     renderWithProviders(<GrantsPage />);
-    const row = (await screen.findByText("public.gone")).closest("tr")!;
+    const row = (
+      await screen.findByRole("link", { name: "public.gone" })
+    ).closest("tr")!;
     await waitFor(() => expect(post).toHaveBeenCalled());
     expect(within(row).getAllByText(/orphaned/i)).toHaveLength(1);
   });
@@ -160,17 +177,71 @@ describe("GrantsPage", () => {
     const user = userEvent.setup();
     renderWithProviders(<GrantsPage />);
     await screen.findByText("Ada Lovelace");
-    const table = screen.getByLabelText("Table");
-    expect(table).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: /^Table/ })
+    ).not.toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Source"), SOURCE_ID);
+    await chooseFilter(user, "Source", "Orders DB");
     await waitFor(() =>
       expect(grantParams().some((p) => p.source_id === SOURCE_ID)).toBe(true)
     );
-    await waitFor(() => expect(screen.getByLabelText("Table")).toBeEnabled());
-    await user.selectOptions(screen.getByLabelText("Table"), ORDERS_ID);
+    await chooseFilter(user, "Table", "public.orders");
     await waitFor(() =>
       expect(grantParams().some((p) => p.table_id === ORDERS_ID)).toBe(true)
+    );
+  });
+
+  it("names the sources in the filter, archived ones marked", async () => {
+    const user = userEvent.setup();
+    get.mockImplementation(async (url: string) => {
+      if (url === "/v1/sources") {
+        return {
+          data: {
+            data: [
+              makeSource(),
+              makeSource({
+                id: "7a1d0b0e-1c7a-4a53-9d0e-6a3b1f2c4d66",
+                name: "Legacy DB",
+                archived_at: "2026-11-02T10:00:00.000Z",
+              }),
+            ],
+            next_cursor: null,
+          },
+        };
+      }
+      return { data: { data: [userGrant], next_cursor: null } };
+    });
+    renderWithProviders(<GrantsPage />);
+    await screen.findByText("Ada Lovelace");
+    await user.click(await screen.findByRole("button", { name: /^Source/ }));
+    expect(screen.getByRole("checkbox", { name: "Orders DB" })).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Legacy DB (archived)" })
+    ).toBeVisible();
+  });
+
+  it("drops a table from the address without a source once a source is chosen", async () => {
+    const user = userEvent.setup();
+    renderPage(`/grants?table_id=${ORDERS_ID}`);
+    await screen.findByRole("button", { name: "Clear table" });
+    await chooseFilter(user, "Source", "Orders DB");
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(
+        `?source_id=${SOURCE_ID}`
+      )
+    );
+    expect(screen.getByTestId("where").textContent).not.toContain("table_id");
+    expect(grantParams().at(-1)).not.toHaveProperty("table_id");
+  });
+
+  it("drops the table when the source changes", async () => {
+    const user = userEvent.setup();
+    renderPage(`/grants?source_id=${SOURCE_ID}&table_id=${ORDERS_ID}`);
+    await screen.findByText("Ada Lovelace");
+    await user.click(await screen.findByRole("button", { name: /^Source/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Orders DB" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
     );
   });
 
@@ -180,7 +251,9 @@ describe("GrantsPage", () => {
       route: `/grants?principal_type=user&principal_id=${USER_ID}`,
     });
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Clear principal" }));
+    await user.click(
+      screen.getByRole("button", { name: "Clear person or group" })
+    );
     await waitFor(() =>
       expect(grantParams().at(-1)).not.toHaveProperty("principal_id")
     );
@@ -188,12 +261,8 @@ describe("GrantsPage", () => {
 
   it("offers Edit and Delete rows with zeteo.grants.write, and deletes after confirming", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<GrantsPage />);
+    renderPage();
     const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
-    expect(within(row).getByRole("link", { name: "Edit" })).toHaveAttribute(
-      "href",
-      `/grants/${GRANT_ID}/edit`
-    );
     expect(
       screen.getByRole("button", { name: "New grant" })
     ).toBeInTheDocument();
@@ -202,6 +271,10 @@ describe("GrantsPage", () => {
     await waitFor(() =>
       expect(del).toHaveBeenCalledWith(`/v1/grants/${GRANT_ID}`)
     );
+    await user.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(screen.getByTestId("path")).toHaveTextContent(
+      `/grants/${GRANT_ID}/edit`
+    );
   });
 
   it("has no write control without zeteo.grants.write", async () => {
@@ -209,7 +282,7 @@ describe("GrantsPage", () => {
     renderWithProviders(<GrantsPage />);
     await screen.findByText("Ada Lovelace");
     expect(
-      screen.queryByRole("link", { name: "Edit" })
+      screen.queryByRole("button", { name: "Edit" })
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Delete" })
@@ -276,7 +349,9 @@ describe("GrantsPage", () => {
       await waitFor(() =>
         expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
       );
-      expect(screen.queryByRole("button", { name: "Clear all" })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: "Clear person or group" })
+      ).toBeNull();
     });
 
     it("keeps a table without a source, shows it, and lets it be cleared", async () => {
@@ -284,37 +359,42 @@ describe("GrantsPage", () => {
       renderPage(`/grants?table_id=${ORDERS_ID}`);
       await screen.findByText("Ada Lovelace");
       expect(grantParams()[0]).toMatchObject({ table_id: ORDERS_ID });
-      expect(
-        screen.getByText("public.orders", { selector: "code" })
-      ).toBeInTheDocument();
+      const chip = (
+        await screen.findByRole("button", { name: "Clear table" })
+      ).closest(".z-filter-chip")!;
+      expect(chip).toHaveTextContent("Table: public.orders");
+      expect(screen.getByTestId("where")).toHaveTextContent(
+        `?table_id=${ORDERS_ID}`
+      );
       await user.click(screen.getByRole("button", { name: "Clear table" }));
       await waitFor(() =>
         expect(grantParams().at(-1)).not.toHaveProperty("table_id")
       );
     });
 
-    it("shows every active filter with its own clear, and Clear all, without zeteo.sources.read", async () => {
+    it("shows every active filter as a chip with its own clear, without zeteo.sources.read", async () => {
       held.permissions = ["zeteo.grants.read"];
       const user = userEvent.setup();
       renderPage(
         `/grants?source_id=${SOURCE_ID}&table_id=${ORDERS_ID}&principal_type=user&principal_id=${USER_ID}`
       );
       await screen.findAllByText("Ada Lovelace");
-      const chips = screen.getByRole("list", { name: "Active filters" });
-      expect(
-        within(chips).getByText("orders", { selector: "code" })
-      ).toBeInTheDocument();
-      expect(
-        within(chips).getByText("public.orders", { selector: "code" })
-      ).toBeInTheDocument();
-      expect(within(chips).getByText("Ada Lovelace")).toBeInTheDocument();
+      const chip = (name: string) =>
+        screen.getByRole("button", { name }).closest(".z-filter-chip")!;
+      expect(chip("Clear source")).toHaveTextContent("Source: orders");
+      expect(chip("Clear table")).toHaveTextContent("Table: public.orders");
+      await waitFor(() =>
+        expect(chip("Clear person or group")).toHaveTextContent("Ada Lovelace")
+      );
       await user.click(screen.getByRole("button", { name: "Clear source" }));
       await waitFor(() =>
         expect(screen.getByTestId("where").textContent).not.toMatch(
           /source_id|table_id/
         )
       );
-      await user.click(screen.getByRole("button", { name: "Clear all" }));
+      await user.click(
+        screen.getByRole("button", { name: "Clear person or group" })
+      );
       await waitFor(() =>
         expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
       );
@@ -347,7 +427,7 @@ describe("GrantsPage", () => {
       expect(screen.queryByText("No grants yet.")).toBeNull();
 
       const user = userEvent.setup();
-      await user.click(screen.getByRole("button", { name: "Clear all" }));
+      await user.click(screen.getByRole("button", { name: "Clear table" }));
       expect(await screen.findByText("No grants yet.")).toBeInTheDocument();
       expect(screen.queryByText("No grant matches these filters.")).toBeNull();
     });
@@ -356,10 +436,7 @@ describe("GrantsPage", () => {
       const user = userEvent.setup();
       renderPage();
       await screen.findByText("Ada Lovelace");
-      await user.selectOptions(
-        await screen.findByLabelText("Source"),
-        SOURCE_ID
-      );
+      await chooseFilter(user, "Source", "Orders DB");
       await waitFor(() =>
         expect(screen.getByTestId("where")).toHaveTextContent(
           `source_id=${SOURCE_ID}`

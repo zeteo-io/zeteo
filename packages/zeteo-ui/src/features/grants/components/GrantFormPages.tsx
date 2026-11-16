@@ -9,13 +9,9 @@ import { useGrant } from "../api/useGrant";
 import { GrantForm } from "./GrantForm";
 
 export const GrantNewPage = () => (
-  <>
-    <PageHeader
-      title="New grant"
-      subtitle="Let a user or group query a table"
-    />
-    <GrantForm />
-  </>
+  <div className="z-form-page">
+    <GrantForm title="New grant" />
+  </div>
 );
 
 export const GrantEditPage = () => {
@@ -47,19 +43,20 @@ const GrantEdit = ({ grantId }: { grantId: string }) => {
     );
   }
   return (
-    <>
-      <PageHeader
+    <div className="z-form-page">
+      <GrantForm
+        grant={grant}
         title="Edit grant"
-        actions={
+        extraActions={
           <GrantDeleteButton
             grant={grant}
+            size="sm"
             label="Delete grant"
             confirmLabel="Remove grant"
             onDeleted={() => navigate("/grants")}
           />
         }
       />
-      <GrantForm grant={grant} />
-    </>
+    </div>
   );
 };

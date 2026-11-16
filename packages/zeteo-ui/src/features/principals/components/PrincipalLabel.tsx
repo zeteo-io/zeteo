@@ -33,7 +33,7 @@ export const PrincipalLabelView = ({
       <span>
         <code>{refValue.id}</code>{" "}
         <Badge variant="warning" size="sm">
-          orphaned
+          Orphaned
         </Badge>
       </span>
     );
@@ -46,7 +46,7 @@ export const PrincipalLabelView = ({
         <>
           {" "}
           <Badge variant="secondary" size="sm">
-            inactive
+            Inactive
           </Badge>
         </>
       )}

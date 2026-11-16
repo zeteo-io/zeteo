@@ -1,9 +1,23 @@
-import { usePrincipalNames, type PrincipalRef } from "../api/usePrincipalNames";
-import { Alert, Badge, Button, Input, Spinner } from "@kosmeo-ui/react";
+import { faUser, faUserGroup } from "@fortawesome/free-solid-svg-icons";
 import { PrincipalLabel, PrincipalLabelView } from "./PrincipalLabel";
-import { usePrincipalSearch } from "../api/usePrincipalSearch";
+import { principalSearchQuery } from "../api/usePrincipalSearch";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import type { ApiError } from "@/lib/api";
+import {
+  usePrincipalNames,
+  type Principal,
+  type PrincipalRef,
+} from "../api/usePrincipalNames";
+import {
+  Alert,
+  Badge,
+  Button,
+  Input,
+  SearchList,
+  Spinner,
+} from "@kosmeo-ui/react";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -72,105 +86,134 @@ export const PrincipalPicker = ({
 }: PrincipalPickerProps) => {
   const [chosenType, setType] = useState<"user" | "group">(types[0]);
   const type = types.includes(chosenType) ? chosenType : types[0];
-  const [query, setQuery] = useState("");
   const [pasted, setPasted] = useState("");
   // kosmeo's Input is uncontrolled: a new key empties the field.
   const [pasteKey, setPasteKey] = useState(0);
-  const search = usePrincipalSearch(type, searchable ? query : "");
+  // The chosen principal's name, so the search field can show it.
+  const chosen = usePrincipalNames(value ? [value] : []);
+  // One hook per kind: SearchList calls it on every render.
+  const [searchError, setSearchError] = useState<ApiError | null>(null);
+  const searchQuery = useMemo(
+    () => principalSearchQuery(type, setSearchError),
+    [type]
+  );
   const pastedId = pasted.trim().toLowerCase();
+  // Pasting an id is the way to pick a service account; it stays out of
+  // the way unless asked for, or unless there is no name search.
+  const [pasting, setPasting] = useState(!searchable);
 
   return (
-    <div>
-      {value && (
-        <p>
+    <div className="z-picker">
+      {value && !searchable && (
+        <p className="z-picker-selected">
           Selected: <PrincipalLabel refValue={value} />
         </p>
       )}
       {types.length > 1 && (
-        <div role="group" aria-label="Kind of principal">
+        <div
+          className="z-segmented"
+          role="group"
+          aria-label="Kind of principal"
+        >
           {types.map((kind) => (
-            <Button
+            <button
               key={kind}
-              size="sm"
-              fullWidth={false}
-              variant={type === kind ? "primary" : "light"}
+              type="button"
+              className="z-segmented-option"
               aria-pressed={type === kind}
               onClick={() => setType(kind)}
             >
+              <FontAwesomeIcon icon={kind === "user" ? faUser : faUserGroup} />
               {kind === "user" ? "Users" : "Groups"}
-            </Button>
+            </button>
           ))}
         </div>
       )}
 
       {searchable && (
+        <SearchList<Principal>
+          key={type}
+          label={
+            type === "user" ? "Search by name or email" : "Search by group name"
+          }
+          placeholder={
+            type === "user"
+              ? "Type 3 or more letters of a name or email"
+              : "Type 3 or more letters of a group name"
+          }
+          queryFn={searchQuery}
+          searchKey="q"
+          labelKey="name"
+          max={10}
+          longDropDown
+          value={
+            value && value.type === type ? (chosen.get(value) ?? null) : null
+          }
+          renderOption={(p) => ({
+            label: p.name ?? p.id,
+            node: (
+              <span className="z-picker-option">
+                <FontAwesomeIcon
+                  className="z-principal-icon"
+                  icon={p.type === "group" ? faUserGroup : faUser}
+                />
+                <span>{p.name ?? p.id}</span>
+                {p.email && (
+                  <span className="z-principal-email">{p.email}</span>
+                )}
+                {p.status === "inactive" && (
+                  <Badge size="sm" variant="secondary">
+                    Inactive
+                  </Badge>
+                )}
+              </span>
+            ),
+          })}
+          onSelect={(p) => p && onChange({ type: p.type, id: p.id })}
+        />
+      )}
+      {searchable && <ErrorNotice error={searchError} />}
+
+      {searchable && !pasting ? (
+        <Button
+          size="sm"
+          variant="link"
+          fullWidth={false}
+          onClick={() => setPasting(true)}
+        >
+          Paste an id instead (for a service account)
+        </Button>
+      ) : (
         <>
           <Input
-            label={
-              type === "user"
-                ? "Search by name or email"
-                : "Search by group name"
+            key={pasteKey}
+            label="Or paste an id"
+            placeholder="A user, group or service account id"
+            helperText={
+              types.length > 1
+                ? `Looked up as a ${type}; switch above for a group.`
+                : `Looked up as a ${type}.`
             }
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => setPasted(e.target.value)}
             autoComplete="off"
           />
-          {search.isLoading && <Spinner size="sm" />}
-          <ErrorNotice error={search.error} />
-          {search.results.length > 0 && (
-            <ul>
-              {search.results.map((p) => (
-                <li key={`${p.type}:${p.id}`}>
-                  <Button
-                    variant="light"
-                    fullWidth
-                    align="left"
-                    onClick={() => onChange({ type: p.type, id: p.id })}
-                  >
-                    {p.name}
-                    {p.email ? ` (${p.email})` : ""}
-                    {p.status === "inactive" && (
-                      <>
-                        {" "}
-                        <Badge size="sm" variant="secondary">
-                          inactive
-                        </Badge>
-                      </>
-                    )}
-                  </Button>
-                </li>
-              ))}
-            </ul>
+          {pasted !== "" && !UUID.test(pastedId) && (
+            <Alert variant="warning" size="sm">
+              That is not an id (a UUID).
+            </Alert>
+          )}
+          {UUID.test(pastedId) && (
+            <PastedId
+              key={`${type}:${pastedId}`}
+              refValue={{ type, id: pastedId }}
+              onChange={(selected) => {
+                onChange(selected);
+                setPasted("");
+                setPasteKey((k) => k + 1);
+              }}
+            />
           )}
         </>
-      )}
-
-      <Input
-        key={pasteKey}
-        label="Or paste an id"
-        placeholder="A user, group or service account id"
-        helperText={
-          types.length > 1
-            ? `Looked up as a ${type}; switch above for a group.`
-            : `Looked up as a ${type}.`
-        }
-        onChange={(e) => setPasted(e.target.value)}
-        autoComplete="off"
-      />
-      {pasted !== "" && !UUID.test(pastedId) && (
-        <Alert variant="warning" size="sm">
-          That is not an id (a UUID).
-        </Alert>
-      )}
-      {UUID.test(pastedId) && (
-        <PastedId
-          key={`${type}:${pastedId}`}
-          refValue={{ type, id: pastedId }}
-          onChange={(selected) => {
-            onChange(selected);
-            setPasted("");
-            setPasteKey((k) => k + 1);
-          }}
-        />
       )}
     </div>
   );

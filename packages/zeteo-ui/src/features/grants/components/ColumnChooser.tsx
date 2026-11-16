@@ -28,6 +28,8 @@ interface ColumnChooserProps {
   unavailable?: string;
   /** The columns are still being read: the checklist waits for them. */
   loading?: boolean;
+  /** False when the page offers its own all-columns switch. */
+  showMode?: boolean;
 }
 
 /** Whether a choice can be sent: every column, or 1 to 500 columns. */
@@ -40,26 +42,40 @@ export const ColumnChooser = ({
   columns,
   unavailable,
   loading = false,
+  showMode = true,
 }: ColumnChooserProps) => {
   const live = columns.filter((c) => !c.missing);
   const chosenCount = value.selected.length;
   return (
     <div>
-      <RadioGroup
-        label="Columns"
-        name="grant-columns"
-        value={value.allColumns ? "all" : "some"}
-        onChange={(v) => onChange({ ...value, allColumns: v === "all" })}
-        options={[
-          { value: "all", label: "All columns" },
-          { value: "some", label: "Choose columns" },
-        ]}
-      />
+      {showMode && (
+        <RadioGroup
+          label="Columns"
+          name="grant-columns"
+          value={value.allColumns ? "all" : "some"}
+          onChange={(v) => onChange({ ...value, allColumns: v === "all" })}
+          options={[
+            { value: "all", label: "All columns" },
+            { value: "some", label: "Choose columns" },
+          ]}
+        />
+      )}
       {unavailable && <Alert variant="warning">{unavailable}</Alert>}
       {!value.allColumns && loading && <Spinner size="md" />}
       {!value.allColumns && !loading && (
         <>
           <div className="z-grant-columns-tools">
+            {chosenCount === 0 && (
+              <span role="alert" className="z-grant-columns-note">
+                Choose at least one column, or grant all columns.
+              </span>
+            )}
+            {chosenCount > MAX_GRANT_COLUMNS && (
+              <span role="alert" className="z-grant-columns-note">
+                A grant lists at most {MAX_GRANT_COLUMNS} columns; grant all
+                columns instead.
+              </span>
+            )}
             <Button
               size="sm"
               variant="secondary"
@@ -85,9 +101,6 @@ export const ColumnChooser = ({
             >
               Select none
             </Button>
-            <span>
-              {chosenCount} of {columns.length} columns chosen
-            </span>
           </div>
           <CheckboxGroup
             name="grant-column-ids"
@@ -107,17 +120,6 @@ export const ColumnChooser = ({
               label: c.missing ? `${c.name} (missing)` : c.name,
             }))}
           />
-          {chosenCount === 0 && (
-            <p role="alert">
-              Choose at least one column, or grant all columns.
-            </p>
-          )}
-          {chosenCount > MAX_GRANT_COLUMNS && (
-            <p role="alert">
-              A grant lists at most {MAX_GRANT_COLUMNS} columns; grant all
-              columns instead.
-            </p>
-          )}
         </>
       )}
     </div>

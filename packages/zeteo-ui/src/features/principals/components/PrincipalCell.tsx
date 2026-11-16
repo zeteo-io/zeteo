@@ -1,4 +1,6 @@
+import { faUser, faUserGroup } from "@fortawesome/free-solid-svg-icons";
 import type { PrincipalStatus, PrincipalType } from "../api/types";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { usePrincipalNames } from "../api/usePrincipalNames";
 import { Badge } from "@kosmeo-ui/react";
 
@@ -33,11 +35,19 @@ export const PrincipalCell = ({
           : null;
 
   return (
-    <span>
+    <span className="z-principal-cell">
+      <FontAwesomeIcon
+        icon={ref.type === "group" ? faUserGroup : faUser}
+        className="z-principal-icon"
+        title={ref.type === "group" ? "Group" : "User"}
+      />
       {principal?.name ? <span>{principal.name}</span> : <code>{ref.id}</code>}
-      {principal?.email && <small> {principal.email}</small>}
-      <small> {ref.type}</small>
-      {!principal && unavailable && <small> name unavailable</small>}
+      {principal?.email && (
+        <span className="z-principal-email">{principal.email}</span>
+      )}
+      {!principal && unavailable && (
+        <span className="z-principal-email">name unavailable</span>
+      )}
       {badge && (
         <>
           {" "}

@@ -35,20 +35,20 @@ describe("PrincipalLabel", () => {
   it("flags an inactive one", () => {
     resolved({ status: "inactive" });
     render(<PrincipalLabel refValue={ref} />);
-    expect(screen.getByText("inactive")).toBeInTheDocument();
+    expect(screen.getByText("Inactive")).toBeInTheDocument();
   });
 
   it("shows an orphaned badge", () => {
     resolved({ name: null, email: null, status: "orphaned" });
     render(<PrincipalLabel refValue={ref} />);
-    expect(screen.getByText("orphaned")).toBeInTheDocument();
+    expect(screen.getByText("Orphaned")).toBeInTheDocument();
     expect(screen.getByText(ref.id)).toBeInTheDocument();
   });
 
   it("does not call an active principal without a name orphaned", () => {
     resolved({ name: null, email: null, status: "active" });
     render(<PrincipalLabel refValue={ref} />);
-    expect(screen.queryByText("orphaned")).not.toBeInTheDocument();
+    expect(screen.queryByText(/orphaned/i)).not.toBeInTheDocument();
     expect(screen.getByText(ref.id)).toBeInTheDocument();
   });
 
@@ -57,6 +57,6 @@ describe("PrincipalLabel", () => {
     render(<PrincipalLabel refValue={ref} />);
     expect(screen.getByText(ref.id)).toBeInTheDocument();
     expect(screen.getByText(/name unavailable/i)).toBeInTheDocument();
-    expect(screen.queryByText("orphaned")).not.toBeInTheDocument();
+    expect(screen.queryByText(/orphaned/i)).not.toBeInTheDocument();
   });
 });
