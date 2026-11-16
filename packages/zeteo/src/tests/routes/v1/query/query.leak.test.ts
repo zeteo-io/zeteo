@@ -163,12 +163,12 @@ describeEachEngine("POST /v1/query: leaks", (engine) => {
   });
 
   it("refuses a relation whose key is ungranted exactly as an invented one", async () => {
-    // The relation `customer` is keyed on orders.customer_id, not granted.
-    const ungranted = await query({ join: ["customer"], select: ["id"] });
+    // The relation `customers` is keyed on orders.customer_id, not granted.
+    const ungranted = await query({ join: ["customers"], select: ["id"] });
     const invented = await query({ join: ["zzqxwrel"], select: ["id"] });
     expect(ungranted.status).toBe(422);
     expect(ungranted.body.error).toBe("not_found_or_not_accessible");
-    expect(shapeOf(ungranted, "customer")).toEqual(
+    expect(shapeOf(ungranted, "customers")).toEqual(
       shapeOf(invented, "zzqxwrel")
     );
   });

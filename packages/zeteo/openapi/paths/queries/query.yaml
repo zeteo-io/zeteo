@@ -30,13 +30,13 @@
           example:
             source: sales-db
             from: orders
-            join: [customer]
+            join: [customers]
             select:
-              - customer.region
+              - customers.region
               - { bucket: month, column: created_at, as: month }
               - { sum: total, as: revenue }
             where: { status: { in: [paid, shipped] } }
-            groupBy: [customer.region, month]
+            groupBy: [customers.region, month]
             having: { revenue: { gt: 1000 } }
             orderBy: [{ revenue: desc }]
             limit: 1000
@@ -70,7 +70,8 @@
           The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
           for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
           `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-          `duplicate_output_name`, `join_parent_missing`; `too_many_parameters` (at path `[]`: the
+          `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's
+          `max_joins`); `too_many_parameters` (at path `[]`: the
           compiled query binds more values than the source's engine takes). A plan
           that references a column outside the grants (a planner fault, logged) is
           `not_found_or_not_accessible` with a fixed message and path `[]`.

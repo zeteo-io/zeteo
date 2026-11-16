@@ -15,6 +15,7 @@ export const ASPECTS = [
   "property",
   "postgres",
   "mssql",
+  "calc",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

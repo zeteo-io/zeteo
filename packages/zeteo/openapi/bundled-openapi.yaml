@@ -683,6 +683,54 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/sources/{sourceId}/relations/{relationId}:
+    patch:
+      tags:
+        - Catalogue
+      summary: Rename a relation
+      description: |
+        Renames a discovered or a declared relation. The name follows the declared-name rules and
+        must be free on the relation's from table, whether the other relation is discovered or
+        declared. A discovered relation renamed this way keeps its name across refreshes; the others
+        take the name the naming rules give them at every refresh. An audit entry
+        `zeteo.relation.renamed` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request`, `404 not_found` (also a relation of another source),
+        `409 relation_name_taken`, `409 source_archived`.
+      operationId: updateRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/RelationIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRelationRequest'
+      responses:
+        '200':
+          description: The renamed relation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
     delete:
       tags:
         - Catalogue
@@ -1323,9 +1371,9 @@ paths:
               source: sales-db
               from: orders
               join:
-                - customer
+                - customers
               select:
-                - customer.region
+                - customers.region
                 - bucket: month
                   column: created_at
                   as: month
@@ -1337,7 +1385,7 @@ paths:
                     - paid
                     - shipped
               groupBy:
-                - customer.region
+                - customers.region
                 - month
               having:
                 revenue:
@@ -1378,7 +1426,8 @@ paths:
             The query cannot be run as written - `not_found_or_not_accessible` (at path `["source"]`
             for a source), `missing_in_source`, `column_not_queryable`, `invalid_operator`,
             `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
-            `duplicate_output_name`, `join_parent_missing`; `too_many_parameters` (at path `[]`: the
+            `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's
+            `max_joins`); `too_many_parameters` (at path `[]`: the
             compiled query binds more values than the source's engine takes). A plan
             that references a column outside the grants (a planner fault, logged) is
             `not_found_or_not_accessible` with a fixed message and path `[]`.
@@ -2050,6 +2099,7 @@ components:
         - schemas
         - timeout_ms
         - row_cap
+        - max_joins
         - export_enabled
         - export_row_cap
         - query_concurrency
@@ -2091,6 +2141,11 @@ components:
           type: integer
           minimum: 1
           maximum: 50000
+        max_joins:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: The most joins one query on this source may use
         export_enabled:
           type: boolean
         export_row_cap:
@@ -2191,6 +2246,12 @@ components:
           minimum: 1
           maximum: 50000
           default: 50000
+        max_joins:
+          type: integer
+          minimum: 1
+          maximum: 8
+          default: 4
+          description: The most joins one query on this source may use
         export_enabled:
           type: boolean
           default: false
@@ -2249,6 +2310,11 @@ components:
           type: integer
           minimum: 1
           maximum: 50000
+        max_joins:
+          type: integer
+          minimum: 1
+          maximum: 8
+          description: The most joins one query on this source may use
         export_enabled:
           type: boolean
         export_row_cap:
@@ -2991,8 +3057,8 @@ components:
           description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
         join:
           type: array
-          maxItems: 4
-          description: Relations to join, by name; one reached through another is written `customer.account`
+          maxItems: 8
+          description: Relations to join, by name, at most the source's `max_joins`; one reached through another is written `order_lines.products`
           items:
             oneOf:
               - $ref: '#/components/schemas/Path'
@@ -3125,6 +3191,7 @@ components:
             - invalid_having
             - duplicate_output_name
             - join_parent_missing
+            - too_many_joins
             - too_many_parameters
         error_description:
           type: string
@@ -3365,6 +3432,7 @@ components:
             - default_rows
             - max_rows
             - timeout_ms
+            - max_joins
             - export
           properties:
             default_rows:
@@ -3375,6 +3443,9 @@ components:
               description: The most a `limit` may ask for
             timeout_ms:
               type: integer
+            max_joins:
+              type: integer
+              description: The most joins a query on this source may use
             export:
               type: object
               description: What `POST /v1/export` may take from this source; it also needs `zeteo.data.export`
@@ -3403,6 +3474,15 @@ components:
           description: Ordered by slug
           items:
             $ref: '#/components/schemas/DiscoveredSource'
+    RenameRelationRequest:
+      type: object
+      required:
+        - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
     GrantColumnIds:
       type: array
       minItems: 1
@@ -3416,13 +3496,110 @@ components:
       type: string
       description: |
         `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
-        its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+        its relation path (`customers.region`, `order_lines.products.category`). Segments are 1-128 characters.
     Alias:
       type: string
       pattern: ^[a-z][a-z0-9_]{0,62}$
       description: An output name for a select item
+    CalcExpr:
+      description: |
+        An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
+        with exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a
+        query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
+        `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
+        one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;
+        `round` gives exactly the places asked, half away from zero. Aggregates do not nest.
+      oneOf:
+        - $ref: '#/components/schemas/Path'
+        - type: number
+        - type: object
+          additionalProperties: false
+          required:
+            - value
+          properties:
+            value:
+              type: string
+              maxLength: 1000
+              description: A text literal; a bare string is a path
+        - $ref: '#/components/schemas/CalcOperation'
+    CalcOperation:
+      type: object
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties: false
+      description: Exactly one of these keys
+      properties:
+        add:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        mul:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        sub:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        div:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        abs:
+          $ref: '#/components/schemas/CalcExpr'
+        round:
+          description: An expression (0 places), or `[expression, places]` with places an integer 0 to 10
+          oneOf:
+            - $ref: '#/components/schemas/CalcExpr'
+            - type: array
+              minItems: 2
+              maxItems: 2
+              prefixItems:
+                - $ref: '#/components/schemas/CalcExpr'
+                - type: integer
+                  minimum: 0
+                  maximum: 10
+        concat:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        lower:
+          $ref: '#/components/schemas/CalcExpr'
+        upper:
+          $ref: '#/components/schemas/CalcExpr'
+        coalesce:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        sum:
+          $ref: '#/components/schemas/CalcExpr'
+        avg:
+          $ref: '#/components/schemas/CalcExpr'
+        min:
+          $ref: '#/components/schemas/CalcExpr'
+        max:
+          $ref: '#/components/schemas/CalcExpr'
+        count:
+          type: string
+          description: A path, or `"*"`
+        countDistinct:
+          $ref: '#/components/schemas/Path'
     SelectItem:
-      description: A column path, or one aggregate or date bucket with an optional `as`
+      description: |
+        A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
+        `sum`, `avg`, `min` and `max` over an expression, and `calc`, need `as`.
       oneOf:
         - $ref: '#/components/schemas/Path'
         - type: object
@@ -3450,36 +3627,40 @@ components:
             - sum
           properties:
             sum:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - avg
           properties:
             avg:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - min
           properties:
             min:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
             - max
           properties:
             max:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
+          description: A path, or an expression, in which case `as` is required
         - type: object
           additionalProperties: false
           required:
@@ -3499,6 +3680,20 @@ components:
               $ref: '#/components/schemas/Path'
             as:
               $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - calc
+            - as
+          properties:
+            calc:
+              $ref: '#/components/schemas/CalcExpr'
+            as:
+              $ref: '#/components/schemas/Alias'
+          description: |
+            A calculation. Row-level when it holds no aggregate (computed per row, nameable in `where`
+            and `groupBy`); group-level when every column sits inside an aggregate (nameable in `having`
+            and `orderBy`). A mix of the two is refused (`invalid_grouping`).
     Filter:
       type: object
       description: |

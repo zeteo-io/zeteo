@@ -13,6 +13,7 @@ export const UpdateSourceSchema = z
     allow_writable_login: SourceFieldsShape.allow_writable_login.optional(),
     timeout_ms: SourceFieldsShape.timeout_ms.optional(),
     row_cap: SourceFieldsShape.row_cap.optional(),
+    max_joins: SourceFieldsShape.max_joins.optional(),
     export_enabled: SourceFieldsShape.export_enabled.optional(),
     export_row_cap: SourceFieldsShape.export_row_cap.optional(),
     query_concurrency: SourceFieldsShape.query_concurrency.optional(),

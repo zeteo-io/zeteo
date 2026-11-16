@@ -188,6 +188,34 @@ describe.each(ENGINES)("compileSql ($dialect.name)", (engine) => {
       ]);
     });
 
+    it("binds a calculation's text literals and writes none into the text", () => {
+      const hostile = "'); drop table x;--";
+      const { sql, parameters } = compile({
+        select: [
+          {
+            calc: { concat: [columns.quote, { value: hostile }] },
+            as: "x",
+          },
+          {
+            calc: {
+              lower: { concat: [{ value: HOSTILE_VALUES[2] }, columns.quote] },
+            },
+            as: "y",
+          },
+        ],
+        orderBy: [],
+      });
+      const rest = withoutIdentifiers(sql);
+      expect(rest).not.toMatch(/drop|DROP|pg_sleep/);
+      expect(rest).not.toContain("');");
+      expect(sql.match(engine.placeholders)).toHaveLength(parameters.length);
+      expect(parameters).toEqual([
+        engine.text(hostile),
+        engine.text(HOSTILE_VALUES[2]!),
+        ...engine.page,
+      ]);
+    });
+
     it("escapes %, _ and the escape character in a contains value", () => {
       const { parameters } = compile({
         select: [columns.quote],

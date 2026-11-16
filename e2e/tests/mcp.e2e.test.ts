@@ -98,8 +98,8 @@ describe("MCP through Tereo's sign-in", () => {
         arguments: {
           source: e2e.source.slug,
           from: "orders",
-          join: ["customer"],
-          select: ["id", "customer.name"],
+          join: ["customers"],
+          select: ["id", "customers.name"],
           where: { status: { eq: "paid" } },
           orderBy: [{ id: "asc" }],
         },
@@ -115,6 +115,35 @@ describe("MCP through Tereo's sign-in", () => {
         [1, "Ada"],
         [3, "Brook"],
         [5, "Cyd"],
+      ]);
+
+      const average = await client.callTool({
+        name: "query",
+        arguments: {
+          source: e2e.source.slug,
+          from: "orders",
+          join: ["customers"],
+          select: [
+            "customers.region",
+            {
+              calc: { round: [{ div: [{ sum: "total" }, { count: "*" }] }, 2] },
+              as: "average_order",
+            },
+          ],
+          groupBy: ["customers.region"],
+          orderBy: [{ "customers.region": "asc" }],
+        },
+      });
+      expect(average.isError).not.toBe(true);
+      const averageText = (
+        average.content as Array<{ type: string; text?: string }>
+      )
+        .filter((c) => c.type === "text")
+        .map((c) => c.text)
+        .join("\n");
+      expect((JSON.parse(averageText) as { rows: unknown[][] }).rows).toEqual([
+        ["north", "127.69"],
+        ["south", "42.00"],
       ]);
     } finally {
       await client.close();

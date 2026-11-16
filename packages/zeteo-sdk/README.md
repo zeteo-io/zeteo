@@ -138,13 +138,13 @@ throws. A 401 on the service's token makes the client fetch a new token and repe
 const result = await zeteo.query.run({
   source: "sales-db",
   from: "orders",
-  join: ["customer"],
+  join: ["customers"],
   select: [
-    "customer.region",
+    "customers.region",
     { sum: "total", as: "revenue" },
   ],
   where: { status: { in: ["paid", "shipped"] } },
-  groupBy: ["customer.region"],
+  groupBy: ["customers.region"],
   orderBy: [{ revenue: "desc" }],
   limit: 100,
 });

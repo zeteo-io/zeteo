@@ -11,7 +11,7 @@ import {
   type VisibleCatalog,
 } from "../../../grants/visibleCatalog.js";
 
-// A shop: customers, orders, order_lines, accounts and ledger (Postgres's
+// A shop: customers, orders, order_lines, products, categories, accounts and ledger (Postgres's
 // uuid, money, an enum and domains over them) in schema `shop`, plus
 // `billing.accounts`, so the bare name `accounts` is ambiguous while both are
 // visible. Ids are readable: a table's id is its key below, a column's is
@@ -60,6 +60,26 @@ const TABLES: Record<
       ["sku", "text", "text"],
       ["quantity", "number", "integer"],
       ["price", "number", "numeric(12,2)"],
+      ["product_id", "number", "integer"],
+    ],
+  },
+  products: {
+    schemaName: "shop",
+    name: "products",
+    columns: [
+      ["id", "number", "integer"],
+      ["name", "text", "text"],
+      ["category_id", "number", "integer"],
+      ["cost", "number", "numeric(12,2)"],
+      ["launched_on", "date", "date"],
+    ],
+  },
+  categories: {
+    schemaName: "shop",
+    name: "categories",
+    columns: [
+      ["id", "number", "integer"],
+      ["name", "text", "text"],
     ],
   },
   accounts: {
@@ -107,6 +127,8 @@ const RELATIONS: Array<
   ["orders", "customer", "customer_id", "customers", "id", false],
   ["orders", "lines", "id", "order_lines", "order_id", true],
   ["customers", "account", "account_id", "accounts", "id", false],
+  ["order_lines", "product", "product_id", "products", "id", false],
+  ["products", "category", "category_id", "categories", "id", false],
 ];
 
 export interface ShopOptions {
@@ -124,6 +146,8 @@ export interface ShopOptions {
   uniqueNames?: boolean;
   /** Whose type names `nativeType` holds; Postgres's unless SQL Server's are asked for. */
   engine?: "postgres" | "mssql";
+  /** The source's join limit; 4 unless given. */
+  maxJoins?: number;
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -152,6 +176,7 @@ const SOURCE = {
   type: "postgres",
   timeoutMs: 30_000,
   rowCap: 50_000,
+  maxJoins: 4,
 } as Source;
 
 /**
@@ -222,5 +247,13 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
       !hidden.has(tableId) && !hidden.has(columnId),
     tableAccess: () => "all",
   };
-  return buildVisibleCatalog(SOURCE, tables, columns, relations, access);
+  return buildVisibleCatalog(
+    options.maxJoins === undefined
+      ? SOURCE
+      : ({ ...SOURCE, maxJoins: options.maxJoins } as Source),
+    tables,
+    columns,
+    relations,
+    access
+  );
 };

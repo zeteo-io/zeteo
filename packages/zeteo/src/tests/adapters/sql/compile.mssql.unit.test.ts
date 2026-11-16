@@ -262,7 +262,8 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
       groupBy: ["total"],
     });
     for (const item of planned.select) {
-      if (item.kind === "bucket" || item.column === "*") throw new Error();
+      if (item.kind === "bucket" || item.kind === "calc" || item.column === "*")
+        throw new Error();
       item.column.nativeType = "money";
     }
     expect(
@@ -489,7 +490,8 @@ describe("compileSql on SQL Server: filters", () => {
         where: { created_at: { gte: "2026-01-01T00:00:00+02:00" } },
       });
       const filter = planned.where;
-      if (filter?.kind !== "compare") throw new Error("expected a comparison");
+      if (filter?.kind !== "compare" || !("nativeType" in filter.subject))
+        throw new Error("expected a comparison on a column");
       filter.subject.nativeType = nativeType;
       expect(
         compileSql(planned, mssqlDialect, { limit: 1001, offset: 0 })
@@ -533,7 +535,7 @@ describe("compileSql on SQL Server: filters", () => {
         planned.select[0]!.kind === "column" ? planned.select[0]!.column : null,
         planned.where?.kind === "match" ? planned.where.subject : null,
       ]) {
-        if (ref) ref.nativeType = nativeType;
+        if (ref && "nativeType" in ref) ref.nativeType = nativeType;
       }
       const name = "cast([t0].[name] as nvarchar(max))";
       expect(

@@ -47,6 +47,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `property`    | generated inputs checked against an invariant (fast-check)            |
   | `postgres`    | behaviour specific to the Postgres dialect                            |
   | `mssql`       | behaviour specific to the SQL Server dialect                          |
+  | `calc`        | calculations: expression operations, their types and levels           |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

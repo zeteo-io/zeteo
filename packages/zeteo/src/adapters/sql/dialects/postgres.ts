@@ -1,5 +1,6 @@
 import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { postgresBaseType } from "../../postgres/types.js";
+import { invalidValue } from "../../../engine/errors.js";
 import type { PlanValue } from "../types.js";
 import {
   DummyDriver,
@@ -17,6 +18,11 @@ const INT2 = 32_767n;
 const INT4 = 2_147_483_647n;
 const INT8 = 9_223_372_036_854_775_807n;
 const NAIVE_TIMESTAMP = /^timestamp(\(\d+\))?( without time zone)?$/;
+const DECIMAL_TEXT = /^-?(\d+)(?:\.(\d+))?$/;
+/** numeric's limits: digits before and after the point. */
+const NUMERIC_INTEGER_DIGITS = 131_072;
+const NUMERIC_SCALE = 16_383;
+const FLOATS = new Set(["real", "double precision", "float4", "float8"]);
 
 /** The largest magnitude an integer literal may have before the column's own integer type rejects it. */
 const integerLimit = (nativeType: string | undefined): bigint => {
@@ -24,6 +30,29 @@ const integerLimit = (nativeType: string | undefined): bigint => {
   if (nativeType === "integer" || nativeType === "int" || nativeType === "int4")
     return INT4;
   return INT8;
+};
+
+/**
+ * Refuses a number numeric cannot hold before the server sees it: the
+ * server's out-of-range error (22003) is left to mean overflow in the query's
+ * own arithmetic.
+ */
+const checkNumeric = (text: string): void => {
+  const m = DECIMAL_TEXT.exec(text);
+  if (
+    m &&
+    (m[1]!.replace(/^0+/, "").length > NUMERIC_INTEGER_DIGITS ||
+      (m[2]?.length ?? 0) > NUMERIC_SCALE)
+  ) {
+    throw invalidValue();
+  }
+};
+
+/** An integer literal fits bigint; anything else (a decimal, an exponent) is numeric. */
+const isBigint = (text: string): boolean => {
+  if (!INTEGER_TEXT.test(text)) return false;
+  const n = BigInt(text);
+  return n <= INT8 && n >= -INT8 - 1n;
 };
 
 /**
@@ -59,6 +88,7 @@ const value = (
   }
   if (type === "number") {
     const text = String(v);
+    checkNumeric(text);
     const outOfRange = (() => {
       if (!INTEGER_TEXT.test(text)) return true;
       const n = BigInt(text);
@@ -154,6 +184,30 @@ export const postgresDialect: SqlDialect = {
         return sql`max(${asText(arg, nativeType)})`;
     }
   },
+  // Every literal is cast: two bare parameters would leave the server no
+  // type to pick an operator or function by.
+  literal: (v, type) => {
+    if (type === "text") return sql`cast(${v} as text)`;
+    checkNumeric(v);
+    return isBigint(v) ? sql`cast(${v} as bigint)` : sql`cast(${v} as numeric)`;
+  },
+  text: asText,
+  isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),
+  // The casts match SQL Server's, which keeps only 8 places of this quotient
+  // and truncates them; rounding 8 or more places half away from zero to 6
+  // gives the same digits.
+  divide: (a, b) =>
+    sql`round(cast(${a} as numeric(38, 18)) / nullif(cast(${b} as numeric(38, 10)), 0), 6)`,
+  // numeric's round goes half away from zero and keeps exactly `places`.
+  round: (a, places) =>
+    sql`round(cast(${a} as numeric(38, 10)), ${sql.lit(places)})`,
+  // numeric prints no exponent and its own scale; a float through numeric
+  // has 15 significant digits, cut to 10 places with trailing zeros trimmed.
+  numberToText: (a, approximate) =>
+    approximate
+      ? sql`rtrim(rtrim(cast(round(cast(${a} as numeric), 10) as text), '0'), '.')`
+      : sql`cast(${a} as text)`,
+  concat: (parts) => sql`concat(${sql.join(parts)})`,
   output: (_item, expression) => expression,
   page: (qb, limit, offset) => qb.limit(limit).offset(offset),
 };

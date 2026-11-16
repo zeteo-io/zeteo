@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 31 operations as the description", () => {
+  it("lists the same 32 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(31);
-    expect(Object.keys(found)).toHaveLength(31);
+    expect(blocks).toBe(32);
+    expect(Object.keys(found)).toHaveLength(32);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -121,6 +121,10 @@ describe("operations against the API description", () => {
             to_columns: ["b"],
             to_many: false,
           }),
+      ],
+      [
+        "sources.relations.update",
+        (c) => c.sources.relations.update(ID, ID2, { name: "r" }),
       ],
       ["sources.relations.delete", (c) => c.sources.relations.delete(ID, ID2)],
       ["grants.list", (c) => c.grants.list()],

@@ -12,6 +12,8 @@ import {
   type QueryPath,
 } from "../../engine/errors.js";
 import type {
+  CalcExpr,
+  CalcOp,
   Comparison,
   Condition,
   Filter,
@@ -27,10 +29,12 @@ import type {
   PlanValue,
   QueryableType,
   ResolvedFilter,
+  ResolvedExpr,
   ResolvedJoin,
   ResolvedOrder,
   ResolvedSelect,
   SqlPlan,
+  WhereSubject,
 } from "./types.js";
 
 // Resolves a parsed query against the caller's visible catalogue. The planner
@@ -150,6 +154,33 @@ interface Resolved {
   ref: ColumnRef;
   reference: Reference;
 }
+
+/** A resolved calculation and what decides its level. */
+interface ResolvedCalc {
+  resolved: ResolvedExpr;
+  hasAggregate: boolean;
+  /** The first column read outside any aggregate. */
+  bareColumn?: { path: string; at: QueryPath };
+}
+
+/** The operand types each operation takes, and the type it yields. */
+const OP_TYPES: Record<
+  Exclude<CalcOp, "coalesce">,
+  { takes: readonly QueryableType[]; yields: "number" | "text" }
+> = {
+  add: { takes: ["number"], yields: "number" },
+  sub: { takes: ["number"], yields: "number" },
+  mul: { takes: ["number"], yields: "number" },
+  div: { takes: ["number"], yields: "number" },
+  abs: { takes: ["number"], yields: "number" },
+  round: { takes: ["number"], yields: "number" },
+  lower: { takes: ["text"], yields: "text" },
+  upper: { takes: ["text"], yields: "text" },
+  concat: { takes: ["text", "number"], yields: "text" },
+};
+
+const typeOf = (e: ResolvedExpr): QueryableType =>
+  e.kind === "column" ? e.column.type : e.type;
 
 const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
 
@@ -354,6 +385,153 @@ class Planner {
     };
   }
 
+  /** Whether `columnPath` names a column the caller can see, without touching it. */
+  hasColumn(columnPath: string): boolean {
+    const { prefix, last } = splitPath(columnPath);
+    return (
+      this.scopes.get(prefix)?.table.columns.some((c) => c.name === last) ??
+      false
+    );
+  }
+
+  /**
+   * A calculation at `at`, every column it reads resolved (and added to
+   * `reads`) as a plain path is. Types are checked on the way up; an operand's
+   * refusal carries its own path.
+   */
+  resolveExpr(
+    expr: CalcExpr,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate = false
+  ): ResolvedCalc {
+    if (typeof expr === "string") {
+      const { ref, reference } = this.resolveColumn(expr, at);
+      reads.set(referenceKey(reference), reference);
+      return {
+        resolved: { kind: "column", column: ref },
+        hasAggregate: false,
+        bareColumn: insideAggregate ? undefined : { path: expr, at },
+      };
+    }
+    if (typeof expr === "number") {
+      return {
+        resolved: { kind: "literal", value: expr, type: "number" },
+        hasAggregate: false,
+      };
+    }
+    if ("value" in expr) {
+      return {
+        resolved: { kind: "literal", value: expr.value, type: "text" },
+        hasAggregate: false,
+      };
+    }
+    const [key, operand] = Object.entries(expr)[0] as [string, unknown];
+    const keyAt = [...at, key];
+    if (AGGREGATE_FNS.includes(key as AggregateFn)) {
+      return {
+        resolved: this.resolveAggregate(
+          key as AggregateFn,
+          operand as CalcExpr,
+          keyAt,
+          reads
+        ),
+        hasAggregate: true,
+      };
+    }
+
+    const op = key as CalcOp;
+    let places: number | undefined;
+    let operands: Array<[CalcExpr, QueryPath]>;
+    if (Array.isArray(operand)) {
+      if (op === "round") {
+        const [value, p] = operand as [CalcExpr, number];
+        operands = [[value, [...keyAt, 0]]];
+        places = p;
+      } else {
+        operands = (operand as CalcExpr[]).map((e, i) => [e, [...keyAt, i]]);
+      }
+    } else {
+      operands = [[operand as CalcExpr, keyAt]];
+      if (op === "round") places = 0;
+    }
+    const resolvedOperands = operands.map(([e, p]) => ({
+      ...this.resolveExpr(e, p, reads, insideAggregate),
+      at: p,
+      label: typeof e === "string" ? `"${e}"` : "the operand",
+    }));
+
+    let type: QueryableType;
+    if (op === "coalesce") {
+      type = typeOf(resolvedOperands[0].resolved);
+      for (const o of resolvedOperands.slice(1)) {
+        const t = typeOf(o.resolved);
+        if (t !== type) {
+          throw fail(
+            "invalid_operator",
+            `coalesce takes operands of one type; ${o.label} is ${t}, not ${type}`,
+            o.at
+          );
+        }
+      }
+    } else {
+      const { takes, yields } = OP_TYPES[op];
+      for (const o of resolvedOperands) {
+        const t = typeOf(o.resolved);
+        if (!takes.includes(t)) {
+          throw fail(
+            "invalid_operator",
+            `${op} needs ${takes.join(" or ")}; ${o.label} is ${t}`,
+            o.at
+          );
+        }
+      }
+      type = yields;
+    }
+
+    return {
+      resolved: {
+        kind: "op",
+        op,
+        args: resolvedOperands.map((o) => o.resolved),
+        ...(places === undefined ? {} : { places }),
+        type: type as "number" | "text",
+      },
+      hasAggregate: resolvedOperands.some((o) => o.hasAggregate),
+      bareColumn: resolvedOperands.find((o) => o.bareColumn)?.bareColumn,
+    };
+  }
+
+  /** An aggregate over `arg`, the argument at `at`. */
+  private resolveAggregate(
+    fn: AggregateFn,
+    arg: CalcExpr,
+    at: QueryPath,
+    reads: Map<string, Reference>
+  ): ResolvedExpr & { kind: "aggregate" } {
+    if (fn === "count" && arg === "*") {
+      return { kind: "aggregate", fn, arg: "*", type: "number" };
+    }
+    const { resolved } = this.resolveExpr(arg, at, reads, true);
+    const type = typeOf(resolved);
+    const label = typeof arg === "string" ? `"${arg}"` : "its operand";
+    if (fn === "countDistinct") refuseJson(type, String(arg), fn, at);
+    const allowed = AGGREGATE_TYPES[fn];
+    if (allowed && !allowed.includes(type)) {
+      throw fail(
+        "invalid_operator",
+        `${fn} needs a ${allowed.join(", ")} value; ${label} is ${type}`,
+        at
+      );
+    }
+    return {
+      kind: "aggregate",
+      fn,
+      arg: resolved,
+      type: fn === "min" || fn === "max" ? type : "number",
+    };
+  }
+
   referenceList(): Reference[] {
     return [...this.references.values()];
   }
@@ -473,12 +651,24 @@ const refuseJson = (
   }
 };
 
+/** Evaluated per group rather than per row: an aggregate or a group-level calc. */
+const perGroup = (s: ResolvedSelect): boolean =>
+  s.kind === "aggregate" || (s.kind === "calc" && s.level === "group");
+
 const aggregateFnOf = (
   item: Exclude<SelectItem, string>
 ): AggregateFn | undefined => AGGREGATE_FNS.find((fn) => fn in item);
 
 /** Resolves `query` against `catalog`, the caller's view of the source. */
 export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
+  const maxJoins = catalog.source.maxJoins;
+  if ((query.join?.length ?? 0) > maxJoins) {
+    throw new QueryError(
+      "too_many_joins",
+      `This source allows at most ${maxJoins} ${maxJoins === 1 ? "join" : "joins"}`,
+      ["join"]
+    );
+  }
   const planner = new Planner(catalog);
   const from = planner.resolveFrom(query.from);
 
@@ -536,6 +726,50 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
       references = [reference];
       columnPath = item.column;
       if (item.as) outputPath = ["select", i, "as"];
+    } else if (
+      "calc" in item ||
+      typeof (item as Record<string, unknown>)[aggregateFnOf(item)!] !==
+        "string"
+    ) {
+      // A calc, or an aggregate over an expression: both named by their `as`.
+      const reads = new Map<string, Reference>();
+      const { as, ...rest } = item as { as: string } & Record<string, unknown>;
+      const {
+        resolved: expr,
+        hasAggregate,
+        bareColumn,
+      } = "calc" in rest
+        ? planner.resolveExpr(
+            rest.calc as CalcExpr,
+            ["select", i, "calc"],
+            reads
+          )
+        : planner.resolveExpr(rest as CalcExpr, ["select", i], reads);
+      // A constant item is pointless, and SQL Server refuses a constant in
+      // ORDER BY and GROUP BY, both of which a select item may land in.
+      if (reads.size === 0 && !hasAggregate) {
+        throw fail(
+          "invalid_operator",
+          "A calculation reads at least one column",
+          ["select", i]
+        );
+      }
+      if (hasAggregate && bareColumn) {
+        throw fail(
+          "invalid_grouping",
+          `"${bareColumn.path}" is outside an aggregate in a calculation that has one; put it inside an aggregate or in a select item of its own`,
+          bareColumn.at
+        );
+      }
+      resolved = {
+        kind: "calc",
+        expr,
+        level: hasAggregate ? "group" : "row",
+        output: as,
+        type: typeOf(expr),
+      };
+      references = [...reads.values()];
+      outputPath = ["select", i, "as"];
     } else {
       const fn = aggregateFnOf(item)!;
       const arg = (item as Record<AggregateFn, string>)[fn];
@@ -594,11 +828,32 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
 
   const outputIndex = (name: string) =>
     select.findIndex((s) => s.output === name);
-  const hasAggregate = select.some((s) => s.kind === "aggregate");
+  const hasAggregate = select.some(perGroup);
 
+  // A where key is a calc's or an aggregate's name before it is a column path;
+  // columns and buckets are named by their path or filtered as the column.
   const where =
     query.where &&
-    resolveFilter<ColumnRef>(query.where, ["where"], (key, at) => {
+    resolveFilter<WhereSubject>(query.where, ["where"], (key, at) => {
+      const index = outputIndex(key);
+      const named = index >= 0 ? select[index] : undefined;
+      if (named && (named.kind === "calc" || named.kind === "aggregate")) {
+        if (planner.hasColumn(key)) {
+          throw fail(
+            "duplicate_output_name",
+            `"${key}" is both a select item's name and a column; give the select item another "as"`,
+            at
+          );
+        }
+        if (perGroup(named)) {
+          throw fail(
+            "invalid_grouping",
+            `"${key}" is computed per group, which where cannot filter; use having`,
+            at
+          );
+        }
+        return { subject: { index, type: named.type }, type: named.type };
+      }
       const { ref } = planner.resolveColumn(key, at);
       return { subject: ref, type: ref.type };
     });
@@ -608,10 +863,10 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
   query.groupBy?.forEach((entry, j) => {
     const named = outputIndex(entry);
     if (named >= 0) {
-      if (select[named].kind === "aggregate") {
+      if (perGroup(select[named])) {
         throw fail(
           "invalid_grouping",
-          `"${entry}" is an aggregate; group by the items beside it`,
+          `"${entry}" is computed per group; group by the items beside it`,
           ["groupBy", j]
         );
       }
@@ -620,9 +875,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
       return;
     }
     const byPath = select
-      .map((s, i) =>
-        s.kind !== "aggregate" && selectPaths[i] === entry ? i : -1
-      )
+      .map((s, i) => (!perGroup(s) && selectPaths[i] === entry ? i : -1))
       .filter((i) => i >= 0);
     if (byPath.length === 0) {
       throw fail(
@@ -638,7 +891,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
   });
   if (grouped) {
     select.forEach((s, i) => {
-      if (s.kind !== "aggregate" && !groupedItems.has(i)) {
+      if (!perGroup(s) && !groupedItems.has(i)) {
         throw fail(
           "invalid_grouping",
           `"${s.output}" must be in groupBy or be an aggregate`,
@@ -657,7 +910,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
     query.having &&
     resolveFilter<HavingSubject>(query.having, ["having"], (key, at) => {
       const index = outputIndex(key);
-      if (index < 0 || select[index].kind !== "aggregate") {
+      if (index < 0 || !perGroup(select[index])) {
         throw fail(
           "invalid_having",
           `"${key}" is not the name of an aggregate select item`,
@@ -714,9 +967,7 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
     select,
     distinct,
     where,
-    groupBy: grouped
-      ? select.flatMap((s, i) => (s.kind === "aggregate" ? [] : [i]))
-      : [],
+    groupBy: grouped ? select.flatMap((s, i) => (perGroup(s) ? [] : [i])) : [],
     having,
     orderBy,
     defaultOrder: (query.orderBy?.length ?? 0) === 0,

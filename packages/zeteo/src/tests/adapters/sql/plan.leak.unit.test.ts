@@ -66,6 +66,18 @@ const CASES: Array<[string, object, hidden: string, name: string]> = [
     "total",
   ],
   [
+    "a calculation's operand",
+    { select: [{ calc: { mul: [2, "total"] }, as: "x" }] },
+    "orders.total",
+    "total",
+  ],
+  [
+    "an operand inside an expression aggregate",
+    { select: [{ sum: { abs: "total" }, as: "x" }] },
+    "orders.total",
+    "total",
+  ],
+  [
     "a bucket's column",
     { select: [{ bucket: "month", column: "created_at" }] },
     "orders.created_at",

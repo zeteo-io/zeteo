@@ -44,14 +44,14 @@ describeEachEngine("POST /v1/query", (engine) => {
   it("answers the spec's example: join, bucket, sum, filter, group, having and order", async () => {
     const res = await query({
       from: "orders",
-      join: ["customer"],
+      join: ["customers"],
       select: [
-        "customer.region",
+        "customers.region",
         { bucket: "month", column: "created_at", as: "month" },
         { sum: "total", as: "revenue" },
       ],
       where: { status: { in: ["paid", "shipped"] } },
-      groupBy: ["customer.region", "month"],
+      groupBy: ["customers.region", "month"],
       having: { revenue: { gt: 100 } },
       orderBy: [{ revenue: "desc" }],
       limit: 1000,
@@ -60,7 +60,7 @@ describeEachEngine("POST /v1/query", (engine) => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
       columns: [
-        { name: "customer.region", type: "text" },
+        { name: "customers.region", type: "text" },
         { name: "month", type: "timestamp" },
         { name: "revenue", type: "number" },
       ],
@@ -81,9 +81,9 @@ describeEachEngine("POST /v1/query", (engine) => {
     expect(
       await rowsOf({
         from: "orders",
-        join: ["customer", "customer.account"],
-        select: ["customer.account.plan", { count: "*", as: "n" }],
-        groupBy: ["customer.account.plan"],
+        join: ["customers", "customers.accounts"],
+        select: ["customers.accounts.plan", { count: "*", as: "n" }],
+        groupBy: ["customers.accounts.plan"],
       })
     ).toEqual([
       ["enterprise", "8"],

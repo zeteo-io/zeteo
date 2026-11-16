@@ -324,7 +324,8 @@ describe("compileSql on Postgres: filters", () => {
         shopCatalog()
       );
       const filter = planned.where;
-      if (filter?.kind !== "compare") throw new Error("expected a comparison");
+      if (filter?.kind !== "compare" || !("nativeType" in filter.subject))
+        throw new Error("expected a comparison on a column");
       filter.subject.nativeType = nativeType;
       expect(
         compileSql(planned, postgresDialect, { limit: 1001, offset: 0 })

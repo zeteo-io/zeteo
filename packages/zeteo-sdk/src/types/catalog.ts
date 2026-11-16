@@ -51,6 +51,8 @@ export interface DiscoveredSource {
     /** The most a `limit` may ask for. */
     max_rows: number;
     timeout_ms: number;
+    /** The most joins a query on this source may use. */
+    max_joins: number;
     export: {
       enabled: boolean;
       /** The source's `export_row_cap`; 0 when exports are off. */
