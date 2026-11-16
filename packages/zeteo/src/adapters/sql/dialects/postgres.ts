@@ -188,11 +188,8 @@ export const postgresDialect: SqlDialect = {
   // type to pick an operator or function by.
   literal: (v, type) => {
     if (type === "text") return sql`cast(${v} as text)`;
-    const text = String(v);
-    checkNumeric(text);
-    return isBigint(text)
-      ? sql`cast(${v} as bigint)`
-      : sql`cast(${v} as numeric)`;
+    checkNumeric(v);
+    return isBigint(v) ? sql`cast(${v} as bigint)` : sql`cast(${v} as numeric)`;
   },
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),

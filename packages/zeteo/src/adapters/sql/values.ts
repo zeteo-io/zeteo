@@ -49,6 +49,27 @@ const toIsoUtc = (text: string): string => {
   return date.toISOString();
 };
 
+const EXPONENT_FORM = /^(-?)(\d+)(?:\.(\d+))?e([+-]\d+)$/;
+
+/**
+ * A JS number as decimal text with no exponent (`1e-7` is `0.0000001`,
+ * `1e+21` is `1000000000000000000000`), so every engine reads the same exact
+ * decimal from it.
+ */
+export const plainNumber = (n: number): string => {
+  const text = String(n);
+  const m = EXPONENT_FORM.exec(text);
+  if (!m) return text;
+  const [, sign, whole, fraction = "", exponent] = m;
+  const digits = whole! + fraction;
+  const point = whole!.length + Number(exponent);
+  if (point <= 0) return `${sign}0.${"0".repeat(-point)}${digits}`;
+  if (point >= digits.length) {
+    return sign + digits + "0".repeat(point - digits.length);
+  }
+  return `${sign}${digits.slice(0, point)}.${digits.slice(point)}`;
+};
+
 /** A value as the database printed it in text, in its wire form. */
 export const normaliseValue = (
   value: string | null,

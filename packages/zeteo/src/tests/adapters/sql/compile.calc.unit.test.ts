@@ -59,7 +59,7 @@ describe("compileSql on Postgres: calculations", () => {
         FROM +
         page(3)
     );
-    expect(parameters).toEqual([1, 2.5, -3]);
+    expect(parameters).toEqual(["1", "2.5", "-3"]);
   });
 
   it("binds an integer past bigint as numeric", () => {
@@ -67,7 +67,7 @@ describe("compileSql on Postgres: calculations", () => {
       add: ["id", 9_223_372_036_854_775_808],
     });
     expect(sql).toContain("cast($1 as numeric)");
-    expect(parameters).toEqual([9_223_372_036_854_775_808]);
+    expect(parameters).toEqual(["9223372036854776000"]);
   });
 
   it("divides as decimals with a zero guard, rounded to 6 places", () => {
@@ -110,7 +110,7 @@ describe("compileSql on Postgres: calculations", () => {
     expect(sql).toContain(
       'concat("t0"."status", cast($1 as text), cast("t0"."id" as text), cast(cast($2 as bigint) as text))'
     );
-    expect(parameters).toEqual([" #", 7]);
+    expect(parameters).toEqual([" #", "7"]);
   });
 
   it("writes a float as its decimal text, at most 10 places and no trailing zeros", () => {
@@ -176,7 +176,17 @@ describe("compileSql on Postgres: calculations", () => {
         ' having round(cast(sum("t0"."total") as numeric(38, 18)) / nullif(cast(count(*) as numeric(38, 10)), 0), 6) >= $4' +
         page(4)
     );
-    expect(parameters.slice(0, 4)).toEqual([2, 2, 100, 1]);
+    expect(parameters.slice(0, 4)).toEqual(["2", "2", 100, 1]);
+  });
+
+  it("binds a number literal in exponent form as plain decimal text", () => {
+    const { sql, parameters } = selected({
+      concat: [0.0000001, 1e21],
+    });
+    expect(sql).toContain(
+      "concat(cast(cast($1 as numeric) as text), cast(cast($2 as numeric) as text))"
+    );
+    expect(parameters).toEqual(["0.0000001", "1000000000000000000000"]);
   });
 
   // The database's own out-of-range error (22003) is reserved for overflow
@@ -214,7 +224,7 @@ describe("compileSql on SQL Server: calculations", () => {
     expect(sql).toBe(
       "select " +
         asDecimalText(
-          "([t0].[total] + @1 + ([t0].[customer_id] * cast(@2 as decimal(38, 1))) + ([t0].[id] - @3))"
+          "([t0].[total] + @1 + ([t0].[customer_id] * cast(@2 as decimal(2, 1))) + ([t0].[id] - @3))"
         ) +
         FROM +
         page(3)
@@ -348,5 +358,41 @@ describe("compileSql on SQL Server: calculations", () => {
       orderBy: [],
     });
     expect(sql).not.toContain("group by");
+  });
+
+  it("binds a decimal literal with no more precision than its digits", () => {
+    const { sql, parameters } = selected({ mul: ["total", 0.0001, 12.5] });
+    expect(sql).toContain(
+      "([t0].[total] * cast(@1 as decimal(4, 4)) * cast(@2 as decimal(3, 1)))"
+    );
+    expect(parameters).toEqual([nvarchar("0.0001"), nvarchar("12.5")]);
+  });
+
+  it("binds a number literal in exponent form as plain decimal text", () => {
+    const { sql, parameters } = selected({
+      concat: [0.0000001, 1e21],
+    });
+    expect(sql).toContain(
+      "concat(cast(cast(@1 as decimal(7, 7)) as nvarchar(64)), cast(cast(@2 as decimal(22, 0)) as nvarchar(64)))"
+    );
+    expect(parameters).toEqual([
+      nvarchar("0.0000001"),
+      nvarchar("1000000000000000000000"),
+    ]);
+  });
+
+  it("sums an integer expression as decimal(38, 0), returned as text", () => {
+    const { sql } = ms({
+      select: [
+        {
+          calc: { add: [{ sum: { mul: ["customer_id", "customer_id"] } }, 0] },
+          as: "x",
+        },
+      ],
+      orderBy: [],
+    });
+    expect(sql).toContain(
+      "select cast((sum(cast(([t0].[customer_id] * [t0].[customer_id]) as decimal(38, 0))) + @1) as varchar(48)) as [c0]"
+    );
   });
 });

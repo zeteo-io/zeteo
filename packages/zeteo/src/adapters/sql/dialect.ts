@@ -5,6 +5,7 @@ import type {
   Direction,
   PlanValue,
   QueryableType,
+  ResolvedExpr,
   ResolvedSelect,
 } from "./types.js";
 
@@ -94,8 +95,9 @@ export interface SqlDialect {
   /**
    * A calculation's literal, bound: an integer in bigint's range as bigint,
    * any other number as an exact decimal where one holds it, text as text.
+   * A number comes as plain decimal text (`plainNumber`).
    */
-  literal(value: number | string, type: "number" | "text"): Expression<unknown>;
+  literal(value: string, type: "number" | "text"): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,
@@ -122,11 +124,15 @@ export interface SqlDialect {
   ): Expression<unknown>;
   /** Text parts joined, a null part as empty text; all nulls give `''`. */
   concat(parts: Expression<unknown>[]): Expression<unknown>;
-  /** `"*"` only for `count`. `nativeType` is the column's own type name. */
+  /**
+   * `"*"` only for `count`. `nativeType` is the column's own type name; for
+   * an expression, `expr` is the planned argument instead.
+   */
   aggregate(
     fn: AggregateFn,
     arg: Expression<unknown> | "*",
-    nativeType?: string
+    nativeType?: string,
+    expr?: ResolvedExpr
   ): Expression<unknown>;
   /**
    * A select item's value as the select list returns it, in a form the

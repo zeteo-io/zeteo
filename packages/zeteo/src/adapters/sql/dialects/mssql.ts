@@ -1,5 +1,6 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
+import { plainNumber } from "../values.js";
 import {
   DummyDriver,
   Kysely,
@@ -220,7 +221,9 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
         : undefined;
     case "literal": {
       if (expr.type === "text") return undefined;
-      const { kind } = numberBinding(String(expr.value));
+      const { kind } = numberBinding(
+        typeof expr.value === "number" ? plainNumber(expr.value) : expr.value
+      );
       return kind === "bigint" ? "integer" : kind;
     }
     case "aggregate": {
@@ -233,7 +236,9 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
         if (base === "bigint") return "decimal";
         if (base === "real") return "float";
       }
-      return exprKind(expr.arg);
+      const kind = exprKind(expr.arg);
+      // An integer expression is summed in decimal(38, 0), see `aggregate`.
+      return expr.fn === "sum" && kind === "integer" ? "decimal" : kind;
     }
     case "op":
       if (expr.type !== "number") return undefined;
@@ -330,7 +335,7 @@ export const mssqlDialect: SqlDialect = {
   // CASE included; grouping by every item returns the same rows and allows it.
   distinct: (qb, items, grouped) =>
     grouped ? qb : qb.groupBy(items.map(({ expression }) => expression)),
-  aggregate: (fn, arg, nativeType) => {
+  aggregate: (fn, arg, nativeType, expr) => {
     if (arg === "*") {
       if (fn !== "count") throw new Error(`${fn} cannot take *`);
       return sql`count_big(*)`;
@@ -340,8 +345,12 @@ export const mssqlDialect: SqlDialect = {
         return sql`count_big(${arg})`;
       case "countDistinct":
         return sql`count_big(distinct ${arg})`;
+      // An integer expression would sum in its own int or bigint and
+      // overflow where Postgres's sum (bigint, numeric) does not.
       case "sum":
-        return sumOf(arg, nativeType);
+        return expr !== undefined && exprKind(expr) === "integer"
+          ? sql`sum(cast(${arg} as decimal(38, 0)))`
+          : sumOf(arg, nativeType);
       // An exact column is summed exactly and divided once in float, as
       // Postgres's numeric average is rounded once to float8; averaging
       // floats would round at every addition.
@@ -355,8 +364,16 @@ export const mssqlDialect: SqlDialect = {
         return sql`max(${arg})`;
     }
   },
-  literal: (v, type) =>
-    type === "text" ? param("nvarchar", String(v)) : value(v, { type }),
+  // A decimal literal is cast to no more precision than its digits: SQL
+  // Server sizes a product's precision from its operands', and a chain at
+  // decimal(38, s) would cut the result to 6 places.
+  literal: (v, type) => {
+    if (type === "text") return param("nvarchar", v);
+    const binding = numberBinding(v);
+    if (binding.kind !== "decimal") return value(v, { type });
+    const digits = DECIMAL_TEXT.exec(v)![1]!.replace(/^0+/, "").length;
+    return sql`cast(${param("nvarchar", v)} as decimal(${sql.lit(Math.max(digits + binding.scale, 1))}, ${sql.lit(binding.scale)}))`;
+  },
   // Lower-case, as Postgres prints a uuid.
   text: (expression, nativeType) =>
     baseType(nativeType) === "uniqueidentifier"

@@ -40,7 +40,13 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
 
   beforeAll(async () => {
     source = await seedQuerySource(engine, {}, "calc");
-    for (const table of ["accounts", "customers", "orders", "ledger"]) {
+    for (const table of [
+      "accounts",
+      "customers",
+      "orders",
+      "order_lines",
+      "ledger",
+    ]) {
       await grantTo(user.principal, source.tables[table]!, "all");
     }
   });
@@ -317,5 +323,37 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
       outcome: "failed",
       errorCode: "query_failed",
     });
+  });
+
+  it("sums an integer product past 32 bits", async () => {
+    const rows = await rowsOf({
+      from: "order_lines",
+      select: [
+        ...calcs(["total", { add: [{ sum: { mul: ["qty", "line_no"] } }, 1] }]),
+        { sum: { mul: ["qty", "line_no"] }, as: "plain" },
+      ],
+    });
+    expect(numeric(rows)).toEqual([[3_000_000_001, 3_000_000_000]]);
+  });
+
+  it("keeps a decimal literal's places through a multiplication chain", async () => {
+    const rows = await rowsOf({
+      from: "orders",
+      select: ["id", ...calcs(["tiny", { mul: ["total", 0.0001, 0.0001] }])],
+      where: { id: { eq: 1 } },
+    });
+    expect(numeric(rows)).toEqual([[1, 0.0000001]]);
+  });
+
+  it("prints number literals in exponent form as plain decimals", async () => {
+    const rows = await rowsOf({
+      from: "orders",
+      select: [
+        "id",
+        ...calcs(["text", { concat: [0.0000001, { value: "|" }, 1e21] }]),
+      ],
+      where: { id: { eq: 1 } },
+    });
+    expect(rows).toEqual([[1, "0.0000001|1000000000000000000000"]]);
   });
 });

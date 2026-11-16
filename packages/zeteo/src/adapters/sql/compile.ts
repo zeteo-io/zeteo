@@ -1,5 +1,6 @@
 import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
 import { QueryError } from "../../engine/errors.js";
+import { plainNumber } from "./values.js";
 import type {
   ColumnRef,
   CompareOp,
@@ -89,7 +90,10 @@ export const compileExpr = (
         : read;
     }
     case "literal":
-      return dialect.literal(expr.value, expr.type);
+      return dialect.literal(
+        typeof expr.value === "number" ? plainNumber(expr.value) : expr.value,
+        expr.type
+      );
     case "aggregate":
       if (expr.arg === "*") return dialect.aggregate(expr.fn, "*");
       return expr.arg.kind === "column"
@@ -98,7 +102,12 @@ export const compileExpr = (
             column(expr.arg.column, dialect),
             expr.arg.column.nativeType
           )
-        : dialect.aggregate(expr.fn, compileExpr(expr.arg, dialect));
+        : dialect.aggregate(
+            expr.fn,
+            compileExpr(expr.arg, dialect),
+            undefined,
+            expr.arg
+          );
     case "op": {
       const args = expr.args.map((arg) => compileExpr(arg, dialect));
       switch (expr.op) {
