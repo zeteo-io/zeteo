@@ -22,9 +22,9 @@ answers whenever `UI_CLIENT_ID` is set, build or not.
 
 ## The login client in Tereo
 
-The UI signs in with the authorization code flow and PKCE, as a public client, and keeps its
-tokens in memory. A deploy declares the client in a provisioning document of Tereo
-(`PROVISIONING_PATH`), next to zeteo's own:
+The UI signs in with [`@tereo-io/react`](https://www.npmjs.com/package/@tereo-io/react): the
+authorization code flow with PKCE, as a public client. A deploy declares the client in a
+provisioning document of Tereo (`PROVISIONING_PATH`), next to zeteo's own:
 
 ```json
 {
@@ -39,24 +39,43 @@ tokens in memory. A deploy declares the client in a provisioning document of Ter
       "postLogoutRedirectUris": ["https://zeteo.example.com/"],
       "scopes": ["openid", "profile", "email", "offline_access"],
       "audience": ["zeteo"],
-      "consentRequired": false
+      "consentRequired": false,
+      "liveEvents": true
     }
   ]
 }
 ```
 
-`clientId` is the value of `UI_CLIENT_ID`; `audience: ["zeteo"]` is what makes zeteo accept the
-token. Tereo's `CORS_ALLOWED_ORIGINS` must list zeteo's public origin
-(`https://zeteo.example.com`): the browser exchanges its code and renews its token at Tereo from
-that origin, and without the entry it cannot do either.
+- `clientId` is the value of `UI_CLIENT_ID`; `audience: ["zeteo"]` is what makes zeteo accept the
+  token.
+- `liveEvents: true` lets the page open Tereo's socket and hear when the person's permissions
+  change. It replaces a core scope: the client asks for none of core's own scopes.
+- `redirectUris` is `<zeteo's origin>/callback` and `postLogoutRedirectUris` `<zeteo's origin>/`,
+  each matched exactly, port included.
+- Tereo's `CORS_ALLOWED_ORIGINS` must list zeteo's public origin
+  (`https://zeteo.example.com`): the browser exchanges its code and renews its token at Tereo from
+  that origin, and without the entry it cannot do either.
+- **Same site.** zeteo and Tereo must be on the same site (for example `zeteo.example.com` and
+  `tereo.example.com`; `localhost` and `127.0.0.1` with different ports count as one). Tereo's
+  refresh cookie is `SameSite`, so a page on another site cannot renew its session.
+
+## Where the session lives
+
+The access and ID tokens are kept in `localStorage` (the package's design), so any script on
+zeteo's origin can read them; the content security policy below is what keeps other scripts out.
+The refresh token is never in the page: Tereo sets it in an httpOnly cookie on its own origin and
+the page renews its tokens with that cookie. Tabs share one session, and only one of them renews
+it at a time.
+
+A reload or a new tab signs in from the stored tokens (or, with none, from the cookie) without
+a visit to Tereo's sign-in page. A person who opens a page signed out lands on `/signed-out`; its
+**Sign in** button goes through Tereo and back to the page they asked for.
 
 ## The screens
 
-Sign-in goes through Tereo's own sign-in page and back to `/callback`. The UI holds its tokens in
-memory only (never in `localStorage`, `sessionStorage`, a cookie or the address), so a reload or a
-new tab goes through Tereo and straight back while Tereo's session lasts, without asking for the
-password. Each section shows only to someone holding its permission; a person with no zeteo admin
-permission at all sees a "No access" page and no sections.
+Sign-in goes through Tereo's own sign-in page and back to `/callback`. Each section shows only to
+someone holding its permission; a person with no zeteo admin permission at all sees a "No access"
+page and no sections.
 
 - **Sources** (`zeteo.sources.read`, changes with `.write`): the registered databases with their
   status. A new source takes its connection (host, port, database, login, TLS mode and an optional
@@ -76,27 +95,22 @@ permission at all sees a "No access" page and no sections.
   the UI has no query screen of its own. Searching for a person by name needs
   `zeteo.grants.read` too; without it the filter takes a pasted user id.
 
-The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, so the
-next visit asks for the password again.
+The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, and
+lands on `/signed-out`; the next sign-in asks for the password again.
 
-The UI reads the person's permissions (`GET /v1/me`) once, when it signs in; renewing the token
-does not read them again. A permission granted or removed in Tereo shows in the UI after a reload
-(zeteo itself decides each request from the token it is sent, whatever the UI shows).
-The UI applies the same ladder as zeteo (`admin` covers everything, `x.admin` everything under
-`x.`, and read < write < archive < delete within one area), so it never hides a control zeteo
-would allow.
+**Live permissions.** The UI reads the person's permissions from `GET /v1/me` when it signs in and
+again whenever Tereo reports that they changed (over the socket `liveEvents` opens) or a renewed
+token arrives. A role granted or removed in Tereo therefore shows or hides sections within moments,
+without a reload, and removing the last one turns the page into "No access". `GET /v1/me` reads
+the permissions fresh from Tereo each time (zeteo drops its cached token introspection for that
+route), so the answer after a change is never stale. zeteo itself decides each request from the
+token it is sent, whatever the UI shows. The UI applies the same ladder as zeteo (`admin` covers
+everything, `x.admin` everything under `x.`, and read < write < archive < delete within one area),
+so it never hides a control zeteo would allow.
 
-The UI renews its access token in the background before it expires. Every request to Tereo's token
-endpoint gives up after 15 seconds, so a Tereo that accepts the connection and never answers makes
-a request fail with an error rather than hang, and keeps the session for the next try. Signing out
-waits at most 5 seconds for a renewal in flight.
-
-When a background renewal is refused (another tab signed out, or the session reached its end in
-Tereo), the UI does not leave the page: it shows a "Your session ended" notice over it, which
-cannot be dismissed, and requests from the page fail until the person signs in. Its **Sign in**
-button goes through Tereo and back to the same page; anything not saved on it has to be entered
-again. A request the person makes that finds the session over at that moment goes to Tereo's
-sign-in straight away.
+If the account cannot be loaded after signing in, the UI says so with zeteo's reason. If a stored
+session cannot be renewed (Tereo or the network failed, rather than refusing it), it says the
+session could not be restored, and **Try again** reloads the page.
 
 ## Development setup
 

@@ -60,6 +60,17 @@ export const createUser = async (
   return user.id as string;
 };
 
+/** Replaces the user's directly held roles (an empty list removes them all). */
+export const setUserRoles = (
+  token: string,
+  userId: string,
+  roleIds: string[]
+) =>
+  expectJson(200, "PUT", url(`/v1/admin/users/${userId}/roles`), {
+    token,
+    body: { roleIds },
+  });
+
 export const createGroup = async (
   token: string,
   slug: string

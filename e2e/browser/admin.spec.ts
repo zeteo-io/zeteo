@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { CLIENTS, stack } from "../support/stack.js";
 import { query } from "../support/zeteo.js";
-import { refreshPublic, signIn } from "../support/oauth.js";
+import { createUser, roleId, setUserRoles } from "../support/tereo.js";
+import { signIn } from "../support/oauth.js";
 import {
   ADMIN_EMAIL,
   ensurePeople,
@@ -54,6 +55,8 @@ test("an admin administers zeteo through the UI", async ({
 
   await test.step("sign in through Tereo and land on the sources", async () => {
     await page.goto("/");
+    await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
+    await page.getByRole("button", { name: "Sign in" }).click();
     await submitTereoSignIn(page, ADMIN_EMAIL);
     await expect(page).toHaveURL(`${zeteoOrigin()}/sources`);
     await expect(
@@ -115,33 +118,19 @@ test("an admin administers zeteo through the UI", async ({
     await page.reload();
     await expect(page).toHaveURL(tableUrl);
     await expect(page.getByText(description)).toBeVisible();
-    // Tokens live in memory only, so the reload signed in again: a
-    // prompt=none authorize at Tereo, its code back at /callback, and the
-    // table's address restored.
+    // The tokens are in localStorage: the reload signed in from them,
+    // without a visit to Tereo (its sign-in page, an authorize request or a
+    // callback), and the address stayed.
     const requested = seen.requests.slice(requestsBefore).map((r) => r.url);
-    const authorize = requested.findIndex(
-      (u) =>
-        u.startsWith(`${stack.tereoUrl}/oauth/authorize?`) &&
-        new URL(u).searchParams.get("prompt") === "none"
-    );
-    expect(authorize).toBeGreaterThanOrEqual(0);
-    const callback = requested.findIndex(
-      (u, i) =>
-        i > authorize &&
-        u.startsWith(`${zeteoOrigin()}/callback?`) &&
-        new URL(u).searchParams.has("code")
-    );
-    expect(callback).toBeGreaterThan(authorize);
+    expect(
+      requested.filter((u) => u.startsWith(`${stack.tereoUrl}/oauth/authorize`))
+    ).toEqual([]);
     const landed = seen.navigations.slice(navigationsBefore);
-    const atCallback = landed.findIndex((u) =>
-      u.startsWith(`${zeteoOrigin()}/callback?`)
-    );
-    expect(atCallback).toBeGreaterThanOrEqual(0);
-    expect(landed.slice(atCallback + 1)).toContain(tableUrl);
+    expect(landed.filter((u) => u.startsWith(stack.tereoUrl))).toEqual([]);
+    expect(landed.filter((u) => u.includes("/callback"))).toEqual([]);
     expect(page.url()).not.toContain("code=");
-    // The reload went through Tereo silently: its sign-in form showed only
-    // for the first sign-in (Tereo's page may report one visit twice; a new
-    // sign-in would carry a new state).
+    // Tereo's sign-in form showed only for the first sign-in (Tereo's page
+    // may report one visit twice; a new sign-in would carry a new state).
     const logins = seen.navigations.filter((u) =>
       u.startsWith(`${stack.tereoUrl}/login`)
     );
@@ -216,22 +205,30 @@ test("an admin administers zeteo through the UI", async ({
     await page.getByRole("button", { name: "Close" }).click();
   });
 
-  await test.step("no token is stored, and no code is left in the address", async () => {
-    // The first sign-in's and the reload's access, refresh and ID tokens.
-    expect(seen.tokens.length).toBeGreaterThanOrEqual(6);
+  await test.step("the access token is in localStorage, the refresh token in Tereo's httpOnly cookie", async () => {
     const held = await storageOf(page);
-    for (const token of seen.tokens) {
-      expect(held.local).not.toContain(token);
-      expect(held.session).not.toContain(token);
-      expect(held.cookie).not.toContain(token);
-    }
-    for (const cookie of await context.cookies()) {
-      for (const token of seen.tokens) {
-        expect(cookie.value).not.toContain(token);
-      }
-    }
-    // zeteo sets no cookie; the host's cookies are Tereo's (cookies are not
-    // separated by port).
+    const entries = JSON.parse(held.local) as Record<string, string>;
+    const tokensKey = Object.keys(entries).find((k) => k.endsWith("_tokens"));
+    expect(tokensKey).toBeDefined();
+    const stored = JSON.parse(entries[tokensKey as string]) as Record<
+      string,
+      unknown
+    >;
+    expect(stored.access_token).toEqual(expect.any(String));
+    expect(seen.tokens).toContain(stored.access_token);
+    // Nothing the script can read carries a refresh token.
+    expect(stored.refresh_token).toBeUndefined();
+    expect(seen.refreshTokens).toEqual([]);
+    // Tereo's script-readable cookie is only its session indicator.
+    expect(held.cookie).toBe("tsi_e2e-ui=1");
+    for (const token of seen.tokens) expect(held.cookie).not.toContain(token);
+    expect(held.session).not.toMatch(/refresh/i);
+    const refreshCookie = (await context.cookies()).find(
+      (c) => c.name === `trt_${CLIENTS.ui.clientId}`
+    );
+    expect(refreshCookie?.httpOnly).toBe(true);
+    expect(refreshCookie?.path).toBe("/oauth");
+    // zeteo sets no cookie of its own.
     expect(seen.zeteoSetCookies).toEqual([]);
     expect(new URL(page.url()).search).not.toContain("code=");
     const afterCallback = seen.navigations.filter(
@@ -240,28 +237,40 @@ test("an admin administers zeteo through the UI", async ({
     expect(afterCallback.filter((u) => u.includes("code="))).toEqual([]);
   });
 
-  await test.step("sign out; the next visit asks for the password again", async () => {
-    const refreshToken = seen.lastRefreshToken;
-    expect(refreshToken).toEqual(expect.any(String));
+  await test.step("sign out lands on /signed-out; Tereo no longer renews the session", async () => {
     const revocationsBefore = seen.revocations.length;
 
     await page.getByRole("button", { name: "E2E Admin" }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(page).toHaveURL(new RegExp(`^${stack.tereoUrl}/login`));
-
-    // The UI revoked its refresh token, and Tereo no longer renews it.
+    await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
+    await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     expect(seen.revocations.slice(revocationsBefore)).toEqual([200]);
-    const renewed = await refreshPublic(
-      CLIENTS.ui.clientId,
-      refreshToken as string,
-      { origin: zeteoOrigin() }
+    const held = await storageOf(page);
+    expect(held.local).not.toContain("_tokens");
+
+    // A renewal from the page is refused.
+    const renewal = await page.evaluate(
+      async ({ tereo, clientId }) => {
+        const res = await fetch(`${tereo}/oauth/token`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "refresh_token",
+            client_id: clientId,
+            refresh_token_response_mode: "cookie",
+          }),
+        });
+        return { status: res.status, body: await res.json() };
+      },
+      { tereo: stack.tereoUrl, clientId: CLIENTS.ui.clientId }
     );
-    expect(renewed.status).toBe(400);
-    expect(renewed.body.error).toBe("invalid_grant");
+    expect(renewal.status).toBe(400);
+    // The sign-out cleared the cookie (no token to renew) or revoked its token.
+    expect(["invalid_request", "invalid_grant"]).toContain(renewal.body.error);
 
     await page.goto("/sources");
-    await expect(page).toHaveURL(new RegExp(`^${stack.tereoUrl}/login`));
-    await expect(page.getByRole("textbox", { name: "Password" })).toBeVisible();
+    await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
   });
 
   await context.close();
@@ -277,11 +286,79 @@ test("a user without admin permissions sees no sections", async ({
   const page = await context.newPage();
 
   await page.goto("/");
+  await page.getByRole("button", { name: "Sign in" }).click();
   await submitTereoSignIn(page, bob.email);
   await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Sources" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Grants" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: "Runs" })).toHaveCount(0);
+
+  await context.close();
+  expectCleanRun(seen);
+});
+
+test("a deep link opened signed out goes to /signed-out and, after signing in, to the link", async ({
+  browser,
+  baseURL,
+}) => {
+  const context = await browser.newContext({ baseURL });
+  const seen = watch(context);
+  const page = await context.newPage();
+  const deepLink = "/runs?outcome=ok";
+
+  await page.goto(deepLink);
+  await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await submitTereoSignIn(page, ADMIN_EMAIL);
+  await expect(page).toHaveURL(`${zeteoOrigin()}${deepLink}`);
+  await expect(
+    page.getByRole("heading", { name: "Runs", level: 1 })
+  ).toBeVisible();
+
+  await context.close();
+  expectCleanRun(seen);
+});
+
+test("a role removed in Tereo hides the sections without a reload", async ({
+  browser,
+  baseURL,
+}) => {
+  const coreToken = await signIn({
+    client: CLIENTS.tereoUi,
+    email: ADMIN_EMAIL,
+  });
+  const email = `live-${Date.now().toString(36)}@e2e.example.com`;
+  const userId = await createUser(coreToken, email, [
+    await roleId(coreToken, "zeteo_admin"),
+  ]);
+
+  const context = await browser.newContext({ baseURL });
+  const seen = watch(context);
+  const page = await context.newPage();
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await submitTereoSignIn(page, email);
+  const nav = page.getByRole("navigation", { name: "Sections" });
+  await expect(nav.getByRole("link", { name: "Sources" })).toBeVisible();
+  await expect(nav.getByRole("link", { name: "Runs" })).toBeVisible();
+
+  // Survives only while the page is not reloaded.
+  await page.evaluate(() => {
+    (window as unknown as { liveMarker: string }).liveMarker = "same page";
+  });
+  await setUserRoles(coreToken, userId, []);
+
+  // Tereo pushes the change over its socket; allow a bounded wait.
+  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(nav.getByRole("link", { name: "Sources" })).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => (window as unknown as { liveMarker?: string }).liveMarker
+    )
+  ).toBe("same page");
 
   await context.close();
   expectCleanRun(seen);

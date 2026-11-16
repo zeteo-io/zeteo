@@ -25,7 +25,9 @@ const socket = vi.hoisted(() => {
 vi.mock("socket.io-client", () => ({ io: () => socket }));
 
 const TOKENS_KEY = "tereo_zeteo-ui_tokens";
-const RETURN_KEY = "tereo_zeteo-ui_post_login_path";
+const RETURN_KEY = "zeteo-ui:return-path";
+const PACKAGE_RETURN_KEY = "tereo_zeteo-ui_post_login_path";
+const SIGNED_IN_KEY = "tereo_zeteo-ui_signed_in";
 const SOURCE_ID = "6f1f8a8e-2b7c-4d3e-9a51-0c9d7e6b5a41";
 
 const base64url = (value: object) =>
@@ -50,6 +52,7 @@ const storeSession = () =>
 
 let permissions: string[];
 let meStatus: number;
+let tokenStatus: number;
 const requests: { url: string; auth: unknown }[] = [];
 
 const answer: AxiosAdapter = async (config) => {
@@ -62,6 +65,10 @@ const answer: AxiosAdapter = async (config) => {
     headers: {},
     config,
   });
+  if (url.endsWith("/oauth/token")) {
+    const res = respond(tokenStatus, { error: "server_error" });
+    throw new axios.AxiosError("refused", "ERR_BAD_RESPONSE", config, {}, res);
+  }
   if (url === "/v1/me") {
     const res =
       meStatus === 200
@@ -109,6 +116,7 @@ describe("the session, with the real @tereo-io/react", () => {
   beforeEach(() => {
     permissions = ["zeteo.grants.read", "zeteo.runs.read"];
     meStatus = 200;
+    tokenStatus = 503;
     requests.length = 0;
     socket.listeners.clear();
     axios.defaults.adapter = answer;
@@ -163,7 +171,8 @@ describe("the session, with the real @tereo-io/react", () => {
       await screen.findByRole("button", { name: "Sign in" })
     );
     await vi.waitFor(() => expect(signedOutRedirects()).toHaveLength(2));
-    expect(sessionStorage.getItem(RETURN_KEY)).toBe(
+    expect(sessionStorage.getItem(RETURN_KEY)).toBeNull();
+    expect(sessionStorage.getItem(PACKAGE_RETURN_KEY)).toBe(
       `/grants?source_id=${SOURCE_ID}`
     );
     expect(sessionStorage.getItem("tereo_zeteo-ui_pkce")).not.toBeNull();
@@ -189,6 +198,20 @@ describe("the session, with the real @tereo-io/react", () => {
       await screen.findByText("Your account could not be loaded")
     ).toBeInTheDocument();
     expect(screen.getByText("zeteo refused this account")).toBeInTheDocument();
+  });
+
+  it("blames the session, not zeteo, when a session cannot be renewed; Try again reloads the page", async () => {
+    localStorage.setItem(SIGNED_IN_KEY, JSON.stringify("1"));
+    render(<App />);
+
+    expect(
+      await screen.findByText("Your session could not be restored")
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/GET \/v1\/me/)).not.toBeInTheDocument();
+    expect(requests.some((r) => r.url === "/v1/me")).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await vi.waitFor(() => expect(navigations).toHaveLength(1));
   });
 
   it("hides a section when Tereo says the permissions changed", async () => {

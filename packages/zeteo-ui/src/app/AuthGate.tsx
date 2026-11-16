@@ -26,6 +26,18 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
       </Centered>
     );
   }
+  if (!readTokens()) {
+    // A session, but no token, and renewing it did not work (Tereo or the
+    // network); nothing here can be reloaded, only the page can start over.
+    return (
+      <StartupError
+        title="Your session could not be restored"
+        message="Tereo did not renew your session. Try again, or sign out to start over."
+        onRetry={() => window.location.reload()}
+        onSignOut={() => void signOut()}
+      />
+    );
+  }
   // A token, but GET /v1/me kept failing.
   return (
     <StartupError

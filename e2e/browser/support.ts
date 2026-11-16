@@ -66,10 +66,10 @@ export interface Watch {
   violations: string[];
   /** Uncaught errors of zeteo's or Tereo's pages. */
   pageErrors: string[];
-  /** Access, refresh and ID tokens from every successful /oauth/token answer. */
+  /** Access and ID tokens from every successful /oauth/token answer. */
   tokens: string[];
-  /** The refresh token of the latest successful /oauth/token answer. */
-  lastRefreshToken?: string;
+  /** Refresh tokens from /oauth/token bodies: none, as Tereo keeps it in a cookie. */
+  refreshTokens: string[];
   /** The `grant_type` of every successful /oauth/token request. */
   grants: string[];
   /** The status of every /oauth/revoke answer. */
@@ -93,6 +93,7 @@ export const watch = (context: BrowserContext): Watch => {
     violations: [],
     pageErrors: [],
     tokens: [],
+    refreshTokens: [],
     grants: [],
     revocations: [],
     navigations: [],
@@ -126,11 +127,11 @@ export const watch = (context: BrowserContext): Watch => {
       );
       seen.grants.push(grant ?? "");
       const body = (await response.json()) as Record<string, unknown>;
-      for (const key of ["access_token", "refresh_token", "id_token"]) {
+      for (const key of ["access_token", "id_token"]) {
         if (typeof body[key] === "string") seen.tokens.push(body[key]);
       }
       if (typeof body.refresh_token === "string") {
-        seen.lastRefreshToken = body.refresh_token;
+        seen.refreshTokens.push(body.refresh_token);
       }
     }
   };
