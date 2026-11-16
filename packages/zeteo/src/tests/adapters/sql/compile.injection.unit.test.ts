@@ -196,7 +196,12 @@ describe.each(ENGINES)("compileSql ($dialect.name)", (engine) => {
             calc: { concat: [columns.quote, { value: hostile }] },
             as: "x",
           },
-          { calc: { lower: { value: HOSTILE_VALUES[2] } }, as: "y" },
+          {
+            calc: {
+              lower: { concat: [{ value: HOSTILE_VALUES[2] }, columns.quote] },
+            },
+            as: "y",
+          },
         ],
         orderBy: [],
       });

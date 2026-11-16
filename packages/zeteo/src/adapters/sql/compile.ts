@@ -298,20 +298,29 @@ export const compileSql = (
     );
   }
 
-  const orderBy =
-    fetch.defaultOrder === false && plan.defaultOrder ? [] : plan.orderBy;
-  for (const order of orderBy) {
+  // SQL Server refuses an expression named twice in ORDER BY, which two select
+  // items computing the same thing would give; a repeat changes no order.
+  const ordered = new Set<string>();
+  const orderBy = (
+    fetch.defaultOrder === false && plan.defaultOrder ? [] : plan.orderBy
+  ).flatMap((order) => {
     const { target } = order;
-    qb = dialect.orderBy(
-      qb,
+    const sorted =
       target.kind === "output"
         ? {
             expression: selected[target.index]!,
             alias: sql.id(`c${target.index}`),
           }
-        : { expression: column(target.column, dialect) },
-      order.direction
+        : { expression: column(target.column, dialect) };
+    const key = JSON.stringify(sorted.expression.toOperationNode(), (_, v) =>
+      typeof v === "bigint" ? `${v}n` : v
     );
+    if (ordered.has(key)) return [];
+    ordered.add(key);
+    return [{ sorted, direction: order.direction }];
+  });
+  for (const { sorted, direction } of orderBy) {
+    qb = dialect.orderBy(qb, sorted, direction);
   }
 
   qb = dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);

@@ -2,7 +2,7 @@ Path:
   type: string
   description: |
     `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
-    its relation path (`customers.region`, `customers.accounts.plan`). Segments are 1-128 characters.
+    its relation path (`customers.region`, `order_lines.products.category`). Segments are 1-128 characters.
 
 Alias:
   type: string
@@ -158,8 +158,8 @@ Query:
       description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
     join:
       type: array
-      maxItems: 4
-      description: Relations to join, by name; one reached through another is written `customers.accounts`
+      maxItems: 8
+      description: Relations to join, by name, at most the source's `max_joins`; one reached through another is written `order_lines.products`
       items:
         oneOf:
           - { $ref: '#/Path' }

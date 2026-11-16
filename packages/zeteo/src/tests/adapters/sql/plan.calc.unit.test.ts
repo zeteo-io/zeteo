@@ -437,7 +437,7 @@ describe("planSql: calculation refusals", () => {
 
   it.each([
     [{ lower: "total" }, ["lower"]],
-    [{ upper: { value: "a" } }, null],
+    [{ upper: { concat: [{ value: "a" }, "status"] } }, null],
     [{ add: ["total", "status"] }, ["add", 1]],
     [{ mul: ["total", { value: "2" }] }, ["mul", 1]],
     [{ abs: "ordered_on" }, ["abs"]],
@@ -461,6 +461,27 @@ describe("planSql: calculation refusals", () => {
         path: ["select", 0, "calc", ...at],
       });
     }
+  });
+
+  it.each([
+    [5],
+    [{ value: "EU" }],
+    [{ add: [1, 2] }],
+    [{ upper: { value: "a" } }],
+    [{ coalesce: [{ value: "a" }, { value: "b" }] }],
+  ])("refuses a calculation that reads no column: %j", (calc) => {
+    expect(refusal({ select: ["id", { calc, as: "label" }] })).toEqual({
+      code: "invalid_operator",
+      path: ["select", 1],
+      message: "A calculation reads at least one column",
+    });
+  });
+
+  it("accepts a calculation whose only input is count(*)", () => {
+    expect(
+      plan({ select: [{ calc: { add: [{ count: "*" }, 1] }, as: "n" }] })
+        .select[0]
+    ).toMatchObject({ kind: "calc", level: "group" });
   });
 
   it("refuses an expression aggregate over the wrong type at its operand", () => {

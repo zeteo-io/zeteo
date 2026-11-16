@@ -486,6 +486,58 @@ describe("refreshSource", () => {
     });
   });
 
+  it("names relations of one constraint name in two schemas the same whatever order the database lists them in", async () => {
+    await fixture.run(`
+      CREATE SCHEMA archive;
+      CREATE TABLE archive.orders (id integer PRIMARY KEY, customer_id integer);
+      ALTER TABLE archive.orders ADD CONSTRAINT orders_customer_id_fkey
+        FOREIGN KEY (customer_id) REFERENCES sales.customers (id);
+      GRANT USAGE ON SCHEMA archive TO zeteo_ro;
+      GRANT SELECT ON archive.orders TO zeteo_ro;
+    `);
+    await prisma.source.update({
+      where: { id: sourceId },
+      data: { schemas: ["sales", "archive"] },
+    });
+    await closeSourcePool(sourceId);
+    let reversed = false;
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    vi.spyOn(postgresAdapter, "connect").mockImplementation(async (...args) => {
+      const conn = await connect(...args);
+      const readSchema = conn.readSchema.bind(conn);
+      conn.readSchema = async (schemas) => {
+        const snapshot = await readSchema(schemas);
+        return reversed
+          ? { ...snapshot, foreignKeys: [...snapshot.foreignKeys].reverse() }
+          : snapshot;
+      };
+      return conn;
+    });
+    const reverseNames = async () =>
+      (
+        await prisma.relation.findMany({
+          where: {
+            sourceId,
+            toMany: true,
+            constraintName: "orders_customer_id_fkey",
+          },
+        })
+      )
+        .map((r) => [r.toTableId, r.name])
+        .sort();
+
+    await refreshSource(sourceId, ACTOR);
+    const first = await reverseNames();
+    expect(first.map(([, name]) => name).sort()).toEqual([
+      "orders",
+      "orders_2",
+    ]);
+    reversed = true;
+    await closeSourcePool(sourceId);
+    await refreshSource(sourceId, ACTOR);
+    expect(await reverseNames()).toEqual(first);
+  });
+
   it("names a new relation around a declared one that holds the name", async () => {
     await refreshSource(sourceId, ACTOR);
     await fixture.run(`

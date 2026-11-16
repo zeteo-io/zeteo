@@ -745,6 +745,15 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
             reads
           )
         : planner.resolveExpr(rest as CalcExpr, ["select", i], reads);
+      // A constant item is pointless, and SQL Server refuses a constant in
+      // ORDER BY and GROUP BY, both of which a select item may land in.
+      if (reads.size === 0 && !hasAggregate) {
+        throw fail(
+          "invalid_operator",
+          "A calculation reads at least one column",
+          ["select", i]
+        );
+      }
       if (hasAggregate && bareColumn) {
         throw fail(
           "invalid_grouping",

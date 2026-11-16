@@ -81,6 +81,85 @@ results for the same data:
 Every object is strict: an unknown key is refused. Expressions are the closed set of operations
 under *Calculations*; there are no other function calls, subqueries or raw fragments.
 
+### Filters
+
+A filter is one of:
+
+- `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`;
+- `{ "<path>": { "<operator>": value }, ... }`: each path takes exactly one operator, and several
+  paths in one object must all hold.
+
+| Operator | Value | Applies to |
+|----------|-------|------------|
+| `eq`, `ne`, `gt`, `gte`, `lt`, `lte` | a value | text, number, date, timestamp; `eq`/`ne` also boolean |
+| `between` | `[low, high]`, inclusive | text, number, date, timestamp |
+| `in`, `notIn` | 1 to 1,000 values | text, number, date, timestamp, boolean |
+| `contains`, `startsWith` | a string | text: case-insensitive whatever the collation, `%`, `_` and `[` match themselves |
+| `isNull` | `true` or `false` | every type, json included |
+
+Values are checked against the column: text takes a string; numbers a number or a decimal string
+(`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
+dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
+(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
+
+Every value is bound as a parameter, and an engine takes only so many in one statement: 2,098 on
+Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two
+included. A query that binds more, which takes several long `in` lists, is refused before it
+runs with `422 too_many_parameters` at path `[]`. A timestamp's fraction past 100 ns is cut on
+Azure SQL, its precision.
+
+A value that has the right shape but that the source itself cannot convert to the column's type
+is the caller's error: `422 invalid_value` at path `[]`, with the fixed message `A value in the
+query could not be converted to its column's type`, recorded as `refused`. On Postgres that is a
+malformed uuid, or a timestamp offset beyond ±15:59; on Azure SQL a malformed uniqueidentifier, a
+timestamp offset beyond ±14:00, a timestamp that leaves years 1 to 9999 once converted to UTC, and
+a bound outside 1753-01-01 to 9999-12-31 compared with a `datetime` column.
+
+**Postgres's own types.** A uuid column compares as a uuid (`eq`, `ne`, `in`, `notIn`, ranges), so
+its index is used and the value's case does not matter; `contains`, `startsWith`, `min` and `max`
+read it as text. An enum column is read as text everywhere: a label the enum does not have
+matches nothing, and it sorts, and `min` and `max` compare, alphabetically, not in the enum's
+order. A money column is read as numeric everywhere, so it filters, sums and averages like a
+decimal. A domain behaves as its base type.
+
+**Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
+names cannot be filtered on directly (select it through a view that renames it), and an `as` of
+`and`, `or` or `not` cannot be used in `having`.
+
+**`eq` on text follows the database's collation**, which differs between engines: Postgres
+compares exactly, case and accents included, unless the column has a case-insensitive collation;
+Azure SQL's default collations ignore case, so `{ "eq": "paid" }` also matches `PAID` there. Use
+`contains` or `startsWith` for a match that ignores case on every engine. Sorting text follows the
+collation too, and so does what `distinct` and `groupBy` count as the same text.
+
+**Where the engines differ.** Over the types both have, the engines return the same rows, in the
+same order, in the same wire forms, except:
+
+- text compared, sorted, deduplicated or grouped follows each database's collation (above);
+- money prints with four decimal places on Azure SQL (`"640.1000"`) and two on Postgres
+  (`"640.10"`);
+- a uuid prints in lower case on Postgres and a uniqueidentifier in upper case on Azure SQL, and
+  they sort differently: Postgres in the order of their text, SQL Server in its own byte order
+  (which `min` and `max` follow too; on Postgres they compare the text);
+- json is the JSON value on Postgres and text on Azure SQL;
+- a timestamp's fraction past 100 ns is cut on Azure SQL, and its `datetime` holds 1/300 s ticks
+  (see *Results*);
+- a value one engine cannot convert fails there as `422 invalid_value` (see *Filters*): a timestamp
+  offset beyond ±14:00 on Azure SQL but only beyond ±15:59 on Postgres, and a bound outside
+  1753-01-01 to 9999-12-31 compared with a `datetime` column on Azure SQL, which Postgres has no
+  counterpart of.
+
+Types only one engine has behave as that engine's section says: on Postgres, an enum sorts as its
+text and a money column computes as numeric (see *Postgres's own types*); float `NaN` and
+`Infinity` are Postgres's alone.
+
+### Json columns
+
+A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
+grouped, deduplicated (`distinct`, `countDistinct`) or sorted (`invalid_operator`). A query whose
+select items are all json has no default order. On Azure SQL json is stored as text (`nvarchar`):
+its columns are text columns there.
+
 ## Calculations
 
 An **expression** is a column path (`"unit_price"`, `"products.name"`), a number, a text literal
@@ -103,15 +182,17 @@ takes a column path only.
 
 **Where calculations go**
 
-- A select item: `{ "calc": expression, "as": "name" }`; `as` is required.
+- A select item: `{ "calc": expression, "as": "name" }`; `as` is required. A calculation reads
+  at least one column (an aggregate such as `{ "count": "*" }` also counts): one built only of
+  literals is refused with `422 invalid_operator` at the item's path, `["select", i]`.
 - An aggregate's argument: `{ "sum": { "mul": ["unit_price", "quantity"] }, "as": "revenue" }`.
   `sum`, `avg`, `min` and `max` take an expression where they took a path, and then need `as`;
   `count` and `countDistinct` stay paths.
 - By name elsewhere: a calculation's `as` works in `groupBy` and `orderBy`, in `having` when it
   is group-level, and in `where` when it is row-level (zeteo puts the calculation itself into the
-  WHERE clause, since SQL cannot name a select alias there). A `where` key is read as a select
-  name first, then as a column path; a name that is both is `422 duplicate_output_name`: pick
-  another `as`.
+  WHERE clause, since SQL cannot name a select alias there). A `where` key that names a
+  calculation or an aggregate is read as that item, any other as a column path; a calculation's
+  or aggregate's name that is also a column is `422 duplicate_output_name`: pick another `as`.
 
 **Row-level and group-level**
 
@@ -125,8 +206,8 @@ takes a column path only.
   `422 invalid_grouping`, at the bare column.
 
 **Types.** Arithmetic takes `number` columns, `lower` and `upper` take `text`; `concat` takes text
-or numbers (numbers are converted to text). Dates, booleans, json and `other` columns are refused
-with `422 invalid_operator`, at the path of the operand (`path` is a list of keys and indexes, such
+or numbers (numbers are converted to text). Dates, booleans, json and `other` columns are refused,
+except in `coalesce`, with `422 invalid_operator`, at the path of the operand (`path` is a list of keys and indexes, such
 as `["select", 2, "sum", "mul", 1]`). `coalesce` operands must share one type. Every column an expression reads goes through the usual column resolution, so
 grants, joins and `not_found_or_not_accessible` work as for a plain path, and the run record lists
 the columns read. A result is typed in `columns` like any select item; decimals arrive as strings.
@@ -238,6 +319,62 @@ Full name (row-level); a null last name counts as empty text:
   ]
 }
 ```
+
+## Discovering what you can query
+
+`GET /v1/catalog` (`zeteo.data.read`) answers what the caller may query, so a person or an AI
+can write a query without being told the schema. It shows exactly the caller's grants (their own
+and their groups') and nothing else: no ids, no native types, no connection settings, and no
+trace of a table, column, relation or source they are not granted.
+
+```json
+{
+  "sources": [
+    {
+      "slug": "sales-db",
+      "name": "Sales",
+      "type": "postgres",
+      "language": { "id": "sql", "schema": { "type": "object", "properties": { "select": {} } } },
+      "limits": {
+        "default_rows": 1000,
+        "max_rows": 50000,
+        "timeout_ms": 30000,
+        "max_joins": 4,
+        "export": { "enabled": true, "max_rows": 200000 }
+      },
+      "tables": [
+        {
+          "name": "orders",
+          "schema_name": "sales",
+          "kind": "table",
+          "description": null,
+          "missing": false,
+          "columns": [{ "name": "id", "type": "number", "nullable": false, "description": null, "missing": false }],
+          "relations": [{ "name": "customers", "to": "customers", "to_many": false, "missing": false }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+- Without `?source=<slug>`, every source the caller has a grant on, ordered by slug; archived
+  sources never appear. A `source` that is unknown, archived or not granted gives `sources: []`,
+  exactly as a caller with no grants gets.
+- Tables are ordered by schema, then name; columns in the table's own order, only those granted.
+- A table's `name` is what a query writes in `from`: the bare name when no other table the caller
+  can see in that source has it, else `schema.table`.
+- A relation is listed under the table it starts from. Its `name` is what a query's `join`
+  names (through a joined relation, `order_lines.products`); `to` is the target table as `from` would
+  write it. A relation appears only when every key column on both sides is granted.
+- `limits` are those of `POST /v1/query`: `default_rows` and `max_rows` are lowered to the
+  source's `row_cap`, `timeout_ms` is the source's time limit, `max_joins` the most joins one
+  query may name. `export` says whether the source
+  takes exports (`enabled`: `export_enabled` and an `export_row_cap` above 0) and up to how many
+  rows (`max_rows`, 0 when it does not); exporting also needs `zeteo.data.export`.
+- `language.schema` is the JSON Schema of the query body.
+- `missing` marks a table, column or relation the last refresh did not find; a query that uses
+  one fails with `missing_in_source`.
 
 ## Worked examples
 

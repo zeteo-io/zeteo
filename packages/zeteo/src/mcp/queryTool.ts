@@ -22,13 +22,13 @@ const QueryInput = z.looseObject({
     .array(z.unknown())
     .optional()
     .describe(
-      'Relations to join, by name ("customer") or { relation, type: "inner" | "left" }'
+      'Relations to join, by name ("customers") or { relation, type: "inner" | "left" }'
     ),
   select: z
     .array(z.unknown())
     .optional()
     .describe(
-      'Columns ("id", "customer.region"), aggregates ({ sum: "total", as: "revenue" }; sum, avg, min and max also take an expression, then "as" is required), date buckets and calculations ({ calc: { mul: ["price", "qty"] }, as: "line_total" })'
+      'Columns ("id", "customers.region"), aggregates ({ sum: "total", as: "revenue" }; sum, avg, min and max also take an expression, then "as" is required), date buckets and calculations ({ calc: { mul: ["unit_price", "quantity"] }, as: "line_value" })'
     ),
   distinct: z.boolean().optional(),
   where: z

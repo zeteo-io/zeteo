@@ -456,12 +456,14 @@ const applySnapshot = async (
   for (const r of existingRelations) {
     if (!free.has(r.id)) takenOn(r.fromTableId).add(r.name);
   }
+  // Constraint names are unique per table only, so equal names in two tables
+  // fall back to the tables' ids, never to the order the database listed them.
+  const compare = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
   const bySide = (a: Side, b: Side) =>
-    a.constraintName === b.constraintName
-      ? Number(a.toMany) - Number(b.toMany)
-      : a.constraintName < b.constraintName
-        ? -1
-        : 1;
+    compare(a.constraintName, b.constraintName) ||
+    Number(a.toMany) - Number(b.toMany) ||
+    compare(a.keyTableId, b.keyTableId) ||
+    compare(a.tableId, b.tableId);
   const finalName = new Map<Side, string>();
   const assign = (side: Side, wanted: string) => {
     const name = uniqueName(wanted, takenOn(side.tableId));

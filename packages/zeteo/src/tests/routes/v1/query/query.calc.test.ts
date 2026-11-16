@@ -20,6 +20,8 @@ import {
 
 describeEachEngine("POST /v1/query: calculations", (engine) => {
   let source: SeededSource;
+  /** Takes one join only. */
+  let oneJoin: SeededSource;
   const user = newQueryUser();
 
   const query = (body: Record<string, unknown>) =>
@@ -49,10 +51,14 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
     ]) {
       await grantTo(user.principal, source.tables[table]!, "all");
     }
+    oneJoin = await seedQuerySource(engine, { max_joins: 1 }, "calc");
+    for (const table of ["accounts", "customers", "orders"]) {
+      await grantTo(user.principal, oneJoin.tables[table]!, "all");
+    }
   });
   afterAll(async () => {
     await removeRunsOf([user.id]);
-    await removeSources([source.id]);
+    await removeSources([source.id, oneJoin.id]);
   });
 
   it("adds, subtracts, multiplies and takes absolute values per row", async () => {
@@ -91,7 +97,7 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
         "id",
         ...calcs(
           ["half", { div: ["id", 2] }],
-          ["literal", { div: [7, 2] }],
+          ["literal", { div: [{ add: [7, { sub: ["id", "id"] }] }, 2] }],
           ["third", { div: ["total", 3] }],
           ["by_zero", { div: ["total", { sub: ["id", "id"] }] }],
           ["by_literal_zero", { div: ["total", 0] }]
@@ -182,22 +188,25 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
             },
           ],
           ["nothing", { concat: ["notes", "external_ref"] }],
-          ["literal", { concat: [12.5, { value: "/" }, 7] }]
+          [
+            "literal",
+            { concat: [12.5, { value: "/" }, 7, { value: "/" }, "id"] },
+          ]
         ),
       ],
       where: { id: { in: [1, 2, 11] } },
       orderBy: [{ id: "asc" }],
     });
     expect(rows).toEqual([
-      [1, "10.00 EUR", "#|", "", "12.5/7"],
+      [1, "10.00 EUR", "#|", "", "12.5/7/1"],
       [
         2,
         "250.50 EUR",
         "#9007199254740993|rush",
         "rush9007199254740993",
-        "12.5/7",
+        "12.5/7/2",
       ],
-      [11, "12.00 EUR", "#9|", "9", "12.5/7"],
+      [11, "12.00 EUR", "#9|", "9", "12.5/7/11"],
     ]);
   });
 
@@ -350,10 +359,97 @@ describeEachEngine("POST /v1/query: calculations", (engine) => {
       from: "orders",
       select: [
         "id",
-        ...calcs(["text", { concat: [0.0000001, { value: "|" }, 1e21] }]),
+        ...calcs([
+          "text",
+          { concat: [0.0000001, { value: "|" }, 1e21, { value: "|" }, "id"] },
+        ]),
       ],
       where: { id: { eq: 1 } },
     });
-    expect(rows).toEqual([[1, "0.0000001|1000000000000000000000"]]);
+    expect(rows).toEqual([[1, "0.0000001|1000000000000000000000|1"]]);
+  });
+
+  it.each([[{ value: "EU" }], [5], [{ add: [1, 2] }]])(
+    "refuses a calculation that reads no column, %j, with 422",
+    async (calc) => {
+      const res = await query({
+        from: "orders",
+        select: ["id", { calc, as: "label" }],
+      });
+      expect(res.status).toBe(422);
+      expect(res.body).toMatchObject({
+        error: "invalid_operator",
+        error_description: "A calculation reads at least one column",
+        path: ["select", 1],
+      });
+    }
+  );
+
+  it("orders by a column and a calc computing the same thing", async () => {
+    const rows = await rowsOf({
+      from: "orders",
+      select: ["id", { calc: "id", as: "same" }],
+      where: { id: { in: [1, 2] } },
+    });
+    expect(numeric(rows)).toEqual([
+      [1, 1],
+      [2, 2],
+    ]);
+  });
+
+  it("orders by identical aggregates, and an aggregate beside the same calc", async () => {
+    const rows = await rowsOf({
+      from: "orders",
+      select: [
+        "status",
+        { sum: "total" },
+        { sum: "total", as: "again" },
+        { calc: { sum: "total" }, as: "t" },
+        { calc: { mul: ["customer_id", 2] }, as: "twice" },
+        { calc: { mul: ["customer_id", 2] }, as: "twice_again" },
+      ],
+      groupBy: ["status", "twice", "twice_again"],
+      where: { status: { eq: "pending" } },
+    });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const [status, sum, again, t, twice, twiceAgain] of rows) {
+      expect(status).toBe("pending");
+      expect(Number(again)).toBe(Number(sum));
+      expect(Number(t)).toBe(Number(sum));
+      expect(Number(twiceAgain)).toBe(Number(twice));
+    }
+  });
+
+  it("orders by an explicit orderBy that names the same expression twice", async () => {
+    const rows = await rowsOf({
+      from: "orders",
+      select: ["id", { calc: "id", as: "same" }, "status"],
+      where: { id: { in: [1, 2, 3] } },
+      orderBy: [{ same: "desc" }, { id: "asc" }, { status: "asc" }],
+    });
+    expect(rows.map((r) => Number(r[0]))).toEqual([3, 2, 1]);
+  });
+
+  it("refuses more joins than the source's max_joins with 422 too_many_joins", async () => {
+    const res = await postQuery(user.token, {
+      source: oneJoin.slug,
+      from: "orders",
+      join: ["customers", "customers.accounts"],
+      select: ["id"],
+    });
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({
+      error: "too_many_joins",
+      error_description: "This source allows at most 1 join",
+      path: ["join"],
+    });
+    const ok = await postQuery(user.token, {
+      source: oneJoin.slug,
+      from: "orders",
+      join: ["customers"],
+      select: ["id"],
+      limit: 1,
+    });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
   });
 });

@@ -181,10 +181,10 @@ describe("compileSql on Postgres: calculations", () => {
 
   it("binds a number literal in exponent form as plain decimal text", () => {
     const { sql, parameters } = selected({
-      concat: [0.0000001, 1e21],
+      concat: [0.0000001, 1e21, "status"],
     });
     expect(sql).toContain(
-      "concat(cast(cast($1 as numeric) as text), cast(cast($2 as numeric) as text))"
+      "concat(cast(cast($1 as numeric) as text), cast(cast($2 as numeric) as text), "
     );
     expect(parameters).toEqual(["0.0000001", "1000000000000000000000"]);
   });
@@ -327,6 +327,46 @@ describe("compileSql on SQL Server: calculations", () => {
     expect(parameters).toEqual([bigint("2"), bigint("0"), bigint("1001")]);
   });
 
+  it("orders by each distinct expression once, as SQL Server refuses a repeat", () => {
+    const order = (e: string, dir = "asc") =>
+      `case when ${e} is null then ${dir === "asc" ? "1 else 0" : "0 else 1"} end, ${e} ${dir}`;
+    const tail = " offset @1 rows fetch next @2 rows only";
+    expect(ms({ select: ["id", { calc: "id", as: "same" }] }).sql).toBe(
+      "select [t0].[id] as [c0], [t0].[id] as [c1] from [shop].[orders] as [t0]" +
+        ` order by ${order("[t0].[id]")}${tail}`
+    );
+    expect(
+      ms({
+        select: [
+          { sum: "total" },
+          { calc: { sum: "total" }, as: "t" },
+          { sum: "total", as: "again" },
+        ],
+      }).sql
+    ).toBe(
+      "select cast(sum([t0].[total]) as varchar(48)) as [c0], cast(sum([t0].[total]) as varchar(48)) as [c1]," +
+        " cast(sum([t0].[total]) as varchar(48)) as [c2]" +
+        ` from [shop].[orders] as [t0] order by ${order("sum([t0].[total])")}${tail}`
+    );
+    expect(
+      ms({
+        select: ["id", { calc: "id", as: "same" }, "total"],
+        orderBy: [{ same: "desc" }, { id: "asc" }, { total: "asc" }],
+      }).sql
+    ).toBe(
+      "select [t0].[id] as [c0], [t0].[id] as [c1], cast([t0].[total] as varchar(48)) as [c2]" +
+        " from [shop].[orders] as [t0]" +
+        ` order by ${order("[t0].[id]", "desc")}, ${order("[t0].[total]")}${tail}`
+    );
+  });
+
+  it("orders by a repeated expression once on Postgres too", () => {
+    expect(pg({ select: ["id", { calc: "id", as: "same" }] }).sql).toBe(
+      'select "t0"."id" as "c0", "t0"."id" as "c1" from "shop"."orders" as "t0"' +
+        ' order by "c0" asc nulls last limit $1 offset $2'
+    );
+  });
+
   it("filters on a row calc by its expression, and having on a group calc", () => {
     const { sql } = ms({
       select: [
@@ -370,10 +410,10 @@ describe("compileSql on SQL Server: calculations", () => {
 
   it("binds a number literal in exponent form as plain decimal text", () => {
     const { sql, parameters } = selected({
-      concat: [0.0000001, 1e21],
+      concat: [0.0000001, 1e21, "status"],
     });
     expect(sql).toContain(
-      "concat(cast(cast(@1 as decimal(7, 7)) as nvarchar(64)), cast(cast(@2 as decimal(22, 0)) as nvarchar(64)))"
+      "concat(cast(cast(@1 as decimal(7, 7)) as nvarchar(64)), cast(cast(@2 as decimal(22, 0)) as nvarchar(64)), "
     );
     expect(parameters).toEqual([
       nvarchar("0.0000001"),

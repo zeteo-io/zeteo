@@ -16,7 +16,7 @@ export interface TextLiteral {
 
 /**
  * A calculation expression: a column path, a number, a text literal, an
- * aggregate, or an operation object with exactly one key. At most 5 levels
+ * aggregate, or an operation object with exactly one key. At most 8 levels
  * deep (an aggregate counts as one), and 100 operations and aggregates per
  * query. `add`, `mul`, `concat` and `coalesce` take 2 to 10 operands.
  */
