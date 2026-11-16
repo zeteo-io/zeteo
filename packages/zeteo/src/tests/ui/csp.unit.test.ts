@@ -20,7 +20,7 @@ const BASE = {
 };
 
 describe("cspDirectives", () => {
-  it("lets the UI reach the origin of UI_TEREO_URL, and upgrades requests on an https PUBLIC_URL", () => {
+  it("lets the UI reach the origin of UI_TEREO_URL and its websocket, and upgrades requests on an https PUBLIC_URL", () => {
     expect(
       cspDirectives({
         UI_CLIENT_ID: "zeteo-ui",
@@ -29,7 +29,11 @@ describe("cspDirectives", () => {
       })
     ).toEqual({
       ...BASE.fixed,
-      "connect-src": ["'self'", "https://core.example.com"],
+      "connect-src": [
+        "'self'",
+        "https://core.example.com",
+        "wss://core.example.com",
+      ],
       "upgrade-insecure-requests": [],
     });
   });
@@ -57,7 +61,7 @@ describe("cspDirectives", () => {
       })
     ).toEqual({
       ...BASE.fixed,
-      "connect-src": ["'self'", "http://localhost:4001"],
+      "connect-src": ["'self'", "http://localhost:4001", "ws://localhost:4001"],
     });
   });
 });

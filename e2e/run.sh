@@ -8,7 +8,7 @@
 #   PLAYWRIGHT=0 e2e/run.sh        # only the Vitest files
 #
 # Tereo is a released image, TEREO_IMAGE (default
-# ghcr.io/tereo-io/tereo:0.8.1), pulled when missing. zeteo's image is built
+# ghcr.io/tereo-io/tereo:0.8.2), pulled when missing. zeteo's image is built
 # from this checkout as zeteo:e2e (ZETEO_IMAGE).
 #
 # Everything runs in the compose project zeteo-e2e on free host ports bound to
@@ -93,7 +93,7 @@ log "Building @zeteo-io/sdk for the SDK's cases"
 (cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
 
 # --- Images --------------------------------------------------------------
-TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.1}"
+TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.2}"
 if ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
   log "Pulling $TEREO_IMAGE"
   if ! docker pull "$TEREO_IMAGE" >&2; then

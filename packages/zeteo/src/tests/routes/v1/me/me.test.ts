@@ -4,6 +4,7 @@ import { clearDirectory, seedDirectory } from "../../../support/principals.js";
 import type { Principal } from "../../../../principals/directory.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { tokenFor } from "../../../support/tokens.js";
+import { getTereo } from "../../../../utils/tereo.js";
 import { fetchJson } from "../../../support/http.js";
 import { redis } from "../../../../utils/redis.js";
 import { randomUUID } from "crypto";
@@ -126,6 +127,33 @@ describe("GET /v1/me", () => {
       },
     });
     expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("drops the token's cached introspection before verifying it, so a changed permission shows at once", async () => {
+    const token = tokenFor({ userId: ADA, permissions: ["zeteo.data.read"] });
+    const auth = getTereo().auth;
+    const order: string[] = [];
+    vi.spyOn(auth, "invalidateToken").mockImplementation(async (t) => {
+      order.push(`drop ${t}`);
+    });
+    const verify = auth.requireAuth.bind(auth);
+    vi.spyOn(auth, "requireAuth").mockImplementation((req, res, next) => {
+      order.push("verify");
+      return verify(req, res, next);
+    });
+    const res = await me(token);
+    expect(res.status).toBe(200);
+    expect(order).toEqual([`drop ${token}`, "verify"]);
+  });
+
+  it("still answers when dropping the cached introspection fails", async () => {
+    vi.spyOn(getTereo().auth, "invalidateToken").mockRejectedValue(
+      new Error("redis down")
+    );
+    const res = await me(
+      tokenFor({ userId: ADA, permissions: ["zeteo.data.read"] })
+    );
+    expect(res.status).toBe(200);
   });
 
   it("answers 401 without a token", async () => {

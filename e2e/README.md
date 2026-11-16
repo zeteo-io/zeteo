@@ -32,7 +32,7 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
 
-- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.1`),
+- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.2`),
   pulled when it is not present. If it cannot be pulled the run stops and names the image it needs.
 - **zeteo's image** is built from this checkout as `zeteo:e2e` (`ZETEO_IMAGE`; `SKIP_ZETEO_BUILD=1`
   reuses one already built).
@@ -56,7 +56,7 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
 - **Images left behind**: the run keeps the images, so the next one starts faster:
   `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images
   `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
-  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.1 zeteo:e2e`, adding the base images only if
+  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.2 zeteo:e2e`, adding the base images only if
   nothing else uses them; `docker builder prune` drops the build cache of `zeteo:e2e`.
 - **The SDK**: before the tests start, the script builds `@zeteo-io/sdk`
   (`npx nx run @zeteo-io/sdk:build`), which `sdk.e2e.test.ts` imports through the workspace link.
