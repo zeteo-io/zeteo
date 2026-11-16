@@ -157,6 +157,11 @@ INSERT INTO sales.typed_values VALUES
    '2026-01-01 00:00:00', '2026-01-01 00:00:00.000999+00',
    '{"z": 1, "a": 2}', '{"z": 1, "a": 2}', NULL);
 
+-- Integers whose products fit 32 bits and whose sum does not.
+INSERT INTO sales.order_lines VALUES
+  (2, 1, 'big-a', 1000000000, 1.5000),
+  (2, 2, 'big-b', 1000000000, 0.2500);
+
 INSERT INTO sales.ledger VALUES
   (1, '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', 1234.50),
   (2, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 0.99),

@@ -56,6 +56,7 @@ describe("MCP discovery tools", () => {
         // The profile's 5,000, under the source's own cap.
         max_rows: 2000,
         timeout_ms: expect.any(Number),
+        max_joins: 4,
       },
     });
   });
@@ -126,7 +127,12 @@ describe("MCP discovery tools", () => {
           },
         ],
         relations: [
-          { name: "customer", to: "customers", to_many: false, missing: false },
+          {
+            name: "customers",
+            to: "customers",
+            to_many: false,
+            missing: false,
+          },
         ],
       },
     });

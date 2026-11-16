@@ -99,12 +99,24 @@ describe("/v1/sources/:sourceId", () => {
       limits: {
         timeout_ms: 30_000,
         row_cap: 50_000,
+        max_joins: 4,
         export_enabled: false,
         export_row_cap: 0,
         query_concurrency: 1,
         export_concurrency: 10,
       },
     });
+  });
+
+  it("PATCH changes max_joins and keeps it when the body omits it", async () => {
+    const source = await create();
+    const res = await call("PATCH", `/${source.id}`, { max_joins: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body.max_joins).toBe(2);
+    const kept = await call("PATCH", `/${source.id}`, { name: "Renamed" });
+    expect(kept.body.max_joins).toBe(2);
+    const refused = await call("PATCH", `/${source.id}`, { max_joins: 9 });
+    expect(refused.status).toBe(400);
   });
 
   it("PATCH keeps the open pool when no concurrency setting changed", async () => {

@@ -76,6 +76,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
             default_rows: view.limits.default_rows,
             max_rows: view.limits.max_rows,
             timeout_ms: view.limits.timeout_ms,
+            max_joins: view.limits.max_joins,
           },
         })),
       };

@@ -120,6 +120,11 @@ INSERT INTO sales.orders VALUES
   (11, 2, N'shipped', 12.00, '2026-06-10 10:10:10.5 +00:00', NULL, 9),
   (12, 3, N'paid', 999.99, '2026-06-30 12:00:00 +00:00', N'big', 10);
 
+-- Integers whose products fit 32 bits and whose sum does not.
+INSERT INTO sales.order_lines VALUES
+  (2, 1, N'big-a', 1000000000, 1.5000),
+  (2, 2, N'big-b', 1000000000, 0.2500);
+
 INSERT INTO sales.ledger VALUES
   (1, '6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B', 1234.50),
   (2, 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', 0.99),

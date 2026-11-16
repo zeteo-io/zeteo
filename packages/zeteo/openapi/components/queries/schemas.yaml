@@ -2,7 +2,7 @@ Path:
   type: string
   description: |
     `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
-    its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+    its relation path (`customers.region`, `order_lines.products.category`). Segments are 1-128 characters.
 
 Alias:
   type: string
@@ -20,7 +20,9 @@ Scalar:
     dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`.
 
 SelectItem:
-  description: A column path, or one aggregate or date bucket with an optional `as`
+  description: |
+    A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
+    `sum`, `avg`, `min` and `max` over an expression, and `calc`, need `as`.
   oneOf:
     - { $ref: '#/Path' }
     - type: object
@@ -39,26 +41,30 @@ SelectItem:
       additionalProperties: false
       required: [sum]
       properties:
-        sum: { $ref: '#/Path' }
+        sum: { $ref: '#/CalcExpr' }
         as: { $ref: '#/Alias' }
+      description: A path, or an expression, in which case `as` is required
     - type: object
       additionalProperties: false
       required: [avg]
       properties:
-        avg: { $ref: '#/Path' }
+        avg: { $ref: '#/CalcExpr' }
         as: { $ref: '#/Alias' }
+      description: A path, or an expression, in which case `as` is required
     - type: object
       additionalProperties: false
       required: [min]
       properties:
-        min: { $ref: '#/Path' }
+        min: { $ref: '#/CalcExpr' }
         as: { $ref: '#/Alias' }
+      description: A path, or an expression, in which case `as` is required
     - type: object
       additionalProperties: false
       required: [max]
       properties:
-        max: { $ref: '#/Path' }
+        max: { $ref: '#/CalcExpr' }
         as: { $ref: '#/Alias' }
+      description: A path, or an expression, in which case `as` is required
     - type: object
       additionalProperties: false
       required: [bucket, column]
@@ -66,6 +72,67 @@ SelectItem:
         bucket: { type: string, enum: [day, week, month, quarter, year], description: Truncated in UTC; weeks start on Monday }
         column: { $ref: '#/Path' }
         as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [calc, as]
+      properties:
+        calc: { $ref: '#/CalcExpr' }
+        as: { $ref: '#/Alias' }
+      description: |
+        A calculation. Row-level when it holds no aggregate (computed per row, nameable in `where`
+        and `groupBy`); group-level when every column sits inside an aggregate (nameable in `having`
+        and `orderBy`). A mix of the two is refused (`invalid_grouping`).
+
+CalcExpr:
+  description: |
+    An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
+    with exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a
+    query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
+    `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
+    one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;
+    `round` gives exactly the places asked, half away from zero. Aggregates do not nest.
+  oneOf:
+    - { $ref: '#/Path' }
+    - { type: number }
+    - type: object
+      additionalProperties: false
+      required: [value]
+      properties:
+        value: { type: string, maxLength: 1000, description: A text literal; a bare string is a path }
+    - { $ref: '#/CalcOperation' }
+
+CalcOperation:
+  type: object
+  minProperties: 1
+  maxProperties: 1
+  additionalProperties: false
+  description: Exactly one of these keys
+  properties:
+    add: { type: array, minItems: 2, maxItems: 10, items: { $ref: '#/CalcExpr' } }
+    mul: { type: array, minItems: 2, maxItems: 10, items: { $ref: '#/CalcExpr' } }
+    sub: { type: array, minItems: 2, maxItems: 2, items: { $ref: '#/CalcExpr' } }
+    div: { type: array, minItems: 2, maxItems: 2, items: { $ref: '#/CalcExpr' } }
+    abs: { $ref: '#/CalcExpr' }
+    round:
+      description: An expression (0 places), or `[expression, places]` with places an integer 0 to 10
+      oneOf:
+        - { $ref: '#/CalcExpr' }
+        - type: array
+          minItems: 2
+          maxItems: 2
+          prefixItems:
+            - { $ref: '#/CalcExpr' }
+            - { type: integer, minimum: 0, maximum: 10 }
+    concat: { type: array, minItems: 2, maxItems: 10, items: { $ref: '#/CalcExpr' } }
+    lower: { $ref: '#/CalcExpr' }
+    upper: { $ref: '#/CalcExpr' }
+    coalesce: { type: array, minItems: 2, maxItems: 10, items: { $ref: '#/CalcExpr' } }
+    sum: { $ref: '#/CalcExpr' }
+    avg: { $ref: '#/CalcExpr' }
+    min: { $ref: '#/CalcExpr' }
+    max: { $ref: '#/CalcExpr' }
+    count: { type: string, description: 'A path, or `"*"`' }
+    countDistinct: { $ref: '#/Path' }
 
 Filter:
   type: object
@@ -91,8 +158,8 @@ Query:
       description: A table or view, by its bare name when that is unique among the source's schemas, else `schema.table`
     join:
       type: array
-      maxItems: 4
-      description: Relations to join, by name; one reached through another is written `customer.account`
+      maxItems: 8
+      description: Relations to join, by name, at most the source's `max_joins`; one reached through another is written `order_lines.products`
       items:
         oneOf:
           - { $ref: '#/Path' }
@@ -186,7 +253,7 @@ QueryError:
   properties:
     error:
       type: string
-      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_parameters]
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters]
     error_description: { type: string }
     path:
       type: array
@@ -291,11 +358,12 @@ DiscoveredSource:
     limits:
       type: object
       description: What one query on this source may return and take
-      required: [default_rows, max_rows, timeout_ms, export]
+      required: [default_rows, max_rows, timeout_ms, max_joins, export]
       properties:
         default_rows: { type: integer, description: Rows when the query sets no `limit` }
         max_rows: { type: integer, description: The most a `limit` may ask for }
         timeout_ms: { type: integer }
+        max_joins: { type: integer, description: The most joins a query on this source may use }
         export:
           type: object
           description: What `POST /v1/export` may take from this source; it also needs `zeteo.data.export`

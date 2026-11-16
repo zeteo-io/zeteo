@@ -50,6 +50,7 @@ export interface Source {
   schemas: string[];
   timeout_ms: number;
   row_cap: number;
+  max_joins: number;
   export_enabled: boolean;
   export_row_cap: number;
   query_concurrency: number;
@@ -72,6 +73,8 @@ interface CreateSourceFields {
   timeout_ms?: number;
   /** 1 to 50000; the API's default is 50000. */
   row_cap?: number;
+  /** 1 to 8; the API's default is 4. */
+  max_joins?: number;
   export_enabled?: boolean;
   /** 0 to 1000000; the API's default is 0. */
   export_row_cap?: number;
@@ -96,6 +99,7 @@ export interface UpdateSourceRequest {
   allow_writable_login?: boolean;
   timeout_ms?: number;
   row_cap?: number;
+  max_joins?: number;
   export_enabled?: boolean;
   export_row_cap?: number;
   query_concurrency?: number;
@@ -175,6 +179,11 @@ export interface DeclareRelationRequest {
   to_table_id: string;
   to_columns: string[];
   to_many: boolean;
+}
+
+export interface RenameRelationRequest {
+  /** Matches `^[a-z][a-z0-9_]{0,62}$`. */
+  name: string;
 }
 
 export interface ListSourcesOptions extends ListOptions {

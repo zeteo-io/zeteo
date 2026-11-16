@@ -3,6 +3,7 @@ import { send, type CallContext } from "../send.js";
 import type {
   CreateSourceRequest,
   DeclareRelationRequest,
+  RenameRelationRequest,
   ListSourcesOptions,
   ListTablesOptions,
   PatchTableRequest,
@@ -83,6 +84,17 @@ export const sourcesCalls = (ctx: CallContext) => ({
       send(ctx, {
         op: "declareRelation",
         params: { sourceId },
+        body,
+        once: true,
+      }),
+    update: (
+      sourceId: string,
+      relationId: string,
+      body: RenameRelationRequest
+    ): Promise<Relation> =>
+      send(ctx, {
+        op: "updateRelation",
+        params: { sourceId, relationId },
         body,
         once: true,
       }),

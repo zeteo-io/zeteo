@@ -287,3 +287,60 @@ export const removeRelation = async (
     });
   });
 };
+
+/**
+ * Renames a relation. A discovered relation is marked as named by an admin,
+ * which keeps refreshes from giving it the rule-derived name again.
+ */
+export const renameRelation = async (
+  sourceId: string,
+  relationId: string,
+  name: string,
+  actorId: string
+): Promise<Relation> =>
+  withAudit(async (tx, audit) => {
+    await lockSourceCatalog(tx, sourceId);
+    const source = await requireActiveSource(tx, sourceId);
+    const relation = await tx.relation.findFirst({
+      where: { id: relationId, sourceId },
+    });
+    if (!relation) throw new NotFoundError("Relation not found");
+    const message = "The from table already has a relation with this name";
+    if (
+      await tx.relation.findFirst({
+        where: {
+          fromTableId: relation.fromTableId,
+          name,
+          id: { not: relation.id },
+        },
+        select: { id: true },
+      })
+    ) {
+      throw new ConflictError(message, "relation_name_taken");
+    }
+    const renamed = await mapUniqueViolation(
+      () =>
+        tx.relation.update({
+          where: { id: relation.id },
+          data: {
+            name,
+            ...(relation.origin === "discovered" ? { nameLocked: true } : {}),
+          },
+        }),
+      message,
+      "relation_name_taken"
+    );
+    audit({
+      action: AUDIT_EVENTS.relationRenamed,
+      resourceType: "relation",
+      resourceId: relation.id,
+      actorId,
+      metadata: {
+        source_id: sourceId,
+        slug: source.slug,
+        name: renamed.name,
+        previous_name: relation.name,
+      },
+    });
+    return renamed;
+  });

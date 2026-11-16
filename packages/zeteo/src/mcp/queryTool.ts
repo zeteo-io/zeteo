@@ -22,13 +22,13 @@ const QueryInput = z.looseObject({
     .array(z.unknown())
     .optional()
     .describe(
-      'Relations to join, by name ("customer") or { relation, type: "inner" | "left" }'
+      'Relations to join, by name ("customers") or { relation, type: "inner" | "left" }'
     ),
   select: z
     .array(z.unknown())
     .optional()
     .describe(
-      'Columns ("id", "customer.region"), aggregates ({ sum: "total", as: "revenue" }) and date buckets'
+      'Columns ("id", "customers.region"), aggregates ({ sum: "total", as: "revenue" }; sum, avg, min and max also take an expression, then "as" is required), date buckets and calculations ({ calc: { mul: ["unit_price", "quantity"] }, as: "line_value" })'
     ),
   distinct: z.boolean().optional(),
   where: z
@@ -56,7 +56,7 @@ export const defineQueryTool = (mcp: TereoMcp): void => {
     name: "query",
     title: "Query a source",
     description:
-      'Run a read-only query on a source, written in its JSON query language: "source", "from", "join", "select" (columns, aggregates, date buckets), "where", "groupBy", "having", "orderBy", "limit", "offset". Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }.',
+      'Run a read-only query on a source, written in its JSON query language: "source", "from", "join", "select" (columns, aggregates, date buckets, and calculations written as { calc, as }), "where", "groupBy", "having", "orderBy", "limit", "offset". Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }.',
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,

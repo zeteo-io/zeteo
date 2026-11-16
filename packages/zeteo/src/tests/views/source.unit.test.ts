@@ -14,6 +14,7 @@ const row = (overrides: Partial<Source>): Source => ({
   schemas: ["public"],
   timeoutMs: 30_000,
   rowCap: 50_000,
+  maxJoins: 4,
   exportEnabled: false,
   exportRowCap: 0,
   queryConcurrency: 5,

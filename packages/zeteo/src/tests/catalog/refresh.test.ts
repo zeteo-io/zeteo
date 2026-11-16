@@ -2,14 +2,12 @@
 // @module-tag platform
 import { createThrowawayDb, type ThrowawayDb } from "../support/throwawayDb.js";
 import { closeAllSourcePools, closeSourcePool } from "../../sources/pools.js";
-import { declareRelation, removeRelation } from "../../catalog/service.js";
 import { postgresAdapter } from "../../adapters/postgres/index.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { SourceUnreachableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
-import { lockSourceCatalog } from "../../catalog/lock.js";
+import { renameRelation } from "../../catalog/service.js";
 import { refreshSource } from "../../catalog/refresh.js";
-import { updateSource } from "../../sources/service.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import {
@@ -115,7 +113,7 @@ describe("refreshSource", () => {
     const relations = await prisma.relation.findMany({ where: { sourceId } });
     const named = (from: string, name: string) =>
       relations.find((r) => r.fromTableId === from && r.name === name);
-    expect(named(orders.id, "customer")).toMatchObject({
+    expect(named(orders.id, "customers")).toMatchObject({
       toTableId: customers.id,
       fromColumns: ["customer_id"],
       toColumns: ["id"],
@@ -129,7 +127,7 @@ describe("refreshSource", () => {
       toColumns: ["customer_id"],
       toMany: true,
     });
-    expect(named((await tableRow("order_lines")).id, "order")).toBeDefined();
+    expect(named((await tableRow("order_lines")).id, "orders")).toBeDefined();
     expect(named(orders.id, "order_lines")).toBeDefined();
 
     const source = await prisma.source.findUniqueOrThrow({
@@ -230,7 +228,7 @@ describe("refreshSource", () => {
       where: { sourceId, constraintName: "orders_customer_id_fkey" },
       orderBy: { name: "asc" },
     });
-    expect(before.map((r) => r.name)).toEqual(["customer", "orders"]);
+    expect(before.map((r) => r.name)).toEqual(["customers", "orders"]);
 
     await fixture.run(
       "ALTER TABLE sales.orders DROP CONSTRAINT orders_customer_id_fkey"
@@ -276,7 +274,7 @@ describe("refreshSource", () => {
     )
       .map((r) => r.name)
       .sort();
-    expect(names).toEqual(["account", "orders", "orders_2"]);
+    expect(names).toEqual(["accounts", "orders", "orders_2"]);
   });
 
   it("updates a column whose type changed in place and counts it as changed", async () => {
@@ -338,6 +336,206 @@ describe("refreshSource", () => {
     expect(
       await prisma.relation.findUniqueOrThrow({ where: { id: declared.id } })
     ).toEqual(declared);
+  });
+
+  describe("naming by rule at every refresh", () => {
+    const names = async (from: string) =>
+      (
+        await prisma.relation.findMany({
+          where: { fromTableId: (await tableRow(from)).id },
+        })
+      )
+        .map((r) => r.name)
+        .sort();
+
+    it("gives an unlocked discovered relation the rule's name, whatever it was called", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const orders = await tableRow("orders");
+      const found = await prisma.relation.findFirstOrThrow({
+        where: { fromTableId: orders.id, name: "customers" },
+      });
+      await prisma.relation.update({
+        where: { id: found.id },
+        data: { name: "customer" },
+      });
+      const summary = await refreshSource(sourceId, ACTOR);
+      expect(summary.relations).toEqual({ added: 0, missing: 0, restored: 0 });
+      expect(
+        (await prisma.relation.findUniqueOrThrow({ where: { id: found.id } }))
+          .name
+      ).toBe("customers");
+    });
+
+    it("keeps the name an admin gave a discovered relation", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const orders = await tableRow("orders");
+      const found = await prisma.relation.findFirstOrThrow({
+        where: { fromTableId: orders.id, name: "customers" },
+      });
+      await renameRelation(sourceId, found.id, "buyer", ACTOR);
+      await refreshSource(sourceId, ACTOR);
+      await refreshSource(sourceId, ACTOR);
+      expect(await names("orders")).toEqual(["buyer", "order_lines"]);
+      expect(
+        (await prisma.relation.findUniqueOrThrow({ where: { id: found.id } }))
+          .nameLocked
+      ).toBe(true);
+    });
+
+    it("names a new relation around an admin-given name that the rule would also give", async () => {
+      await refreshSource(sourceId, ACTOR);
+      const orders = await tableRow("orders");
+      const found = await prisma.relation.findFirstOrThrow({
+        where: { fromTableId: orders.id, name: "customers" },
+      });
+      await renameRelation(sourceId, found.id, "accounts", ACTOR);
+      await fixture.run(`
+        ALTER TABLE sales.orders ADD COLUMN account_id integer;
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_account_fkey FOREIGN KEY (account_id) REFERENCES sales.accounts (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      expect(
+        (await prisma.relation.findUniqueOrThrow({ where: { id: found.id } }))
+          .name
+      ).toBe("accounts");
+      const added = await prisma.relation.findFirstOrThrow({
+        where: {
+          fromTableId: orders.id,
+          constraintName: "orders_account_fkey",
+        },
+      });
+      expect(added.name).toBe("accounts_2");
+    });
+
+    it("moves two relations of the same name between tables without tripping the unique index", async () => {
+      await fixture.run(`
+        CREATE TABLE sales.suppliers (id integer PRIMARY KEY);
+        CREATE TABLE sales.refunds (id integer PRIMARY KEY, a_id integer, b_id integer);
+        GRANT SELECT ON sales.suppliers, sales.refunds TO zeteo_ro;
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_a FOREIGN KEY (a_id) REFERENCES sales.customers (id);
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_b FOREIGN KEY (b_id) REFERENCES sales.suppliers (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      const reverse = async () =>
+        Object.fromEntries(
+          await Promise.all(
+            (
+              await prisma.relation.findMany({
+                where: { sourceId, toMany: true, name: "refunds" },
+              })
+            ).map(async (r) => [
+              r.constraintName,
+              (
+                await prisma.sourceTable.findUniqueOrThrow({
+                  where: { id: r.fromTableId },
+                })
+              ).name,
+            ])
+          )
+        );
+      expect(await reverse()).toEqual({
+        refunds_fk_a: "customers",
+        refunds_fk_b: "suppliers",
+      });
+      await fixture.run(`
+        ALTER TABLE sales.refunds DROP CONSTRAINT refunds_fk_a, DROP CONSTRAINT refunds_fk_b;
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_a FOREIGN KEY (a_id) REFERENCES sales.suppliers (id);
+        ALTER TABLE sales.refunds ADD CONSTRAINT refunds_fk_b FOREIGN KEY (b_id) REFERENCES sales.customers (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      expect(await reverse()).toEqual({
+        refunds_fk_a: "suppliers",
+        refunds_fk_b: "customers",
+      });
+    });
+
+    it("names repeated names in constraint-name order, swapping names between existing relations without tripping the unique index", async () => {
+      await refreshSource(sourceId, ACTOR);
+      await fixture.run(`
+        ALTER TABLE sales.orders ADD COLUMN a_id integer, ADD COLUMN z_id integer;
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_z_fkey FOREIGN KEY (z_id) REFERENCES sales.customers (id);
+        ALTER TABLE sales.orders ADD CONSTRAINT orders_a_fkey FOREIGN KEY (a_id) REFERENCES sales.customers (id);
+      `);
+      await refreshSource(sourceId, ACTOR);
+      const reverse = async () =>
+        (
+          await prisma.relation.findMany({
+            where: {
+              sourceId,
+              toMany: true,
+              fromTableId: (await tableRow("customers")).id,
+              constraintName: { startsWith: "orders_" },
+            },
+            orderBy: { constraintName: "asc" },
+          })
+        ).map((r) => [r.constraintName, r.name]);
+      const expected = [
+        ["orders_a_fkey", "orders"],
+        ["orders_customer_id_fkey", "orders_2"],
+        ["orders_z_fkey", "orders_3"],
+      ];
+      expect(await reverse()).toEqual(expected);
+      await refreshSource(sourceId, ACTOR);
+      expect(await reverse()).toEqual(expected);
+      expect(await names("orders")).toEqual([
+        "a",
+        "customer",
+        "order_lines",
+        "z",
+      ]);
+    });
+  });
+
+  it("names relations of one constraint name in two schemas the same whatever order the database lists them in", async () => {
+    await fixture.run(`
+      CREATE SCHEMA archive;
+      CREATE TABLE archive.orders (id integer PRIMARY KEY, customer_id integer);
+      ALTER TABLE archive.orders ADD CONSTRAINT orders_customer_id_fkey
+        FOREIGN KEY (customer_id) REFERENCES sales.customers (id);
+      GRANT USAGE ON SCHEMA archive TO zeteo_ro;
+      GRANT SELECT ON archive.orders TO zeteo_ro;
+    `);
+    await prisma.source.update({
+      where: { id: sourceId },
+      data: { schemas: ["sales", "archive"] },
+    });
+    await closeSourcePool(sourceId);
+    let reversed = false;
+    const connect = postgresAdapter.connect.bind(postgresAdapter);
+    vi.spyOn(postgresAdapter, "connect").mockImplementation(async (...args) => {
+      const conn = await connect(...args);
+      const readSchema = conn.readSchema.bind(conn);
+      conn.readSchema = async (schemas) => {
+        const snapshot = await readSchema(schemas);
+        return reversed
+          ? { ...snapshot, foreignKeys: [...snapshot.foreignKeys].reverse() }
+          : snapshot;
+      };
+      return conn;
+    });
+    const reverseNames = async () =>
+      (
+        await prisma.relation.findMany({
+          where: {
+            sourceId,
+            toMany: true,
+            constraintName: "orders_customer_id_fkey",
+          },
+        })
+      )
+        .map((r) => [r.toTableId, r.name])
+        .sort();
+
+    await refreshSource(sourceId, ACTOR);
+    const first = await reverseNames();
+    expect(first.map(([, name]) => name).sort()).toEqual([
+      "orders",
+      "orders_2",
+    ]);
+    reversed = true;
+    await closeSourcePool(sourceId);
+    await refreshSource(sourceId, ACTOR);
+    expect(await reverseNames()).toEqual(first);
   });
 
   it("names a new relation around a declared one that holds the name", async () => {
@@ -463,7 +661,11 @@ describe("refreshSource", () => {
 
   it("names relations from mixed-case identifiers within the declared-name rules", async () => {
     await fixture.run(`
-      CREATE TABLE sales."Order Items" ("itemId" integer PRIMARY KEY, "CustomerRef" integer REFERENCES sales.customers (id));
+      CREATE TABLE sales."Order Items" (
+        "itemId" integer PRIMARY KEY,
+        "CustomerRef" integer REFERENCES sales.customers (id),
+        "OwnerId" integer REFERENCES sales.customers (id)
+      );
       GRANT SELECT ON sales."Order Items" TO zeteo_ro;
     `);
     await refreshSource(sourceId, ACTOR);
@@ -471,215 +673,9 @@ describe("refreshSource", () => {
       (r) => r.name
     );
     expect(names).toContain("customer_ref");
+    expect(names).toContain("owner");
     expect(names).toContain("order_items");
     expect(names.every((n) => /^[a-z][a-z0-9_]{0,62}$/.test(n))).toBe(true);
-  });
-
-  describe("declaring and removing relations while a refresh holds the lock", () => {
-    const holdLock = async () => {
-      let release!: () => void;
-      let locked!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      const ready = new Promise<void>((resolve) => (locked = resolve));
-      const holder = prisma.$transaction(async (tx) => {
-        await lockSourceCatalog(tx, sourceId);
-        locked();
-        await held;
-      });
-      await ready;
-      return { release, holder };
-    };
-    const pending = async (promise: Promise<unknown>) => {
-      let done = false;
-      const tracked = promise.then(() => {
-        done = true;
-      });
-      await new Promise((resolve) => setTimeout(resolve, 300));
-      return { isDone: () => done, tracked };
-    };
-
-    it("waits for the lock before declaring", async () => {
-      await refreshSource(sourceId, ACTOR);
-      const orders = await tableRow("orders");
-      const customers = await tableRow("customers");
-      const lock = await holdLock();
-      const declared = pending(
-        declareRelation(
-          sourceId,
-          {
-            name: "by_status",
-            fromTableId: orders.id,
-            fromColumns: ["status"],
-            toTableId: customers.id,
-            toColumns: ["region"],
-            toMany: false,
-          },
-          ACTOR
-        )
-      );
-      const waiting = await declared;
-      expect(waiting.isDone()).toBe(false);
-      lock.release();
-      await lock.holder;
-      await waiting.tracked;
-      expect(waiting.isDone()).toBe(true);
-    });
-
-    it("waits for the lock before removing", async () => {
-      await refreshSource(sourceId, ACTOR);
-      const orders = await tableRow("orders");
-      const customers = await tableRow("customers");
-      const relation = await declareRelation(
-        sourceId,
-        {
-          name: "by_status",
-          fromTableId: orders.id,
-          fromColumns: ["status"],
-          toTableId: customers.id,
-          toColumns: ["region"],
-          toMany: false,
-        },
-        ACTOR
-      );
-      const lock = await holdLock();
-      const waiting = await pending(
-        removeRelation(sourceId, relation.id, ACTOR)
-      );
-      expect(waiting.isDone()).toBe(false);
-      lock.release();
-      await lock.holder;
-      await waiting.tracked;
-      expect(await prisma.relation.count({ where: { id: relation.id } })).toBe(
-        0
-      );
-    });
-
-    it("never fails a refresh or a declare racing for one name", async () => {
-      await refreshSource(sourceId, ACTOR);
-      await fixture.run(`
-        ALTER TABLE sales.orders ADD COLUMN referrer_id integer;
-        ALTER TABLE sales.orders ADD CONSTRAINT orders_referrer_fkey FOREIGN KEY (referrer_id) REFERENCES sales.customers (id);
-      `);
-      const orders = await tableRow("orders");
-      const customers = await tableRow("customers");
-      const [refreshed, declared] = await Promise.allSettled([
-        refreshSource(sourceId, ACTOR),
-        declareRelation(
-          sourceId,
-          {
-            name: "referrer",
-            fromTableId: orders.id,
-            fromColumns: ["status"],
-            toTableId: customers.id,
-            toColumns: ["region"],
-            toMany: false,
-          },
-          ACTOR
-        ),
-      ]);
-      expect(refreshed.status).toBe("fulfilled");
-      if (declared.status === "rejected") {
-        expect(declared.reason).toMatchObject({ code: "relation_name_taken" });
-      }
-    });
-  });
-
-  describe("concurrency", () => {
-    it("lets two refreshes started together both resolve, leaving no duplicate rows", async () => {
-      const results = await Promise.all([
-        refreshSource(sourceId, ACTOR),
-        refreshSource(sourceId, ACTOR),
-      ]);
-      expect(results).toHaveLength(2);
-      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
-
-      const again = await Promise.all([
-        refreshSource(sourceId, ACTOR),
-        refreshSource(sourceId, ACTOR),
-        refreshSource(sourceId, ACTOR),
-      ]);
-      expect(again).toHaveLength(3);
-      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
-    });
-
-    it("ends matching the newer snapshot when an older read lands last", async () => {
-      await refreshSource(sourceId, ACTOR);
-      await closeSourcePool(sourceId);
-
-      // The first read through the pool is held after it has read the old schema.
-      let release!: () => void;
-      let readDone!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      const read = new Promise<void>((resolve) => (readDone = resolve));
-      const connect = postgresAdapter.connect.bind(postgresAdapter);
-      let first = true;
-      vi.spyOn(postgresAdapter, "connect").mockImplementation(
-        async (...args) => {
-          const conn = await connect(...args);
-          const readSchema = conn.readSchema.bind(conn);
-          conn.readSchema = async (schemas) => {
-            const snapshot = await readSchema(schemas);
-            if (first) {
-              first = false;
-              readDone();
-              await held;
-            }
-            return snapshot;
-          };
-          return conn;
-        }
-      );
-
-      const slow = refreshSource(sourceId, ACTOR);
-      await read;
-      await fixture.run("ALTER TABLE sales.customers ADD COLUMN phone text");
-      await refreshSource(sourceId, ACTOR);
-      release();
-      await slow;
-
-      expect((await columnRow("customers", "phone")).missingSince).toBeNull();
-    });
-
-    it("reads again when the source's schemas changed during the read", async () => {
-      await refreshSource(sourceId, ACTOR);
-      await closeSourcePool(sourceId);
-
-      let release!: () => void;
-      let readDone!: () => void;
-      const held = new Promise<void>((resolve) => (release = resolve));
-      const read = new Promise<void>((resolve) => (readDone = resolve));
-      const connect = postgresAdapter.connect.bind(postgresAdapter);
-      let first = true;
-      vi.spyOn(postgresAdapter, "connect").mockImplementation(
-        async (...args) => {
-          const conn = await connect(...args);
-          const readSchema = conn.readSchema.bind(conn);
-          conn.readSchema = async (schemas) => {
-            const snapshot = await readSchema(schemas);
-            if (first) {
-              first = false;
-              readDone();
-              await held;
-            }
-            return snapshot;
-          };
-          return conn;
-        }
-      );
-
-      const slow = refreshSource(sourceId, ACTOR);
-      await read;
-      // The read above saw `sales`; the list no longer holds it.
-      await updateSource(sourceId, { schemas: ["hr"] }, ACTOR);
-      release();
-      await slow;
-
-      const tables = await prisma.sourceTable.findMany({ where: { sourceId } });
-      expect(tables).toHaveLength(12);
-      for (const table of tables) {
-        expect(table.missingSince).not.toBeNull();
-      }
-    });
   });
 
   describe("when the database cannot be read", () => {

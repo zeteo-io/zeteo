@@ -10,4 +10,5 @@ export type SqlQueryErrorCode =
   | "invalid_having"
   | "duplicate_output_name"
   | "join_parent_missing"
+  | "too_many_joins"
   | "too_many_parameters";

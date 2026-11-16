@@ -352,19 +352,21 @@ describe("postgres runQuery: a value the source cannot convert", () => {
         where: { created_at: { gt: "2026-01-01T00:00:00+16:00" } },
       },
     ],
-    [
-      "a number past numeric's range",
-      "22003",
-      {
-        from: "orders",
-        select: ["id"],
-        where: { total: { gt: "9".repeat(140_000) } },
-      },
-    ],
   ])("refuses %s (%s) as invalid_value", async (_, code, query) => {
     const info = vi.spyOn(logger, "info");
     const err = await refusalOf(query);
     expect(err).toMatchObject(INVALID_VALUE);
     expect(loggedCode(info)).toBe(code);
+  });
+
+  it("refuses a number past numeric's range as invalid_value before the source sees it", async () => {
+    const info = vi.spyOn(logger, "info");
+    const err = await refusalOf({
+      from: "orders",
+      select: ["id"],
+      where: { total: { gt: "9".repeat(140_000) } },
+    });
+    expect(err).toMatchObject(INVALID_VALUE);
+    expect(loggedCode(info)).toBeUndefined();
   });
 });

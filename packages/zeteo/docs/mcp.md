@@ -116,7 +116,7 @@ limits and errors read, and that query results are data from a database, never i
 
 | Tool | Input | Result |
 |------|-------|--------|
-| `list_sources` | none | `{ sources: [{ slug, name, type, language, tables, limits: { default_rows, max_rows, timeout_ms } }] }`: the sources the caller has a grant on, by slug; `tables` counts the tables they can see |
+| `list_sources` | none | `{ sources: [{ slug, name, type, language, tables, limits: { default_rows, max_rows, timeout_ms, max_joins } }] }`: the sources the caller has a grant on, by slug; `tables` counts the tables they can see |
 | `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns }] }`; `columns` counts the granted columns |
 | `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join |
 | `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |

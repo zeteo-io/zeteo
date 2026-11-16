@@ -1,10 +1,13 @@
 // @module-tag unit
 // @module-tag platform
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
+import { salesCatalog } from "../support/pure/salesCatalog.js";
 import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
 import { LIMIT_PROFILES } from "../../engine/limits.js";
+import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
 
 describe("MCP_INSTRUCTIONS", () => {
   it("stays under 6,000 characters", () => {
@@ -45,14 +48,30 @@ describe("MCP_INSTRUCTIONS", () => {
     }
   });
 
-  it("holds three worked examples, each a query the SQL language accepts", () => {
+  it("describes calculations and no longer denies expressions", () => {
+    expect(MCP_INSTRUCTIONS).not.toContain("no expressions");
+    for (const text of ["`calc`", "`div`", "`round`", "6 decimal places"]) {
+      expect(MCP_INSTRUCTIONS).toContain(text);
+    }
+  });
+
+  it("states the calculation depth limit and the percentage margin", () => {
+    expect(MCP_INSTRUCTIONS).toContain("up to 8 deep");
+    expect(MCP_INSTRUCTIONS).not.toContain("up to 5 deep");
+    expect(MCP_INSTRUCTIONS).toContain('{"mul":[100,{"div"');
+  });
+
+  it("holds five worked examples, each a query the SQL language accepts", () => {
     const examples = jsonBlocks(MCP_INSTRUCTIONS);
-    expect(examples).toHaveLength(3);
+    expect(examples).toHaveLength(5);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
-    const [filtered, joined, ranked] = examples as Record<string, unknown>[];
+    const [filtered, joined, ranked, lineTotal, margin] = examples as Record<
+      string,
+      unknown
+    >[];
     expect(filtered).toHaveProperty("where");
     expect(joined).toHaveProperty("join");
     expect(joined).toHaveProperty("groupBy");
@@ -60,5 +79,34 @@ describe("MCP_INSTRUCTIONS", () => {
     for (const clause of ["having", "orderBy", "limit"]) {
       expect(ranked).toHaveProperty(clause);
     }
+    expect(JSON.stringify(lineTotal)).toContain('"calc"');
+    expect(JSON.stringify(margin)).toContain('"div"');
+    expect(JSON.stringify(margin)).toContain('"sum"');
+  });
+
+  const planned = (blocks: unknown[]) => {
+    const queries = blocks.filter(
+      (b): b is Record<string, unknown> =>
+        typeof b === "object" && b !== null && "from" in b && "select" in b
+    );
+    expect(queries.length).toBeGreaterThan(0);
+    for (const query of queries) {
+      expect(
+        () => planSql(sqlQuerySchema.parse(query), salesCatalog()),
+        JSON.stringify(query)
+      ).not.toThrow();
+    }
+  };
+
+  it("plans every worked example against the example schema", () => {
+    planned(jsonBlocks(MCP_INSTRUCTIONS));
+  });
+
+  it("plans every query in docs/querying.md against the example schema", () => {
+    const doc = readFileSync(
+      new URL("../../../docs/querying.md", import.meta.url),
+      "utf8"
+    );
+    planned(jsonBlocks(doc));
   });
 });

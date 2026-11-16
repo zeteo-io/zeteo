@@ -66,9 +66,10 @@ const STOP_GRACE_MS = 1000;
 const QUERY_CANCELED = "57014";
 // Data exceptions a bound value the planner accepted still raises when the
 // server converts it: invalid text for the type (22P02, a malformed uuid), a
-// time zone offset past the server's range (22009), a number past numeric's
-// (22003).
-const VALUE_CODES = new Set(["22P02", "22009", "22003"]);
+// time zone offset past the server's range (22009). Out of range (22003) is
+// not one: the dialect refuses a number numeric cannot hold before the query
+// runs, so 22003 is overflow in a calculation, the query's own failure.
+const VALUE_CODES = new Set(["22P02", "22009"]);
 // Class 08 is a connection exception; 57P01 to 57P03, the server shutting
 // down, crashing or not yet accepting connections.
 const CONNECTION_CODES = ["57P01", "57P02", "57P03"];

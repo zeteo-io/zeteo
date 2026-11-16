@@ -14,6 +14,7 @@ never changes the id of a table, column or relation.
 | `PATCH /v1/sources/:sourceId/tables/:tableId` | `zeteo.sources.write` | the table view |
 | `GET /v1/sources/:sourceId/relations` (`limit`, `cursor`) | `zeteo.sources.read` | `{ data, next_cursor }`, in creation order |
 | `POST /v1/sources/:sourceId/relations` | `zeteo.sources.write` | `201`, the relation |
+| `PATCH /v1/sources/:sourceId/relations/:relationId` (`name`) | `zeteo.sources.write` | `200`, the relation, renamed |
 | `DELETE /v1/sources/:sourceId/relations/:relationId` | `zeteo.sources.write` | `204` |
 
 A table or relation id from another source is `404 not_found` through this source's URL. Every
@@ -88,21 +89,38 @@ table does not have). What the body leaves out is unchanged. It is audited as
 
 Each foreign key gives two **discovered** relations, matched across refreshes by constraint name:
 
-- forward, on the table that holds the key, `to_many: false`, named after the single key column
-  without a trailing `_id`, `Id` or `_fk` (`customer_id` gives `customer`), or the target table's
-  name when the key has several columns or nothing is left of the column's name (`id`);
+- forward, on the table that holds the key, `to_many: false`. When the table has one foreign key
+  to the target table it is named after the target table (`orders` to `customers` gives
+  `customers`). When it has several, the name comes from the key: a single-column key uses its
+  column without the table's column prefix and without one key suffix, and a multi-column key uses
+  the target table's name plus its first column so cleaned. The column prefix is the part up to
+  and including the first `_` when every column of the table shares it (`ws_sold_date_sk`,
+  `ws_ship_date_sk` give `sold_date_sk`, `ship_date_sk`). The key suffix is the first of `_id`,
+  `_key`, `_sk`, `_fk`, `id`, `key` the name ends in (`productid` gives `product`, `ws_sold_date_sk`
+  gives `sold_date`). The target table's name is used instead when nothing is left;
 - reverse, on the referenced table, `to_many: true`, named after the table that holds the key.
 
 Discovered names follow the declared-name pattern: camelCase boundaries become `_`, the name is
 lower-cased, other characters become `_`, a name not starting with a letter gets `r_` in front, an
-empty one is `relation`, and it is cut so that a `_N` suffix still fits in 63 characters. Names
-already stored are never renamed.
+empty one is `relation`, and it is cut so that a `_N` suffix still fits in 63 characters.
 
-When a name is already taken on that table (by another relation, discovered or declared) a `_2`,
-`_3`, ... is appended. A discovered relation keeps its name and id when its foreign key is dropped
+**Every refresh gives each discovered relation the name these rules give**, so a change to the rules
+reaches existing relations at the next refresh. The exceptions are a relation an administrator
+renamed (below), a declared relation, and one the source no longer has. Those keep their names, and
+are settled first. When a name is already taken on that table, a `_2`, `_3`, ... is appended; the
+unlocked discovered relations of a table take their names in constraint-name order (the reverse
+relation of a self-referencing key after its forward one), so the result does not depend on the
+order rows are stored in. A discovered relation keeps its id when its foreign key is dropped
 and created again, even under another constraint name (a missing or renamed relation with the same
 tables, columns and direction is taken over; exact constraint names are matched first), and cannot
 be removed (`409 relation_discovered`).
+
+**Renaming.** `PATCH /v1/sources/:sourceId/relations/:relationId` with `{ "name": "..." }` renames a
+discovered or a declared relation (`zeteo.sources.write`, `200` and the relation). The name follows
+the pattern below and must be free on the from table (`409 relation_name_taken`; the relation's own
+name is accepted). A renamed discovered relation is marked as named by an administrator and
+keeps its name across refreshes; the mark is not part of the API. Declared relations are never
+renamed by a refresh.
 
 A **declared** relation is one an administrator adds, for a join the database does not enforce:
 
@@ -115,7 +133,7 @@ A **declared** relation is one an administrator adds, for a join the database do
 It is refused with `422 invalid_relation` when a table is not in this source, a column does not
 exist or is marked missing, the column lists differ in length or repeat a column, or paired
 columns have different normalised types or have type `other` or `json`. `origin` is `declared`.
-Declaring and removing are audited as `zeteo.relation.declared` and `zeteo.relation.removed`
+Declaring, renaming and removing are audited as `zeteo.relation.declared`, `zeteo.relation.renamed` and `zeteo.relation.removed`
 (entity type `relation`, with `source_id` in the metadata).
 
 ## Error codes

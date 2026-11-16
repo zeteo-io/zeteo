@@ -9,20 +9,63 @@ export type Path = string;
 /** An output name: `^[a-z][a-z0-9_]{0,62}$`. */
 export type Alias = string;
 
+/** A text literal; a bare string in an expression is a column path. */
+export interface TextLiteral {
+  value: string;
+}
+
+/**
+ * A calculation expression: a column path, a number, a text literal, an
+ * aggregate, or an operation object with exactly one key. At most 8 levels
+ * deep (an aggregate counts as one), and 100 operations and aggregates per
+ * query. `add`, `mul`, `concat` and `coalesce` take 2 to 10 operands.
+ */
+export type CalcExpr =
+  | Path
+  | number
+  | TextLiteral
+  | { add: CalcExpr[] }
+  | { sub: [CalcExpr, CalcExpr] }
+  | { mul: CalcExpr[] }
+  /** Division by zero gives null; the result keeps at least 6 decimal places. */
+  | { div: [CalcExpr, CalcExpr] }
+  | { abs: CalcExpr }
+  /** `[expression, places]` with places an integer 0 to 10, or one expression for 0 places. */
+  | { round: CalcExpr | [CalcExpr, number] }
+  /** Text or number operands; null counts as empty text. */
+  | { concat: CalcExpr[] }
+  | { lower: CalcExpr }
+  | { upper: CalcExpr }
+  /** Operands of one type; the first non-null. */
+  | { coalesce: CalcExpr[] }
+  | { sum: CalcExpr }
+  | { avg: CalcExpr }
+  | { min: CalcExpr }
+  | { max: CalcExpr }
+  | { count: Path | "*" }
+  | { countDistinct: Path };
+
+type ExpressionAggregate<K extends "sum" | "avg" | "min" | "max"> =
+  | ({ [P in K]: Path } & { as?: Alias })
+  | ({ [P in K]: Exclude<CalcExpr, Path> } & { as: Alias });
+
 export type SelectItem =
   | Path
   | { count: string; as?: Alias }
   | { countDistinct: Path; as?: Alias }
-  | { sum: Path; as?: Alias }
-  | { avg: Path; as?: Alias }
-  | { min: Path; as?: Alias }
-  | { max: Path; as?: Alias }
+  /** Over an expression rather than a path, `as` is required. */
+  | ExpressionAggregate<"sum">
+  | ExpressionAggregate<"avg">
+  | ExpressionAggregate<"min">
+  | ExpressionAggregate<"max">
   | {
       /** Truncated in UTC; weeks start on Monday. */
       bucket: "day" | "week" | "month" | "quarter" | "year";
       column: Path;
       as?: Alias;
-    };
+    }
+  /** Row-level (no aggregate) or group-level (every column inside an aggregate), not mixed. */
+  | { calc: CalcExpr; as: Alias };
 
 export type JoinItem = Path | { relation: Path; type?: "inner" | "left" };
 

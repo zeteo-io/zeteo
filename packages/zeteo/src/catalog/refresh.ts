@@ -1,5 +1,4 @@
 import type { SchemaSnapshot, SnapshotColumn } from "../adapters/types.js";
-import { forwardName, reverseName, uniqueName } from "./relationNames.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { withSourceConnection } from "../sources/pools.js";
@@ -9,6 +8,12 @@ import { db, prisma } from "../utils/db/index.js";
 import { lockSourceCatalog } from "./lock.js";
 import { typeOf } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
+import {
+  columnPrefixOf,
+  forwardName,
+  reverseName,
+  uniqueName,
+} from "./relationNames.js";
 import {
   HostNotAllowedError,
   NotFoundError,
@@ -271,14 +276,6 @@ const applySnapshot = async (
 
   // --- discovered relations ---
   const existingRelations = await tx.relation.findMany({ where: { sourceId } });
-  const taken = new Map<string, Set<string>>();
-  const takenOn = (tableId: string) => {
-    let names = taken.get(tableId);
-    if (!names) taken.set(tableId, (names = new Set()));
-    return names;
-  };
-  for (const r of existingRelations) takenOn(r.fromTableId).add(r.name);
-
   // Only foreign keys whose tables and columns are all in this snapshot: a
   // table or column marked missing above must not keep a live relation.
   const columnsInSnapshot = new Map(
@@ -307,6 +304,12 @@ const applySnapshot = async (
     baseName: string;
   }
   const sides: Side[] = [];
+  const keys: Array<{
+    fk: (typeof snapshot.foreignKeys)[number];
+    fromId: string;
+    toId: string;
+  }> = [];
+  const keysBetween = new Map<string, number>();
   for (const fk of snapshot.foreignKeys) {
     if (!present(fk.from) || !present(fk.to)) continue;
     const fromId = tableIdByKey.get(
@@ -314,6 +317,17 @@ const applySnapshot = async (
     );
     const toId = tableIdByKey.get(tableKey(fk.to.schemaName, fk.to.table));
     if (!fromId || !toId) continue;
+    keys.push({ fk, fromId, toId });
+    const pair = `${fromId}\u0000${toId}`;
+    keysBetween.set(pair, (keysBetween.get(pair) ?? 0) + 1);
+  }
+  const columnPrefixByTable = new Map(
+    snapshot.tables.map((t) => [
+      tableKey(t.schemaName, t.name),
+      columnPrefixOf(t.columns.map((c) => c.name)),
+    ])
+  );
+  for (const { fk, fromId, toId } of keys) {
     sides.push(
       {
         constraintName: fk.constraintName,
@@ -323,7 +337,12 @@ const applySnapshot = async (
         columns: fk.from.columns,
         otherId: toId,
         otherColumns: fk.to.columns,
-        baseName: forwardName(fk),
+        baseName: forwardName(fk, {
+          keysToSameTarget: keysBetween.get(`${fromId}\u0000${toId}`)!,
+          columnPrefix: columnPrefixByTable.get(
+            tableKey(fk.from.schemaName, fk.from.table)
+          )!,
+        }),
       },
       {
         constraintName: fk.constraintName,
@@ -420,12 +439,63 @@ const applySnapshot = async (
     );
   }
 
+  // Names are settled for the whole snapshot before any row changes. Names
+  // nobody re-derives are taken first (declared relations, admin-named ones,
+  // relations the snapshot no longer has); the rest are then assigned in
+  // constraint-name order, so the result does not depend on row order.
+  const rederived = (r: (typeof existingRelations)[number], side: Side) =>
+    !r.nameLocked || r.fromTableId !== side.tableId;
+  const free = new Set<string>();
+  for (const [side, r] of matched) if (rederived(r, side)) free.add(r.id);
+  const taken = new Map<string, Set<string>>();
+  const takenOn = (tableId: string) => {
+    let names = taken.get(tableId);
+    if (!names) taken.set(tableId, (names = new Set()));
+    return names;
+  };
+  for (const r of existingRelations) {
+    if (!free.has(r.id)) takenOn(r.fromTableId).add(r.name);
+  }
+  // Constraint names are unique per table only, so equal names in two tables
+  // fall back to the tables' ids, never to the order the database listed them.
+  const compare = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  const bySide = (a: Side, b: Side) =>
+    compare(a.constraintName, b.constraintName) ||
+    Number(a.toMany) - Number(b.toMany) ||
+    compare(a.keyTableId, b.keyTableId) ||
+    compare(a.tableId, b.tableId);
+  const finalName = new Map<Side, string>();
+  const assign = (side: Side, wanted: string) => {
+    const name = uniqueName(wanted, takenOn(side.tableId));
+    takenOn(side.tableId).add(name);
+    finalName.set(side, name);
+  };
+  const ordered = [...sides].sort(bySide);
+  // A locked relation that moved to another table keeps its name there if it can.
+  for (const side of ordered) {
+    const found = matched.get(side);
+    if (found && found.nameLocked && !free.has(found.id)) {
+      finalName.set(side, found.name);
+    } else if (found && found.nameLocked) {
+      assign(side, found.name);
+    }
+  }
+  for (const side of ordered) {
+    const found = matched.get(side);
+    if (!found || !found.nameLocked) assign(side, side.baseName);
+  }
+
   const newRelations: Prisma.RelationCreateManyInput[] = [];
+  const renames: Array<{ id: string; name: string }> = [];
+  const changes: Array<{
+    side: Side;
+    found: (typeof existingRelations)[number];
+    name: string;
+  }> = [];
   for (const side of sides) {
     const found = matched.get(side);
+    const name = finalName.get(side)!;
     if (!found) {
-      const name = uniqueName(side.baseName, takenOn(side.tableId));
-      takenOn(side.tableId).add(name);
       newRelations.push({
         sourceId,
         name,
@@ -441,33 +511,44 @@ const applySnapshot = async (
       continue;
     }
     if (found.missingSince) summary.relations.restored++;
-    const moved = found.fromTableId !== side.tableId;
     if (
       found.missingSince ||
-      moved ||
+      found.name !== name ||
+      found.fromTableId !== side.tableId ||
       found.constraintName !== side.constraintName ||
       found.toTableId !== side.otherId ||
       !same(found.fromColumns, side.columns) ||
       !same(found.toColumns, side.otherColumns)
     ) {
-      let name = found.name;
-      if (moved) {
-        name = uniqueName(found.name, takenOn(side.tableId));
-        takenOn(side.tableId).add(name);
+      changes.push({ side, found, name });
+      if (found.name !== name || found.fromTableId !== side.tableId) {
+        renames.push({ id: found.id, name });
       }
-      await tx.relation.update({
-        where: { id: found.id },
-        data: {
-          name,
-          constraintName: side.constraintName,
-          fromTableId: side.tableId,
-          fromColumns: side.columns,
-          toTableId: side.otherId,
-          toColumns: side.otherColumns,
-          missingSince: null,
-        },
-      });
     }
+  }
+  // Names can swap between two relations of a table, which the unique index
+  // on (from table, name) would refuse row by row: park the renamed rows on
+  // names no relation can have (they hold a character the name rules refuse),
+  // then give them their final ones.
+  for (const rows of chunks(renames)) {
+    await tx.$executeRaw`
+      UPDATE "zeteo"."relations" AS r
+         SET "name" = '~' || r."id"::text
+       WHERE r."id" = ANY(${rows.map((r) => r.id)}::uuid[])`;
+  }
+  for (const { side, found, name } of changes) {
+    await tx.relation.update({
+      where: { id: found.id },
+      data: {
+        name,
+        constraintName: side.constraintName,
+        fromTableId: side.tableId,
+        fromColumns: side.columns,
+        toTableId: side.otherId,
+        toColumns: side.otherColumns,
+        missingSince: null,
+      },
+    });
   }
   const newlyMissingRelationIds = existingDiscovered
     .filter((r) => !claimed.has(r.id) && r.missingSince === null)

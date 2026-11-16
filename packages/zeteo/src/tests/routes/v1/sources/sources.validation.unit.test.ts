@@ -61,3 +61,35 @@ describe("source name", () => {
     );
   });
 });
+
+describe("max_joins", () => {
+  const body = {
+    slug: "sales",
+    type: "postgres",
+    name: "Sales",
+    settings: {},
+    schemas: ["public"],
+  };
+
+  it.each([1, 8])("accepts %s on a create and on an update", (max_joins) => {
+    expect(CreateSourceSchema.safeParse({ ...body, max_joins }).success).toBe(
+      true
+    );
+    expect(UpdateSourceSchema.safeParse({ max_joins }).success).toBe(true);
+  });
+
+  it.each([0, 9, 2.5, "4"])("refuses %j", (max_joins) => {
+    expect(CreateSourceSchema.safeParse({ ...body, max_joins }).success).toBe(
+      false
+    );
+    expect(UpdateSourceSchema.safeParse({ max_joins }).success).toBe(false);
+  });
+
+  it("leaves max_joins out when the body omits it", () => {
+    const parsed = CreateSourceSchema.parse(body);
+    expect(parsed).not.toHaveProperty("max_joins");
+    expect(UpdateSourceSchema.parse({ name: "x" })).not.toHaveProperty(
+      "max_joins"
+    );
+  });
+});

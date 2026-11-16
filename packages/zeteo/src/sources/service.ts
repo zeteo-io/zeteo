@@ -34,6 +34,7 @@ export interface SourceFields {
   allow_writable_login: boolean;
   timeout_ms: number;
   row_cap: number;
+  max_joins: number;
   export_enabled: boolean;
   export_row_cap: number;
   query_concurrency: number;
@@ -57,6 +58,7 @@ const optionalColumns = (input: Partial<SourceFields>) => ({
   ...(input.schemas !== undefined && { schemas: input.schemas }),
   ...(input.timeout_ms !== undefined && { timeoutMs: input.timeout_ms }),
   ...(input.row_cap !== undefined && { rowCap: input.row_cap }),
+  ...(input.max_joins !== undefined && { maxJoins: input.max_joins }),
   ...(input.export_enabled !== undefined && {
     exportEnabled: input.export_enabled,
   }),
@@ -75,6 +77,7 @@ const optionalColumns = (input: Partial<SourceFields>) => ({
 const limitsMetadata = (row: Source) => ({
   timeout_ms: row.timeoutMs,
   row_cap: row.rowCap,
+  max_joins: row.maxJoins,
   export_enabled: row.exportEnabled,
   export_row_cap: row.exportRowCap,
   query_concurrency: row.queryConcurrency,
