@@ -11,7 +11,7 @@ import {
   type VisibleCatalog,
 } from "../../../grants/visibleCatalog.js";
 
-// A shop: customers, orders, order_lines, accounts and ledger (Postgres's
+// A shop: customers, orders, order_lines, products, categories, accounts and ledger (Postgres's
 // uuid, money, an enum and domains over them) in schema `shop`, plus
 // `billing.accounts`, so the bare name `accounts` is ambiguous while both are
 // visible. Ids are readable: a table's id is its key below, a column's is
@@ -60,6 +60,26 @@ const TABLES: Record<
       ["sku", "text", "text"],
       ["quantity", "number", "integer"],
       ["price", "number", "numeric(12,2)"],
+      ["product_id", "number", "integer"],
+    ],
+  },
+  products: {
+    schemaName: "shop",
+    name: "products",
+    columns: [
+      ["id", "number", "integer"],
+      ["name", "text", "text"],
+      ["category_id", "number", "integer"],
+      ["cost", "number", "numeric(12,2)"],
+      ["launched_on", "date", "date"],
+    ],
+  },
+  categories: {
+    schemaName: "shop",
+    name: "categories",
+    columns: [
+      ["id", "number", "integer"],
+      ["name", "text", "text"],
     ],
   },
   accounts: {
@@ -107,6 +127,8 @@ const RELATIONS: Array<
   ["orders", "customer", "customer_id", "customers", "id", false],
   ["orders", "lines", "id", "order_lines", "order_id", true],
   ["customers", "account", "account_id", "accounts", "id", false],
+  ["order_lines", "product", "product_id", "products", "id", false],
+  ["products", "category", "category_id", "categories", "id", false],
 ];
 
 export interface ShopOptions {
