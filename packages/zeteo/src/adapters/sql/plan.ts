@@ -545,8 +545,22 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
       columnPath = item.column;
       if (item.as) outputPath = ["select", i, "as"];
     } else {
+      if ("calc" in item) {
+        throw fail("invalid_operator", "calculations are not planned yet", [
+          "select",
+          i,
+          "calc",
+        ]);
+      }
       const fn = aggregateFnOf(item)!;
-      const arg = (item as Record<AggregateFn, string>)[fn];
+      const arg = (item as Record<AggregateFn, unknown>)[fn];
+      if (typeof arg !== "string") {
+        throw fail("invalid_operator", "calculations are not planned yet", [
+          "select",
+          i,
+          fn,
+        ]);
+      }
       let column: ColumnRef | "*" = "*";
       let type: QueryableType = "number";
       if (!(fn === "count" && arg === "*")) {

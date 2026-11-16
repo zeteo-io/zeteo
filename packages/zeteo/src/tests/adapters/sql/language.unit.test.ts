@@ -242,3 +242,207 @@ describe("sqlLanguage", () => {
     expect(() => JSON.stringify(described)).not.toThrow();
   });
 });
+
+type Leaf = { path: PropertyKey[]; message: string };
+
+/** Every issue with its full path, looking inside the select item's union. */
+const leaves = (
+  issues: readonly {
+    path: PropertyKey[];
+    message: string;
+    errors?: unknown;
+  }[],
+  prefix: PropertyKey[] = []
+): Leaf[] =>
+  issues.flatMap((issue) => {
+    const path = [...prefix, ...issue.path];
+    return Array.isArray(issue.errors)
+      ? (issue.errors as (typeof issues)[]).flatMap((branch) =>
+          leaves(branch, path)
+        )
+      : [{ path, message: issue.message }];
+  });
+
+const calcPaths = (select: unknown) =>
+  leaves(issuesOf({ ...base, select: [select] })).map((l) => l.path);
+
+/** `{ abs: { abs: … "a" } }` with `levels` operation objects. */
+const absChain = (levels: number): unknown =>
+  levels === 0 ? "a" : { abs: absChain(levels - 1) };
+
+describe("calculations", () => {
+  it.each([
+    [
+      "a row-level calculation",
+      {
+        calc: {
+          mul: ["unitprice", { sub: [1, "unitpricediscount"] }, "orderqty"],
+        },
+        as: "line_total",
+      },
+    ],
+    [
+      "an aggregate over an expression",
+      { sum: { mul: ["a", "b"] }, as: "revenue" },
+    ],
+    ["an aggregate over a path with no as", { sum: "a" }],
+    [
+      "a ratio of aggregates",
+      { calc: { div: [{ sum: "profit" }, { sum: "revenue" }] }, as: "margin" },
+    ],
+    [
+      "count and countDistinct inside a calculation",
+      { calc: { div: [{ count: "*" }, { countDistinct: "id" }] }, as: "ratio" },
+    ],
+    [
+      "a text literal",
+      { calc: { concat: ["first", { value: " " }, "last"] }, as: "name" },
+    ],
+    [
+      "round with places",
+      { calc: { round: [{ div: ["a", "b"] }, 2] }, as: "r" },
+    ],
+    ["round with one operand", { calc: { round: "a" }, as: "r" }],
+    [
+      "lower, upper, abs and coalesce",
+      {
+        calc: { coalesce: [{ lower: "a" }, { upper: "b" }, { value: "x" }] },
+        as: "c",
+      },
+    ],
+    ["a number literal", { calc: { add: ["a", 1.5] }, as: "c" }],
+    ["depth 5", { calc: absChain(5), as: "c" }],
+  ])("accepts %s", (_name, item) => {
+    const query = { ...base, select: [item] };
+    expect(sqlQuerySchema.parse(query)).toEqual(query);
+  });
+
+  it.each([
+    ["a calc without as", { calc: { add: ["a", "b"] } }, ["select", 0]],
+    [
+      "an aggregate over an expression without as",
+      { sum: { mul: ["a", "b"] } },
+      ["select", 0, "as"],
+    ],
+    [
+      "sub with three operands",
+      { calc: { sub: ["a", "b", "c"] }, as: "x" },
+      ["select", 0, "calc", "sub"],
+    ],
+    [
+      "add with one operand",
+      { calc: { add: ["a"] }, as: "x" },
+      ["select", 0, "calc", "add"],
+    ],
+    [
+      "add with eleven operands",
+      { calc: { add: Array(11).fill("a") }, as: "x" },
+      ["select", 0, "calc", "add"],
+    ],
+    [
+      "round with eleven places",
+      { calc: { round: ["a", 11] }, as: "x" },
+      ["select", 0, "calc", "round", 1],
+    ],
+    [
+      "round with fractional places",
+      { calc: { round: ["a", 1.5] }, as: "x" },
+      ["select", 0, "calc", "round", 1],
+    ],
+    [
+      "two keys in one operation",
+      { calc: { add: ["a", "b"], abs: "c" }, as: "x" },
+      ["select", 0, "calc"],
+    ],
+    [
+      "an unknown operation",
+      { calc: { pow: ["a", 2] }, as: "x" },
+      ["select", 0, "calc"],
+    ],
+    [
+      "an aggregate inside an aggregate",
+      { sum: { sum: "a" }, as: "x" },
+      ["select", 0, "sum", "sum"],
+    ],
+    [
+      "an aggregate inside an aggregate inside a calculation",
+      { calc: { add: [{ avg: { mul: ["a", { max: "b" }] } }, 1] }, as: "x" },
+      ["select", 0, "calc", "add", 0, "avg", "mul", 1, "max"],
+    ],
+    [
+      "depth 6",
+      { calc: absChain(6), as: "x" },
+      ["select", 0, "calc", "abs", "abs", "abs", "abs", "abs", "abs"],
+    ],
+    [
+      "countDistinct of *",
+      { calc: { countDistinct: "*" }, as: "x" },
+      ["select", 0, "calc", "countDistinct"],
+    ],
+    [
+      "a text literal over 1000 characters",
+      { calc: { value: "x".repeat(1001) }, as: "x" },
+      ["select", 0, "calc", "value"],
+    ],
+    [
+      "a text literal with NUL",
+      { calc: { value: "a\u0000b" }, as: "x" },
+      ["select", 0, "calc", "value"],
+    ],
+    [
+      "a boolean literal",
+      { calc: { add: [true, 1] }, as: "x" },
+      ["select", 0, "calc", "add", 0],
+    ],
+  ])("refuses %s", (_name, item, path) => {
+    expect(calcPaths(item)).toContainEqual(path);
+  });
+
+  it("allows 100 operation and aggregate objects and refuses 101, at the first item over", () => {
+    // Each item: add + 9 abs = 10 objects.
+    const item = {
+      calc: { add: Array(9).fill({ abs: "a" }).concat("b") },
+      as: "",
+    };
+    const items = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ ...item, as: `c${i}` }));
+    expect(
+      sqlQuerySchema.safeParse({ ...base, select: items(10) }).success
+    ).toBe(true);
+
+    const over = [...items(10), { calc: { abs: "a" }, as: "extra" }];
+    expect(issuesOf({ ...base, select: over })).toEqual([
+      expect.objectContaining({ path: ["select", 10] }),
+    ]);
+  });
+
+  it("counts an aggregate over an expression and its operands", () => {
+    const select = [
+      ...Array.from({ length: 49 }, (_, i) => ({
+        calc: { add: Array(1).fill({ abs: "a" }).concat("b") },
+        as: `c${i}`,
+      })),
+      { sum: { add: [{ abs: "a" }, { abs: "b" }, { abs: "c" }] }, as: "s" },
+    ];
+    // 49 * 2 = 98, then 1 + 1 + 3 = 5 more.
+    expect(issuesOf({ ...base, select })).toEqual([
+      expect.objectContaining({ path: ["select", 49] }),
+    ]);
+  });
+
+  it("names calc beside the existing forms in a select item's error", () => {
+    const issues = issuesOf({ ...base, select: [{ nope: 1 }] });
+    expect(issues[0]?.message).toContain("{ calc: expression, as }");
+  });
+
+  it("exports the limits", async () => {
+    const language = await import("../../../adapters/sql/language.js");
+    expect([
+      language.MAX_CALC_DEPTH,
+      language.MAX_CALC_NODES,
+      language.MAX_CALC_OPERANDS,
+      language.MAX_ROUND_PLACES,
+    ]).toEqual([5, 100, 10, 10]);
+    expect(language.CALC_OPS).toHaveLength(10);
+  });
+});
