@@ -107,7 +107,7 @@ takes a column path only.
 - A calculation with no aggregate is **row-level**: computed per row, it behaves like a column. In
   a grouped query it must be listed in `groupBy`.
 - A calculation in which **every column sits inside an aggregate** is **group-level**
-  (`{ "div": [{ "sum": "profit" }, { "sum": "linetotal" }] }`): it behaves like an aggregate, needs
+  (`{ "div": [{ "sum": "unit_cost" }, { "sum": "unit_price" }] }`): it behaves like an aggregate, needs
   no `groupBy` entry, and can be named in `having` and `orderBy`, never in `where` (`422
   invalid_grouping`). Literals may appear outside the aggregates.
 - A calculation that mixes the two (a bare column beside an aggregate) is refused with
@@ -130,203 +130,100 @@ Literals are bound parameters and count towards the parameter limit.
 most 100 operation and aggregate objects in all, `add`, `mul`, `concat` and `coalesce` take 2 to
 10 operands, and `round` places are 0 to 10.
 
-Line total per order line (row-level):
+The examples below use one small schema, with relation names as the discovery rules give them (a
+single key is named after its target table):
+
+- `orders` (id, customer_id, status, created_at); relation `customers`
+- `order_lines` (id, order_id, product_id, unit_price, quantity, discount, unit_cost); relations
+  `orders` and `products`
+- `products` (id, name, category)
+- `customers` (id, first_name, last_name, email)
+
+Value of each order line (row-level); `line_value` is not a column, so `where` can name it:
 
 ```json
 {
-  "source": "adventureworks",
-  "from": "salesorderdetail",
+  "source": "sales-db",
+  "from": "order_lines",
   "select": [
-    "salesorderid",
-    { "calc": { "mul": ["unitprice", "orderqty"] }, "as": "linetotal" }
+    "id",
+    { "calc": { "mul": ["unit_price", "quantity"] }, "as": "line_value" }
   ],
-  "where": { "linetotal": { "gt": 1000 } }
+  "where": { "line_value": { "gt": 1000 } }
 }
 ```
 
-Margin percentage by product category (group-level, rounded to one place):
+Margin by product category (group-level): revenue and cost are computed from the lines, and the
+ratio is rounded to three places. `mul` by 100 for a percentage would nest one level past the limit
+of 5, so the result is a fraction:
 
 ```json
 {
-  "source": "adventureworks",
-  "from": "salesorderdetail",
-  "join": ["product"],
+  "source": "sales-db",
+  "from": "order_lines",
+  "join": ["products"],
   "select": [
-    "product.category",
+    "products.category",
     {
       "calc": {
-        "round": [{ "mul": [100, { "div": [{ "sum": "profit" }, { "sum": "linetotal" }] }] }, 1]
+        "round": [
+          {
+            "div": [
+              {
+                "sub": [
+                  { "sum": { "mul": ["unit_price", "quantity"] } },
+                  { "sum": { "mul": ["unit_cost", "quantity"] } }
+                ]
+              },
+              { "sum": { "mul": ["unit_price", "quantity"] } }
+            ]
+          },
+          3
+        ]
       },
-      "as": "margin_pct"
+      "as": "margin"
     }
   ],
-  "groupBy": ["product.category"],
-  "orderBy": [{ "margin_pct": "desc" }]
+  "groupBy": ["products.category"],
+  "orderBy": [{ "margin": "desc" }]
 }
 ```
 
-Average order value, orders counted once however many lines they have:
+Average order value, each order counted once however many lines it has:
 
 ```json
 {
-  "source": "adventureworks",
-  "from": "salesorderdetail",
+  "source": "sales-db",
+  "from": "order_lines",
   "select": [
     {
-      "calc": { "div": [{ "sum": "linetotal" }, { "countDistinct": "salesorderid" }] },
+      "calc": {
+        "div": [
+          { "sum": { "mul": ["unit_price", "quantity"] } },
+          { "countDistinct": "order_id" }
+        ]
+      },
       "as": "average_order_value"
     }
   ]
 }
 ```
 
-Full name, with a missing middle name counted as empty text:
+Full name (row-level); a null last name counts as empty text:
 
 ```json
 {
-  "source": "adventureworks",
-  "from": "person",
+  "source": "sales-db",
+  "from": "customers",
   "select": [
+    "id",
     {
-      "calc": { "concat": ["firstname", { "value": " " }, "middlename", { "value": " " }, "lastname"] },
-      "as": "fullname"
+      "calc": { "concat": ["first_name", { "value": " " }, "last_name"] },
+      "as": "full_name"
     }
   ]
 }
 ```
-
-### Filters
-
-A filter is one of:
-
-- `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`;
-- `{ "<path>": { "<operator>": value }, ... }`: each path takes exactly one operator, and several
-  paths in one object must all hold.
-
-| Operator | Value | Applies to |
-|----------|-------|------------|
-| `eq`, `ne`, `gt`, `gte`, `lt`, `lte` | a value | text, number, date, timestamp; `eq`/`ne` also boolean |
-| `between` | `[low, high]`, inclusive | text, number, date, timestamp |
-| `in`, `notIn` | 1 to 1,000 values | text, number, date, timestamp, boolean |
-| `contains`, `startsWith` | a string | text: case-insensitive whatever the collation, `%`, `_` and `[` match themselves |
-| `isNull` | `true` or `false` | every type, json included |
-
-Values are checked against the column: text takes a string; numbers a number or a decimal string
-(`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
-dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
-(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
-
-Every value is bound as a parameter, and an engine takes only so many in one statement: 2,098 on
-Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two
-included. A query that binds more, which takes several long `in` lists, is refused before it
-runs with `422 too_many_parameters` at path `[]`. A timestamp's fraction past 100 ns is cut on
-Azure SQL, its precision.
-
-A value that has the right shape but that the source itself cannot convert to the column's type
-is the caller's error: `422 invalid_value` at path `[]`, with the fixed message `A value in the
-query could not be converted to its column's type`, recorded as `refused`. On Postgres that is a
-malformed uuid, or a timestamp offset beyond ±15:59; on Azure SQL a malformed uniqueidentifier, a
-timestamp offset beyond ±14:00, a timestamp that leaves years 1 to 9999 once converted to UTC, and
-a bound outside 1753-01-01 to 9999-12-31 compared with a `datetime` column.
-
-**Postgres's own types.** A uuid column compares as a uuid (`eq`, `ne`, `in`, `notIn`, ranges), so
-its index is used and the value's case does not matter; `contains`, `startsWith`, `min` and `max`
-read it as text. An enum column is read as text everywhere: a label the enum does not have
-matches nothing, and it sorts, and `min` and `max` compare, alphabetically, not in the enum's
-order. A money column is read as numeric everywhere, so it filters, sums and averages like a
-decimal. A domain behaves as its base type.
-
-**Reserved names.** `and`, `or` and `not` are always logical operators. A column with one of those
-names cannot be filtered on directly (select it through a view that renames it), and an `as` of
-`and`, `or` or `not` cannot be used in `having`.
-
-**`eq` on text follows the database's collation**, which differs between engines: Postgres
-compares exactly, case and accents included, unless the column has a case-insensitive collation;
-Azure SQL's default collations ignore case, so `{ "eq": "paid" }` also matches `PAID` there. Use
-`contains` or `startsWith` for a match that ignores case on every engine. Sorting text follows the
-collation too, and so does what `distinct` and `groupBy` count as the same text.
-
-**Where the engines differ.** Over the types both have, the engines return the same rows, in the
-same order, in the same wire forms, except:
-
-- text compared, sorted, deduplicated or grouped follows each database's collation (above);
-- money prints with four decimal places on Azure SQL (`"640.1000"`) and two on Postgres
-  (`"640.10"`);
-- a uuid prints in lower case on Postgres and a uniqueidentifier in upper case on Azure SQL, and
-  they sort differently: Postgres in the order of their text, SQL Server in its own byte order
-  (which `min` and `max` follow too; on Postgres they compare the text);
-- json is the JSON value on Postgres and text on Azure SQL;
-- a timestamp's fraction past 100 ns is cut on Azure SQL, and its `datetime` holds 1/300 s ticks
-  (see *Results*);
-- a value one engine cannot convert fails there as `422 invalid_value` (see *Filters*): a timestamp
-  offset beyond ±14:00 on Azure SQL but only beyond ±15:59 on Postgres, and a bound outside
-  1753-01-01 to 9999-12-31 compared with a `datetime` column on Azure SQL, which Postgres has no
-  counterpart of.
-
-Types only one engine has behave as that engine's section says: on Postgres, an enum sorts as its
-text and a money column computes as numeric (see *Postgres's own types*); float `NaN` and
-`Infinity` are Postgres's alone.
-
-### Json columns
-
-A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
-grouped, deduplicated (`distinct`, `countDistinct`) or sorted (`invalid_operator`). A query whose
-select items are all json has no default order. On Azure SQL json is stored as text (`nvarchar`):
-its columns are text columns there.
-
-## Discovering what you can query
-
-`GET /v1/catalog` (`zeteo.data.read`) answers what the caller may query, so a person or an AI
-can write a query without being told the schema. It shows exactly the caller's grants (their own
-and their groups') and nothing else: no ids, no native types, no connection settings, and no
-trace of a table, column, relation or source they are not granted.
-
-```json
-{
-  "sources": [
-    {
-      "slug": "sales-db",
-      "name": "Sales",
-      "type": "postgres",
-      "language": { "id": "sql", "schema": { "type": "object", "properties": { "select": {} } } },
-      "limits": {
-        "default_rows": 1000,
-        "max_rows": 50000,
-        "timeout_ms": 30000,
-        "export": { "enabled": true, "max_rows": 200000 }
-      },
-      "tables": [
-        {
-          "name": "orders",
-          "schema_name": "sales",
-          "kind": "table",
-          "description": null,
-          "missing": false,
-          "columns": [{ "name": "id", "type": "number", "nullable": false, "description": null, "missing": false }],
-          "relations": [{ "name": "customers", "to": "customers", "to_many": false, "missing": false }]
-        }
-      ]
-    }
-  ]
-}
-```
-
-- Without `?source=<slug>`, every source the caller has a grant on, ordered by slug; archived
-  sources never appear. A `source` that is unknown, archived or not granted gives `sources: []`,
-  exactly as a caller with no grants gets.
-- Tables are ordered by schema, then name; columns in the table's own order, only those granted.
-- A table's `name` is what a query writes in `from`: the bare name when no other table the caller
-  can see in that source has it, else `schema.table`.
-- A relation is listed under the table it starts from. Its `name` is what a query's `join`
-  names (through a joined relation, `customers.accounts`); `to` is the target table as `from` would
-  write it. A relation appears only when every key column on both sides is granted.
-- `limits` are those of `POST /v1/query`: `default_rows` and `max_rows` are lowered to the
-  source's `row_cap`, `timeout_ms` is the source's time limit. `export` says whether the source
-  takes exports (`enabled`: `export_enabled` and an `export_row_cap` above 0) and up to how many
-  rows (`max_rows`, 0 when it does not); exporting also needs `zeteo.data.export`.
-- `language.schema` is the JSON Schema of the query body.
-- `missing` marks a table, column or relation the last refresh did not find; a query that uses
-  one fails with `missing_in_source`.
 
 ## Worked examples
 

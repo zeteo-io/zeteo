@@ -44,12 +44,12 @@ The ten customers with the most revenue, over 500 each:
 {"source":"sales-db","from":"orders","join":["customers"],"select":["customers.name",{"sum":"total","as":"revenue"}],"groupBy":["customers.name"],"having":{"revenue":{"gt":500}},"orderBy":[{"revenue":"desc"}],"limit":10}
 \`\`\`
 
-Line total per order line, then margin % by product category:
+Value of each order line, then margin by product category (revenue and cost from the lines):
 \`\`\`json
-{"source":"sales-db","from":"order_lines","select":["id",{"calc":{"mul":["unit_price","quantity"]},"as":"line_total"}]}
+{"source":"sales-db","from":"order_lines","select":["id",{"calc":{"mul":["unit_price","quantity"]},"as":"line_value"}],"where":{"line_value":{"gt":1000}}}
 \`\`\`
 \`\`\`json
-{"source":"sales-db","from":"order_lines","join":["product"],"select":["product.category",{"calc":{"round":[{"mul":[100,{"div":[{"sum":"profit"},{"sum":"revenue"}]}]},1]},"as":"margin_pct"}],"groupBy":["product.category"],"orderBy":[{"margin_pct":"desc"}]}
+{"source":"sales-db","from":"order_lines","join":["products"],"select":["products.category",{"calc":{"round":[{"div":[{"sub":[{"sum":{"mul":["unit_price","quantity"]}},{"sum":{"mul":["unit_cost","quantity"]}}]},{"sum":{"mul":["unit_price","quantity"]}}]},3]},"as":"margin"}],"groupBy":["products.category"],"orderBy":[{"margin":"desc"}]}
 \`\`\`
 
 ## Results
