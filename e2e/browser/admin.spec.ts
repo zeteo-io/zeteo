@@ -1,9 +1,14 @@
-import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 import { CLIENTS, stack } from "../support/stack.js";
-import { query } from "../support/zeteo.js";
-import { createUser, roleId, setUserRoles } from "../support/tereo.js";
 import { signIn } from "../support/oauth.js";
+import { query } from "../support/zeteo.js";
+import { readFileSync } from "node:fs";
+import {
+  createUser,
+  ensureRole,
+  roleId,
+  setUserRoles,
+} from "../support/tereo.js";
 import {
   ADMIN_EMAIL,
   ensurePeople,
@@ -220,7 +225,7 @@ test("an admin administers zeteo through the UI", async ({
     expect(stored.refresh_token).toBeUndefined();
     expect(seen.refreshTokens).toEqual([]);
     // Tereo's script-readable cookie is only its session indicator.
-    expect(held.cookie).toBe("tsi_e2e-ui=1");
+    expect(held.cookie).toBe(`tsi_${CLIENTS.ui.clientId}=1`);
     for (const token of seen.tokens) expect(held.cookie).not.toContain(token);
     expect(held.session).not.toMatch(/refresh/i);
     const refreshCookie = (await context.cookies()).find(
@@ -266,8 +271,8 @@ test("an admin administers zeteo through the UI", async ({
       { tereo: stack.tereoUrl, clientId: CLIENTS.ui.clientId }
     );
     expect(renewal.status).toBe(400);
-    // The sign-out cleared the cookie (no token to renew) or revoked its token.
-    expect(["invalid_request", "invalid_grant"]).toContain(renewal.body.error);
+    // The sign-out cleared the cookie: there is no refresh token to renew.
+    expect(renewal.body.error).toBe("invalid_request");
 
     await page.goto("/sources");
     await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
@@ -319,7 +324,7 @@ test("a deep link opened signed out goes to /signed-out and, after signing in, t
   expectCleanRun(seen);
 });
 
-test("a role removed in Tereo hides the sections without a reload", async ({
+test("a role removed in Tereo hides its sections without a reload", async ({
   browser,
   baseURL,
 }) => {
@@ -327,9 +332,14 @@ test("a role removed in Tereo hides the sections without a reload", async ({
     client: CLIENTS.tereoUi,
     email: ADMIN_EMAIL,
   });
+  // A second role that keeps one section: only the run record.
+  const runsReader = await ensureRole(coreToken, "e2e_runs_reader", [
+    "zeteo.runs.read",
+  ]);
   const email = `live-${Date.now().toString(36)}@e2e.example.com`;
   const userId = await createUser(coreToken, email, [
     await roleId(coreToken, "zeteo_admin"),
+    runsReader,
   ]);
 
   const context = await browser.newContext({ baseURL });
@@ -347,13 +357,20 @@ test("a role removed in Tereo hides the sections without a reload", async ({
   await page.evaluate(() => {
     (window as unknown as { liveMarker: string }).liveMarker = "same page";
   });
-  await setUserRoles(coreToken, userId, []);
+  await setUserRoles(coreToken, userId, [runsReader]);
 
   // Tereo pushes the change over its socket; allow a bounded wait.
-  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible({
+  await expect(nav.getByRole("link", { name: "Sources" })).toHaveCount(0, {
     timeout: 30_000,
   });
-  await expect(nav.getByRole("link", { name: "Sources" })).toHaveCount(0);
+  await expect(nav.getByRole("link", { name: "Runs" })).toBeVisible();
+  // The sources page it was on says so inside the layout, and the run
+  // record still opens, all on the same page.
+  await expect(page.getByText("zeteo.sources.read")).toBeVisible();
+  await nav.getByRole("link", { name: "Runs" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Runs", level: 1 })
+  ).toBeVisible();
   expect(
     await page.evaluate(
       () => (window as unknown as { liveMarker?: string }).liveMarker
