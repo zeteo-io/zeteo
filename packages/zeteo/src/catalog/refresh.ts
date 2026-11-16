@@ -323,7 +323,7 @@ const applySnapshot = async (
         columns: fk.from.columns,
         otherId: toId,
         otherColumns: fk.to.columns,
-        baseName: forwardName(fk),
+        baseName: forwardName(fk, { keysToSameTarget: 1, columnPrefix: null }),
       },
       {
         constraintName: fk.constraintName,
