@@ -49,7 +49,7 @@ Value of each order line, then margin % by product category (revenue and cost fr
 {"source":"sales-db","from":"order_lines","select":["id",{"calc":{"mul":["unit_price","quantity"]},"as":"line_value"}],"where":{"line_value":{"gt":1000}}}
 \`\`\`
 \`\`\`json
-{"source":"sales-db","from":"order_lines","join":["products"],"select":["products.category",{"calc":{"round":[{"mul":[100,{"div":[{"sub":[{"sum":{"mul":["unit_price","quantity"]}},{"sum":{"mul":["unit_cost","quantity"]}}]},{"sum":{"mul":["unit_price","quantity"]}}]}]},1]},"as":"margin_pct"}],"groupBy":["products.category"],"orderBy":[{"margin":"desc"}]}
+{"source":"sales-db","from":"order_lines","join":["products"],"select":["products.category",{"calc":{"round":[{"mul":[100,{"div":[{"sub":[{"sum":{"mul":["unit_price","quantity"]}},{"sum":{"mul":["unit_cost","quantity"]}}]},{"sum":{"mul":["unit_price","quantity"]}}]}]},1]},"as":"margin_pct"}],"groupBy":["products.category"],"orderBy":[{"margin_pct":"desc"}]}
 \`\`\`
 
 ## Results

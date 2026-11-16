@@ -1,10 +1,13 @@
 // @module-tag unit
 // @module-tag platform
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
+import { salesCatalog } from "../support/pure/salesCatalog.js";
 import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
 import { LIMIT_PROFILES } from "../../engine/limits.js";
+import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "fs";
 
 describe("MCP_INSTRUCTIONS", () => {
   it("stays under 6,000 characters", () => {
@@ -79,5 +82,31 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(JSON.stringify(lineTotal)).toContain('"calc"');
     expect(JSON.stringify(margin)).toContain('"div"');
     expect(JSON.stringify(margin)).toContain('"sum"');
+  });
+
+  const planned = (blocks: unknown[]) => {
+    const queries = blocks.filter(
+      (b): b is Record<string, unknown> =>
+        typeof b === "object" && b !== null && "from" in b && "select" in b
+    );
+    expect(queries.length).toBeGreaterThan(0);
+    for (const query of queries) {
+      expect(
+        () => planSql(sqlQuerySchema.parse(query), salesCatalog()),
+        JSON.stringify(query)
+      ).not.toThrow();
+    }
+  };
+
+  it("plans every worked example against the example schema", () => {
+    planned(jsonBlocks(MCP_INSTRUCTIONS));
+  });
+
+  it("plans every query in docs/querying.md against the example schema", () => {
+    const doc = readFileSync(
+      new URL("../../../docs/querying.md", import.meta.url),
+      "utf8"
+    );
+    planned(jsonBlocks(doc));
   });
 });

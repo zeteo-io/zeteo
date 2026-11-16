@@ -126,8 +126,8 @@ takes a column path only.
 
 **Types.** Arithmetic takes `number` columns, `lower` and `upper` take `text`; `concat` takes text
 or numbers (numbers are converted to text). Dates, booleans, json and `other` columns are refused
-with `422 invalid_operator`, at the path of the operand (`path` is a list of keys and indexes, such as `["select", 2, "sum", "mul", 1]`). `coalesce` operands
-must share one type. Every column an expression reads goes through the usual column resolution, so
+with `422 invalid_operator`, at the path of the operand (`path` is a list of keys and indexes, such
+as `["select", 2, "sum", "mul", 1]`). `coalesce` operands must share one type. Every column an expression reads goes through the usual column resolution, so
 grants, joins and `not_found_or_not_accessible` work as for a plain path, and the run record lists
 the columns read. A result is typed in `columns` like any select item; decimals arrive as strings.
 
