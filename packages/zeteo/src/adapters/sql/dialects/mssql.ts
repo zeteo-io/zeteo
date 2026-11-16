@@ -164,6 +164,8 @@ const exactKind = (
       return kindOf(item.column.nativeType);
     case "bucket":
       return undefined;
+    case "calc":
+      throw new Error("calculations are not compiled yet");
     case "aggregate":
       if (item.column === "*") return undefined;
       if (item.fn === "min" || item.fn === "max") {

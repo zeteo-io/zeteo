@@ -1,4 +1,5 @@
 import type { ColumnType, QueryPlan } from "../types.js";
+import type { CalcOp } from "./language.js";
 
 // The plan the SQL compiler consumes. It is complete: the compiler never reads
 // the catalogue or the query. Every name in it is a real catalogue name, every
@@ -47,6 +48,29 @@ export interface ResolvedJoin {
 }
 
 /**
+ * A calculation. Aggregates may appear only inside `group`-level calcs, and a
+ * calc's `type` is the type its value has.
+ */
+export type ResolvedExpr =
+  | { kind: "column"; column: ColumnRef }
+  | { kind: "literal"; value: number | string; type: "number" | "text" }
+  | {
+      kind: "op";
+      op: CalcOp;
+      args: ResolvedExpr[];
+      /** `round` only: decimal places. */
+      places?: number;
+      type: "number" | "text";
+    }
+  | {
+      kind: "aggregate";
+      fn: AggregateFn;
+      /** `"*"` only for `count`. */
+      arg: ResolvedExpr | "*";
+      type: QueryableType;
+    };
+
+/**
  * One result column. `output` is its name in the result, unique in the plan;
  * `type` is the type of the value it yields (`number` for every count, sum
  * and average).
@@ -68,6 +92,14 @@ export type ResolvedSelect =
       column: ColumnRef;
       output: string;
       type: QueryableType;
+    }
+  | {
+      kind: "calc";
+      expr: ResolvedExpr;
+      /** `group` when the expression holds an aggregate: it is evaluated per group, not per row. */
+      level: "row" | "group";
+      output: string;
+      type: QueryableType;
     };
 
 /**
@@ -85,8 +117,8 @@ export type PlanValue = string | number | boolean;
 export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 
 /**
- * A filter tree over subjects `S`: catalogue columns in `where`, aggregate
- * select items in `having`. Several paths in one query object arrive as `and`.
+ * A filter tree over subjects `S`: catalogue columns and row-level calculations in
+ * `where`, aggregate and group-level calculation select items in `having`. Several paths in one query object arrive as `and`.
  */
 export type ResolvedFilter<S> =
   | { kind: "and" | "or"; filters: ResolvedFilter<S>[] }
@@ -106,7 +138,16 @@ export type ResolvedFilter<S> =
   /** `isNull: false` means IS NOT NULL. */
   | { kind: "isNull"; subject: S; isNull: boolean };
 
-/** An aggregate select item, by index into `select`, and the type it yields. */
+/** A row-level calculation select item, by index into `select`, and the type it yields. */
+export interface CalcSubject {
+  index: number;
+  type: QueryableType;
+}
+
+/** What `where` compares: a catalogue column or a row-level calculation. */
+export type WhereSubject = ColumnRef | CalcSubject;
+
+/** An aggregate or group-level calculation select item, by index into `select`, and the type it yields. */
 export interface HavingSubject {
   index: number;
   type: QueryableType;
@@ -128,7 +169,7 @@ export interface SqlPlan extends QueryPlan {
   /** One to 50 items, in the order of `columns`. */
   select: ResolvedSelect[];
   distinct: boolean;
-  where: ResolvedFilter<ColumnRef> | undefined;
+  where: ResolvedFilter<WhereSubject> | undefined;
   /**
    * Indexes into `select` to group by: every non-aggregate item when the query
    * is grouped (it has an aggregate or a `groupBy`), else empty. Empty with

@@ -675,7 +675,8 @@ describe("postgres runQuery", () => {
             where: {
               kind: "compare",
               op: "eq",
-              subject: planned.select[0].column as never,
+              subject: (planned.select[0] as { column: unknown })
+                .column as never,
               value: unserialisable as never,
             },
           } as SqlPlan,

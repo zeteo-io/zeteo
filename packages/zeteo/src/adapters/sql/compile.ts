@@ -9,6 +9,7 @@ import type {
   ResolvedSelect,
   SqlPlan,
   TableName,
+  WhereSubject,
 } from "./types.js";
 import {
   sql,
@@ -66,6 +67,8 @@ const selectExpression = (
         item.column.type === "date" ? "date" : "timestamp",
         item.column.nativeType
       );
+    case "calc":
+      throw new Error("calculations are not compiled yet");
   }
 };
 
@@ -169,11 +172,15 @@ export const compileSql = (
 
   if (plan.where) {
     qb = qb.where(
-      compileFilter(plan.where, dialect, (c) => ({
-        expression: column(c, dialect),
-        type: c.type,
-        nativeType: c.nativeType,
-      }))
+      compileFilter(plan.where, dialect, (s: WhereSubject) =>
+        "index" in s
+          ? { expression: selected[s.index]!, type: s.type }
+          : {
+              expression: column(s, dialect),
+              type: s.type,
+              nativeType: s.nativeType,
+            }
+      )
     );
   }
 
