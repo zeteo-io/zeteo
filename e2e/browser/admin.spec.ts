@@ -73,16 +73,20 @@ test("an admin administers zeteo through the UI", async ({
     await page.getByRole("button", { name: "New source" }).click();
     const field = (name: string) =>
       page.getByRole("textbox", { name, exact: true });
-    await field("Slug").fill(slug);
+    // The slug follows the name until it is typed: name first, then slug.
     await field("Name").fill(`UI ${slug}`);
+    await field("Slug").fill(slug);
     await field("Host").fill("source-pg");
     await field("Port").fill("5432");
     await field("Database").fill("source");
     await field("User").fill("zeteo_ro");
     await field("Password").fill(stack.sourceReaderPassword);
-    // zeteo does not trust the run's CA: verify against the CA given here.
-    await page.getByRole("combobox", { name: "TLS" }).selectOption("verify");
-    await field("CA certificate").fill(readFileSync(stack.caCertPath, "utf8"));
+    // zeteo does not trust the run's CA: verify (TLS's default) against the
+    // CA given here; the CA field shows only for verified TLS.
+    await expect(field("TLS")).toHaveValue("Required, certificate verified");
+    await field("CA certificate (optional)").fill(
+      readFileSync(stack.caCertPath, "utf8")
+    );
     await field("Schemas").fill("sales");
     await page.getByRole("button", { name: "Create source" }).click();
 
@@ -93,14 +97,17 @@ test("an admin administers zeteo through the UI", async ({
 
     await page.getByRole("link", { name: "Sources" }).click();
     const row = page.getByRole("row").filter({ hasText: slug });
-    // Name, Slug, Type, Status, Last refreshed.
-    await expect(row.getByRole("cell").nth(3)).toHaveText("active");
+    // Name (with the slug under it), Database, Status, Last refreshed.
+    await expect(row.getByRole("cell").nth(1)).toHaveText("PostgreSQL");
+    await expect(row.getByRole("cell").nth(2)).toHaveText("Active");
     await row.getByRole("link", { name: `UI ${slug}` }).click();
     await expect(page).toHaveURL(`${zeteoOrigin()}/sources/${sourceId}`);
 
-    await page.getByRole("button", { name: "Test", exact: true }).click();
-    await expect(page.getByText("No findings")).toBeVisible();
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    await page.getByRole("button", { name: "Test connection" }).click();
+    await expect(
+      page.getByText("Connected. The login is read-only.")
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Refresh catalogue" }).click();
     await expect(page.getByText("Catalogue refreshed")).toBeVisible();
 
     await page.getByRole("link", { name: "Tables", exact: true }).click();
@@ -146,16 +153,17 @@ test("an admin administers zeteo through the UI", async ({
     await page.getByRole("link", { name: "Grants" }).click();
     await page.getByRole("button", { name: "New grant" }).click();
     await page
-      .getByRole("textbox", { name: "Search by name or email" })
+      .getByRole("combobox", { name: "Search by name or email" })
       .fill("alice@e2e");
-    await page.getByRole("button", { name: /alice@e2e\.example\.com/ }).click();
-    await page
-      .getByRole("combobox", { name: "Source" })
-      .selectOption({ label: `UI ${slug} (${slug})` });
-    await page
-      .getByRole("combobox", { name: "Table" })
-      .selectOption({ label: "sales.orders" });
-    await page.getByRole("radio", { name: "All columns" }).check();
+    await page.getByRole("option", { name: /alice@e2e\.example\.com/ }).click();
+    // Source and Table are searchable fields: type, then pick from the list.
+    await page.getByRole("textbox", { name: "Source" }).fill(`UI ${slug}`);
+    await page.getByText(`UI ${slug}`, { exact: true }).click();
+    await page.getByRole("textbox", { name: "Table" }).fill("sales.orders");
+    await page.getByText("sales.orders", { exact: true }).click();
+    await expect(
+      page.getByRole("checkbox", { name: "All columns" })
+    ).toBeChecked();
     await page.getByRole("button", { name: "Create grant" }).click();
 
     await expect(page).toHaveURL(new RegExp(`^${zeteoOrigin()}/grants`));
@@ -171,12 +179,11 @@ test("an admin administers zeteo through the UI", async ({
     await page.getByRole("button", { name: "New limit" }).click();
     const dialog = page.getByRole("dialog");
     await dialog
-      .getByRole("textbox", { name: "Search by name or email" })
+      .getByRole("combobox", { name: "Search by name or email" })
       .fill("alice@e2e");
-    await dialog
-      .getByRole("button", { name: /alice@e2e\.example\.com/ })
-      .click();
-    await dialog.getByRole("textbox", { name: "Query concurrency" }).fill("2");
+    // The list opens in a portal outside the dialog.
+    await page.getByRole("option", { name: /alice@e2e\.example\.com/ }).click();
+    await dialog.getByRole("textbox", { name: "Queries at once" }).fill("2");
     await dialog.getByRole("button", { name: "Create limit" }).click();
     await expect(dialog).toBeHidden();
 
@@ -203,7 +210,7 @@ test("an admin administers zeteo through the UI", async ({
       .filter({ hasText: `UI ${slug}` });
     await expect(row).toHaveCount(1);
     // When, Person, Source, Entry point, Outcome, ...
-    await expect(row.getByRole("cell").nth(4)).toHaveText("ok");
+    await expect(row.getByRole("cell").nth(4)).toHaveText("OK");
     await row.getByRole("button", { name: "Details" }).click();
     const detail = page.getByTestId("run-query");
     await expect(detail).toContainText('"from": "orders"');
