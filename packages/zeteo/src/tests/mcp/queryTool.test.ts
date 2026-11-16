@@ -119,6 +119,58 @@ describeEachEngine("MCP query tool", (engine) => {
     expect(runs.find((r) => r.id === apiRun)?.entryPoint).toBe("api");
   });
 
+  it("runs a row-level calculation and a group-level div with round", async () => {
+    const plain = await query({
+      from: "orders",
+      select: ["id", "total"],
+      where: { id: { in: [1, 2] } },
+      orderBy: [{ id: "asc" }],
+    });
+    const doubled = await query({
+      from: "orders",
+      select: ["id", { calc: { mul: ["total", 2] }, as: "doubled" }],
+      where: { id: { in: [1, 2] } },
+      orderBy: [{ id: "asc" }],
+    });
+    expect(doubled.isError).toBe(false);
+    expect(doubled.json.columns.map((c: { name: string }) => c.name)).toEqual([
+      "id",
+      "doubled",
+    ]);
+    expect(
+      doubled.json.rows.map(([id, d]: unknown[]) => [id, Number(d)])
+    ).toEqual(
+      plain.json.rows.map(([id, total]: unknown[]) => [id, Number(total) * 2])
+    );
+
+    const sums = await query({
+      from: "orders",
+      select: ["status", { sum: "total", as: "s" }, { count: "*", as: "n" }],
+      groupBy: ["status"],
+      orderBy: [{ status: "asc" }],
+    });
+    const mean = await query({
+      from: "orders",
+      select: [
+        "status",
+        {
+          calc: { round: [{ div: [{ sum: "total" }, { count: "*" }] }, 2] },
+          as: "mean",
+        },
+      ],
+      groupBy: ["status"],
+      orderBy: [{ status: "asc" }],
+    });
+    expect(mean.isError, JSON.stringify(mean.json)).toBe(false);
+    expect(mean.json.rows).toEqual(
+      sums.json.rows.map(([status, sum, n]: unknown[]) => [
+        status,
+        (Math.round((Number(sum) / Number(n)) * 100) / 100).toFixed(2),
+      ])
+    );
+    expect(mean.json.rows.length).toBeGreaterThan(1);
+  });
+
   it("answers a name it cannot plan with the error's path and suggestions", async () => {
     const call = await query({ from: "orders", select: ["id", "statu"] });
     expect(call.isError).toBe(true);

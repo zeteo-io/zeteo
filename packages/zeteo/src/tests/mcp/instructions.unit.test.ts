@@ -52,6 +52,12 @@ describe("MCP_INSTRUCTIONS", () => {
     }
   });
 
+  it("states the calculation depth limit and the percentage margin", () => {
+    expect(MCP_INSTRUCTIONS).toContain("up to 8 deep");
+    expect(MCP_INSTRUCTIONS).not.toContain("up to 5 deep");
+    expect(MCP_INSTRUCTIONS).toContain('{"mul":[100,{"div"');
+  });
+
   it("holds five worked examples, each a query the SQL language accepts", () => {
     const examples = jsonBlocks(MCP_INSTRUCTIONS);
     expect(examples).toHaveLength(5);

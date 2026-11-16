@@ -3504,7 +3504,7 @@ components:
     CalcExpr:
       description: |
         An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
-        with exactly one operation key. It nests at most 5 levels (an aggregate counts as one) and a
+        with exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a
         query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
         `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
         one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;

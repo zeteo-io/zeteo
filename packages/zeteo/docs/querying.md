@@ -126,7 +126,7 @@ takes a column path only.
 
 **Types.** Arithmetic takes `number` columns, `lower` and `upper` take `text`; `concat` takes text
 or numbers (numbers are converted to text). Dates, booleans, json and `other` columns are refused
-with `422 invalid_operator`, at the path of the operand (`select.2.sum.mul.1`). `coalesce` operands
+with `422 invalid_operator`, at the path of the operand (`path` is a list of keys and indexes, such as `["select", 2, "sum", "mul", 1]`). `coalesce` operands
 must share one type. Every column an expression reads goes through the usual column resolution, so
 grants, joins and `not_found_or_not_accessible` work as for a plain path, and the run record lists
 the columns read. A result is typed in `columns` like any select item; decimals arrive as strings.
@@ -137,7 +137,15 @@ guarantees); wrap it in `round` to get exactly the places you want, which is als
 identical text on both. Integer `add`, `sub` and `mul` can overflow, which is `502 query_failed`.
 Literals are bound parameters and count towards the parameter limit.
 
-**Limits.** An expression nests at most 5 levels (an aggregate counts as one), a query holds at
+**Precision and limits across databases.** `div` returns 6 decimal places, rounded half away from
+zero; its numerator may have up to 20 integer digits (more is `502 query_failed`) and its divisor is
+read to 10 places, so a non-zero divisor below 5e-11 counts as 0 and gives null. `round` reads its
+operand to 10 places. On SQL Server a column times a column is computed at SQL Server's decimal
+precision, which can drop places a chain of high-precision decimal columns would keep on Postgres.
+A uniqueidentifier read inside a calculation is lower-case on both databases. Money inside `concat`
+prints 2 places.
+
+**Limits.** An expression nests at most 8 levels (an aggregate counts as one), a query holds at
 most 100 operation and aggregate objects in all, `add`, `mul`, `concat` and `coalesce` take 2 to
 10 operands, and `round` places are 0 to 10.
 
@@ -155,9 +163,8 @@ Value of each order line (row-level); `line_value` is not a column, so `where` c
 }
 ```
 
-Margin by product category (group-level): revenue and cost are computed from the lines, and the
-ratio is rounded to three places. `mul` by 100 for a percentage would nest one level past the limit
-of 5, so the result is a fraction:
+Margin percentage by product category (group-level): revenue and cost are computed from the lines,
+and the percentage is rounded to one place (this nests 6 levels):
 
 ```json
 {
@@ -170,24 +177,29 @@ of 5, so the result is a fraction:
       "calc": {
         "round": [
           {
-            "div": [
+            "mul": [
+              100,
               {
-                "sub": [
-                  { "sum": { "mul": ["unit_price", "quantity"] } },
-                  { "sum": { "mul": ["unit_cost", "quantity"] } }
+                "div": [
+                  {
+                    "sub": [
+                      { "sum": { "mul": ["unit_price", "quantity"] } },
+                      { "sum": { "mul": ["unit_cost", "quantity"] } }
+                    ]
+                  },
+                  { "sum": { "mul": ["unit_price", "quantity"] } }
                 ]
-              },
-              { "sum": { "mul": ["unit_price", "quantity"] } }
+              }
             ]
           },
-          3
+          1
         ]
       },
-      "as": "margin"
+      "as": "margin_pct"
     }
   ],
   "groupBy": ["products.category"],
-  "orderBy": [{ "margin": "desc" }]
+  "orderBy": [{ "margin_pct": "desc" }]
 }
 ```
 

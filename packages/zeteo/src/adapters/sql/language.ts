@@ -72,7 +72,7 @@ export const CALC_OPS = [
 export type CalcOp = (typeof CALC_OPS)[number];
 
 /** Operation and aggregate objects nested in one expression; paths and literals add none. */
-export const MAX_CALC_DEPTH = 5;
+export const MAX_CALC_DEPTH = 8;
 /** Operation and aggregate objects across all select items of one query. */
 export const MAX_CALC_NODES = 100;
 export const MAX_CALC_OPERANDS = 10;
@@ -146,7 +146,7 @@ const isPlainObject = (v: unknown): v is Record<string, unknown> =>
 
 /**
  * An expression whose operation or aggregate object, if it is one, is at
- * `depth` (the outermost is 1); an object at depth 6 is refused at each key. Built out level by level like `filterAt`, so
+ * `depth` (the outermost is 1); an object past the limit is refused at each key. Built out level by level like `filterAt`, so
  * parsing stops at the limit. Inside an aggregate (`aggregates` false) a
  * further aggregate is refused at its own key.
  */

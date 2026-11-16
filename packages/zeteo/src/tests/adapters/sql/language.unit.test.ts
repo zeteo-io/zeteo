@@ -291,7 +291,7 @@ describe("calculations", () => {
       },
     ],
     ["a number literal", { calc: { add: ["a", 1.5] }, as: "c" }],
-    ["depth 5", { calc: absChain(5), as: "c" }],
+    ["depth 8", { calc: absChain(8), as: "c" }],
   ])("accepts %s", (_name, item) => {
     const query = { ...base, select: [item] };
     expect(sqlQuerySchema.parse(query)).toEqual(query);
@@ -350,9 +350,9 @@ describe("calculations", () => {
       ["select", 0, "calc", "add", 0, "avg", "mul", 1, "max"],
     ],
     [
-      "depth 6",
-      { calc: absChain(6), as: "x" },
-      ["select", 0, "calc", "abs", "abs", "abs", "abs", "abs", "abs"],
+      "depth 9",
+      { calc: absChain(9), as: "x" },
+      ["select", 0, "calc", ...Array(9).fill("abs")],
     ],
     [
       "countDistinct of *",
@@ -423,7 +423,7 @@ describe("calculations", () => {
       language.MAX_CALC_NODES,
       language.MAX_CALC_OPERANDS,
       language.MAX_ROUND_PLACES,
-    ]).toEqual([5, 100, 10, 10]);
+    ]).toEqual([8, 100, 10, 10]);
     expect(language.CALC_OPS).toHaveLength(10);
   });
 });

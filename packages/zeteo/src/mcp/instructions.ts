@@ -23,7 +23,7 @@ A query is one JSON object; every object is strict (an unknown key is refused), 
 - Columns are paths: \`total\` on the \`from\` table, \`customers.region\` through a joined relation.
 - \`select\`: column paths; aggregates \`{ "count": "*" }\`, \`{ "countDistinct": path }\`, \`{ "sum" | "avg" | "min" | "max": path }\`; date buckets \`{ "bucket": "day" | "week" | "month" | "quarter" | "year", "column": path }\`. Any item takes \`"as": "name"\` (a lowercase letter, then lowercase letters, digits or \`_\`). Calculations, a \`calc\` item: \`{ "calc": expression, "as": "name" }\` (\`as\` required); \`sum\`, \`avg\`, \`min\` and \`max\` also take an expression, then \`as\` is required too.
 - \`where\`: \`{ "<path>": { "<operator>": value } }\`, combined with \`and\`, \`or\` (lists) and \`not\`. Operators: \`eq\`, \`ne\`, \`gt\`, \`gte\`, \`lt\`, \`lte\`, \`between\` ([low, high]), \`in\`, \`notIn\`, \`contains\` and \`startsWith\` (text, case-insensitive), \`isNull\` (true or false). Dates are \`YYYY-MM-DD\`, timestamps ISO 8601 with an offset or \`Z\`.
-- Expressions: a column path, a number, \`{ "value": "text" }\`, an aggregate, or an object with one operation: \`add\`, \`mul\` (2-10 operands in an array), \`sub\`, \`div\` (exactly 2), \`abs\`, \`round\` (\`[expr, places]\`, places 0-10) on numbers; \`concat\` (2-10 text or number operands), \`lower\`, \`upper\` on text; \`coalesce\` (2-10 of one type). They nest up to 5 deep; dates and booleans are refused. \`div\` by zero is null and keeps at least 6 decimal places; use \`round\` for exact places.
+- Expressions: a column path, a number, \`{ "value": "text" }\`, an aggregate, or an object with one operation: \`add\`, \`mul\` (2-10 operands in an array), \`sub\`, \`div\` (exactly 2), \`abs\`, \`round\` (\`[expr, places]\`, places 0-10) on numbers; \`concat\` (2-10 text or number operands), \`lower\`, \`upper\` on text; \`coalesce\` (2-10 of one type). They nest up to 8 deep; dates and booleans are refused. \`div\` by zero is null and keeps at least 6 decimal places; use \`round\` for exact places.
 - A calculation with no aggregate is row-level: list it in \`groupBy\` when grouped, and use its \`as\` name in \`where\`. One whose every column sits inside an aggregate is group-level: it needs no \`groupBy\`, and its name works in \`having\` and \`orderBy\`, never \`where\`. Mixing a bare column with an aggregate in one calculation is refused (\`invalid_grouping\`).
 - \`groupBy\`: with an aggregate, list every other select item (by its \`as\` or its path).
 - \`having\`: a filter over the \`as\` names of aggregates.
@@ -44,12 +44,12 @@ The ten customers with the most revenue, over 500 each:
 {"source":"sales-db","from":"orders","join":["customers"],"select":["customers.name",{"sum":"total","as":"revenue"}],"groupBy":["customers.name"],"having":{"revenue":{"gt":500}},"orderBy":[{"revenue":"desc"}],"limit":10}
 \`\`\`
 
-Value of each order line, then margin by product category (revenue and cost from the lines):
+Value of each order line, then margin % by product category (revenue and cost from the lines):
 \`\`\`json
 {"source":"sales-db","from":"order_lines","select":["id",{"calc":{"mul":["unit_price","quantity"]},"as":"line_value"}],"where":{"line_value":{"gt":1000}}}
 \`\`\`
 \`\`\`json
-{"source":"sales-db","from":"order_lines","join":["products"],"select":["products.category",{"calc":{"round":[{"div":[{"sub":[{"sum":{"mul":["unit_price","quantity"]}},{"sum":{"mul":["unit_cost","quantity"]}}]},{"sum":{"mul":["unit_price","quantity"]}}]},3]},"as":"margin"}],"groupBy":["products.category"],"orderBy":[{"margin":"desc"}]}
+{"source":"sales-db","from":"order_lines","join":["products"],"select":["products.category",{"calc":{"round":[{"mul":[100,{"div":[{"sub":[{"sum":{"mul":["unit_price","quantity"]}},{"sum":{"mul":["unit_cost","quantity"]}}]},{"sum":{"mul":["unit_price","quantity"]}}]}]},1]},"as":"margin_pct"}],"groupBy":["products.category"],"orderBy":[{"margin":"desc"}]}
 \`\`\`
 
 ## Results
