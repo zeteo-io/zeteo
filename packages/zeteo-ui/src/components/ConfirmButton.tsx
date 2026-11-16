@@ -1,3 +1,5 @@
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { toApiError, type ApiError } from "@/lib/api";
 import { Button, Modal } from "@kosmeo-ui/react";
 import { ErrorNotice } from "./ErrorNotice";
@@ -11,6 +13,9 @@ interface ConfirmButtonProps {
   /** May return a promise: the modal stays open and busy until it settles. */
   onConfirm: () => void | Promise<unknown>;
   danger?: boolean;
+  size?: "sm" | "md" | "lg";
+  /** Shows only this icon; `label` becomes its accessible name and tooltip. */
+  icon?: IconDefinition;
 }
 
 export const ConfirmButton = ({
@@ -20,6 +25,8 @@ export const ConfirmButton = ({
   confirmLabel,
   onConfirm,
   danger = false,
+  size,
+  icon,
 }: ConfirmButtonProps) => {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -48,10 +55,13 @@ export const ConfirmButton = ({
     <>
       <Button
         variant={danger ? "danger" : "secondary"}
+        size={size}
         fullWidth={false}
+        aria-label={icon ? label : undefined}
+        title={icon ? label : undefined}
         onClick={() => setOpen(true)}
       >
-        {label}
+        {icon ? <FontAwesomeIcon icon={icon} /> : label}
       </Button>
       <Modal
         show={open}

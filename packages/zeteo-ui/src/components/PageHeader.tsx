@@ -3,9 +3,11 @@ import type { ReactNode } from "react";
 
 interface PageHeaderProps {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   badges?: ReactNode;
   actions?: ReactNode;
+  /** The line under the header; leave it off when tabs follow, which draw their own. */
+  divider?: boolean;
 }
 
 export const PageHeader = ({
@@ -13,6 +15,7 @@ export const PageHeader = ({
   subtitle,
   badges,
   actions,
+  divider,
 }: PageHeaderProps) => (
   <SectionHeader
     as="h1"
@@ -20,5 +23,6 @@ export const PageHeader = ({
     subtitle={subtitle}
     badges={badges}
     actions={actions}
+    divider={divider}
   />
 );
