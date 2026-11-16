@@ -112,20 +112,23 @@ export const GrantForm = ({ grant, title, extraActions }: GrantFormProps) => {
 
   const submit = () => {
     if (!canSubmit) return;
-    const done = { onSuccess: () => navigate("/grants") };
-    if (grant) {
-      replace.mutate(toRequest(choice), done);
-    } else if (principal) {
-      create.mutate(
-        {
+    // Waits on the request itself: callbacks given to mutate are dropped if
+    // the mutation is reset meanwhile, and the page would never move on.
+    const saved = grant
+      ? replace.mutateAsync(toRequest(choice))
+      : principal &&
+        create.mutateAsync({
           principal_type: principal.type,
           principal_id: principal.id,
           table_id: tableId,
           ...toRequest(choice),
-        },
-        done
-      );
-    }
+        });
+    if (!saved) return;
+    saved.then(
+      () => navigate("/grants"),
+      // The mutation's own error state shows the failure.
+      () => undefined
+    );
   };
 
   const selectsFailed = !canReadSources || sources.error?.status === 403;

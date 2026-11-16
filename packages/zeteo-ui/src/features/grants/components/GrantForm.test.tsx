@@ -209,6 +209,20 @@ describe("GrantForm", () => {
     expect(await screen.findByText("list")).toBeInTheDocument();
   });
 
+  it("still returns to the list when a choice is made again mid-save", async () => {
+    const user = userEvent.setup();
+    let finish: (value: unknown) => void = () => undefined;
+    post.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
+    renderForm();
+    await chooseTable(user);
+    await user.click(screen.getByRole("button", { name: "Create grant" }));
+    await waitFor(() => expect(post).toHaveBeenCalled());
+    // Picking again resets the mutation while the request is in flight.
+    await user.click(screen.getByRole("button", { name: "principal chosen" }));
+    finish({ data: makeGrant() });
+    expect(await screen.findByText("list")).toBeInTheDocument();
+  });
+
   it("sends the chosen columns, not the missing ones", async () => {
     const user = userEvent.setup();
     renderForm();
