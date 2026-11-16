@@ -38,30 +38,80 @@ describe("SourcesPage", () => {
       );
   });
 
-  it("lists name, slug, type, status and last refresh, linking to the source", async () => {
+  it("lists name, slug, database, status and last refresh, linking to the source", async () => {
     renderWithProviders(<SourcesPage />);
     const link = await screen.findByRole("link", { name: "Orders DB" });
     expect(link).toHaveAttribute("href", `/sources/${SOURCE_ID}`);
     const row = link.closest("tr")!;
     expect(row).toHaveTextContent("orders");
-    expect(row).toHaveTextContent("postgres");
-    expect(row).toHaveTextContent("active");
-    expect(row).toHaveTextContent("2026");
+    expect(row).toHaveTextContent("PostgreSQL");
+    expect(row).toHaveTextContent("Active");
+    expect(row.querySelector("time")).toHaveAttribute(
+      "title",
+      expect.stringContaining("2026")
+    );
   });
 
-  it("refetches with include_archived=true when archived sources are shown", async () => {
+  it("loads archived sources once and shows them when asked", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SourcesPage />);
     await screen.findByText("Orders DB");
-    expect(get.mock.calls[0][1].params.include_archived).toBeUndefined();
+    expect(get.mock.calls[0][1].params.include_archived).toBe(true);
     expect(screen.queryByText("Legacy DB")).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("Show archived"));
     const row = (await screen.findByText("Legacy DB")).closest("tr")!;
     expect(row).toHaveTextContent("Archived");
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters by name or slug as you type", async () => {
+    const user = userEvent.setup();
+    get.mockResolvedValue({
+      data: {
+        data: [
+          makeSource(),
+          makeSource({
+            id: "8b2e1c1f-2d8b-4b64-8e1f-7b4c2d3e5f77",
+            slug: "billing",
+            name: "Billing",
+          }),
+        ],
+        next_cursor: null,
+      },
+    });
+    renderWithProviders(<SourcesPage />);
+    await screen.findByText("Billing");
+    await user.type(screen.getByLabelText("Search"), "bill");
+    await waitFor(() =>
+      expect(screen.queryByText("Orders DB")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("Billing")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Search"));
+    await user.type(screen.getByLabelText("Search"), "ORDERS");
+    await waitFor(() =>
+      expect(screen.queryByText("Billing")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("Orders DB")).toBeInTheDocument();
+  });
+
+  it("filters by database, and says when nothing matches", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<SourcesPage />);
+    await screen.findByText("Orders DB");
+    await user.click(screen.getByRole("button", { name: /Database/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Azure SQL" }));
     expect(
-      get.mock.calls.some(([, cfg]) => cfg.params.include_archived === true)
-    ).toBe(true);
+      await screen.findByText("No sources match these filters.")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Orders DB")).not.toBeInTheDocument();
+  });
+
+  it("says there are no sources yet when there are none", async () => {
+    get.mockResolvedValue({ data: { data: [archived], next_cursor: null } });
+    renderWithProviders(<SourcesPage />);
+    expect(await screen.findByText(/No sources yet/)).toBeInTheDocument();
   });
 
   it("offers New source to someone who can write", async () => {

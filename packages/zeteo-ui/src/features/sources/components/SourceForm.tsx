@@ -2,8 +2,10 @@ import { parseNumberField } from "@/utils/parseNumberField";
 import { useCreateSource } from "../api/useCreateSource";
 import { useUpdateSource } from "../api/useUpdateSource";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { PageHeader } from "@/components/PageHeader";
 import { issueFor, type ApiError } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
+import { sourceTypeName } from "./sourceLabels";
 import { useNavigate } from "react-router-dom";
 import "./styles.css";
 import {
@@ -15,13 +17,13 @@ import {
 } from "./ConnectionFields";
 import {
   Alert,
+  BorderedSection,
   Button,
   Checkbox,
   Form,
-  FormActions,
   FormGrid,
   Input,
-  Select,
+  Switch,
 } from "@kosmeo-ui/react";
 import type {
   CreateSource,
@@ -32,6 +34,15 @@ import type {
 } from "../api/types";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
+
+/** A slug suggested from a name: "Larkspur Retail" → "larkspur-retail". */
+const slugify = (name: string) =>
+  name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^[^a-z]+/, "")
+    .replace(/-+$/, "")
+    .slice(0, 63);
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
@@ -51,7 +62,7 @@ interface NumberField {
 const NUMBER_FIELDS: NumberField[] = [
   {
     key: "timeout_ms",
-    label: "Timeout (ms)",
+    label: "Time limit (ms)",
     min: 1000,
     max: 120000,
     default: 30000,
@@ -59,21 +70,21 @@ const NUMBER_FIELDS: NumberField[] = [
   { key: "row_cap", label: "Row cap", min: 1, max: 50000, default: 50000 },
   {
     key: "export_row_cap",
-    label: "Export row cap",
+    label: "Row cap",
     min: 0,
     max: 1000000,
     default: 0,
   },
   {
     key: "query_concurrency",
-    label: "Query concurrency",
+    label: "Queries at once",
     min: 1,
     max: 50,
     default: 5,
   },
   {
     key: "export_concurrency",
-    label: "Export concurrency",
+    label: "Exports at once",
     min: 1,
     max: 10,
     default: 2,
@@ -86,7 +97,8 @@ type Limits = Record<NumberField["key"], string>;
 const shownPaths = (
   creating: boolean,
   connectionOpen: boolean,
-  type: SourceType
+  type: SourceType,
+  tls: string
 ): string[] => [
   ...(creating ? ["slug"] : []),
   "name",
@@ -99,7 +111,7 @@ const shownPaths = (
         "settings.user",
         "settings.password",
         "settings.tls",
-        ...(type === "postgres" ? ["settings.ca"] : []),
+        ...(type === "postgres" && tls === "verify" ? ["settings.ca"] : []),
       ]
     : []),
   ...NUMBER_FIELDS.map((f) => f.key),
@@ -148,7 +160,8 @@ const buildSettings = (
     ? {
         ...base,
         tls: c.tls as "verify" | "require" | "off",
-        ...(c.ca.trim() && { ca: c.ca }),
+        // The CA field shows only for verified TLS; a hidden one is not sent.
+        ...(c.tls === "verify" && c.ca.trim() && { ca: c.ca }),
       }
     : { ...base, tls: c.tls as "verify" | "trust-server-certificate" };
 };
@@ -156,15 +169,21 @@ const buildSettings = (
 interface SourceFormProps {
   /** Present when editing. */
   source?: Source;
+  /** The page title, shown with the form's Cancel and submit buttons. */
+  title: string;
 }
 
-export const SourceForm = ({ source }: SourceFormProps) => {
+const FORM_ID = "z-source-form";
+
+export const SourceForm = ({ source, title }: SourceFormProps) => {
   const navigate = useNavigate();
   const create = useCreateSource();
   const update = useUpdateSource(source?.id ?? "");
   const mutation = source ? update : create;
 
   const [slug, setSlug] = useState("");
+  // The slug follows the name until it is edited by hand.
+  const [slugEdited, setSlugEdited] = useState(false);
   const [name, setName] = useState(source?.name ?? "");
   const [type, setType] = useState<SourceType>(source?.type ?? "postgres");
   const [connectionOpen, setConnectionOpen] = useState(!source);
@@ -364,117 +383,204 @@ export const SourceForm = ({ source }: SourceFormProps) => {
     );
   }
 
-  const fieldPaths = shownPaths(!source, connectionOpen, source?.type ?? type);
+  const fieldPaths = shownPaths(
+    !source,
+    connectionOpen,
+    source?.type ?? type,
+    conn.tls
+  );
   const allIssuesShown =
     serverError?.status === 400 &&
     (serverError.issues?.length ?? 0) > 0 &&
     serverError.issues!.every((i) => fieldPaths.includes(i.path));
 
+  const numberInput = (key: NumberField["key"]) => {
+    const field = NUMBER_FIELDS.find((f) => f.key === key)!;
+    return (
+      <Input
+        key={field.key}
+        label={field.label}
+        placeholder={source ? undefined : `${field.default} (default)`}
+        value={limits[field.key]}
+        error={errorFor(field.key)}
+        onChange={(e) => {
+          setLimits((l) => ({ ...l, [field.key]: e.target.value }));
+          edited(field.key);
+        }}
+      />
+    );
+  };
+
   return (
     <div className="z-source-form">
-      <Form onSubmit={submit}>
-        {!source && (
-          <>
+      <PageHeader
+        title={title}
+        divider={false}
+        actions={
+          <div className="z-source-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() =>
+                navigate(source ? `/sources/${source.id}` : "/sources")
+              }
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              type="submit"
+              form={FORM_ID}
+              fullWidth={false}
+              isLoading={mutation.isPending}
+              disabled={mutation.isPending || unchanged}
+            >
+              {source ? "Save changes" : "Create source"}
+            </Button>
+          </div>
+        }
+      />
+      <Form id={FORM_ID} onSubmit={submit}>
+        <BorderedSection title="About" as="h2">
+          <FormGrid columns={source ? 1 : 2}>
             <Input
-              label="Slug"
+              label="Name"
               required
-              value={slug}
-              error={errorFor("slug")}
-              helperText="Lower case letters, digits and hyphens. Cannot be changed later."
+              value={name}
+              error={errorFor("name")}
               onChange={(e) => {
-                setSlug(e.target.value);
-                edited("slug");
+                setName(e.target.value);
+                if (!source && !slugEdited) setSlug(slugify(e.target.value));
+                edited("name", "slug");
               }}
             />
-            <Select<SourceType>
-              label="Type"
-              value={type}
-              options={[
-                { value: "postgres", label: "postgres" },
-                { value: "azure-sql", label: "azure-sql" },
-              ]}
-              onChange={(next) => changeType(next ?? "postgres")}
-            />
-          </>
-        )}
-        <Input
-          label="Name"
-          required
-          value={name}
-          error={errorFor("name")}
-          onChange={(e) => {
-            setName(e.target.value);
-            edited("name");
-          }}
-        />
+            {!source && (
+              <>
+                <Input
+                  label="Slug"
+                  required
+                  value={slug}
+                  error={errorFor("slug")}
+                  helperText="How queries name it. Can't be changed later."
+                  onChange={(e) => {
+                    setSlug(e.target.value);
+                    setSlugEdited(true);
+                    edited("slug");
+                  }}
+                />
+              </>
+            )}
+          </FormGrid>
+          <div className="z-source-about-row">
+            {!source && (
+              <div>
+                <div className="z-field-label">Database</div>
+                <div className="z-segmented" role="group" aria-label="Database">
+                  {(["postgres", "azure-sql"] as SourceType[]).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      className="z-segmented-option"
+                      aria-pressed={type === t}
+                      onClick={() => type !== t && changeType(t)}
+                    >
+                      {sourceTypeName(t)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </BorderedSection>
 
-        <fieldset>
-          <legend>Connection</legend>
-          {connectionOpen ? (
-            <>
-              <ConnectionFields
-                type={source?.type ?? type}
-                value={conn}
-                onChange={changeConnection}
-                editing={!!source}
-                errorFor={errorFor}
-              />
-              {source && (
-                <Button
-                  variant="secondary"
-                  fullWidth={false}
-                  onClick={() => keepConnection(source)}
-                >
-                  Keep connection unchanged
-                </Button>
-              )}
-            </>
-          ) : (
-            <div className="z-source-connection-unchanged">
-              <span>Connection: unchanged</span>
+        <BorderedSection
+          title="Connection"
+          as="h2"
+          actions={
+            source &&
+            (connectionOpen ? (
               <Button
+                size="sm"
+                variant="secondary"
+                fullWidth={false}
+                onClick={() => keepConnection(source)}
+              >
+                Keep connection unchanged
+              </Button>
+            ) : (
+              <Button
+                size="sm"
                 variant="secondary"
                 fullWidth={false}
                 onClick={() => setConnectionOpen(true)}
               >
                 Change connection
               </Button>
-            </div>
-          )}
-        </fieldset>
-
-        <Input
-          label="Schemas"
-          required
-          value={schemas}
-          error={errorFor("schemas")}
-          helperText="Separate with commas: at most 20, each listed once."
-          onChange={(e) => {
-            setSchemas(e.target.value);
-            edited("schemas");
-          }}
-        />
-
-        <FormGrid columns={2}>
-          {NUMBER_FIELDS.map((field) => (
-            <Input
-              key={field.key}
-              label={field.label}
-              placeholder={source ? undefined : `${field.default} (default)`}
-              value={limits[field.key]}
-              error={errorFor(field.key)}
-              onChange={(e) => {
-                setLimits((l) => ({ ...l, [field.key]: e.target.value }));
-                edited(field.key);
-              }}
+            ))
+          }
+        >
+          {connectionOpen ? (
+            <ConnectionFields
+              type={source?.type ?? type}
+              value={conn}
+              onChange={changeConnection}
+              editing={!!source}
+              errorFor={errorFor}
             />
-          ))}
-        </FormGrid>
-        <Checkbox
-          label="Export enabled"
-          checked={exportEnabled}
-          onChange={(e) => setExportEnabled(e.target.checked)}
-        />
+          ) : (
+            <p className="z-muted z-source-connection-note">
+              The connection stays as it is. Changing it needs the password
+              again.
+            </p>
+          )}
+        </BorderedSection>
+
+        <BorderedSection title="Catalogue" as="h2">
+          <Input
+            label="Schemas"
+            required
+            value={schemas}
+            error={errorFor("schemas")}
+            helperText="The schemas whose tables people can query. Separate with commas; at most 20."
+            onChange={(e) => {
+              setSchemas(e.target.value);
+              edited("schemas");
+            }}
+          />
+        </BorderedSection>
+
+        <BorderedSection title="Querying" as="h2">
+          <FormGrid columns={3}>
+            {numberInput("timeout_ms")}
+            {numberInput("row_cap")}
+            {numberInput("query_concurrency")}
+          </FormGrid>
+        </BorderedSection>
+
+        <BorderedSection
+          title="Exports"
+          as="h2"
+          actions={
+            <Switch
+              size="sm"
+              label="Allow exports"
+              checked={exportEnabled}
+              onChange={(e) => setExportEnabled(e.target.checked)}
+            />
+          }
+        >
+          {exportEnabled ? (
+            <FormGrid columns={2}>
+              {numberInput("export_row_cap")}
+              {numberInput("export_concurrency")}
+            </FormGrid>
+          ) : (
+            <p className="z-muted z-source-connection-note">
+              People can't export from this source.
+            </p>
+          )}
+        </BorderedSection>
 
         {serverError && !allIssuesShown && (
           <ErrorNotice error={serverError} fieldPaths={fieldPaths} />
@@ -486,26 +592,6 @@ export const SourceForm = ({ source }: SourceFormProps) => {
             onChange={(e) => setAllowWritable(e.target.checked)}
           />
         )}
-
-        <FormActions>
-          <Button
-            variant="secondary"
-            fullWidth={false}
-            onClick={() =>
-              navigate(source ? `/sources/${source.id}` : "/sources")
-            }
-          >
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            fullWidth={false}
-            isLoading={mutation.isPending}
-            disabled={mutation.isPending || unchanged}
-          >
-            {source ? "Save changes" : "Create source"}
-          </Button>
-        </FormActions>
       </Form>
     </div>
   );

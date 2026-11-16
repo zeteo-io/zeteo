@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { optionTexts, pickOption } from "@/test/searchSelect";
 import { makeSource, SOURCE_ID } from "../testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
@@ -22,13 +23,32 @@ const labelPattern = (label: string) =>
 const field = (label: string) => screen.getByLabelText(labelPattern(label));
 const maybeField = (label: string) =>
   screen.queryByLabelText(labelPattern(label));
+// The boxed section under a heading; "Row cap" is in both Querying and Exports.
+const section = (title: string) =>
+  within(
+    screen
+      .getByRole("heading", { name: title })
+      .closest(".k-bordered-section") as HTMLElement
+  );
+const inSection = (title: string, label: string) =>
+  section(title).getByLabelText(labelPattern(label));
+const chooseDatabase = (
+  user: ReturnType<typeof userEvent.setup>,
+  name: "PostgreSQL" | "Azure SQL"
+) =>
+  user.click(
+    within(screen.getByRole("group", { name: "Database" })).getByRole(
+      "button",
+      { name }
+    )
+  );
 
 const URL_ = `/v1/sources/${SOURCE_ID}`;
 
 const renderCreate = () =>
   renderWithProviders(
     <Routes>
-      <Route path="/sources/new" element={<SourceForm />} />
+      <Route path="/sources/new" element={<SourceForm title="New source" />} />
       <Route path="/sources/:sourceId" element={<p>detail page</p>} />
     </Routes>,
     { route: "/sources/new" }
@@ -39,7 +59,7 @@ const renderEdit = (source = makeSource()) =>
     <Routes>
       <Route
         path="/sources/:sourceId/edit"
-        element={<SourceForm source={source} />}
+        element={<SourceForm source={source} title="Edit source" />}
       />
       <Route path="/sources/:sourceId" element={<p>detail page</p>} />
     </Routes>,
@@ -48,17 +68,17 @@ const renderEdit = (source = makeSource()) =>
 
 const type = async (
   user: ReturnType<typeof userEvent.setup>,
-  label: string,
+  label: string | HTMLElement,
   text: string
 ) => {
-  const input = field(label);
+  const input = typeof label === "string" ? field(label) : label;
   await user.clear(input);
   await user.type(input, text);
 };
 
 const fillConnection = async (user: ReturnType<typeof userEvent.setup>) => {
   await type(user, "Host", "db.example.test");
-  await type(user, "Database", "orders");
+  await type(user, inSection("Connection", "Database"), "orders");
   await type(user, "User", "reader");
   await type(user, "Password", "s3cret");
 };
@@ -74,18 +94,19 @@ describe("SourceForm", () => {
       const user = userEvent.setup();
       renderCreate();
       expect(field("Port")).toHaveValue("5432");
-      expect(field("CA certificate")).toBeInTheDocument();
+      expect(field("CA certificate (optional)")).toBeInTheDocument();
 
-      await user.selectOptions(field("Type"), "azure-sql");
+      await chooseDatabase(user, "Azure SQL");
 
       expect(field("Port")).toHaveValue("1433");
-      expect(maybeField("CA certificate")).not.toBeInTheDocument();
-      expect(
-        screen.getByRole("option", { name: "trust-server-certificate" })
-      ).toBeInTheDocument();
-      expect(
-        screen.queryByRole("option", { name: "require" })
-      ).not.toBeInTheDocument();
+      expect(maybeField("CA certificate (optional)")).not.toBeInTheDocument();
+      await user.click(field("TLS"));
+      await waitFor(() =>
+        expect(optionTexts()).toEqual([
+          "Required, certificate verified",
+          "Required, server certificate trusted",
+        ])
+      );
     });
 
     it("sends every field as typed, numbers as numbers, and goes to the new source", async () => {
@@ -96,15 +117,18 @@ describe("SourceForm", () => {
       await type(user, "Name", "Orders DB");
       await fillConnection(user);
       await type(user, "Port", "6543");
-      await user.selectOptions(field("TLS"), "require");
-      await type(user, "CA certificate", "-----BEGIN CERTIFICATE-----");
+      await type(
+        user,
+        "CA certificate (optional)",
+        "-----BEGIN CERTIFICATE-----"
+      );
       await type(user, "Schemas", "public, sales, ops");
-      await type(user, "Timeout (ms)", "20000");
-      await type(user, "Row cap", "1000");
-      await user.click(field("Export enabled"));
-      await type(user, "Export row cap", "5000");
-      await type(user, "Query concurrency", "7");
-      await type(user, "Export concurrency", "3");
+      await type(user, "Time limit (ms)", "20000");
+      await type(user, inSection("Querying", "Row cap"), "1000");
+      await user.click(field("Allow exports"));
+      await type(user, inSection("Exports", "Row cap"), "5000");
+      await type(user, "Queries at once", "7");
+      await type(user, "Exports at once", "3");
 
       await user.click(screen.getByRole("button", { name: "Create source" }));
 
@@ -120,7 +144,7 @@ describe("SourceForm", () => {
           database: "orders",
           user: "reader",
           password: "s3cret",
-          tls: "require",
+          tls: "verify",
           ca: "-----BEGIN CERTIFICATE-----",
         },
         schemas: ["public", "sales", "ops"],
@@ -230,7 +254,9 @@ describe("SourceForm", () => {
     it("sends only the name when only the name changed, with no settings", async () => {
       const user = userEvent.setup();
       renderEdit();
-      expect(screen.getByText("Connection: unchanged")).toBeInTheDocument();
+      expect(
+        screen.getByText(/The connection stays as it is/)
+      ).toBeInTheDocument();
       expect(maybeField("Host")).not.toBeInTheDocument();
       await type(user, "Name", "Orders (prod)");
 
@@ -245,7 +271,9 @@ describe("SourceForm", () => {
     it("does not offer to change the slug or the type", () => {
       renderEdit();
       expect(maybeField("Slug")).not.toBeInTheDocument();
-      expect(maybeField("Type")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("group", { name: "Database" })
+      ).not.toBeInTheDocument();
     });
 
     it("blocks saving an opened connection group without a password", async () => {
@@ -271,8 +299,7 @@ describe("SourceForm", () => {
       );
       await fillConnection(user);
       await type(user, "Port", "5433");
-      await user.selectOptions(field("TLS"), "require");
-      await type(user, "CA certificate", "PEM");
+      await type(user, "CA certificate (optional)", "PEM");
 
       await user.click(screen.getByRole("button", { name: "Save changes" }));
 
@@ -284,7 +311,7 @@ describe("SourceForm", () => {
           database: "orders",
           user: "reader",
           password: "s3cret",
-          tls: "require",
+          tls: "verify",
           ca: "PEM",
         },
       });
@@ -293,8 +320,8 @@ describe("SourceForm", () => {
     it("sends changed limits and leaves an emptied optional number unchanged", async () => {
       const user = userEvent.setup();
       renderEdit();
-      await type(user, "Row cap", "100");
-      await user.clear(field("Timeout (ms)"));
+      await type(user, inSection("Querying", "Row cap"), "100");
+      await user.clear(field("Time limit (ms)"));
       await user.click(screen.getByRole("button", { name: "Save changes" }));
       await waitFor(() => expect(patch).toHaveBeenCalled());
       expect(patch.mock.calls[0][1]).toEqual({ row_cap: 100 });
@@ -353,8 +380,12 @@ describe("SourceForm", () => {
     it("sends an Azure SQL source with its port and tls and no ca", async () => {
       const user = userEvent.setup();
       renderCreate();
-      await user.selectOptions(field("Type"), "azure-sql");
-      await user.selectOptions(field("TLS"), "trust-server-certificate");
+      await chooseDatabase(user, "Azure SQL");
+      await pickOption(
+        user,
+        field("TLS"),
+        "Required, server certificate trusted"
+      );
       await fillBasics(user);
       await user.click(screen.getByRole("button", { name: "Create source" }));
       await waitFor(() => expect(post).toHaveBeenCalled());
@@ -371,12 +402,55 @@ describe("SourceForm", () => {
     it("drops a typed CA when the type is switched to Azure SQL", async () => {
       const user = userEvent.setup();
       renderCreate();
-      await type(user, "CA certificate", "PEM");
-      await user.selectOptions(field("Type"), "azure-sql");
+      await type(user, "CA certificate (optional)", "PEM");
+      await chooseDatabase(user, "Azure SQL");
       await fillBasics(user);
       await user.click(screen.getByRole("button", { name: "Create source" }));
       await waitFor(() => expect(post).toHaveBeenCalled());
       expect(post.mock.calls[0][1].settings).not.toHaveProperty("ca");
+    });
+
+    it("asks for a CA only for verified TLS, and drops a typed one otherwise", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await type(user, "CA certificate (optional)", "PEM");
+      await pickOption(user, field("TLS"), "Required");
+      expect(maybeField("CA certificate (optional)")).not.toBeInTheDocument();
+      await fillBasics(user);
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1].settings).toMatchObject({ tls: "require" });
+      expect(post.mock.calls[0][1].settings).not.toHaveProperty("ca");
+    });
+
+    it("suggests the slug from the name until the slug is edited", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await type(user, "Name", "Larkspur Retail 2");
+      expect(field("Slug")).toHaveValue("larkspur-retail-2");
+      await type(user, "Slug", "larkspur");
+      await type(user, "Name", "Something else");
+      expect(field("Slug")).toHaveValue("larkspur");
+    });
+
+    it("drops leading digits and symbols from a suggested slug", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await type(user, "Name", "2024 -- Sales!");
+      expect(field("Slug")).toHaveValue("sales");
+    });
+
+    it("shows the export settings only while exports are allowed", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      expect(maybeField("Exports at once")).not.toBeInTheDocument();
+      expect(
+        screen.getByText("People can't export from this source.")
+      ).toBeInTheDocument();
+      await user.click(field("Allow exports"));
+      expect(field("Exports at once")).toBeInTheDocument();
+      await user.click(field("Allow exports"));
+      expect(maybeField("Exports at once")).not.toBeInTheDocument();
     });
 
     it("offers the writable-login override on create and resends with it", async () => {
@@ -460,11 +534,11 @@ describe("SourceForm", () => {
       const user = userEvent.setup();
       renderCreate();
       await fillBasics(user);
-      await type(user, "Row cap", "12abc");
+      await type(user, inSection("Querying", "Row cap"), "12abc");
       await user.click(screen.getByRole("button", { name: "Create source" }));
       expect(await screen.findByText("Enter a number.")).toBeInTheDocument();
       expect(post).not.toHaveBeenCalled();
-      await type(user, "Row cap", "12");
+      await type(user, inSection("Querying", "Row cap"), "12");
       expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
     });
 
@@ -494,7 +568,10 @@ describe("SourceForm", () => {
         <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={["/sources/new"]}>
             <Routes>
-              <Route path="/sources/new" element={<SourceForm />} />
+              <Route
+                path="/sources/new"
+                element={<SourceForm title="New source" />}
+              />
               <Route path="/sources/:sourceId" element={<p>detail page</p>} />
             </Routes>
           </MemoryRouter>
@@ -552,7 +629,9 @@ describe("SourceForm", () => {
       await user.click(
         screen.getByRole("button", { name: "Keep connection unchanged" })
       );
-      expect(screen.getByText("Connection: unchanged")).toBeInTheDocument();
+      expect(
+        screen.getByText(/The connection stays as it is/)
+      ).toBeInTheDocument();
 
       await type(user, "Name", "Renamed");
       await user.click(screen.getByRole("button", { name: "Save changes" }));

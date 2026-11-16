@@ -62,8 +62,8 @@
 .z-source-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
-  margin-bottom: 1rem;
 }
 
 .z-source-result ul {
@@ -107,4 +107,121 @@
   margin-top: 0.25rem;
   font-size: var(--k-text-size-sm);
   color: var(--k-danger-color);
+}
+
+.z-source-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.z-source-subtitle code {
+  font-size: inherit;
+}
+
+.z-source-actions-gap {
+  width: 0.75rem;
+}
+
+.z-source-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
+  gap: 1rem;
+  align-items: start;
+  max-width: 64rem;
+}
+
+.z-source-column {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.z-source-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.z-source-chip {
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--k-border-color);
+  border-radius: 999px;
+  font-size: var(--k-text-size-sm);
+}
+
+/* Slug, type and status sit on the title's line, not under it. */
+.z-source-header .k-section-header-row {
+  align-items: center;
+}
+
+.z-source-header .k-section-header-titles {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.z-sources-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.z-sources-name code {
+  font-size: var(--k-text-size-sm);
+}
+
+.z-source-form .k-bordered-section {
+  margin: 0;
+}
+
+.z-field-label {
+  font-size: var(--k-text-size-sm);
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+}
+
+.z-source-connection-note {
+  margin: 0;
+}
+
+.z-source-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.z-source-ca {
+  grid-column: 1 / -1;
+}
+
+.z-source-form {
+  margin: 0 auto;
+}
+
+/* Database choice and the exports switch on one row, bottoms aligned. */
+.z-source-about-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.z-source-about-row .k-switch,
+.z-source-about-row > :last-child {
+  padding-bottom: 0.3rem;
+}
+
+/* The exports switch and its two settings on one line. */
+.z-source-exports-row {
+  display: grid;
+  grid-template-columns: auto 1fr 1fr;
+  align-items: end;
+  gap: 1rem;
+}
+
+.z-source-exports-row > :first-child {
+  padding-bottom: 0.6rem;
 }

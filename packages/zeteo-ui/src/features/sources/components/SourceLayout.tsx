@@ -1,8 +1,10 @@
 import { NavLink, Outlet, useOutletContext, useParams } from "react-router-dom";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
+import { useSourceActions } from "./SourceActions";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
+import { sourceTypeName } from "./sourceLabels";
 import { SourceStatus } from "./SourceStatus";
 import { useSource } from "../api/useSource";
 import { Spinner } from "@kosmeo-ui/react";
@@ -40,13 +42,28 @@ const SourceLoader = ({ sourceId }: { sourceId: string }) => {
   if (isLoading) return <Spinner size="lg" />;
   if (!source) return <ErrorNotice error={error} />;
 
+  return <SourceShell source={source} />;
+};
+
+const SourceShell = ({ source }: { source: Source }) => {
+  const { actions, results } = useSourceActions(source);
   return (
     <>
-      <PageHeader
-        title={source.name}
-        subtitle={source.slug}
-        badges={<SourceStatus source={source} />}
-      />
+      <div className="z-source-header">
+        <PageHeader
+          title={source.name}
+          badges={
+            <span className="z-source-subtitle">
+              <code>{source.slug}</code>
+              <span>{sourceTypeName(source.type)}</span>
+              <SourceStatus source={source} />
+            </span>
+          }
+          actions={actions}
+          divider={false}
+        />
+      </div>
+      {results}
       <nav className="z-source-tabs" aria-label="Source">
         {TABS.map((tab) => (
           <NavLink

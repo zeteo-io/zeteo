@@ -26,6 +26,7 @@ const renderDetail = () =>
         <Route index element={<SourceDetailPage />} />
         <Route path="tables" element={<p>tables page</p>} />
       </Route>
+      <Route path="/sources/:sourceId/edit" element={<p>edit page</p>} />
     </Routes>,
     { route: `/sources/${SOURCE_ID}` }
   );
@@ -59,13 +60,28 @@ describe("SourceDetailPage", () => {
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
   });
 
-  it("prints non-primitive settings values as JSON, not [object Object]", async () => {
+  it("shows the connection and limits in words", async () => {
     get.mockResolvedValue({
-      data: makeSource({ settings: { host: "h", options: { a: 1 } } }),
+      data: makeSource({
+        settings: {
+          host: "db.example.test",
+          database: "orders",
+          user: "reader",
+          tls: "verify",
+        },
+        timeout_ms: 60_000,
+        row_cap: 50_000,
+      }),
     });
     renderDetail();
-    expect(await screen.findByText('{"a":1}')).toBeInTheDocument();
-    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Orders DB" });
+    expect(screen.getAllByText("PostgreSQL").length).toBeGreaterThan(0);
+    expect(
+      screen.getByText("Required, certificate verified")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Default")).toBeInTheDocument();
+    expect(screen.getByText("1 min")).toBeInTheDocument();
+    expect(screen.getAllByText("50,000 rows").length).toBeGreaterThan(0);
   });
 
   it("says so when the settings are unreadable", async () => {
@@ -92,7 +108,9 @@ describe("SourceDetailPage", () => {
       },
     });
     renderDetail();
-    await user.click(await screen.findByRole("button", { name: "Test" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Test connection" })
+    );
     expect(post).toHaveBeenCalledWith(`${SOURCE_URL}/test`);
     expect(await screen.findByText(/can write orders/)).toBeInTheDocument();
   });
@@ -101,8 +119,12 @@ describe("SourceDetailPage", () => {
     const user = userEvent.setup();
     post.mockResolvedValue({ data: { ok: true, findings: [] } });
     renderDetail();
-    await user.click(await screen.findByRole("button", { name: "Test" }));
-    expect(await screen.findByText("No findings")).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Test connection" })
+    );
+    expect(
+      await screen.findByText("Connected. The login is read-only.")
+    ).toBeInTheDocument();
   });
 
   it("Refresh shows the counts and reloads the source", async () => {
@@ -117,7 +139,7 @@ describe("SourceDetailPage", () => {
     renderDetail();
     await screen.findByRole("heading", { name: "Orders DB" });
     const before = get.mock.calls.length;
-    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await user.click(screen.getByRole("button", { name: "Refresh catalogue" }));
     expect(post).toHaveBeenCalledWith(`${SOURCE_URL}/refresh`);
     expect(await screen.findByText(/^Tables:/)).toHaveTextContent(
       "2 added, 1 missing, 0 restored"
@@ -136,7 +158,9 @@ describe("SourceDetailPage", () => {
     let finish: (v: unknown) => void = () => {};
     post.mockReturnValue(new Promise((resolve) => (finish = resolve)));
     renderDetail();
-    const button = await screen.findByRole("button", { name: "Test" });
+    const button = await screen.findByRole("button", {
+      name: "Test connection",
+    });
     await user.click(button);
     await waitFor(() => expect(button).toBeDisabled());
     await user.click(button);
@@ -153,7 +177,9 @@ describe("SourceDetailPage", () => {
       message: "The source did not answer",
     });
     renderDetail();
-    await user.click(await screen.findByRole("button", { name: "Refresh" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Refresh catalogue" })
+    );
     expect(
       await screen.findByText("The source did not answer")
     ).toBeInTheDocument();
@@ -186,7 +212,12 @@ describe("SourceDetailPage", () => {
     });
     renderDetail();
     await screen.findByRole("heading", { name: "Orders DB" });
-    for (const name of ["Test", "Refresh", "Archive", "Edit"]) {
+    for (const name of [
+      "Test connection",
+      "Refresh catalogue",
+      "Archive",
+      "Edit",
+    ]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
   });
@@ -195,9 +226,61 @@ describe("SourceDetailPage", () => {
     held.permissions = ["zeteo.sources.read"];
     renderDetail();
     await screen.findByRole("heading", { name: "Orders DB" });
-    for (const name of ["Test", "Refresh", "Archive", "Edit"]) {
+    for (const name of [
+      "Test connection",
+      "Refresh catalogue",
+      "Archive",
+      "Edit",
+    ]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
+  });
+
+  it("keeps the last result under the header on every tab", async () => {
+    const user = userEvent.setup();
+    post.mockResolvedValue({ data: { ok: true, findings: [] } });
+    renderDetail();
+    await user.click(
+      await screen.findByRole("button", { name: "Test connection" })
+    );
+    await screen.findByText("Connected. The login is read-only.");
+    await user.click(screen.getByRole("link", { name: "Tables" }));
+    expect(await screen.findByText("tables page")).toBeInTheDocument();
+    expect(
+      screen.getByText("Connected. The login is read-only.")
+    ).toBeInTheDocument();
+  });
+
+  it("replaces the last result with the next action's", async () => {
+    const user = userEvent.setup();
+    post.mockImplementation(async (url: string) =>
+      url.endsWith("/test")
+        ? { data: { ok: true, findings: [] } }
+        : {
+            data: {
+              tables: { added: 1, missing: 0, restored: 0 },
+              columns: { added: 0, changed: 0, missing: 0, restored: 0 },
+              relations: { added: 0, missing: 0, restored: 0 },
+            },
+          }
+    );
+    renderDetail();
+    await user.click(
+      await screen.findByRole("button", { name: "Test connection" })
+    );
+    await screen.findByText("Connected. The login is read-only.");
+    await user.click(screen.getByRole("button", { name: "Refresh catalogue" }));
+    expect(await screen.findByText(/Catalogue refreshed/)).toBeInTheDocument();
+    expect(
+      screen.queryByText("Connected. The login is read-only.")
+    ).not.toBeInTheDocument();
+  });
+
+  it("Edit goes to the edit form", async () => {
+    const user = userEvent.setup();
+    renderDetail();
+    await user.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(await screen.findByText("edit page")).toBeInTheDocument();
   });
 
   it("shows a missing source's error", async () => {

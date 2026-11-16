@@ -1,5 +1,6 @@
-import { FormGrid, Input, Select, TextArea } from "@kosmeo-ui/react";
+import { FormGrid, Input, SearchSelect, TextArea } from "@kosmeo-ui/react";
 import type { SourceType } from "../api/types";
+import { tlsName } from "./sourceLabels";
 
 export interface ConnectionState {
   host: string;
@@ -99,18 +100,20 @@ export const ConnectionFields = ({
       onChange={(e) => onChange({ password: e.target.value })}
     />
     <div>
-      <Select
+      <SearchSelect<string>
         label="TLS"
         value={value.tls}
-        options={TLS_MODES[type].map((mode) => ({ value: mode, label: mode }))}
-        onChange={(tls) => onChange({ tls: tls ?? "verify" })}
+        options={TLS_MODES[type]}
+        getOptionLabel={tlsName}
+        getOptionKey={(mode) => mode}
+        onSelect={(tls) => onChange({ tls })}
       />
       <FieldError message={errorFor("settings.tls")} />
     </div>
-    {type === "postgres" && (
-      <div>
+    {type === "postgres" && value.tls === "verify" && (
+      <div className="z-source-ca">
         <TextArea
-          label="CA certificate"
+          label="CA certificate (optional)"
           rows={4}
           value={value.ca}
           onChange={(e) => onChange({ ca: e.target.value })}
