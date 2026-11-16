@@ -126,7 +126,12 @@ describe("MCP discovery tools", () => {
           },
         ],
         relations: [
-          { name: "customer", to: "customers", to_many: false, missing: false },
+          {
+            name: "customers",
+            to: "customers",
+            to_many: false,
+            missing: false,
+          },
         ],
       },
     });

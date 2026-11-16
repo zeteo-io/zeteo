@@ -219,14 +219,14 @@ describe("azure-sql runQuery", () => {
   it("joins, buckets in UTC and groups", async () => {
     const result = await run({
       from: "orders",
-      join: ["customer"],
+      join: ["customers"],
       select: [
-        "customer.region",
+        "customers.region",
         { bucket: "quarter", column: "created_at", as: "quarter" },
         { sum: "total", as: "revenue" },
         { count: "*", as: "orders" },
       ],
-      groupBy: ["customer.region", "quarter"],
+      groupBy: ["customers.region", "quarter"],
     });
     expect(result.rows).toEqual([
       ["EU", "2026-01-01T00:00:00.000Z", "1535.50", "4"],
@@ -263,9 +263,9 @@ describe("azure-sql runQuery", () => {
   it("follows a relation two joins deep", async () => {
     const result = await run({
       from: "orders",
-      join: ["customer", "customer.account"],
-      select: ["customer.account.plan", { count: "*" }],
-      groupBy: ["customer.account.plan"],
+      join: ["customers", "customers.accounts"],
+      select: ["customers.accounts.plan", { count: "*" }],
+      groupBy: ["customers.accounts.plan"],
     });
     expect(result.rows).toEqual([
       ["enterprise", "8"],

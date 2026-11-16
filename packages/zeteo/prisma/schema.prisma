@@ -176,6 +176,8 @@ model Relation {
   toMany         Boolean        @map("to_many")
   origin         RelationOrigin
   constraintName String?        @map("constraint_name")
+  // Set when an admin renames a discovered relation: refreshes then leave the name alone.
+  nameLocked     Boolean        @default(false) @map("name_locked")
   missingSince   DateTime?      @map("missing_since") @db.Timestamp(3)
   createdBy      String?        @map("created_by") @db.Uuid
 

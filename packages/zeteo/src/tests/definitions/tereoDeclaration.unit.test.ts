@@ -153,6 +153,7 @@ describe("buildTereoDocument", () => {
       "zeteo.query.run",
       "zeteo.relation.declared",
       "zeteo.relation.removed",
+      "zeteo.relation.renamed",
       "zeteo.source.archived",
       "zeteo.source.created",
       "zeteo.source.refreshed",

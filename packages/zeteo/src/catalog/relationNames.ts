@@ -1,10 +1,17 @@
 import type { SnapshotForeignKey } from "../adapters/types.js";
 
-/** Longest first, so `_id` goes before `id`; matched after the column is snake-cased. */
+/** Tried in this order on the snake-cased column, and the first the name ends in is removed; the `_` forms come first so `product_id` loses `_id`, not `id`. */
 const KEY_SUFFIXES = ["_id", "_key", "_sk", "_fk", "id", "key"];
 
 /** The longest relation name, as the declared-name pattern allows. */
 const MAX_NAME = 63;
+
+/** camelCase boundaries become `_`, the rest is lower-cased, and other characters become `_`. */
+const snake = (raw: string): string =>
+  raw
+    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "_");
 
 /**
  * Turns a database identifier into a name matching `^[a-z][a-z0-9_]{0,62}$`:
@@ -12,12 +19,6 @@ const MAX_NAME = 63;
  * become `_`, a name not starting with a letter gets `r_` in front, and an
  * empty one is `relation`.
  */
-const snake = (raw: string): string =>
-  raw
-    .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "_");
-
 const normalise = (raw: string): string => {
   let name = snake(raw);
   if (name === "") name = "relation";

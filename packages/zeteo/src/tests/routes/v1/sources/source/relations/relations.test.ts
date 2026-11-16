@@ -288,7 +288,7 @@ describe("/v1/sources/:sourceId/relations", () => {
       const again = await post({ name: "dup" });
       expect(again.status).toBe(409);
       expect(again.body.error).toBe("relation_name_taken");
-      const discovered = await post({ name: "customer" });
+      const discovered = await post({ name: "customers" });
       expect(discovered.status).toBe(409);
       expect(discovered.body.error).toBe("relation_name_taken");
       // Another table may reuse the name.

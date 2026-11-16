@@ -122,6 +122,11 @@
         "readPermission": "zeteo.sources.read"
       },
       {
+        "eventType": "zeteo.relation.renamed",
+        "description": "A relation was renamed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
         "eventType": "zeteo.relation.removed",
         "description": "A declared relation was removed",
         "readPermission": "zeteo.sources.read"

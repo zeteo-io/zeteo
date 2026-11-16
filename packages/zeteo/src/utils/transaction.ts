@@ -30,6 +30,7 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.sourceArchived]: "ARCHIVE",
   [AUDIT_EVENTS.sourceRefreshed]: "UPDATE",
   [AUDIT_EVENTS.relationDeclared]: "CREATE",
+  [AUDIT_EVENTS.relationRenamed]: "UPDATE",
   [AUDIT_EVENTS.relationRemoved]: "DELETE",
   [AUDIT_EVENTS.grantCreated]: "CREATE",
   [AUDIT_EVENTS.grantUpdated]: "UPDATE",

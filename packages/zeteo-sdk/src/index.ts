@@ -53,6 +53,7 @@ export type {
   TableDetail,
   PatchTableRequest,
   DeclareRelationRequest,
+  RenameRelationRequest,
   ListSourcesOptions,
   ListTablesOptions,
 } from "./types/sources.js";

@@ -98,8 +98,8 @@ describe("MCP through Tereo's sign-in", () => {
         arguments: {
           source: e2e.source.slug,
           from: "orders",
-          join: ["customer"],
-          select: ["id", "customer.name"],
+          join: ["customers"],
+          select: ["id", "customers.name"],
           where: { status: { eq: "paid" } },
           orderBy: [{ id: "asc" }],
         },

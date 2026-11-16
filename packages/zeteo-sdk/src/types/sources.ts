@@ -177,6 +177,11 @@ export interface DeclareRelationRequest {
   to_many: boolean;
 }
 
+export interface RenameRelationRequest {
+  /** Matches `^[a-z][a-z0-9_]{0,62}$`. */
+  name: string;
+}
+
 export interface ListSourcesOptions extends ListOptions {
   include_archived?: boolean;
 }

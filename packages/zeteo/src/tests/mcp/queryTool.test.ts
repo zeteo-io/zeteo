@@ -92,8 +92,8 @@ describeEachEngine("MCP query tool", (engine) => {
     const body = {
       source: source.slug,
       from: "orders",
-      join: ["customer"],
-      select: ["id", "customer.region", "total"],
+      join: ["customers"],
+      select: ["id", "customers.region", "total"],
       where: { status: { eq: "paid" } },
       orderBy: [{ id: "asc" }],
     };

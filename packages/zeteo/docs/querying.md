@@ -21,14 +21,14 @@ results for the same data:
 {
   "source": "sales-db",
   "from": "orders",
-  "join": ["customer", { "relation": "lines", "type": "left" }],
+  "join": ["customers", { "relation": "order_lines", "type": "left" }],
   "select": [
-    "customer.region",
+    "customers.region",
     { "bucket": "month", "column": "created_at", "as": "month" },
     { "sum": "total", "as": "revenue" }
   ],
   "where": { "status": { "in": ["paid", "shipped"] } },
-  "groupBy": ["customer.region", "month"],
+  "groupBy": ["customers.region", "month"],
   "having": { "revenue": { "gt": 1000 } },
   "orderBy": [{ "revenue": "desc" }],
   "limit": 1000,
@@ -40,10 +40,10 @@ results for the same data:
 - **`from`** names a table or view by its bare name when that is unique among the source's
   schemas, otherwise `schema.table`.
 - **Columns** are paths: a bare name is a column of the `from` table; `relation.column` is a column
-  of a joined table, and `customer.account.plan` one reached through two relations.
+  of a joined table, and `customers.accounts.plan` one reached through two relations.
 - **`join`** lists relations by name (see `docs/catalog.md`), `inner` by default or
   `{ "relation": "...", "type": "left" }`. A relation reached through another is joined after it:
-  `["customer", "customer.account"]`. At most 4 joins. A relation can be used only when every key
+  `["customers", "customers.accounts"]`. At most 4 joins. A relation can be used only when every key
   column on both sides is granted.
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
@@ -176,7 +176,7 @@ trace of a table, column, relation or source they are not granted.
           "description": null,
           "missing": false,
           "columns": [{ "name": "id", "type": "number", "nullable": false, "description": null, "missing": false }],
-          "relations": [{ "name": "customer", "to": "customers", "to_many": false, "missing": false }]
+          "relations": [{ "name": "customers", "to": "customers", "to_many": false, "missing": false }]
         }
       ]
     }
@@ -191,7 +191,7 @@ trace of a table, column, relation or source they are not granted.
 - A table's `name` is what a query writes in `from`: the bare name when no other table the caller
   can see in that source has it, else `schema.table`.
 - A relation is listed under the table it starts from. Its `name` is what a query's `join`
-  names (through a joined relation, `customer.account`); `to` is the target table as `from` would
+  names (through a joined relation, `customers.accounts`); `to` is the target table as `from` would
   write it. A relation appears only when every key column on both sides is granted.
 - `limits` are those of `POST /v1/query`: `default_rows` and `max_rows` are lowered to the
   source's `row_cap`, `timeout_ms` is the source's time limit. `export` says whether the source
@@ -209,22 +209,22 @@ Revenue per region and quarter, paid orders only:
 {
   "source": "sales-db",
   "from": "orders",
-  "join": ["customer"],
+  "join": ["customers"],
   "select": [
-    "customer.region",
+    "customers.region",
     { "bucket": "quarter", "column": "created_at", "as": "quarter" },
     { "sum": "total", "as": "revenue" },
     { "count": "*", "as": "orders" }
   ],
   "where": { "status": { "eq": "paid" } },
-  "groupBy": ["customer.region", "quarter"]
+  "groupBy": ["customers.region", "quarter"]
 }
 ```
 
 ```json
 {
   "columns": [
-    { "name": "customer.region", "type": "text" },
+    { "name": "customers.region", "type": "text" },
     { "name": "quarter", "type": "timestamp" },
     { "name": "revenue", "type": "number" },
     { "name": "orders", "type": "number" }

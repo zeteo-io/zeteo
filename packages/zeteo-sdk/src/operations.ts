@@ -23,6 +23,10 @@ export const OPERATIONS = {
     method: "POST",
     path: "/v1/sources/{sourceId}/relations",
   },
+  updateRelation: {
+    method: "PATCH",
+    path: "/v1/sources/{sourceId}/relations/{relationId}",
+  },
   deleteRelation: {
     method: "DELETE",
     path: "/v1/sources/{sourceId}/relations/{relationId}",

@@ -208,7 +208,7 @@ with the process.
 ## Audit
 
 `zeteo.source.created`, `zeteo.source.updated` and `zeteo.source.archived` are written to the outbox
-in the change's transaction. A refresh, a table description change and a relation declared or
+in the change's transaction. A refresh, a table description change and a relation declared, renamed or
 removed are audited as well; see [catalog.md](catalog.md). Metadata holds the slug and type, for an
 update the names of the fields changed, under `limits` the source's `timeout_ms`, `row_cap`,
 `export_enabled`, `export_row_cap`, `query_concurrency` and `export_concurrency` as they stand after

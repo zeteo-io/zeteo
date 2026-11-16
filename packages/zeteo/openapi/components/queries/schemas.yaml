@@ -2,7 +2,7 @@ Path:
   type: string
   description: |
     `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
-    its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+    its relation path (`customers.region`, `customers.accounts.plan`). Segments are 1-128 characters.
 
 Alias:
   type: string
@@ -92,7 +92,7 @@ Query:
     join:
       type: array
       maxItems: 4
-      description: Relations to join, by name; one reached through another is written `customer.account`
+      description: Relations to join, by name; one reached through another is written `customers.accounts`
       items:
         oneOf:
           - { $ref: '#/Path' }

@@ -19,8 +19,8 @@ export const MCP_INSTRUCTIONS = `Zeteo answers questions from databases you have
 ## The query language
 A query is one JSON object; every object is strict (an unknown key is refused), and there are no expressions or raw SQL.
 - \`source\`: the source's slug. \`from\`: a table name as list_tables gives it.
-- \`join\`: relation names from describe_table, inner by default or \`{ "relation": "customer", "type": "left" }\`; a relation reached through another is \`customer.account\`, joined after \`customer\`.
-- Columns are paths: \`total\` on the \`from\` table, \`customer.region\` through a joined relation.
+- \`join\`: relation names from describe_table, inner by default or \`{ "relation": "customers", "type": "left" }\`; a relation reached through another is \`customers.accounts\`, joined after \`customers\`.
+- Columns are paths: \`total\` on the \`from\` table, \`customers.region\` through a joined relation.
 - \`select\`: column paths; aggregates \`{ "count": "*" }\`, \`{ "countDistinct": path }\`, \`{ "sum" | "avg" | "min" | "max": path }\`; date buckets \`{ "bucket": "day" | "week" | "month" | "quarter" | "year", "column": path }\`. Any item takes \`"as": "name"\` (a lowercase letter, then lowercase letters, digits or \`_\`).
 - \`where\`: \`{ "<path>": { "<operator>": value } }\`, combined with \`and\`, \`or\` (lists) and \`not\`. Operators: \`eq\`, \`ne\`, \`gt\`, \`gte\`, \`lt\`, \`lte\`, \`between\` ([low, high]), \`in\`, \`notIn\`, \`contains\` and \`startsWith\` (text, case-insensitive), \`isNull\` (true or false). Dates are \`YYYY-MM-DD\`, timestamps ISO 8601 with an offset or \`Z\`.
 - \`groupBy\`: with an aggregate, list every other select item (by its \`as\` or its path).
@@ -35,11 +35,11 @@ Customers whose name mentions "organic" and who have no email:
 \`\`\`
 Revenue and order count of paid orders, per customer region and quarter:
 \`\`\`json
-{"source":"sales-db","from":"orders","join":["customer"],"select":["customer.region",{"bucket":"quarter","column":"created_at","as":"quarter"},{"sum":"total","as":"revenue"},{"count":"*","as":"orders"}],"where":{"status":{"eq":"paid"}},"groupBy":["customer.region","quarter"]}
+{"source":"sales-db","from":"orders","join":["customers"],"select":["customers.region",{"bucket":"quarter","column":"created_at","as":"quarter"},{"sum":"total","as":"revenue"},{"count":"*","as":"orders"}],"where":{"status":{"eq":"paid"}},"groupBy":["customers.region","quarter"]}
 \`\`\`
 The ten customers with the most revenue, over 500 each:
 \`\`\`json
-{"source":"sales-db","from":"orders","join":["customer"],"select":["customer.name",{"sum":"total","as":"revenue"}],"groupBy":["customer.name"],"having":{"revenue":{"gt":500}},"orderBy":[{"revenue":"desc"}],"limit":10}
+{"source":"sales-db","from":"orders","join":["customers"],"select":["customers.name",{"sum":"total","as":"revenue"}],"groupBy":["customers.name"],"having":{"revenue":{"gt":500}},"orderBy":[{"revenue":"desc"}],"limit":10}
 \`\`\`
 
 ## Results

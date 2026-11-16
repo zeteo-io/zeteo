@@ -1,4 +1,43 @@
 /v1/sources/{sourceId}/relations/{relationId}:
+  patch:
+    tags: [Catalogue]
+    summary: Rename a relation
+    description: |
+      Renames a discovered or a declared relation. The name follows the declared-name rules and
+      must be free on the relation's from table, whether the other relation is discovered or
+      declared. A discovered relation renamed this way keeps its name across refreshes; the others
+      take the name the naming rules give them at every refresh. An audit entry
+      `zeteo.relation.renamed` is written.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `404 not_found` (also a relation of another source),
+      `409 relation_name_taken`, `409 source_archived`.
+    operationId: updateRelation
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/RelationIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/catalog/schemas.yaml#/RenameRelationRequest'
+    responses:
+      '200':
+        description: The renamed relation
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/Relation'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
   delete:
     tags: [Catalogue]
     summary: Remove a declared relation

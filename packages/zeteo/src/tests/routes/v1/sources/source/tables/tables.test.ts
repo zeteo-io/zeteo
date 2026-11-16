@@ -185,7 +185,7 @@ describe("/v1/sources/:sourceId/tables", () => {
       const names = res.body.relations
         .map((r: { name: string }) => r.name)
         .sort();
-      expect(names).toEqual(["customer", "order_lines"]);
+      expect(names).toEqual(["customers", "order_lines"]);
       expect(res.body.relations[0]).toEqual({
         id: expect.any(String),
         name: expect.any(String),

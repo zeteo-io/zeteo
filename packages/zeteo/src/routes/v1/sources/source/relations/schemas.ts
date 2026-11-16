@@ -23,11 +23,15 @@ const Columns = z
   .min(1)
   .max(32);
 
+const RelationName = z.string().regex(RELATION_NAME_PATTERN, {
+  message:
+    "A relation name is lower case letters, digits and underscores, starting with a letter, 1 to 63 characters",
+});
+
+export const RenameRelationSchema = z.strictObject({ name: RelationName });
+
 export const DeclareRelationSchema = z.strictObject({
-  name: z.string().regex(RELATION_NAME_PATTERN, {
-    message:
-      "A relation name is lower case letters, digits and underscores, starting with a letter, 1 to 63 characters",
-  }),
+  name: RelationName,
   from_table_id: IdSchema,
   from_columns: Columns,
   to_table_id: IdSchema,

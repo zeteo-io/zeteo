@@ -97,7 +97,7 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       missing: false,
     });
     expect(orders.relations).toEqual([
-      { name: "customer", to: "customers", to_many: false, missing: false },
+      { name: "customers", to: "customers", to_many: false, missing: false },
     ]);
     // The reverse of the foreign key, listed under the table it starts from.
     expect(tableOf(res.body, source.slug, "customers").relations).toEqual([

@@ -683,6 +683,54 @@ paths:
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/sources/{sourceId}/relations/{relationId}:
+    patch:
+      tags:
+        - Catalogue
+      summary: Rename a relation
+      description: |
+        Renames a discovered or a declared relation. The name follows the declared-name rules and
+        must be free on the relation's from table, whether the other relation is discovered or
+        declared. A discovered relation renamed this way keeps its name across refreshes; the others
+        take the name the naming rules give them at every refresh. An audit entry
+        `zeteo.relation.renamed` is written.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request`, `404 not_found` (also a relation of another source),
+        `409 relation_name_taken`, `409 source_archived`.
+      operationId: updateRelation
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/RelationIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameRelationRequest'
+      responses:
+        '200':
+          description: The renamed relation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Relation'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
     delete:
       tags:
         - Catalogue
@@ -1323,9 +1371,9 @@ paths:
               source: sales-db
               from: orders
               join:
-                - customer
+                - customers
               select:
-                - customer.region
+                - customers.region
                 - bucket: month
                   column: created_at
                   as: month
@@ -1337,7 +1385,7 @@ paths:
                     - paid
                     - shipped
               groupBy:
-                - customer.region
+                - customers.region
                 - month
               having:
                 revenue:
@@ -2992,7 +3040,7 @@ components:
         join:
           type: array
           maxItems: 4
-          description: Relations to join, by name; one reached through another is written `customer.account`
+          description: Relations to join, by name; one reached through another is written `customers.accounts`
           items:
             oneOf:
               - $ref: '#/components/schemas/Path'
@@ -3403,6 +3451,15 @@ components:
           description: Ordered by slug
           items:
             $ref: '#/components/schemas/DiscoveredSource'
+    RenameRelationRequest:
+      type: object
+      required:
+        - name
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
     GrantColumnIds:
       type: array
       minItems: 1
@@ -3416,7 +3473,7 @@ components:
       type: string
       description: |
         `(relation.)*column`: a bare column of the `from` table, or a column of a joined table through
-        its relation path (`customer.region`, `customer.account.plan`). Segments are 1-128 characters.
+        its relation path (`customers.region`, `customers.accounts.plan`). Segments are 1-128 characters.
     Alias:
       type: string
       pattern: ^[a-z][a-z0-9_]{0,62}$
