@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { optionTexts, pickOption } from "@/test/searchSelect";
 import { screen, waitFor } from "@testing-library/react";
 import { SOURCE_ID } from "../../sources/testFixtures";
 import { renderWithProviders } from "@/test/render";
@@ -57,14 +58,15 @@ const renderForm = () =>
 
 type User = ReturnType<typeof userEvent.setup>;
 
+// Tables and columns are kosmeo SearchSelects.
+const pick = (user: User, text: string, option: string) =>
+  pickOption(user, field(text), option);
+
 const chooseTables = async (user: User) => {
-  await user.selectOptions(field("From table"), ORDERS_ID);
-  await user.selectOptions(field("To table"), CUSTOMERS_ID);
-  await waitFor(() =>
-    expect(
-      screen.getByRole("option", { name: "customer_id" })
-    ).toBeInTheDocument()
-  );
+  await pick(user, "From table", "public.orders");
+  await pick(user, "To table", "public.customers");
+  await waitFor(() => expect(field("From column 1")).toBeEnabled());
+  await waitFor(() => expect(field("To column 1")).toBeEnabled());
 };
 
 describe("RelationForm", () => {
@@ -98,11 +100,11 @@ describe("RelationForm", () => {
     renderForm();
     await user.type(field("Name"), "customer");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "tenant_id");
-    await user.selectOptions(field("To column 1"), "tenant_id");
+    await pick(user, "From column 1", "tenant_id");
+    await pick(user, "To column 1", "tenant_id");
     await user.click(screen.getByRole("button", { name: "Add column pair" }));
-    await user.selectOptions(field("From column 2"), "customer_id");
-    await user.selectOptions(field("To column 2"), "id");
+    await pick(user, "From column 2", "customer_id");
+    await pick(user, "To column 2", "id");
     await user.click(screen.getByLabelText("Each row has many matches"));
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
 
@@ -118,15 +120,29 @@ describe("RelationForm", () => {
     await waitFor(() => expect(onDeclared).toHaveBeenCalled());
   });
 
+  it("offers only the chosen table's columns, and clears them when that table changes", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await chooseTables(user);
+    await user.click(field("From column 1"));
+    await waitFor(() =>
+      expect(optionTexts()).toEqual(["id", "customer_id", "tenant_id"])
+    );
+    await pick(user, "From column 1", "customer_id");
+    expect(field("From column 1")).toHaveValue("customer_id");
+    await pick(user, "From table", "public.customers");
+    await waitFor(() => expect(field("From column 1")).toHaveValue(""));
+  });
+
   it("refuses a pair with only one side chosen", async () => {
     const user = userEvent.setup();
     renderForm();
     await user.type(field("Name"), "customer");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "customer_id");
-    await user.selectOptions(field("To column 1"), "id");
+    await pick(user, "From column 1", "customer_id");
+    await pick(user, "To column 1", "id");
     await user.click(screen.getByRole("button", { name: "Add column pair" }));
-    await user.selectOptions(field("From column 2"), "tenant_id");
+    await pick(user, "From column 2", "tenant_id");
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
     expect(
       await screen.findByText(/both sides of every column pair/i)
@@ -139,11 +155,11 @@ describe("RelationForm", () => {
     renderForm();
     await user.type(field("Name"), "customer");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "customer_id");
-    await user.selectOptions(field("To column 1"), "id");
+    await pick(user, "From column 1", "customer_id");
+    await pick(user, "To column 1", "id");
     await user.click(screen.getByRole("button", { name: "Add column pair" }));
-    await user.selectOptions(field("From column 2"), "customer_id");
-    await user.selectOptions(field("To column 2"), "tenant_id");
+    await pick(user, "From column 2", "customer_id");
+    await pick(user, "To column 2", "tenant_id");
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
     expect(await screen.findByText(/more than once/i)).toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
@@ -154,8 +170,8 @@ describe("RelationForm", () => {
     renderForm();
     await user.type(field("Name"), "Bad-Name");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "customer_id");
-    await user.selectOptions(field("To column 1"), "id");
+    await pick(user, "From column 1", "customer_id");
+    await pick(user, "To column 1", "id");
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
     expect(await screen.findByText(/lower case letters/i)).toBeInTheDocument();
     expect(post).not.toHaveBeenCalled();
@@ -192,8 +208,8 @@ describe("RelationForm", () => {
     renderForm();
     await user.type(field("Name"), "customer");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "customer_id");
-    await user.selectOptions(field("To column 1"), "id");
+    await pick(user, "From column 1", "customer_id");
+    await pick(user, "To column 1", "id");
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
     expect(
       await screen.findByText("customer_id and id differ in type")
@@ -218,10 +234,18 @@ describe("RelationForm", () => {
     renderForm();
     await user.type(field("Name"), "customer");
     await chooseTables(user);
-    await user.selectOptions(field("From column 1"), "customer_id");
-    await user.selectOptions(field("To column 1"), "id");
+    await pick(user, "From column 1", "customer_id");
+    await pick(user, "To column 1", "id");
     await user.click(screen.getByRole("button", { name: "Declare relation" }));
     expect(await screen.findByText(description)).toBeInTheDocument();
+  });
+
+  it("closes on Cancel without declaring", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
   });
 
   it("says so when a table's columns cannot be loaded", async () => {
@@ -232,7 +256,7 @@ describe("RelationForm", () => {
     });
     const user = userEvent.setup();
     renderForm();
-    await user.selectOptions(field("From table"), ORDERS_ID);
+    await pick(user, "From table", "public.orders");
     expect(await screen.findByText("No such table")).toBeInTheDocument();
   });
 });

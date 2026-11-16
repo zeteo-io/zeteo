@@ -1,6 +1,5 @@
 export { TablesPage } from "./components/TablesPage";
 export { TablePage } from "./components/TablePage";
-export { useTables } from "./api/useTables";
 export { useTable } from "./api/useTable";
 export { useAllTables, tableLabel } from "./api/useAllTables";
 export { useCanEditCatalogue } from "./api/useCanEditCatalogue";

@@ -1,19 +1,23 @@
 import { tableLabel, useTable, type Table } from "@/features/tables";
+import { faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useDeclareRelation } from "../api/useDeclareRelation";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useState } from "react";
 import "./styles.css";
 import {
+  BorderedSection,
   Button,
-  Checkbox,
   Form,
-  FormActions,
   Input,
-  Select,
+  Modal,
+  SearchSelect,
+  Switch,
 } from "@kosmeo-ui/react";
 
 const NAME = /^[a-z][a-z0-9_]{0,62}$/;
 const MAX_PAIRS = 32;
+const FORM_ID = "relation-form";
 
 interface Pair {
   from: string;
@@ -53,14 +57,8 @@ export const RelationForm = ({
     sourceId,
     toTableId || undefined
   );
-  const tableOptions = tables.map((t) => ({
-    value: t.id,
-    label: tableLabel(t),
-  }));
   const columnOptions = (table: typeof fromTable) =>
-    (table?.columns ?? [])
-      .filter((c) => !c.missing_since)
-      .map((c) => ({ value: c.name, label: c.name }));
+    (table?.columns ?? []).filter((c) => !c.missing_since).map((c) => c.name);
 
   const setPair = (index: number, patch: Partial<Pair>) =>
     setPairs((all) =>
@@ -114,107 +112,152 @@ export const RelationForm = ({
   };
 
   return (
-    <div className="z-relation-form">
-      <h2>Declare a relation</h2>
-      <Form onSubmit={submit}>
-        <Input
-          label="Name"
-          required
-          value={name}
-          error={errors.name}
-          helperText="Unique on the from table."
-          onChange={(e) => setName(e.target.value)}
-        />
-        <Select
-          label="From table"
-          required
-          placeholder="Choose a table"
-          value={fromTableId}
-          options={tableOptions}
-          onChange={(id) => chooseFromTable(id ?? "")}
-        />
-        {errors.from_table && <p role="alert">{errors.from_table}</p>}
-        <ErrorNotice error={fromError} />
-        <Select
-          label="To table"
-          required
-          placeholder="Choose a table"
-          value={toTableId}
-          options={tableOptions}
-          onChange={(id) => chooseToTable(id ?? "")}
-        />
-        {errors.to_table && <p role="alert">{errors.to_table}</p>}
-        <ErrorNotice error={toError} />
-
-        <div className="z-relation-pairs">
-          {pairs.map((pair, index) => (
-            <div className="z-relation-pair" key={index}>
-              <Select
-                label={`From column ${index + 1}`}
-                placeholder="Choose a column"
-                value={pair.from}
-                options={columnOptions(fromTable)}
-                disabled={!fromTable}
-                onChange={(from) => setPair(index, { from: from ?? "" })}
-              />
-              <Select
-                label={`To column ${index + 1}`}
-                placeholder="Choose a column"
-                value={pair.to}
-                options={columnOptions(toTable)}
-                disabled={!toTable}
-                onChange={(to) => setPair(index, { to: to ?? "" })}
-              />
-              {pairs.length > 1 && (
-                <Button
-                  variant="secondary"
-                  fullWidth={false}
-                  aria-label={`Remove column pair ${index + 1}`}
-                  onClick={() =>
-                    setPairs((all) => all.filter((_, i) => i !== index))
-                  }
-                >
-                  Remove
-                </Button>
-              )}
-            </div>
-          ))}
-          {errors.pairs && <p role="alert">{errors.pairs}</p>}
-          {pairs.length < MAX_PAIRS && (
+    <Modal
+      show
+      title="Declare a relation"
+      onClose={onClose}
+      dismissible={!declare.isPending}
+      footerButtons={[
+        <Button
+          key="cancel"
+          variant="secondary"
+          fullWidth={false}
+          disabled={declare.isPending}
+          onClick={onClose}
+        >
+          Cancel
+        </Button>,
+        <Button
+          key="declare"
+          type="submit"
+          form={FORM_ID}
+          fullWidth={false}
+          isLoading={declare.isPending}
+          disabled={declare.isPending}
+        >
+          Declare relation
+        </Button>,
+      ]}
+    >
+      <div className="z-relation-form">
+        <Form id={FORM_ID} onSubmit={submit}>
+          <Input
+            label="Name"
+            required
+            value={name}
+            error={errors.name}
+            helperText="Unique on the from table."
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div className="z-relation-tables">
             <div>
-              <Button
-                variant="secondary"
-                fullWidth={false}
-                onClick={() =>
-                  setPairs((all) => [...all, { from: "", to: "" }])
-                }
-              >
-                Add column pair
-              </Button>
+              <SearchSelect<Table>
+                label="From table"
+                required
+                placeholder="Search tables"
+                value={tables.find((t) => t.id === fromTableId) ?? null}
+                options={tables}
+                getOptionLabel={tableLabel}
+                getOptionKey={(t) => t.id}
+                longDropDown
+                onSelect={(t) => chooseFromTable(t.id)}
+              />
+              {errors.from_table && <p role="alert">{errors.from_table}</p>}
+              <ErrorNotice error={fromError} />
             </div>
-          )}
-        </div>
+            <div>
+              <SearchSelect<Table>
+                label="To table"
+                required
+                placeholder="Search tables"
+                value={tables.find((t) => t.id === toTableId) ?? null}
+                options={tables}
+                getOptionLabel={tableLabel}
+                getOptionKey={(t) => t.id}
+                longDropDown
+                onSelect={(t) => chooseToTable(t.id)}
+              />
+              {errors.to_table && <p role="alert">{errors.to_table}</p>}
+              <ErrorNotice error={toError} />
+            </div>
+          </div>
 
-        <Checkbox
-          label="Each row has many matches"
-          checked={toMany}
-          onChange={(e) => setToMany(e.target.checked)}
-        />
-        <ErrorNotice error={declare.error} />
-        <FormActions>
-          <Button variant="secondary" fullWidth={false} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            type="submit"
-            fullWidth={false}
-            isLoading={declare.isPending}
-            disabled={declare.isPending}
+          <BorderedSection
+            title="Columns"
+            as="h3"
+            actions={
+              <div className="z-relation-columns-actions">
+                <Switch
+                  size="sm"
+                  label="Each row has many matches"
+                  labelLocation="left"
+                  checked={toMany}
+                  onChange={(e) => setToMany(e.target.checked)}
+                />
+                {pairs.length < MAX_PAIRS && (
+                  <Button
+                    size="sm"
+                    variant="success"
+                    fullWidth={false}
+                    title="Add a column pair"
+                    aria-label="Add column pair"
+                    onClick={() =>
+                      setPairs((all) => [...all, { from: "", to: "" }])
+                    }
+                  >
+                    <FontAwesomeIcon icon={faPlus} />
+                  </Button>
+                )}
+              </div>
+            }
           >
-            Declare relation
-          </Button>
-        </FormActions>
-      </Form>
-    </div>
+            <div className="z-relation-pairs">
+              {pairs.map((pair, index) => (
+                <div className="z-relation-pair" key={index}>
+                  <SearchSelect<string>
+                    label={`From column ${index + 1}`}
+                    placeholder="Search columns"
+                    value={pair.from || null}
+                    options={columnOptions(fromTable)}
+                    getOptionLabel={(c) => c}
+                    getOptionKey={(c) => c}
+                    disabled={!fromTable}
+                    onSelect={(from) => setPair(index, { from })}
+                  />
+                  <SearchSelect<string>
+                    label={`To column ${index + 1}`}
+                    placeholder="Search columns"
+                    value={pair.to || null}
+                    options={columnOptions(toTable)}
+                    getOptionLabel={(c) => c}
+                    getOptionKey={(c) => c}
+                    disabled={!toTable}
+                    onSelect={(to) => setPair(index, { to })}
+                  />
+                  {pairs.length > 1 && (
+                    <div className="z-relation-remove">
+                      <Button
+                        variant="danger"
+                        fullWidth={false}
+                        title="Remove this column pair"
+                        aria-label={`Remove column pair ${index + 1}`}
+                        onClick={() =>
+                          setPairs((all) => all.filter((_, i) => i !== index))
+                        }
+                      >
+                        <FontAwesomeIcon icon={faTrash} />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {errors.pairs && <p role="alert">{errors.pairs}</p>}
+            </div>
+          </BorderedSection>
+
+          <ErrorNotice error={declare.error} />
+        </Form>
+      </div>
+    </Modal>
   );
 };

@@ -3,6 +3,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
+import { optionTexts } from "@/test/searchSelect";
 import { Route, Routes } from "react-router-dom";
 import { RelationsPage } from "./RelationsPage";
 import { makeRelation } from "../testFixtures";
@@ -77,14 +78,95 @@ describe("RelationsPage", () => {
     });
   });
 
-  it("lists each relation with resolved table names, columns, to-many and origin", async () => {
+  it("lists each relation with resolved table names, columns, what it returns and origin", async () => {
     renderPage();
     const row = (await screen.findByText("customer")).closest("tr")!;
     await waitFor(() => expect(row).toHaveTextContent("public.orders"));
-    expect(row).toHaveTextContent("customer_id");
+    expect(row).toHaveTextContent("customer_id → id");
     expect(row).toHaveTextContent("public.customers");
-    expect(row).toHaveTextContent("declared");
-    expect(row).toHaveTextContent("No");
+    expect(row).toHaveTextContent("Declared");
+    expect(row).toHaveTextContent("One");
+    const other = screen.getByText("fk_orders_customers").closest("tr")!;
+    expect(other).not.toHaveTextContent("Declared");
+  });
+
+  it("shows the key once when both sides name their columns alike", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === `/v1/sources/${SOURCE_ID}`) return { data: makeSource() };
+      if (url.endsWith("/relations")) {
+        return {
+          data: {
+            data: [
+              makeRelation({
+                from_columns: ["id"],
+                to_columns: ["id"],
+                to_many: true,
+              }),
+            ],
+            next_cursor: null,
+          },
+        };
+      }
+      return { data: { data: [], next_cursor: null } };
+    });
+    renderPage();
+    const row = (await screen.findByText("customer")).closest("tr")!;
+    expect(within(row).getByText("id")).toBeInTheDocument();
+    expect(row).not.toHaveTextContent("→");
+    expect(row).toHaveTextContent("Many");
+  });
+
+  it("filters by name or table as you type", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("stale_fk");
+    await user.type(screen.getByLabelText("Search"), "retired");
+    await waitFor(() =>
+      expect(screen.queryByText("customer")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("stale_fk")).toBeInTheDocument();
+  });
+
+  it("filters by a table on either side", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("stale_fk");
+    await user.click(screen.getByRole("button", { name: /Table/ }));
+    await user.click(
+      await screen.findByRole("checkbox", { name: "public.retired" })
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("customer")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("stale_fk")).toBeInTheDocument();
+  });
+
+  it("filters by origin, and says when nothing matches", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("stale_fk");
+    await user.click(screen.getByRole("button", { name: /Origin/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Declared" }));
+    await waitFor(() =>
+      expect(screen.queryByText("stale_fk")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("customer")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Returns/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Many" }));
+    expect(
+      await screen.findByText("No relations match these filters.")
+    ).toBeInTheDocument();
+  });
+
+  it("says how to get relations when there are none", async () => {
+    get.mockImplementation(async (url: string) =>
+      url === `/v1/sources/${SOURCE_ID}`
+        ? { data: makeSource() }
+        : { data: { data: [], next_cursor: null } }
+    );
+    renderPage();
+    expect(await screen.findByText(/No relations yet/)).toBeInTheDocument();
   });
 
   it("flags a relation a refresh no longer finds", async () => {
@@ -154,6 +236,7 @@ describe("RelationsPage", () => {
     renderPage();
     const row = (await screen.findByText("customer")).closest("tr")!;
     expect(row).not.toHaveTextContent(CUSTOMERS_ID);
+    expect(row).toHaveTextContent("…");
     expect(
       screen.getByRole("button", { name: "Declare relation" })
     ).toBeDisabled();
@@ -192,10 +275,31 @@ describe("RelationsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Declare relation" })
     );
-    expect(await screen.findByLabelText(/^Name/)).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("option", { name: "public.customers" })
-    ).toHaveLength(2);
-    expect(screen.queryByRole("option", { name: "public.retired" })).toBeNull();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Declare a relation",
+    });
+    expect(within(dialog).getByLabelText(/^Name/)).toBeInTheDocument();
+    // Missing tables are not offered.
+    await user.click(within(dialog).getByLabelText(/^From table/));
+    await waitFor(() =>
+      expect(optionTexts()).toEqual(["public.orders", "public.customers"])
+    );
+  });
+
+  it("closes the declare form on Cancel", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(
+      await screen.findByRole("button", { name: "Declare relation" })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Declare a relation",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Declare a relation" })
+      ).not.toBeInTheDocument()
+    );
   });
 });

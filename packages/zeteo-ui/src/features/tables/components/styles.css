@@ -41,3 +41,21 @@
 .z-wrap th {
   overflow-wrap: anywhere;
 }
+
+.z-tables-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Name and schema stay narrow; the description takes the rest. */
+.z-tables-list th:nth-child(1),
+.z-tables-list th:nth-child(2) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.z-tables-list td:nth-child(1),
+.z-tables-list td:nth-child(2) {
+  white-space: nowrap;
+}
