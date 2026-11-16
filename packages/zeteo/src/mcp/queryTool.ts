@@ -8,10 +8,46 @@ import { z } from "zod";
 /** The longest time limit a source may have (120 s), and room for the run's record. */
 const QUERY_TOOL_TIMEOUT_MS = 135_000;
 
-// The rest of the query is the source's language, checked by the engine as
-// for POST /v1/query, so its errors have the same paths.
+// Each clause is declared with its JSON type only, because a model client
+// sends an argument the schema does not declare as a string. The engine
+// checks the query itself, as for POST /v1/query, so its errors have the same
+// paths; for the same reason only `source` is required here.
 const QueryInput = z.looseObject({
   source: z.string().describe("The source's slug, as list_sources gives it"),
+  from: z
+    .string()
+    .optional()
+    .describe("The table to read, as list_tables names it"),
+  join: z
+    .array(z.unknown())
+    .optional()
+    .describe(
+      'Relations to join, by name ("customer") or { relation, type: "inner" | "left" }'
+    ),
+  select: z
+    .array(z.unknown())
+    .optional()
+    .describe(
+      'Columns ("id", "customer.region"), aggregates ({ sum: "total", as: "revenue" }) and date buckets'
+    ),
+  distinct: z.boolean().optional(),
+  where: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      'A filter, such as { status: { eq: "paid" } }, combined with and / or'
+    ),
+  groupBy: z.array(z.unknown()).optional(),
+  having: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe("A filter on aggregates, by their alias"),
+  orderBy: z
+    .array(z.unknown())
+    .optional()
+    .describe('Entries of one { path: "asc" | "desc" }'),
+  limit: z.int().optional(),
+  offset: z.int().optional(),
 });
 
 /** The `query` tool: `POST /v1/query`'s engine, with MCP's row and size limits. */
