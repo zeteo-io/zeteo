@@ -51,10 +51,10 @@ results for the same data:
 - **`from`** names a table or view by its bare name when that is unique among the source's
   schemas, otherwise `schema.table`.
 - **Columns** are paths: a bare name is a column of the `from` table; `relation.column` is a column
-  of a joined table, and `customers.accounts.plan` one reached through two relations.
+  of a joined table, and `order_lines.products.category` one reached through two relations.
 - **`join`** lists relations by name (see `docs/catalog.md`), `inner` by default or
   `{ "relation": "...", "type": "left" }`. A relation reached through another is joined after it:
-  `["customers", "customers.accounts"]`. At most the source's `max_joins` joins (4 unless the source sets more, up to 8; a query over the source's limit is `422 too_many_joins`). A relation can be used only when every key
+  `["order_lines", "order_lines.products"]`. At most the source's `max_joins` joins (4 unless the source sets more, up to 8; a query over the source's limit is `422 too_many_joins`). A relation can be used only when every key
   column on both sides is granted.
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
