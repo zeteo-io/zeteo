@@ -243,28 +243,8 @@ describe("sqlLanguage", () => {
   });
 });
 
-type Leaf = { path: PropertyKey[]; message: string };
-
-/** Every issue with its full path, looking inside the select item's union. */
-const leaves = (
-  issues: readonly {
-    path: PropertyKey[];
-    message: string;
-    errors?: unknown;
-  }[],
-  prefix: PropertyKey[] = []
-): Leaf[] =>
-  issues.flatMap((issue) => {
-    const path = [...prefix, ...issue.path];
-    return Array.isArray(issue.errors)
-      ? (issue.errors as (typeof issues)[]).flatMap((branch) =>
-          leaves(branch, path)
-        )
-      : [{ path, message: issue.message }];
-  });
-
 const calcPaths = (select: unknown) =>
-  leaves(issuesOf({ ...base, select: [select] })).map((l) => l.path);
+  issuesOf({ ...base, select: [select] }).map((i) => i.path);
 
 /** `{ abs: { abs: … "a" } }` with `levels` operation objects. */
 const absChain = (levels: number): unknown =>
@@ -318,7 +298,7 @@ describe("calculations", () => {
   });
 
   it.each([
-    ["a calc without as", { calc: { add: ["a", "b"] } }, ["select", 0]],
+    ["a calc without as", { calc: { add: ["a", "b"] } }, ["select", 0, "as"]],
     [
       "an aggregate over an expression without as",
       { sum: { mul: ["a", "b"] } },
@@ -433,6 +413,7 @@ describe("calculations", () => {
   it("names calc beside the existing forms in a select item's error", () => {
     const issues = issuesOf({ ...base, select: [{ nope: 1 }] });
     expect(issues[0]?.message).toContain("{ calc: expression, as }");
+    expect(issues[0]?.message.length).toBeLessThanOrEqual(256);
   });
 
   it("exports the limits", async () => {

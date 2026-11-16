@@ -235,35 +235,54 @@ const needsAs = (key: string) => (item: object, ctx: z.RefinementCtx) => {
   }
 };
 
-const selectItemSchema = z.union(
-  [
-    pathSchema,
-    z.strictObject({ count: pathSchema, as: aliasSchema.optional() }),
-    z.strictObject({ countDistinct: pathSchema, as: aliasSchema.optional() }),
-    z
-      .strictObject({ sum: aggregateArgSchema, as: aliasSchema.optional() })
-      .superRefine(needsAs("sum")),
-    z
-      .strictObject({ avg: aggregateArgSchema, as: aliasSchema.optional() })
-      .superRefine(needsAs("avg")),
-    z
-      .strictObject({ min: aggregateArgSchema, as: aliasSchema.optional() })
-      .superRefine(needsAs("min")),
-    z
-      .strictObject({ max: aggregateArgSchema, as: aliasSchema.optional() })
-      .superRefine(needsAs("max")),
-    z.strictObject({
-      bucket: z.enum(BUCKET_UNITS),
-      column: pathSchema,
-      as: aliasSchema.optional(),
-    }),
-    z.strictObject({ calc: calcSchema, as: aliasSchema }),
-  ],
-  {
-    error:
-      'A select item is a column path, or one of { count: path | "*" }, { countDistinct }, { sum }, { avg }, { min }, { max } (these three over a path or an expression), { bucket, column } or { calc: expression, as }, each with an optional "as" except calc, and sum, avg, min and max over an expression',
-  }
-);
+export type SelectItem =
+  | string
+  | { count: string; as?: string }
+  | { countDistinct: string; as?: string }
+  | { sum: CalcExpr; as?: string }
+  | { avg: CalcExpr; as?: string }
+  | { min: CalcExpr; as?: string }
+  | { max: CalcExpr; as?: string }
+  | { bucket: (typeof BUCKET_UNITS)[number]; column: string; as?: string }
+  | { calc: CalcExpr; as: string };
+
+const expressionAggregate = (key: "sum" | "avg" | "min" | "max") =>
+  z
+    .strictObject({ [key]: aggregateArgSchema, as: aliasSchema.optional() })
+    .superRefine(needsAs(key));
+
+/** The form a select item's object is checked as, by the key that names it. */
+const selectForms: Record<string, z.ZodType> = {
+  count: z.strictObject({ count: pathSchema, as: aliasSchema.optional() }),
+  countDistinct: z.strictObject({
+    countDistinct: pathSchema,
+    as: aliasSchema.optional(),
+  }),
+  sum: expressionAggregate("sum"),
+  avg: expressionAggregate("avg"),
+  min: expressionAggregate("min"),
+  max: expressionAggregate("max"),
+  bucket: z.strictObject({
+    bucket: z.enum(BUCKET_UNITS),
+    column: pathSchema,
+    as: aliasSchema.optional(),
+  }),
+  calc: z.strictObject({ calc: calcSchema, as: aliasSchema }),
+};
+
+const SELECT_ITEM_ERROR =
+  'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column } or { calc: expression, as }; "as" is optional except on calc';
+
+/** Dispatched by key rather than a union, so an issue keeps its exact path. */
+const selectItemSchema = dispatching<SelectItem>((value) => {
+  if (typeof value === "string") return pathSchema.safeParse(value);
+  const form = isPlainObject(value)
+    ? Object.keys(value).find((k) => k in selectForms)
+    : undefined;
+  return form
+    ? selectForms[form]!.safeParse(value)
+    : z.never({ error: SELECT_ITEM_ERROR }).safeParse(value);
+}, SELECT_ITEM_ERROR);
 
 /** Operation and aggregate objects in one expression. */
 const countNodes = (expr: unknown): number => {
@@ -458,7 +477,6 @@ export const sqlQuerySchema = z
   });
 
 export type SqlQuery = z.infer<typeof sqlQuerySchema>;
-export type SelectItem = SqlQuery["select"][number];
 export type JoinItem = NonNullable<SqlQuery["join"]>[number];
 
 export const sqlLanguage: QueryLanguage<SqlQuery, SqlPlan> = {
