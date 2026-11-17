@@ -363,18 +363,22 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
             }}
           />
         </div>
-        {refreshSeconds !== null && (
+        {refreshSeconds !== null ? (
           <span className="z-dashboard-live">
-            <Badge size="sm" variant="secondary">
+            <Badge size="sm" variant="success">
               Live · every {intervalLabel(refreshSeconds)}
             </Badge>
           </span>
+        ) : (
+          // Manual refresh only while auto-refresh is off.
+          <span className="z-dashboard-refresh-all">
+            <IconAction
+              icon={faArrowsRotate}
+              label="Refresh all"
+              onClick={() => void run({ timeRange: chosen })}
+            />
+          </span>
         )}
-        <IconAction
-          icon={faArrowsRotate}
-          label="Refresh all"
-          onClick={() => void run({ timeRange: chosen })}
-        />
       </div>
       <ErrorNotice error={save.error} />
       {runner.error && runner.error.code !== "cancelled" && (
@@ -397,7 +401,11 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
               panel={panel}
               run={runner.panels[panel.id]}
               now={now}
-              onRefresh={() => refreshPanel(panel.id)}
+              onRefresh={
+                refreshSeconds === null
+                  ? () => refreshPanel(panel.id)
+                  : undefined
+              }
               actions={panelActions(panel)}
             />
           )}

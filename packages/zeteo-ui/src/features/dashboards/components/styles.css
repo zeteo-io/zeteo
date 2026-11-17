@@ -73,8 +73,19 @@
   width: 10rem;
 }
 
-.z-dashboard-live {
-  align-self: center;
+/* The Live badge and the Refresh all button sit in a box as tall as the
+   pickers' small inputs (39px), so they line up with them, not with their
+   labels. */
+.z-dashboard-live,
+.z-dashboard-refresh-all {
+  display: flex;
+  align-items: center;
+  height: 39px;
+}
+
+.z-dashboard-refresh-all .k-button {
+  height: 39px;
+  width: 39px;
 }
 
 .z-dashboard-grid {

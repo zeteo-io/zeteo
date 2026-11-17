@@ -102,6 +102,27 @@ describe("DashboardView auto-refresh", () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
+  it("offers the manual refresh buttons only while auto-refresh is off", async () => {
+    renderView();
+    await screen.findByTestId("chart");
+    expect(
+      screen.getByRole("button", { name: "Refresh all" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeInTheDocument();
+  });
+
+  it("hides the manual refresh buttons while live", async () => {
+    current = makeDashboard({ refresh_seconds: 300 });
+    renderView();
+    await screen.findByTestId("chart");
+    expect(
+      screen.queryByRole("button", { name: "Refresh all" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Refresh" })
+    ).not.toBeInTheDocument();
+  });
+
   it("prefers the viewer's remembered choice", async () => {
     current = makeDashboard({ refresh_seconds: 300 });
     window.localStorage.setItem(KEY, "900");
