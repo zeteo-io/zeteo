@@ -14,6 +14,8 @@ export interface SavedQuery {
   shared_at?: string;
   last_run_at: string | null;
   you_last_ran_at: string | null;
+  /** Direct and group shares, on the admin list; absent until the server sends it. */
+  share_count?: number;
   source?: { id: string; slug: string };
   query?: unknown;
 }

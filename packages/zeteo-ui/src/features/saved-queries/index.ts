@@ -2,6 +2,8 @@ export { useMySavedQueries } from "./api/useMySavedQueries";
 export { useSharedSavedQueries } from "./api/useSharedSavedQueries";
 export { useCreateSavedQuery } from "./api/useCreateSavedQuery";
 export { useUpdateSavedQuery } from "./api/useUpdateSavedQuery";
+export { SavedQueriesPage } from "./components/SavedQueriesPage";
+export { useAllSavedQueries } from "./api/useAllSavedQueries";
 export { useDeleteSavedQuery } from "./api/useDeleteSavedQuery";
 export { useCopySavedQuery } from "./api/useCopySavedQuery";
 export { TransferDialog } from "./components/TransferDialog";

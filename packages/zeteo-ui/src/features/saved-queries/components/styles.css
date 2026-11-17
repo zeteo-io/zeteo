@@ -48,3 +48,9 @@
 .z-share-row .k-button {
   margin-left: auto;
 }
+
+.z-sq-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}

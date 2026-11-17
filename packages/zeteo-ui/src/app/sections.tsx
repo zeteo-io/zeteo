@@ -11,6 +11,11 @@ export const SECTIONS: Section[] = [
   { path: "/grants", label: "Grants", permission: "zeteo.grants.read" },
   { path: "/limits", label: "Limits", permission: "zeteo.grants.read" },
   { path: "/runs", label: "Runs", permission: "zeteo.runs.read" },
+  {
+    path: "/saved-queries",
+    label: "Saved queries",
+    permission: "zeteo.saved_queries.read",
+  },
   // Last, so admins still land on their first admin section and others here.
   { path: "/my", label: "My Zeteo", permission: "zeteo.data.read" },
 ];
