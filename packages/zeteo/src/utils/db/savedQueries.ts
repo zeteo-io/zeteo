@@ -243,15 +243,12 @@ export const stampRun = async (
   tx?: Prisma.TransactionClient
 ): Promise<void> => {
   const run = async (db: Db) => {
-    await db.savedQuery.update({
-      where: { id: savedQueryId },
-      data: { lastRunAt: at },
-    });
-    await db.savedQueryUserRun.upsert({
-      where: { savedQueryId_userId: { savedQueryId, userId } },
-      create: { savedQueryId, userId, lastRunAt: at },
-      update: { lastRunAt: at },
-    });
+    // Raw, so `updated_at` (when it was last edited) stays as it is, and a
+    // saved query deleted meanwhile is skipped, not an error.
+    await db.$executeRaw`UPDATE "zeteo"."saved_queries" SET last_run_at = ${at} WHERE id = ${savedQueryId}::uuid`;
+    await db.$executeRaw`INSERT INTO "zeteo"."saved_query_user_runs" (saved_query_id, user_id, last_run_at)
+      SELECT id, ${userId}::uuid, ${at} FROM "zeteo"."saved_queries" WHERE id = ${savedQueryId}::uuid
+      ON CONFLICT (saved_query_id, user_id) DO UPDATE SET last_run_at = EXCLUDED.last_run_at`;
   };
   if (tx) await run(tx);
   else await prisma.$transaction((t) => run(t));

@@ -161,6 +161,24 @@ describe("saved queries repository", () => {
     expect(rows[0].lastRunAt).toEqual(later);
   });
 
+  it("stampRun leaves updatedAt alone", async () => {
+    const sq = await newQuery(owner, `stamp-updated ${suffix}`);
+    await db.savedQueries.stampRun(sq.id, userId, new Date());
+    const after = await db.savedQueries.findById(sq.id);
+    expect(after?.updatedAt).toEqual(sq.updatedAt);
+    expect(after?.lastRunAt).not.toBeNull();
+  });
+
+  it("stampRun does not throw for a saved query that no longer exists", async () => {
+    const id = randomUUID();
+    await expect(
+      db.savedQueries.stampRun(id, userId, new Date())
+    ).resolves.toBeUndefined();
+    expect(
+      await prisma.savedQueryUserRun.count({ where: { savedQueryId: id } })
+    ).toBe(0);
+  });
+
   it("deleting a saved query nulls its runs' link and removes its shares and user runs", async () => {
     const sq = await newQuery(owner, `delete ${suffix}`);
     await prisma.$transaction((tx) =>
