@@ -1,7 +1,7 @@
 import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { PanelLine, PanelResult, PanelState } from "./types";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readErrorBody, readLines } from "./ndjson";
+import { INTERRUPTED, readErrorBody, readLines } from "./ndjson";
 import type { TimeRangeKey } from "./types";
 import { isAxiosError } from "axios";
 
@@ -139,11 +139,7 @@ export const useRunDashboard = (
           }));
         });
         if (!done && !controller.signal.aborted) {
-          throw {
-            status: null,
-            code: "interrupted",
-            message: "The dashboard's run stopped before it finished.",
-          } satisfies ApiError;
+          throw INTERRUPTED;
         }
       } catch (err) {
         if (controller.signal.aborted) return;

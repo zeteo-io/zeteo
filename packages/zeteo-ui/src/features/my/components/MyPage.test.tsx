@@ -125,6 +125,13 @@ describe("MyPage", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("labels a dashboard panel's run Dashboard", async () => {
+    runs = [makeRun({ ...run, entry_point: "dashboard" })];
+    at("runs");
+    const list = await screen.findByRole("list", { name: "Recent runs" });
+    expect(list.querySelector(".z-run-meta")).toHaveTextContent(/· Dashboard/);
+  });
+
   it("offers no query actions for a run whose query was not recorded", async () => {
     runs = [unrecordableRun];
     at("runs");

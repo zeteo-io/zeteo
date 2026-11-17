@@ -9,7 +9,9 @@ import {
   controlledStream,
   DASHBOARD_ID,
   makeDashboard,
+  makePanel,
   okLine,
+  PANEL_B,
   streamOf,
 } from "../testFixtures";
 
@@ -49,6 +51,19 @@ const unauthorized = () =>
     config: {} as never,
     data: { error: "unauthorized", error_description: "Sign in again." },
   });
+
+const failedWith = (status: number) =>
+  new AxiosError("Failed", "ERR_BAD_RESPONSE", undefined, undefined, {
+    status,
+    statusText: "Failed",
+    headers: {},
+    config: {} as never,
+    data: { error: "server_error", error_description: `Failed with ${status}` },
+  });
+
+const dashboardGets = () =>
+  get.mock.calls.filter(([url]) => url === `/v1/dashboards/${DASHBOARD_ID}`)
+    .length;
 
 const okRun = async () => ({ data: streamOf([okLine(current.panels[0].id)]) });
 
@@ -177,5 +192,79 @@ describe("DisplayPage", () => {
     renderDisplay();
     await screen.findByTestId("chart");
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  });
+
+  it("reloads the dashboard on each tick, so a panel added since appears", async () => {
+    renderDisplay();
+    await screen.findByTestId("chart");
+    expect(dashboardGets()).toBe(1);
+    current = makeDashboard({
+      refresh_seconds: 60,
+      panels: [makePanel(), makePanel({ id: PANEL_B, title: "Orders", y: 4 })],
+    });
+    post.mockImplementation(async () => ({
+      data: streamOf([okLine(current.panels[0].id), okLine(PANEL_B)]),
+    }));
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(dashboardGets()).toBe(2);
+    expect(await screen.findAllByTestId("chart")).toHaveLength(2);
+    expect(screen.getByRole("heading", { name: "Orders" })).toBeInTheDocument();
+  });
+
+  it("reloads the dashboard when a run's line has another state than its panel", async () => {
+    current = makeDashboard({
+      refresh_seconds: null,
+      panels: [
+        makePanel({
+          state: "needs_update",
+          message: "This panel needs updating by its owner.",
+          chart: undefined,
+        }),
+      ],
+    });
+    const fixed = makeDashboard({ refresh_seconds: null });
+    get.mockImplementationOnce(async () => ({ data: current }));
+    get.mockImplementation(async () => ({ data: fixed }));
+    renderDisplay();
+    expect(await screen.findByTestId("chart")).toBeInTheDocument();
+    expect(dashboardGets()).toBe(2);
+    await act(async () => vi.advanceTimersByTimeAsync(600_000));
+    expect(dashboardGets()).toBe(2);
+  });
+
+  it("retries a failed first load with back-off, then shows the dashboard", async () => {
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "setTimeout",
+        "clearTimeout",
+        "Date",
+      ],
+    });
+    get.mockRejectedValueOnce(failedWith(503));
+    renderDisplay();
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(dashboardGets()).toBe(1);
+    await act(async () => vi.advanceTimersByTimeAsync(5_000));
+    expect(dashboardGets()).toBe(2);
+    expect(screen.getByTestId("chart")).toBeInTheDocument();
+  });
+
+  it("does not retry a dashboard that is not found", async () => {
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "setTimeout",
+        "clearTimeout",
+        "Date",
+      ],
+    });
+    get.mockRejectedValue(failedWith(404));
+    renderDisplay();
+    await act(async () => vi.advanceTimersByTimeAsync(120_000));
+    expect(dashboardGets()).toBe(1);
+    expect(screen.getByText("Failed with 404")).toBeInTheDocument();
   });
 });

@@ -23,6 +23,7 @@ const ENTRY_LABEL: Record<MyRun["entry_point"], string> = {
   api: "API",
   mcp: "MCP",
   export: "Export",
+  dashboard: "Dashboard",
 };
 
 /** A string field of the run's query JSON, when it has one. */

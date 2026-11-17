@@ -203,6 +203,110 @@ describe("toOption", () => {
     expect(o.xAxis.type).toBe("value");
   });
 
+  it("draws a line over a time x in order of x, whatever the rows' order", () => {
+    const r = result(
+      [
+        ["day", "timestamp"],
+        ["region", "text"],
+        ["n", "number"],
+      ],
+      [
+        ["2026-01-03T00:00:00Z", "eu", 3],
+        ["2026-01-01T00:00:00Z", "eu", 1],
+        ["2026-01-02T00:00:00Z", "us", 20],
+        ["2026-01-02T00:00:00Z", "eu", 2],
+        ["2026-01-01T00:00:00Z", "us", 10],
+      ]
+    );
+    const o = opt(
+      toOption(
+        { version: 1, type: "area", x: "day", y: ["n"], series: "region" },
+        r,
+        theme
+      )
+    );
+    expect(o.series[0].data).toEqual([
+      ["2026-01-01T00:00:00Z", 1],
+      ["2026-01-02T00:00:00Z", 2],
+      ["2026-01-03T00:00:00Z", 3],
+    ]);
+    expect(o.series[1].data).toEqual([
+      ["2026-01-01T00:00:00Z", 10],
+      ["2026-01-02T00:00:00Z", 20],
+    ]);
+  });
+
+  it("draws a line over a number x in numeric order", () => {
+    const r = result(
+      [
+        ["n", "number"],
+        ["m", "number"],
+      ],
+      [
+        [10, 1],
+        [2, 2],
+        ["9", 3],
+      ]
+    );
+    const o = opt(
+      toOption({ version: 1, type: "line", x: "n", y: ["m"] }, r, theme)
+    );
+    expect(o.series[0].data).toEqual([
+      [2, 2],
+      ["9", 3],
+      [10, 1],
+    ]);
+  });
+
+  it("orders the folded Other series by x on a time axis", () => {
+    const rows: unknown[][] = [];
+    for (let i = 0; i < 20; i++) rows.push(["2026-01-01", `s${i}`, 1]);
+    rows.push(["2026-01-03", "s20", 5]);
+    rows.push(["2026-01-01", "s21", 7]);
+    rows.push(["2026-01-02", "s22", 6]);
+    const r = result(
+      [
+        ["day", "date"],
+        ["region", "text"],
+        ["n", "number"],
+      ],
+      rows
+    );
+    const o = opt(
+      toOption(
+        { version: 1, type: "line", x: "day", y: ["n"], series: "region" },
+        r,
+        theme
+      )
+    );
+    expect(o.series[20].name).toBe("Other");
+    expect(o.series[20].data).toEqual([
+      ["2026-01-01", 7],
+      ["2026-01-02", 6],
+      ["2026-01-03", 5],
+    ]);
+  });
+
+  it("keeps a category x in the rows' order", () => {
+    const r = result(
+      [
+        ["month", "text"],
+        ["n", "number"],
+      ],
+      [
+        ["mar", 3],
+        ["jan", 1],
+      ]
+    );
+    const o = opt(
+      toOption({ version: 1, type: "line", x: "month", y: ["n"] }, r, theme)
+    );
+    expect(o.series[0].data).toEqual([
+      ["mar", 3],
+      ["jan", 1],
+    ]);
+  });
+
   it("folds series beyond the twentieth into Other, summing them", () => {
     const rows: unknown[][] = [];
     for (let i = 0; i < 23; i++) rows.push(["jan", `s${i}`, 1]);

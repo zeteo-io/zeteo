@@ -122,6 +122,21 @@ describe("useRunDashboard", () => {
     expect(result.current.panels[PANEL_A]?.staleSince).toBeDefined();
   });
 
+  it("treats a stream cut partway through a line as interrupted, keeping the last result", async () => {
+    post.mockResolvedValueOnce({ data: streamOf([okLine(PANEL_A)]) });
+    const { result } = renderHook(() => useRunDashboard(DASHBOARD_ID));
+    await act(() => result.current.run());
+    const cut = controlledStream();
+    cut.push(`{"panel_id":"${PANEL_A}","sta`);
+    cut.close();
+    post.mockResolvedValueOnce({ data: cut.stream });
+    await act(() => result.current.run());
+    expect(result.current.panels[PANEL_A]?.staleSince).toBeDefined();
+    expect(result.current.panels[PANEL_A]?.result).toEqual(makeResult());
+    expect(result.current.error?.code).toBe("interrupted");
+    expect(result.current.panels[PANEL_A]?.error?.error).toBe("interrupted");
+  });
+
   it("marks the dashboard's panels failed when its first run fails before any line", async () => {
     post.mockRejectedValueOnce({
       status: 500,

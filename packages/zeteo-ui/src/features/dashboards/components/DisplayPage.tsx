@@ -1,9 +1,10 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Centered, Spinner } from "@kosmeo-ui/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { Dashboard, DashboardTheme } from "../api/types";
 import { useRunDashboard } from "../api/useRunDashboard";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import type { PanelRun } from "../api/useRunDashboard";
 import { useDashboard } from "../api/useDashboard";
-import type { DashboardTheme } from "../api/types";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { DashboardGrid } from "./DashboardGrid";
@@ -58,6 +59,32 @@ export const DisplaySignedOut = () => {
   );
 };
 
+/**
+ * The panels whose last line disagrees with the dashboard as loaded: a state
+ * other than the panel's, or a panel the dashboard does not have yet. Empty
+ * when they agree; a key that changes when what disagrees does.
+ */
+export const disagreement = (
+  dashboard: Dashboard | undefined,
+  runs: Record<string, PanelRun>
+): string => {
+  if (!dashboard) return "";
+  const byId = new Map(dashboard.panels.map((p) => [p.id, p]));
+  return Object.entries(runs)
+    .filter(([id, run]) => {
+      if (run.state === undefined || run.loading) return false;
+      const panel = byId.get(id);
+      return (
+        !panel ||
+        panel.state !== run.state ||
+        (run.state === "ok" && panel.chart === undefined)
+      );
+    })
+    .map(([id, run]) => `${id}:${run.state}`)
+    .sort()
+    .join(",");
+};
+
 /** `/dashboards/:dashboardId/display`: the dashboard alone, refreshing itself. */
 export const DisplayPage = () => {
   const id = useUuidParam("dashboardId");
@@ -65,7 +92,13 @@ export const DisplayPage = () => {
 };
 
 const Display = ({ dashboardId }: { dashboardId: string }) => {
-  const { data: dashboard, error, isLoading } = useDashboard(dashboardId);
+  const {
+    data: dashboard,
+    error,
+    failureReason,
+    isLoading,
+    refetch,
+  } = useDashboard(dashboardId, { retryUntilLoaded: true });
   const panelIds = useMemo(
     () => dashboard?.panels.map((p) => p.id) ?? [],
     [dashboard]
@@ -84,11 +117,15 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
     if (unauthorized) setSignedOut(true);
   }, [unauthorized]);
 
-  // A tick never cuts a run still going: a slow run finishes first.
-  const running = useRef(false);
-  useEffect(() => {
-    running.current = runner.running;
-  }, [runner.running]);
+  // A tick never cuts a run still going: a slow run finishes first. Held in
+  // a ref from the moment the run starts, not from its next render.
+  const running = useRef<Promise<void> | null>(null);
+  const runUnlessRunning = useCallback(() => {
+    if (running.current) return;
+    running.current = run().finally(() => {
+      running.current = null;
+    });
+  }, [run]);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -97,31 +134,46 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
 
   // The dashboard's own range: a display has no picker.
   useEffect(() => {
-    if (loaded) void run();
-  }, [loaded, run]);
+    if (loaded) runUnlessRunning();
+  }, [loaded, runUnlessRunning]);
 
+  // Each tick reloads the dashboard too, so the owner's changes appear.
   useEffect(() => {
     if (!loaded || refreshSeconds === null || signedOut) return;
     const timer = setInterval(() => {
-      if (!running.current) void run();
+      if (running.current) return;
+      void refetch();
+      runUnlessRunning();
     }, refreshSeconds * 1000);
     return () => clearInterval(timer);
-  }, [loaded, refreshSeconds, signedOut, run]);
+  }, [loaded, refreshSeconds, signedOut, runUnlessRunning, refetch]);
+
+  // A line that disagrees with the dashboard (a panel fixed or added since it
+  // loaded) reloads it, once for each new disagreement.
+  const differs = disagreement(dashboard, runner.panels);
+  const reloadedFor = useRef("");
+  useEffect(() => {
+    if (differs === reloadedFor.current) return;
+    reloadedFor.current = differs;
+    if (differs !== "" && !signedOut) void refetch();
+  }, [differs, signedOut, refetch]);
 
   if (signedOut || unauthorized) {
     return <DisplaySignedOut />;
   }
-  if (isLoading) {
-    return (
-      <Centered>
-        <Spinner size="lg" />
-      </Centered>
-    );
-  }
   if (!dashboard) {
+    // While a failed load is retried its reason stays up; the screen recovers on its own.
+    const shown = error ?? failureReason;
+    if (isLoading && !shown) {
+      return (
+        <Centered>
+          <Spinner size="lg" />
+        </Centered>
+      );
+    }
     return (
       <div className="z-display">
-        <ErrorNotice error={error} />
+        <ErrorNotice error={shown} />
       </div>
     );
   }

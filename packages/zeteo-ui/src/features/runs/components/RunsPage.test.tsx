@@ -156,6 +156,27 @@ describe("RunsPage", () => {
     );
   });
 
+  it("labels a dashboard panel's run Dashboard", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === "/v1/runs") {
+        return {
+          data: {
+            data: [makeRun({ entry_point: "dashboard" })],
+            next_cursor: null,
+          },
+        };
+      }
+      if (url === "/v1/sources") {
+        return { data: { data: [makeSource()], next_cursor: null } };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    renderWithProviders(<RunsPage />);
+    await screen.findAllByText("Ada Lovelace");
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Dashboard");
+  });
+
   it("shows the raw source id without zeteo.sources.read", async () => {
     held.permissions = ["zeteo.runs.read"];
     renderWithProviders(<RunsPage />);

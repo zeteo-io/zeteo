@@ -1,6 +1,17 @@
+import type { ApiError } from "@/lib/api";
+
+/** A run's stream that ended early: before its done line, or partway through a line. */
+export const INTERRUPTED: ApiError = {
+  status: null,
+  code: "interrupted",
+  message: "The dashboard's run stopped before it finished.",
+};
+
 /**
  * Reads an NDJSON body line by line, calling `onLine` with each parsed line
- * as soon as its newline arrives (a line may be split across chunks).
+ * as soon as its newline arrives (a line may be split across chunks). A last
+ * line without its newline that is not whole JSON is a cut connection:
+ * `INTERRUPTED` is thrown, never the parser's error.
  */
 export const readLines = async (
   body: ReadableStream<Uint8Array>,
@@ -24,7 +35,14 @@ export const readLines = async (
       end = buffer.indexOf("\n");
     }
   }
-  flush(buffer + decoder.decode());
+  const rest = buffer + decoder.decode();
+  let last: unknown;
+  try {
+    last = rest.trim() === "" ? undefined : JSON.parse(rest.trim());
+  } catch {
+    throw INTERRUPTED;
+  }
+  if (last !== undefined) onLine(last);
 };
 
 /** The body of a failed streamed request, read back to JSON so its error can be told. */

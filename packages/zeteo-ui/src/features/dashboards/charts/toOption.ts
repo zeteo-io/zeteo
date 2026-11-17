@@ -33,12 +33,48 @@ const toNumber = (v: unknown): number | null => {
 
 type Point = [unknown, number | null];
 
-/** One series per (series value, y column); the 21st onward folded into one "Other". */
+type XAxisType = "time" | "value" | "category";
+
+/** The x axis a column type is drawn on. */
+const xAxisTypeOf = (type: string): XAxisType =>
+  type === "date" || type === "timestamp"
+    ? "time"
+    : type === "number"
+      ? "value"
+      : "category";
+
+/** An x value's place on a time or value axis; null when it has none (drawn last). */
+const xPosition = (v: unknown, axis: XAxisType): number | null => {
+  if (axis !== "time") return toNumber(v);
+  if (typeof v !== "string" && typeof v !== "number") return null;
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? null : t;
+};
+
+/**
+ * The points in order of x on a time or value axis, where a line joins them
+ * in the order given; a category axis keeps the rows' order. Stable.
+ */
+const inOrder = (points: Point[], axis: XAxisType): Point[] => {
+  if (axis === "category") return points;
+  return points
+    .map((p) => ({ p, at: xPosition(p[0], axis) }))
+    .sort((a, b) =>
+      a.at === null ? (b.at === null ? 0 : 1) : b.at === null ? -1 : a.at - b.at
+    )
+    .map(({ p }) => p);
+};
+
+/**
+ * One series per (series value, y column); the 21st onward folded into one
+ * "Other". Each series' points in order of x on a time or value axis.
+ */
 function buildSeries(
   chart: Extract<ChartSettings, { x: string }>,
   result: RunResult
 ): { name: string; points: Point[] }[] {
   const xi = indexOfColumn(result, chart.x);
+  const axis = xAxisTypeOf(result.columns[xi].type);
   const yis = chart.y.map((y) => indexOfColumn(result, y));
   const si = chart.series ? indexOfColumn(result, chart.series) : -1;
 
@@ -62,7 +98,10 @@ function buildSeries(
     chart.y.forEach((y, j) => {
       out.push({
         name: name(key, y),
-        points: groups.get(key)!.map((r) => [r[xi], toNumber(r[yis[j]])]),
+        points: inOrder(
+          groups.get(key)!.map((r) => [r[xi], toNumber(r[yis[j]])]),
+          axis
+        ),
       });
     });
   });
@@ -76,7 +115,7 @@ function buildSeries(
           sums.set(r[xi], (sums.get(r[xi]) ?? 0) + (toNumber(r[yis[j]]) ?? 0));
       out.push({
         name: chart.y.length > 1 ? `${OTHER} · ${y}` : OTHER,
-        points: [...sums.entries()] as Point[],
+        points: inOrder([...sums.entries()] as Point[], axis),
       });
     });
   }
@@ -142,13 +181,7 @@ export function toOption(
   }
 
   const xi = indexOfColumn(result, chart.x);
-  const xType = result.columns[xi].type;
-  const catAxisType =
-    xType === "date" || xType === "timestamp"
-      ? "time"
-      : xType === "number"
-        ? "value"
-        : "category";
+  const catAxisType = xAxisTypeOf(result.columns[xi].type);
   const horizontal = chart.type === "bar" && chart.horizontal === true;
   const stack =
     (chart.type === "area" || chart.type === "bar") && chart.stacked

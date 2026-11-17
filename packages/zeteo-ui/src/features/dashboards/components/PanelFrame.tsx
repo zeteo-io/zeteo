@@ -121,6 +121,11 @@ export const PanelFrame = ({
           </>
         ) : run?.error ? (
           <p className="z-panel-message">{run.error.error_description}</p>
+        ) : result ? (
+          // A run newer than the dashboard as loaded: it is being reloaded.
+          <p className="z-panel-message">
+            This panel changed; reloading the dashboard.
+          </p>
         ) : (
           <Spinner size="sm" />
         )}
