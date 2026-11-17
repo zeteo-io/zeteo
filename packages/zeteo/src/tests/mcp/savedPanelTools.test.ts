@@ -52,6 +52,16 @@ describe("MCP saved panel tools", () => {
     await removeSources([source.id]);
   });
 
+  it("tells the model that preview_panel reads at most 100 rows, unlike the dashboard", async () => {
+    const { tools } = await session.client.listTools();
+    const preview = tools.find((t) => t.name === "preview_panel")!;
+    expect(preview.description).toContain("reads at most 100 rows");
+    expect(preview.description).toContain(
+      "That is the preview's limit, not the saved query's or the dashboard's"
+    );
+    expect(preview.description).toContain("up to 1,000 rows");
+  });
+
   it("creates, lists, reads, updates and deletes a saved panel, with no owner id", async () => {
     const query = await savedQuery();
     const name = uniqueName("sp");
