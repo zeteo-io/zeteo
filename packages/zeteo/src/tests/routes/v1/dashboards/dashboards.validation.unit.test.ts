@@ -145,3 +145,27 @@ describe("UpdatePanelSchema", () => {
     expect(UpdatePanelSchema.safeParse({ kind: "own" }).success).toBe(false);
   });
 });
+
+describe("UpdateDashboardSchema panels by id", () => {
+  const place = { x: 0, y: 0, w: 6, h: 2 };
+  const update = (panels: unknown[]) =>
+    UpdateDashboardSchema.safeParse({ panels });
+
+  it("takes an existing panel by id with its place, and new panels beside it", () => {
+    expect(update([{ id: ID, ...place, title: null }]).success).toBe(true);
+    expect(
+      update([
+        { id: ID, ...place },
+        { kind: "own", saved_query_id: ID, chart: CHART },
+      ]).success
+    ).toBe(true);
+  });
+
+  it.each([
+    ["no place", { id: ID }],
+    ["x + w over 12", { id: ID, x: 8, y: 0, w: 5, h: 2 }],
+    ["an unknown key", { id: ID, ...place, kind: "own" }],
+  ])("refuses an existing panel with %s", (_, entry) => {
+    expect(update([entry]).success).toBe(false);
+  });
+});

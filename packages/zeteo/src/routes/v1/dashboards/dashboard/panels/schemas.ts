@@ -1,3 +1,4 @@
+import type { PanelReplacement } from "../../../../../dashboards/service.js";
 import type { PanelInput } from "../../../../../dashboards/service.js";
 import { GRID_COLUMNS } from "../../../../../dashboards/layout.js";
 import { chartSchema } from "../../../../../dashboards/chart.js";
@@ -82,3 +83,35 @@ export const PanelInputSchema = z
         }
       : { kind: "linked", savedPanelId: p.saved_panel_id, title, x, y, w, h };
   });
+
+/** A panel of a replacement list that keeps its row: its id and place, and optionally a new title, saved query, chart or time column. */
+const existingPanel = z
+  .strictObject({
+    id: IdSchema,
+    x: PlaceFields.x.unwrap(),
+    y: PlaceFields.y.unwrap(),
+    w: PlaceFields.w.unwrap(),
+    h: PlaceFields.h.unwrap(),
+    title: PanelTitleSchema.nullable().optional(),
+    saved_query_id: IdSchema.optional(),
+    chart: chartSchema.optional(),
+    time_column: TimeColumnSchema.nullable().optional(),
+  })
+  .superRefine(placeIssues)
+  .transform((p): PanelReplacement => ({
+    id: p.id,
+    x: p.x,
+    y: p.y,
+    w: p.w,
+    h: p.h,
+    title: p.title,
+    savedQueryId: p.saved_query_id,
+    chart: p.chart,
+    timeColumn: p.time_column,
+  }));
+
+/** A replacement list's entry: an existing panel by `id`, else a new panel. */
+export const ReplacementPanelSchema = z.union([
+  existingPanel,
+  PanelInputSchema,
+]);

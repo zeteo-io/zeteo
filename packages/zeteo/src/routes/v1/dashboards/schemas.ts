@@ -1,9 +1,13 @@
 import { TIME_RANGE_KEYS } from "../../../dashboards/timeRange.js";
-import { PanelInputSchema } from "./dashboard/panels/schemas.js";
+import { MAX_PANELS } from "../../../dashboards/layout.js";
 import { IdSchema } from "../../../utils/idSchema.js";
 import { noNul } from "../../../utils/text.js";
 import env from "../../../env.js";
 import { z } from "zod";
+import {
+  PanelInputSchema,
+  ReplacementPanelSchema,
+} from "./dashboard/panels/schemas.js";
 
 /** Trimmed, 1 to 100 characters; unique per owner whatever the case (the database holds that). */
 export const DashboardNameSchema = noNul(z.string().trim().min(1).max(100));
@@ -21,12 +25,14 @@ export const RefreshSecondsSchema = z
 
 export const ThemeSchema = z.enum(["light", "dark", "auto"]);
 
-/** The most panels a dashboard holds. */
-export const MAX_PANELS = 50;
-
 export const PanelsSchema = z.array(PanelInputSchema).max(MAX_PANELS);
 
 export const DashboardParamsSchema = z.object({ dashboardId: IdSchema });
+
+/** `PATCH`'s list: each panel by id, or new. */
+export const ReplacementPanelsSchema = z
+  .array(ReplacementPanelSchema)
+  .max(MAX_PANELS);
 
 export const CreateDashboardSchema = z.strictObject({
   name: DashboardNameSchema,

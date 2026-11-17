@@ -3,6 +3,7 @@
 import { removeDashboardsOf } from "../../../../support/panelDecisions.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeSources } from "../../../../support/sources.js";
+import { prisma } from "../../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../../support/tokens.js";
 import { ENGINES } from "../../../../support/engines.js";
 import {
@@ -188,6 +189,97 @@ describe("/v1/dashboards/:dashboardId", () => {
     const still = await dashboardsCall("GET", `/${id}`, owner.token);
     expect(still.body.name).not.toBe("Not applied");
     expect(still.body.panels).toHaveLength(1);
+  });
+
+  it("saves a layout that holds a not available panel, keeping every panel's id", async () => {
+    const owner = await user();
+    const other = await user();
+    const mine = await savedQuery(owner.token);
+    const theirs = await savedQuery(other.token);
+    await prisma.savedQuery.update({
+      where: { id: theirs },
+      data: { availableForDashboards: true, availableOrganizationId: null },
+    });
+    const id = await dashboardOf(owner.token, {
+      panels: [ownPanel(mine), ownPanel(theirs, { title: "Borrowed" })],
+    });
+    await prisma.savedQuery.update({
+      where: { id: theirs },
+      data: { availableForDashboards: false },
+    });
+    const before = (await dashboardsCall("GET", `/${id}`, owner.token)).body
+      .panels;
+    expect(before.map((p: { state: string }) => p.state)).toEqual([
+      "ok",
+      "not_available",
+    ]);
+    const res = await dashboardsCall("PATCH", `/${id}`, owner.token, {
+      panels: [
+        { id: before[1].id, x: 0, y: 0, w: 12, h: 2 },
+        { id: before[0].id, x: 0, y: 2, w: 6, h: 3, title: "Moved" },
+      ],
+    });
+    expect(res.status).toBe(200);
+    const after = res.body.panels;
+    expect(after.map((p: { id: string }) => p.id)).toEqual([
+      before[1].id,
+      before[0].id,
+    ]);
+    expect(after[0]).toMatchObject({
+      state: "not_available",
+      title: "Borrowed",
+      w: 12,
+    });
+    expect(after[1]).toMatchObject({ state: "ok", title: "Moved", y: 2 });
+    // The stored settings survived: turning the toggle back on restores it.
+    await prisma.savedQuery.update({
+      where: { id: theirs },
+      data: { availableForDashboards: true },
+    });
+    const back = await dashboardsCall("GET", `/${id}`, owner.token);
+    expect(back.body.panels[0]).toMatchObject({ state: "ok", chart: BAR });
+  });
+
+  it("drops the panels a layout leaves out, adds new ones, and refuses an unknown or repeated id", async () => {
+    const owner = await user();
+    const sq = await savedQuery(owner.token);
+    const id = await dashboardOf(owner.token, {
+      panels: [ownPanel(sq), ownPanel(sq)],
+    });
+    const [a, b] = (await dashboardsCall("GET", `/${id}`, owner.token)).body
+      .panels;
+    const res = await dashboardsCall("PATCH", `/${id}`, owner.token, {
+      panels: [
+        { id: a.id, x: 0, y: 0, w: 6, h: 4 },
+        ownPanel(sq, { chart: TABLE }),
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.panels).toHaveLength(2);
+    expect(res.body.panels[0].id).toBe(a.id);
+    expect(res.body.panels.map((p: { id: string }) => p.id)).not.toContain(
+      b.id
+    );
+    const place = { x: 0, y: 0, w: 6, h: 4 };
+    for (const panels of [
+      [{ id: "00000000-0000-4000-8000-000000000000", ...place }],
+      [
+        { id: a.id, ...place },
+        { id: a.id, ...place },
+      ],
+      [{ id: b.id, ...place }],
+    ]) {
+      const bad = await dashboardsCall("PATCH", `/${id}`, owner.token, {
+        panels,
+      });
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toBe("invalid_panel");
+      expect(bad.body.problems).toEqual([
+        { setting: "panels", problem: "unknown_panel" },
+      ]);
+    }
+    const still = await dashboardsCall("GET", `/${id}`, owner.token);
+    expect(still.body.panels).toHaveLength(2);
   });
 
   it("deletes for the owner and a holder of zeteo.dashboards.write; a recipient gets a 404", async () => {

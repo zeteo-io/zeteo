@@ -1,7 +1,7 @@
 import { DEFAULT_SIZES, type ChartSettings, type ChartType } from "./chart.js";
+import { GRID_COLUMNS, MAX_PANELS, placePanel, type Cell } from "./layout.js";
 import { TIME_RANGE_KEYS, type TimeRangeKey } from "./timeRange.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
-import { GRID_COLUMNS, placePanel, type Cell } from "./layout.js";
 import { findForViewer } from "../saved-queries/service.js";
 import { decideNewPanel, decidePanels } from "./decide.js";
 import { hasPermission } from "../utils/permissions.js";
@@ -15,6 +15,7 @@ import { reaches } from "./reach.js";
 import env from "../env.js";
 import type {
   Dashboard,
+  DashboardPanel,
   DashboardTheme,
   SavedPanel,
   SavedQuery,
@@ -231,6 +232,23 @@ export type PanelInput =
       title?: string;
     } & Place)
   | ({ kind: "linked"; savedPanelId: string; title?: string } & Place);
+
+/** A panel of a replacement list that keeps its row: its place and title, and optionally new settings (checked as `updatePanel` checks them). */
+export interface ExistingPanelInput {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title?: string | null;
+  savedQueryId?: string;
+  chart?: ChartSettings;
+  timeColumn?: string | null;
+}
+
+export type PanelReplacement = PanelInput | ExistingPanelInput;
+
+const isExisting = (p: PanelReplacement): p is ExistingPanelInput => "id" in p;
 
 /** A panel checked against the caller's own objects, not yet placed. */
 interface Checked {
@@ -490,7 +508,7 @@ export interface UpdateDashboardInput {
   time_range?: TimeRangeKey | null;
   refresh_seconds?: number | null;
   theme?: DashboardTheme;
-  panels?: PanelInput[];
+  panels?: PanelReplacement[];
 }
 
 const CHANGEABLE = [
@@ -502,6 +520,115 @@ const CHANGEABLE = [
   "panels",
 ] as const;
 
+interface Replacement {
+  kept: Array<{
+    id: string;
+    cell: Cell;
+    changes: Prisma.DashboardPanelUpdateInput;
+  }>;
+  added: Checked[];
+}
+
+const TOO_MANY = [{ setting: "panels", problem: "too_many" }];
+
+/**
+ * A replacement list checked: an entry with an `id` keeps that panel's row
+ * (an id not on this dashboard, or named twice, is `invalid_panel`), changing
+ * only what it gives, and is asked nothing unless it gives a new saved query,
+ * chart or time column; the others are new panels, checked as a new panel is.
+ */
+const checkReplacement = async (
+  caller: Caller,
+  access: CallerAccess,
+  timeRange: TimeRangeKey | null,
+  current: readonly DashboardPanel[],
+  entries: readonly PanelReplacement[]
+): Promise<Replacement> => {
+  const byId = new Map(current.map((p) => [p.id, p]));
+  const seen = new Set<string>();
+  const kept: Replacement["kept"] = [];
+  const fresh: PanelInput[] = [];
+  for (const entry of entries) {
+    if (!isExisting(entry)) {
+      fresh.push(entry);
+      continue;
+    }
+    const panel = byId.get(entry.id);
+    if (!panel || seen.has(entry.id)) {
+      throw new InvalidPanelError(
+        "A panel is not on this dashboard, or is named twice",
+        [{ setting: "panels", problem: "unknown_panel" }]
+      );
+    }
+    seen.add(entry.id);
+    const settings =
+      entry.savedQueryId !== undefined ||
+      entry.chart !== undefined ||
+      entry.timeColumn !== undefined;
+    if (settings) {
+      if (panel.kind === "linked") {
+        throw new BadRequestError("invalid_panel", NO_OWN_SETTINGS);
+      }
+      await checkOwnPanel(caller, access, timeRange, {
+        savedQueryId: entry.savedQueryId ?? panel.savedQueryId,
+        chart: entry.chart ?? panel.chart,
+        timeColumn:
+          entry.timeColumn !== undefined ? entry.timeColumn : panel.timeColumn,
+      });
+    }
+    kept.push({
+      id: entry.id,
+      cell: { x: entry.x, y: entry.y, w: entry.w, h: entry.h },
+      changes: {
+        x: entry.x,
+        y: entry.y,
+        w: entry.w,
+        h: entry.h,
+        ...(entry.title !== undefined && { title: entry.title }),
+        ...(entry.savedQueryId !== undefined && {
+          savedQuery: { connect: { id: entry.savedQueryId } },
+        }),
+        ...(entry.chart !== undefined && { chart: asJson(entry.chart) }),
+        ...(entry.timeColumn !== undefined && {
+          timeColumn: entry.timeColumn,
+        }),
+      },
+    });
+  }
+  return {
+    kept,
+    added: await checkPanels(caller, access, timeRange, fresh),
+  };
+};
+
+/** Under the dashboard's lock: drops the panels left out, updates the kept ones in place (ids and stored settings survive), adds the new. */
+const applyReplacement = async (
+  tx: Prisma.TransactionClient,
+  dashboardId: string,
+  replacement: Replacement
+): Promise<void> => {
+  const current = await db.dashboards.findWithPanels(dashboardId, tx);
+  const have = new Set(current?.panels.map((p) => p.id));
+  if (replacement.kept.some((k) => !have.has(k.id))) {
+    throw new ConflictError(
+      "The panels changed while saving; load them again and retry"
+    );
+  }
+  const keep = new Set(replacement.kept.map((k) => k.id));
+  for (const p of current?.panels ?? []) {
+    if (!keep.has(p.id)) await db.dashboards.removePanel(p.id, tx);
+  }
+  for (const k of replacement.kept) {
+    await tx.dashboardPanel.update({ where: { id: k.id }, data: k.changes });
+  }
+  const laid = layOut(
+    replacement.kept.map((k) => k.cell),
+    replacement.added
+  );
+  for (const panel of laid)
+    await db.dashboards.addPanel(dashboardId, panel, tx);
+};
+
 /** Changes the caller's own dashboard; `panels` replaces the whole list, in the same transaction. */
 export const updateDashboard = async (
   caller: Caller,
@@ -509,13 +636,16 @@ export const updateDashboard = async (
   patch: UpdateDashboardInput
 ) => {
   const found = await findOwned(caller, id);
-  const checked = patch.panels
-    ? await checkPanels(
+  const range =
+    patch.time_range !== undefined
+      ? patch.time_range
+      : timeRangeOf(found.timeRange);
+  const replacement = patch.panels
+    ? await checkReplacement(
         caller,
         await loadAccess(caller),
-        patch.time_range !== undefined
-          ? patch.time_range
-          : timeRangeOf(found.timeRange),
+        range,
+        (await db.dashboards.findWithPanels(id))?.panels ?? [],
         patch.panels
       )
     : undefined;
@@ -545,10 +675,8 @@ export const updateDashboard = async (
       nameTaken(),
       "conflict"
     );
-    if (checked) {
-      await orConflict(() =>
-        db.dashboards.replacePanels(tx, id, layOut([], checked))
-      );
+    if (replacement) {
+      await orConflict(() => applyReplacement(tx, id, replacement));
     }
     audit({
       action: AUDIT_EVENTS.dashboardUpdated,
@@ -560,7 +688,9 @@ export const updateDashboard = async (
         ...(patch.name !== undefined &&
           patch.name !== current.name && { previous_name: current.name }),
         changed: CHANGEABLE.filter((field) => patch[field] !== undefined),
-        ...(checked && { panel_count: checked.length }),
+        ...(replacement && {
+          panel_count: replacement.kept.length + replacement.added.length,
+        }),
       },
     });
   });
@@ -688,6 +818,12 @@ export const addPanel = async (
     await lockRow(tx, dashboardId);
     const current = await db.dashboards.findWithPanels(dashboardId, tx);
     if (!current || current.ownerId !== caller.userId) throw notFound();
+    if (current.panels.length >= MAX_PANELS) {
+      throw new InvalidPanelError(
+        `A dashboard holds at most ${MAX_PANELS} panels`,
+        TOO_MANY
+      );
+    }
     const [laid] = layOut(current.panels, [checked!]);
     const added = await orConflict(() =>
       db.dashboards.addPanel(dashboardId, laid!, tx)

@@ -91,6 +91,20 @@ describe("POST /v1/dashboards/:dashboardId/panels", () => {
     expect(whole.body.panels).toHaveLength(4);
   });
 
+  it("refuses a panel past the limit of 50", async () => {
+    const owner = await user();
+    const sq = await savedQuery(owner.token);
+    const id = await dashboardOf(owner.token, {
+      panels: Array.from({ length: 50 }, () => ownPanel(sq)),
+    });
+    const res = await addPanel(owner.token, id, ownPanel(sq));
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_panel");
+    expect(res.body.problems).toEqual([
+      { setting: "panels", problem: "too_many" },
+    ]);
+  });
+
   it("refuses a chart naming a missing column with the problems", async () => {
     const owner = await user();
     const sq = await savedQuery(owner.token);

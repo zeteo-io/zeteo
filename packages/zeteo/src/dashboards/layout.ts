@@ -3,6 +3,9 @@
 
 export const GRID_COLUMNS = 12;
 
+/** The most panels a dashboard holds. */
+export const MAX_PANELS = 50;
+
 export interface Cell {
   x: number;
   y: number;

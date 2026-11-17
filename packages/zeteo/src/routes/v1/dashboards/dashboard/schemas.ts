@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   DashboardDescriptionSchema,
   DashboardNameSchema,
-  PanelsSchema,
+  ReplacementPanelsSchema,
   RefreshSecondsSchema,
   ThemeSchema,
   TimeRangeSchema,
@@ -17,7 +17,7 @@ export const UpdateDashboardSchema = z
     time_range: TimeRangeSchema.nullable().optional(),
     refresh_seconds: RefreshSecondsSchema.nullable().optional(),
     theme: ThemeSchema.optional(),
-    panels: PanelsSchema.optional(),
+    panels: ReplacementPanelsSchema.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message:
