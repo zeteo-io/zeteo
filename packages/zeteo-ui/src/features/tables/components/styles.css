@@ -37,6 +37,60 @@
   gap: 0.25rem;
 }
 
+/* Table details. */
+.z-back-link {
+  display: inline-block;
+  margin-bottom: 0.25rem;
+}
+
+/* Under the source's own header: one size down. */
+.z-table-header h1 {
+  font-size: var(--k-text-size-xl, 1.25rem);
+}
+
+.z-table-intro {
+  margin: 0.25rem 0 1rem;
+}
+
+.z-table-intro .z-table-description {
+  margin: 0 0 0.35rem;
+}
+
+.z-table-switch {
+  margin-bottom: 0.75rem;
+}
+
+.z-segmented-count {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
+}
+
+.z-list-toolbar-end {
+  justify-content: flex-end;
+}
+
+.z-column-type {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  white-space: nowrap;
+}
+
+.z-column-type code {
+  font-size: var(--k-text-size-sm);
+}
+
+/* Name, type and nullable stay narrow; the description takes the rest. */
+.z-columns-list th:nth-child(-n + 3),
+.z-columns-list td:nth-child(-n + 3) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.z-relations-list td:first-child {
+  white-space: nowrap;
+}
+
 .z-wrap td,
 .z-wrap th {
   overflow-wrap: anywhere;

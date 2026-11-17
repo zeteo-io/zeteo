@@ -1,9 +1,14 @@
 import { sourceTypeName } from "@/features/sources/components/sourceLabels";
-import { BorderedSection, Spinner } from "@kosmeo-ui/react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { CatalogSource } from "../api/types";
 import { useCatalog } from "../api/useCatalog";
+import { Spinner } from "@kosmeo-ui/react";
 import { useState } from "react";
+import {
+  faChevronDown,
+  faChevronRight,
+} from "@fortawesome/free-solid-svg-icons";
 
 const SourceRow = ({ source }: { source: CatalogSource }) => {
   const [open, setOpen] = useState(false);
@@ -16,16 +21,23 @@ const SourceRow = ({ source }: { source: CatalogSource }) => {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        <span className="z-sq-name">{source.name}</span>
-        <span className="z-muted">
-          {sourceTypeName(source.type as never)} · {count}{" "}
+        <FontAwesomeIcon
+          className="z-catalog-chevron"
+          icon={open ? faChevronDown : faChevronRight}
+          aria-hidden
+        />
+        <span className="z-catalog-name">{source.name}</span>
+        <span className="z-catalog-count">
+          {sourceTypeName(source.type)} · {count}{" "}
           {count === 1 ? "table" : "tables"}
         </span>
       </button>
       {open && (
         <ul className="z-catalog-tables">
           {source.tables.map((t) => (
-            <li key={`${t.schema_name ?? ""}.${t.name}`}>{t.name}</li>
+            <li key={`${t.schema_name ?? ""}.${t.name}`}>
+              <code>{t.name}</code>
+            </li>
           ))}
         </ul>
       )}
@@ -33,14 +45,14 @@ const SourceRow = ({ source }: { source: CatalogSource }) => {
   );
 };
 
-export const CatalogPanel = () => {
+export const CatalogList = () => {
   const catalog = useCatalog();
   return (
-    <BorderedSection title="What I can query" as="h2">
+    <>
       {catalog.isLoading && <Spinner size="sm" />}
       <ErrorNotice error={catalog.error} />
       {catalog.data?.length === 0 && (
-        <p className="z-muted">
+        <p className="z-note">
           You have no access to any data yet. Ask an admin to grant it.
         </p>
       )}
@@ -51,6 +63,6 @@ export const CatalogPanel = () => {
           ))}
         </ul>
       )}
-    </BorderedSection>
+    </>
   );
 };

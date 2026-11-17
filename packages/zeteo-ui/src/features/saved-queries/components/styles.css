@@ -18,7 +18,8 @@
   font-size: var(--k-text-size-sm);
 }
 
-.z-muted {
+/* A small muted paragraph: hints, empty states, notes in dialogs. */
+.z-note {
   margin: 0;
   color: var(--k-text-color-secondary);
   font-size: var(--k-text-size-sm);
@@ -47,6 +48,44 @@
 
 .z-share-row .k-button {
   margin-left: auto;
+}
+
+/* Owner and Shared with buttons, then search, Source and Reset: one row,
+   the buttons level with the inputs under their labels. */
+.z-sq-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+
+.z-sq-tablefilters {
+  flex: 1;
+  min-width: 0;
+}
+
+.z-sq-name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+  max-width: 40rem;
+}
+
+.z-sq-name > span:first-child {
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.z-sq-name .z-muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-sq-list td:nth-child(n + 2) {
+  white-space: nowrap;
 }
 
 .z-sq-more {

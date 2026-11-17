@@ -96,7 +96,7 @@ export const TransferDialog = ({
           checked={keepAccess}
           onChange={(e) => setKeepAccess(e.target.checked)}
         />
-        <p className="z-muted">
+        <p className="z-note">
           {keepAccess
             ? "It is shared with you afterwards, so you can still run it."
             : "You lose access to it unless the new owner shares it back."}

@@ -1,3 +1,4 @@
+import type { SourceType } from "@/features/sources/api/types";
 import type { Run } from "@/features/runs/api/types";
 
 /** A run in `GET /v1/me/runs`: the admin run plus the saved query it came from. */
@@ -15,7 +16,7 @@ export interface CatalogTable {
 export interface CatalogSource {
   slug: string;
   name: string;
-  type: string;
+  type: SourceType;
   tables: CatalogTable[];
 }
 

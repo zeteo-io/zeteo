@@ -119,10 +119,41 @@ describe("TablePage", () => {
     expect(screen.getByText("legacy").closest("tr")).toHaveTextContent(
       "Missing"
     );
+    // Relations are behind their own switch, with their count on it.
+    expect(screen.queryByText("customer")).not.toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /Relations\s*1/ }));
     const relation = (await screen.findByText("customer")).closest("tr")!;
     expect(relation).toHaveTextContent("public.customers");
     expect(relation).toHaveTextContent("customer_id");
     expect(relation).toHaveTextContent("declared");
+  });
+
+  it("filters the columns by name", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole("heading", { name: "public.orders" });
+    expect(screen.getByText("note")).toBeInTheDocument();
+    // The name search comes first; the type filter has its own search.
+    await user.type(screen.getAllByPlaceholderText(/search/i)[0], "custom");
+    await waitFor(() => expect(screen.queryByText("note")).toBeNull());
+    expect(screen.getByText("customer_id")).toBeInTheDocument();
+  });
+
+  it("shows the native type only where it differs", async () => {
+    const [id, ...rest] = makeTableDetail().columns;
+    live.table = makeTableDetail({
+      columns: [{ ...id, type: "number", native_type: "bigint" }, ...rest],
+    });
+    renderPage();
+    await screen.findByRole("heading", { name: "public.orders" });
+    expect(screen.getByText("id").closest("tr")).toHaveTextContent(
+      "numberbigint"
+    );
+    // note: text in both, so shown once.
+    const note = screen.getByText("note").closest("tr")!;
+    expect(note.querySelector("code")).toBeNull();
   });
 
   it("sends only the column whose description changed", async () => {

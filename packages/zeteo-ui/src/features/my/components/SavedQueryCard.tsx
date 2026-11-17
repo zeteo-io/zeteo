@@ -2,8 +2,17 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { formatRelative } from "@/utils/formatRelative";
 import { NoAccessNotice } from "./NoAccessNotice";
 import { formatDate } from "@/utils/formatDate";
-import { Button, Card } from "@kosmeo-ui/react";
+import { IconAction } from "./IconAction";
+import { Card } from "@kosmeo-ui/react";
 import { useState } from "react";
+import {
+  faCode,
+  faCopy,
+  faPen,
+  faRightLeft,
+  faShareNodes,
+  faTrash,
+} from "@fortawesome/free-solid-svg-icons";
 import {
   CopyDialog,
   EditDetailsDialog,
@@ -18,6 +27,8 @@ interface SavedQueryCardProps {
   savedQuery: SavedQuery;
   /** Mine: share, transfer, edit, delete. Shared: copy and view JSON. */
   kind: "mine" | "shared";
+  /** Picked by a link from the overview: drawn out. */
+  picked?: boolean;
 }
 
 type Dialog = "share" | "transfer" | "edit" | "copy" | "json" | null;
@@ -31,13 +42,14 @@ const Time = ({ iso }: { iso: string }) => (
 export const SavedQueryCard = ({
   savedQuery: sq,
   kind,
+  picked = false,
 }: SavedQueryCardProps) => {
   const [dialog, setDialog] = useState<Dialog>(null);
   const remove = useDeleteSavedQuery();
   const close = () => setDialog(null);
   const lastRan = sq.you_last_ran_at ? (
     <>
-      You last ran <Time iso={sq.you_last_ran_at} />
+      You ran it <Time iso={sq.you_last_ran_at} />
     </>
   ) : sq.last_run_at ? (
     <>
@@ -48,103 +60,82 @@ export const SavedQueryCard = ({
   );
 
   return (
-    <div data-saved-query={sq.id}>
+    <div
+      data-saved-query={sq.id}
+      className={`z-sq-card-wrap${picked ? " z-sq-picked" : ""}`}
+    >
       <Card>
         <div className="z-sq-card">
           <div className="z-sq-head">
-            <h3 className="z-sq-name">{sq.name}</h3>
+            <h3 className="z-sq-title">{sq.name}</h3>
             {sq.accessible && sq.source && (
-              <span className="z-sq-source">{sq.source.slug}</span>
+              <code className="z-sq-source">{sq.source.slug}</code>
             )}
           </div>
-          {sq.description && (
+          {sq.description ? (
             <p className="z-sq-description">{sq.description}</p>
+          ) : (
+            <p className="z-note">No description.</p>
           )}
-          <p className="z-muted">
-            {kind === "shared" && (
-              <>
-                From {sq.owner.name ?? "someone"}
-                {sq.shared_at && (
-                  <>
-                    {" "}
-                    · shared <Time iso={sq.shared_at} />
-                  </>
-                )}{" "}
-                ·{" "}
-              </>
-            )}
-            {lastRan}
-          </p>
           {!sq.accessible && <NoAccessNotice />}
-          <div className="z-sq-actions">
-            {kind === "mine" ? (
-              <>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  onClick={() => setDialog("share")}
-                >
-                  Share
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  onClick={() => setDialog("transfer")}
-                >
-                  Transfer
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  fullWidth={false}
-                  onClick={() => setDialog("edit")}
-                >
-                  Edit details
-                </Button>
-                {sq.accessible && (
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    fullWidth={false}
-                    onClick={() => setDialog("json")}
-                  >
-                    View JSON
-                  </Button>
-                )}
-                <ConfirmButton
-                  label="Delete"
-                  size="sm"
-                  danger
-                  confirmTitle="Delete saved query"
-                  confirmText={`Delete "${sq.name}"? It stops being shared and cannot be recovered.`}
-                  confirmLabel="Delete"
-                  onConfirm={() => remove.mutateAsync(sq.id)}
-                />
-              </>
-            ) : (
-              sq.accessible && (
+          <div className="z-sq-foot">
+            <p className="z-note">
+              {kind === "shared" && <>From {sq.owner.name ?? "someone"} · </>}
+              {lastRan}
+            </p>
+            <div className="z-sq-actions">
+              {kind === "mine" ? (
                 <>
-                  <Button
+                  <IconAction
+                    icon={faShareNodes}
+                    label="Share"
+                    onClick={() => setDialog("share")}
+                  />
+                  <IconAction
+                    icon={faRightLeft}
+                    label="Transfer"
+                    onClick={() => setDialog("transfer")}
+                  />
+                  <IconAction
+                    icon={faPen}
+                    label="Edit details"
+                    onClick={() => setDialog("edit")}
+                  />
+                  {sq.accessible && (
+                    <IconAction
+                      icon={faCode}
+                      label="View JSON"
+                      onClick={() => setDialog("json")}
+                    />
+                  )}
+                  <ConfirmButton
+                    label="Delete"
+                    icon={faTrash}
                     size="sm"
-                    variant="secondary"
-                    fullWidth={false}
-                    onClick={() => setDialog("copy")}
-                  >
-                    Copy to mine
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    fullWidth={false}
-                    onClick={() => setDialog("json")}
-                  >
-                    View JSON
-                  </Button>
+                    danger
+                    confirmTitle="Delete saved query"
+                    confirmText={`Delete "${sq.name}"? It stops being shared and cannot be recovered.`}
+                    confirmLabel="Delete"
+                    onConfirm={() => remove.mutateAsync(sq.id)}
+                  />
                 </>
-              )
-            )}
+              ) : (
+                sq.accessible && (
+                  <>
+                    <IconAction
+                      icon={faCopy}
+                      label="Copy to mine"
+                      onClick={() => setDialog("copy")}
+                    />
+                    <IconAction
+                      icon={faCode}
+                      label="View JSON"
+                      onClick={() => setDialog("json")}
+                    />
+                  </>
+                )
+              )}
+            </div>
           </div>
         </div>
       </Card>

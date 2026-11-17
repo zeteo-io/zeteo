@@ -26,6 +26,12 @@ vi.mock("@/lib/config", async () =>
   (await import("@/test/uiConfig")).mockConfig()
 );
 
+/** My Zeteo on one of its tabs (the overview without one). */
+const at = (tab?: string, extra = "") =>
+  renderWithProviders(<MyPage />, {
+    route: tab ? `/my?tab=${tab}${extra}` : "/my",
+  });
+
 const NOTICE =
   "You need expanded permissions to run this saved query. Ask an admin to extend your access.";
 
@@ -107,7 +113,7 @@ describe("MyPage", () => {
 
   it("shows a withheld run without its source or query actions", async () => {
     runs = [withheldRun];
-    renderWithProviders(<MyPage />);
+    at("runs");
     expect(await screen.findByText("Query withheld")).toBeInTheDocument();
     const row = screen.getByText("Query withheld").closest("li") as HTMLElement;
     expect(within(row).queryByText("sales-db")).not.toBeInTheDocument();
@@ -121,8 +127,10 @@ describe("MyPage", () => {
 
   it("offers no query actions for a run whose query was not recorded", async () => {
     runs = [unrecordableRun];
-    renderWithProviders(<MyPage />);
-    expect(await screen.findByText("Weekly revenue")).toBeInTheDocument();
+    at("runs");
+    expect(
+      await screen.findByRole("list", { name: "Recent runs" })
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Show query" })
     ).not.toBeInTheDocument();
@@ -133,7 +141,7 @@ describe("MyPage", () => {
 
   it("deletes a saved query after confirming", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MyPage />);
+    at("mine");
     const card = (await screen.findByText("Weekly revenue")).closest(
       "[data-saved-query]"
     ) as HTMLElement;
@@ -148,7 +156,7 @@ describe("MyPage", () => {
 
   it("copies a shared saved query under a name", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MyPage />);
+    at("shared");
     const card = (await screen.findByText("Team signups")).closest(
       "[data-saved-query]"
     ) as HTMLElement;
@@ -174,7 +182,7 @@ describe("MyPage", () => {
   it("says a copy's name is taken on 409", async () => {
     const user = userEvent.setup();
     post.mockRejectedValue({ status: 409, code: "conflict", message: "dup" });
-    renderWithProviders(<MyPage />);
+    at("shared");
     const card = (await screen.findByText("Team signups")).closest(
       "[data-saved-query]"
     ) as HTMLElement;
@@ -190,23 +198,106 @@ describe("MyPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("has the four panels", async () => {
-    renderWithProviders(<MyPage />);
-    for (const name of [
-      "My saved queries",
-      "Shared with me",
-      "What I can query",
-      "My recent runs",
-    ]) {
+  it("opens on the overview: recently used saved queries and the last runs", async () => {
+    at();
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute(
+      "aria-current",
+      "page"
+    );
+    for (const name of ["Recently used saved queries", "Recent runs"]) {
       expect(await screen.findByRole("heading", { name })).toBeInTheDocument();
     }
-    expect(await screen.findByText("Weekly revenue")).toBeInTheDocument();
-    expect(await screen.findByText("Team signups")).toBeInTheDocument();
-    expect(await screen.findByText("Sales database")).toBeInTheDocument();
+    // Mine and shared together, most recently used first.
+    const recent = await screen.findByRole("list", {
+      name: "Recently used saved queries",
+    });
+    expect(
+      within(recent)
+        .getAllByRole("link")
+        .map((a) => a.textContent)
+    ).toEqual(expect.arrayContaining(["Weekly revenue", "Team signups"]));
+    // A run is labelled by the table it read.
+    expect(await screen.findByText("sales-db.orders")).toBeInTheDocument();
+    // The full lists are on their own tabs.
+    expect(screen.queryByText("Sales database")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /All saved queries/ })
+    ).toHaveAttribute("href", "/my?tab=mine");
+    expect(screen.getByRole("link", { name: /All runs/ })).toHaveAttribute(
+      "href",
+      "/my?tab=runs"
+    );
+  });
+
+  it("shows at most ten runs on the overview, with no Show more", async () => {
+    runs = Array.from({ length: 12 }, (_, i) =>
+      makeRun({
+        id: `a00000${String(i).padStart(2, "0")}-1c7a-4a53-9d0e-6a3b1f2c4d00`,
+        query: { source: "sales-db", from: `table_${i}` },
+      })
+    );
+    at();
+    const list = await screen.findByRole("list", { name: "Recent runs" });
+    await waitFor(() =>
+      expect(within(list).getAllByRole("listitem")).toHaveLength(10)
+    );
+    expect(
+      screen.queryByRole("button", { name: "Show more" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("links a recent saved query to its tab, with that card picked out", async () => {
+    const user = userEvent.setup();
+    at();
+    await user.click(await screen.findByRole("link", { name: "Team signups" }));
+    expect(
+      await screen.findByRole("link", { name: "Shared with me" })
+    ).toHaveAttribute("aria-current", "page");
+    const card = (await screen.findByText("Signups by day")).closest(
+      "[data-saved-query]"
+    ) as HTMLElement;
+    expect(card).toHaveClass("z-sq-picked");
+    const other = screen
+      .getByText("Finance close")
+      .closest("[data-saved-query]") as HTMLElement;
+    expect(other).not.toHaveClass("z-sq-picked");
+  });
+
+  it("shows ten runs, then ten more on Show more", async () => {
+    const user = userEvent.setup();
+    runs = Array.from({ length: 12 }, (_, i) =>
+      makeRun({
+        id: `a00000${String(i).padStart(2, "0")}-1c7a-4a53-9d0e-6a3b1f2c4d00`,
+        query: { source: "sales-db", from: `table_${i}` },
+      })
+    );
+    at("runs");
+    const list = await screen.findByRole("list", { name: "Recent runs" });
+    await waitFor(() =>
+      expect(within(list).getAllByRole("listitem")).toHaveLength(10)
+    );
+    await user.click(screen.getByRole("button", { name: "Show more" }));
+    expect(within(list).getAllByRole("listitem")).toHaveLength(12);
+    expect(
+      screen.queryByRole("button", { name: "Show more" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("lists a source's tables when it is opened", async () => {
+    const user = userEvent.setup();
+    at("catalog");
+    const toggle = await screen.findByRole("button", {
+      name: /Sales database/,
+    });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("customers")).not.toBeInTheDocument();
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("customers")).toBeInTheDocument();
   });
 
   it("shows the notice and no source for an inaccessible shared saved query", async () => {
-    renderWithProviders(<MyPage />);
+    at("shared");
     const card = (await screen.findByText("Finance close")).closest(
       "[data-saved-query]"
     ) as HTMLElement;
@@ -227,7 +318,7 @@ describe("MyPage", () => {
 
   it("opens the create dialog pre-filled from a run's JSON", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MyPage />);
+    at("runs");
     await user.click(
       await screen.findByRole("button", { name: "Save as saved query" })
     );
@@ -249,7 +340,7 @@ describe("MyPage", () => {
 
   it("edits only name and description, with no JSON editor", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MyPage />);
+    at("mine");
     const card = (await screen.findByText("Weekly revenue")).closest(
       "[data-saved-query]"
     ) as HTMLElement;
@@ -275,7 +366,9 @@ describe("MyPage", () => {
     window.history.replaceState(null, "", "/");
     render(<App />);
     expect(
-      await screen.findByRole("heading", { name: "My saved queries" })
+      await screen.findByRole("heading", {
+        name: "Recently used saved queries",
+      })
     ).toBeInTheDocument();
     expect(window.location.pathname).toBe("/my");
     window.history.replaceState(null, "", "/");

@@ -146,7 +146,7 @@ export const SavedQueriesPage = () => {
     <>
       <PageHeader title="Saved queries" divider={false} />
       <div className="z-list-toolbar">
-        <div className="z-list-toolbar-filters">
+        <div className="z-list-toolbar-filters z-sq-toolbar">
           {ownerRef ? (
             <FilterChip
               clearLabel="Clear owner"
@@ -188,7 +188,9 @@ export const SavedQueriesPage = () => {
             </Button>
           )}
           {filtersReady && (
-            <TableFilters filters={filterDefs} onChange={onFiltersChange} />
+            <div className="z-sq-tablefilters">
+              <TableFilters filters={filterDefs} onChange={onFiltersChange} />
+            </div>
           )}
         </div>
       </div>
@@ -244,15 +246,15 @@ export const SavedQueriesPage = () => {
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <div className="z-actions-last">
+        <div className="z-actions-last z-sq-list">
           <Table<SavedQuery>
             rowKey={(sq) => sq.id}
             emptyMessage={
               error ? undefined : (
                 <EmptyState>
                   {anyFilter
-                    ? "No saved query matches these filters."
-                    : "No saved queries yet."}
+                    ? "No saved queries match these filters."
+                    : "No saved queries yet. People save queries from My Zeteo, the API or an AI over MCP."}
                 </EmptyState>
               )
             }
@@ -260,15 +262,29 @@ export const SavedQueriesPage = () => {
               {
                 title: "Name",
                 cellElement: (sq) => (
-                  <div>
-                    {sq.name}
+                  <span className="z-sq-name">
+                    <span>{sq.name}</span>
                     {sq.description && (
-                      <div className="z-muted">{sq.description}</div>
+                      <span className="z-muted" title={sq.description}>
+                        {sq.description}
+                      </span>
                     )}
-                  </div>
+                  </span>
                 ),
               },
-              { title: "Owner", cellElement: ownerName },
+              {
+                title: "Owner",
+                cellElement: (sq) => (
+                  <span className="z-principal-cell">
+                    <FontAwesomeIcon
+                      className="z-principal-icon"
+                      icon={faUser}
+                      aria-hidden
+                    />
+                    {ownerName(sq)}
+                  </span>
+                ),
+              },
               ...(canReadSources
                 ? [
                     {
@@ -285,10 +301,10 @@ export const SavedQueriesPage = () => {
               {
                 title: "Shared with",
                 cellElement: (sq) =>
-                  sq.share_count === undefined ? (
-                    <span className="z-muted">—</span>
+                  sq.share_count ? (
+                    `${sq.share_count} ${sq.share_count === 1 ? "person or group" : "people or groups"}`
                   ) : (
-                    sq.share_count
+                    <span className="z-muted">Not shared</span>
                   ),
               },
               {

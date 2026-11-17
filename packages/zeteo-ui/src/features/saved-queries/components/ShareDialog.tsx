@@ -128,7 +128,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
         {current.isLoading && <Spinner size="sm" />}
         <ErrorNotice error={current.error} />
         {list && list.length === 0 && (
-          <p className="z-muted">Not shared with anyone yet.</p>
+          <p className="z-note">Not shared with anyone yet.</p>
         )}
         {list && list.length > 0 && (
           <ul className="z-share-list" aria-label="Shared with">
@@ -156,7 +156,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
             ))}
           </ul>
         )}
-        <p className="z-muted">{NOTE}</p>
+        <p className="z-note">{NOTE}</p>
         <ErrorNotice error={replace.error} />
       </div>
     </Modal>

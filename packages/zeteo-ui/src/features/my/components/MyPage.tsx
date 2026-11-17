@@ -1,12 +1,17 @@
 import { BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import type { SavedQuery } from "@/features/saved-queries";
+import { RecentSavedQueries } from "./RecentSavedQueries";
+import { isTab, TABS, tabHref, type MyTab } from "./tabs";
+import { Link, useSearchParams } from "react-router-dom";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { SavedQueryCard } from "./SavedQueryCard";
-import { CatalogPanel } from "./CatalogPanel";
+import { CatalogList } from "./CatalogPanel";
+import { useEffect, useState } from "react";
 import type { ApiError } from "@/lib/api";
-import { RunsPanel } from "./RunsPanel";
-import { useState } from "react";
+import { useAuth } from "@tereo-io/react";
+import { RunsList } from "./RunsPanel";
+import type { Me } from "@/lib/auth";
 import "./styles.css";
 import {
   SaveQueryDialog,
@@ -26,72 +31,145 @@ const SavedQueryList = ({
   state,
   kind,
   empty,
+  picked,
 }: {
   state: ListState;
   kind: "mine" | "shared";
   empty: string;
-}) => (
-  <>
-    {state.isLoading && <Spinner size="sm" />}
-    <ErrorNotice error={state.error} />
-    {!state.isLoading && !state.error && state.items.length === 0 && (
-      <p className="z-muted">{empty}</p>
-    )}
-    <div className="z-sq-grid">
-      {state.items.map((sq) => (
-        <SavedQueryCard key={sq.id} savedQuery={sq} kind={kind} />
-      ))}
-    </div>
-    {state.hasMore && (
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={state.loadMore}
-      >
-        Load more
-      </Button>
-    )}
-  </>
+  picked?: string;
+}) => {
+  // Brings the saved query an overview link picked into view, once loaded.
+  useEffect(() => {
+    if (!picked || state.isLoading) return;
+    document
+      .querySelector(`[data-saved-query="${CSS.escape(picked)}"]`)
+      ?.scrollIntoView?.({ block: "center" });
+  }, [picked, state.isLoading]);
+  return (
+    <>
+      {state.isLoading && <Spinner size="sm" />}
+      <ErrorNotice error={state.error} />
+      {!state.isLoading && !state.error && state.items.length === 0 && (
+        <p className="z-note">{empty}</p>
+      )}
+      {state.items.length > 0 && (
+        <div className="z-sq-grid">
+          {state.items.map((sq) => (
+            <SavedQueryCard
+              key={sq.id}
+              savedQuery={sq}
+              kind={kind}
+              picked={sq.id === picked}
+            />
+          ))}
+        </div>
+      )}
+      {state.hasMore && (
+        <div className="z-my-more">
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            onClick={state.loadMore}
+          >
+            Load more
+          </Button>
+        </div>
+      )}
+    </>
+  );
+};
+
+const ViewAll = ({ tab, children }: { tab: MyTab; children: string }) => (
+  <Link className="z-muted-link" to={tabHref(tab)}>
+    {children} →
+  </Link>
 );
 
 export const MyPage = () => {
+  const [params] = useSearchParams();
+  const raw = params.get("tab");
+  const tab: MyTab = isTab(raw) ? raw : "overview";
+  const picked = params.get("saved_query") ?? undefined;
   const mine = useMySavedQueries();
   const shared = useSharedSavedQueries();
+  const { user } = useAuth<Me>();
   const [creating, setCreating] = useState(false);
+  const firstName = user?.name?.split(" ")[0];
+
+  const newButton = (
+    <Button size="sm" fullWidth={false} onClick={() => setCreating(true)}>
+      New saved query
+    </Button>
+  );
+
   return (
     <>
-      <PageHeader title="My Zeteo" divider={false} />
-      <div className="z-my-page">
-        <BorderedSection
-          title="My saved queries"
-          as="h2"
-          actions={
-            <Button
-              size="sm"
-              fullWidth={false}
-              onClick={() => setCreating(true)}
-            >
-              New saved query
-            </Button>
-          }
-        >
-          <SavedQueryList
-            state={mine}
-            kind="mine"
-            empty="You have no saved queries yet. Save one from a recent run below."
-          />
-        </BorderedSection>
-        <BorderedSection title="Shared with me" as="h2">
-          <SavedQueryList
-            state={shared}
-            kind="shared"
-            empty="Nothing has been shared with you."
-          />
-        </BorderedSection>
-        <CatalogPanel />
-        <RunsPanel />
+      <div className="z-my-header">
+        <PageHeader
+          title="My Zeteo"
+          subtitle={firstName ? `Welcome back, ${firstName}.` : undefined}
+          actions={newButton}
+          divider={false}
+        />
       </div>
+      <nav className="z-source-tabs" aria-label="My Zeteo">
+        {TABS.map((t) => (
+          <Link
+            key={t.id}
+            to={tabHref(t.id)}
+            className={`z-source-tab${t.id === tab ? " active" : ""}`}
+            aria-current={t.id === tab ? "page" : undefined}
+          >
+            {t.label}
+          </Link>
+        ))}
+      </nav>
+
+      {tab === "overview" && (
+        <div className="z-my-page">
+          <BorderedSection
+            title="Recently used saved queries"
+            as="h2"
+            actions={<ViewAll tab="mine">All saved queries</ViewAll>}
+          >
+            <RecentSavedQueries mine={mine} shared={shared} />
+          </BorderedSection>
+          <BorderedSection
+            title="Recent runs"
+            as="h2"
+            actions={<ViewAll tab="runs">All runs</ViewAll>}
+          >
+            <RunsList limit={10} />
+          </BorderedSection>
+        </div>
+      )}
+      {tab === "mine" && (
+        <SavedQueryList
+          state={mine}
+          kind="mine"
+          picked={picked}
+          empty="Save a query from one of your recent runs, or ask your AI assistant to save one."
+        />
+      )}
+      {tab === "shared" && (
+        <SavedQueryList
+          state={shared}
+          kind="shared"
+          picked={picked}
+          empty="Nothing has been shared with you yet."
+        />
+      )}
+      {tab === "runs" && (
+        <div className="z-my-narrow">
+          <RunsList />
+        </div>
+      )}
+      {tab === "catalog" && (
+        <div className="z-my-narrow">
+          <CatalogList />
+        </div>
+      )}
       {creating && <SaveQueryDialog onClose={() => setCreating(false)} />}
     </>
   );
