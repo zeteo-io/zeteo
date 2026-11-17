@@ -14,9 +14,11 @@ export const UpdateSavedQuerySchema = z
     name: SavedQueryNameSchema.optional(),
     description: SavedQueryDescriptionSchema.optional(),
     query: SavedQueryBodySchema.optional(),
+    available_for_dashboards: z.boolean().optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
-    message: "Give at least one of name, description and query",
+    message:
+      "Give at least one of name, description, query and available_for_dashboards",
   });
 
 /**

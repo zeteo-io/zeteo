@@ -99,7 +99,8 @@ const ownerNames = async (
 const present = async (
   caller: Caller,
   access: CallerAccess,
-  rows: SavedQueryRow[]
+  rows: SavedQueryRow[],
+  withUsedBy = false
 ): Promise<SavedQueryView[]> => {
   const decided = await decideAccess(access, rows);
   const showSource = hasPermission(caller.permissions, SOURCES_READ);
@@ -118,8 +119,20 @@ const present = async (
       .filter((r) => mayManage(caller, r, SAVED_QUERIES_READ))
       .map((r) => r.id)
   );
+  const usedBy = new Map<string, { dashboards: number; savedPanels: number }>();
+  if (withUsedBy) {
+    for (const r of rows.filter((r) =>
+      mayManage(caller, r, SAVED_QUERIES_READ)
+    )) {
+      usedBy.set(r.id, {
+        dashboards: await db.dashboards.countUsingSavedQuery(r.id),
+        savedPanels: await db.savedPanels.countUsingSavedQuery(r.id),
+      });
+    }
+  }
   return rows.map((row) =>
     savedQueryView(row, {
+      usedBy: usedBy.get(row.id),
       accessible: decided.get(row.id) ?? false,
       ownerName: names.get(row.ownerId) ?? null,
       sourceSlug: slugs.get(row.sourceId) ?? null,
@@ -139,13 +152,14 @@ const presentOne = async (
     caller.userId,
     access.groupIds
   );
-  return (await present(caller, access, [withViewer!]))[0]!;
+  return (await present(caller, access, [withViewer!], true))[0]!;
 };
 
 /**
  * The saved query, when the caller may see it that it exists at all: they own
- * it, it is shared with them or one of their groups, or they hold
- * `zeteo.saved_queries.read`. Anything else is the one 404.
+ * it, it is shared with them or one of their groups, it is available for
+ * dashboards in the organization they are signed in to (null matches null), or
+ * they hold `zeteo.saved_queries.read`. Anything else is the one 404.
  */
 export const findForViewer = async (
   caller: Caller,
@@ -157,6 +171,12 @@ export const findForViewer = async (
   if (
     row.ownerId === caller.userId ||
     hasPermission(caller.permissions, SAVED_QUERIES_READ)
+  ) {
+    return row;
+  }
+  if (
+    row.availableForDashboards &&
+    row.availableOrganizationId === caller.organizationId
   ) {
     return row;
   }
@@ -173,7 +193,7 @@ const findOwned = async (caller: Caller, id: string): Promise<SavedQuery> => {
 };
 
 export interface ListSavedQueriesInput {
-  scope: "mine" | "shared" | "all";
+  scope: "mine" | "shared" | "all" | "available";
   q?: string;
   sourceId?: string;
   ownerId?: string;
@@ -215,14 +235,31 @@ export const listSavedQueries = async (
             ),
             hasMore,
           }))
-      : await db.savedQueries.listVisibleTo({
-          userId: caller.userId,
-          groupIds: [...access.groupIds],
-          scope: input.scope,
-          q: input.q,
-          cursor: input.cursor,
-          limit: input.limit,
-        });
+      : input.scope === "available"
+        ? await db.savedQueries
+            .listAvailable({
+              organizationId: caller.organizationId,
+              excludeOwnerId: caller.userId,
+              q: input.q,
+              cursor: input.cursor,
+              limit: input.limit,
+            })
+            .then(async ({ rows, hasMore }) => ({
+              rows: await db.savedQueries.withViewer(
+                rows,
+                caller.userId,
+                access.groupIds
+              ),
+              hasMore,
+            }))
+        : await db.savedQueries.listVisibleTo({
+            userId: caller.userId,
+            groupIds: [...access.groupIds],
+            scope: input.scope,
+            q: input.q,
+            cursor: input.cursor,
+            limit: input.limit,
+          });
   const last = page.rows.at(-1);
   return {
     data: await present(caller, access, page.rows),
@@ -290,6 +327,7 @@ export interface UpdateSavedQueryInput {
   name?: string;
   description?: string;
   query?: Record<string, unknown>;
+  availableForDashboards?: boolean;
 }
 
 /**
@@ -332,6 +370,12 @@ export const updateSavedQuery = async (
               query: patch.query as Prisma.InputJsonObject,
               sourceId,
             }),
+            ...(patch.availableForDashboards !== undefined && {
+              availableForDashboards: patch.availableForDashboards,
+              availableOrganizationId: patch.availableForDashboards
+                ? caller.organizationId
+                : null,
+            }),
           },
           tx
         ),
@@ -347,9 +391,18 @@ export const updateSavedQuery = async (
         ...auditMetadata(updated),
         ...(patch.name !== undefined &&
           patch.name !== current.name && { previous_name: current.name }),
-        changed: (["name", "description", "query"] as const).filter(
-          (field) => patch[field] !== undefined
-        ),
+        ...(patch.availableForDashboards !== undefined && {
+          available_for_dashboards: updated.availableForDashboards,
+          available_organization_id: updated.availableOrganizationId,
+        }),
+        changed: [
+          ...(["name", "description", "query"] as const).filter(
+            (field) => patch[field] !== undefined
+          ),
+          ...(patch.availableForDashboards !== undefined
+            ? ["available_for_dashboards"]
+            : []),
+        ],
       },
     });
     return updated;
