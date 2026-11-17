@@ -168,6 +168,19 @@ describe("toOption", () => {
     expect(o.yAxis.type).toBe("category");
     expect(o.xAxis.type).toBe("value");
     expect(o.series[0].data[0]).toEqual([10, "jan"]);
+    // The first row is at the top.
+    expect(o.yAxis.inverse).toBe(true);
+  });
+
+  it("does not invert the category axis of a vertical bar chart", () => {
+    const o = opt(
+      toOption(
+        { version: 1, type: "bar", x: "month", y: ["revenue"] },
+        sales,
+        theme
+      )
+    );
+    expect(o.xAxis.inverse).toBeUndefined();
   });
 
   it("uses a time axis for a date or timestamp x", () => {

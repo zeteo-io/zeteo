@@ -203,6 +203,8 @@ export function toOption(
     type: catAxisType,
     axisLabel: textStyle,
     axisLine: { lineStyle: { color: theme.border } },
+    // ECharts draws a y category axis from the bottom; rows read top-down.
+    ...(horizontal && { inverse: true }),
   } as const;
   const valueAxis = {
     type: "value",
