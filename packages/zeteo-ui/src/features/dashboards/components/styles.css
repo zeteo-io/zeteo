@@ -86,6 +86,12 @@
 .z-dashboard-refresh-all .k-button {
   height: 39px;
   width: 39px;
+  padding: 0;
+}
+
+/* Kept at its own size: the square button's padding would squeeze it. */
+.z-dashboard-refresh-all .k-button svg {
+  flex-shrink: 0;
 }
 
 .z-dashboard-grid {
