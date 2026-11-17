@@ -76,6 +76,12 @@
   max-width: 0;
 }
 
+.z-sq-list th,
+.z-sq-list .z-principal-cell {
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+
 .z-sq-desc {
   display: block;
   overflow: hidden;
