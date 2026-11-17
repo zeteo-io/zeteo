@@ -47,4 +47,19 @@ describe("the Dashboards section", () => {
     await waitFor(() => expect(window.location.pathname).toBe("/dashboards"));
     expect(window.location.search).toBe("?tab=panels");
   });
+
+  it("shows a dashboard's display outside the layout, with no top bar", async () => {
+    window.history.replaceState(
+      null,
+      "",
+      "/dashboards/a1111111-1c7a-4a53-9d0e-6a3b1f2c4d01/display"
+    );
+    const { container } = render(<App />);
+    await waitFor(() =>
+      expect(
+        container.querySelector(".z-display, [role=status]")
+      ).not.toBeNull()
+    );
+    expect(screen.queryByRole("navigation", { name: "Sections" })).toBeNull();
+  });
 });

@@ -1,6 +1,7 @@
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
+import { DisplaySignedOut } from "@/features/dashboards";
 import { Callback, SignedOut } from "@/features/auth";
 import { RouteError } from "@/components/RouteError";
 import { RootLayout } from "./layouts/RootLayout";
@@ -38,6 +39,16 @@ const pages = {
   "/saved-queries": lazy(() =>
     import("@/features/saved-queries").then((m) => ({
       default: m.SavedQueriesPage,
+    }))
+  ),
+  "/admin/dashboards": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.AdminDashboardsPage,
+    }))
+  ),
+  "/admin/saved-panels": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.AdminSavedPanelsPage,
     }))
   ),
   "/my": lazy(() =>
@@ -102,6 +113,25 @@ const dashboardRoutes = [
   },
 ];
 
+const displayPage = lazy(() =>
+  import("@/features/dashboards").then((m) => ({ default: m.DisplayPage }))
+);
+
+/** Display mode: outside the layout (no top bar), behind sign-in, and never redirecting on a lost session. */
+const displayRoute = {
+  path: "/dashboards/:dashboardId/display",
+  element: (
+    <AuthGate signedOut={<DisplaySignedOut />}>
+      <RequirePermission permission="zeteo.data.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(displayPage)}
+        </Suspense>
+      </RequirePermission>
+    </AuthGate>
+  ),
+  errorElement: <RouteError />,
+};
+
 const grantNewPage = lazy(() =>
   import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
 );
@@ -135,6 +165,7 @@ export const routes = [
     element: <SignedOut />,
     errorElement: <RouteError />,
   },
+  displayRoute,
   {
     path: "/",
     element: (

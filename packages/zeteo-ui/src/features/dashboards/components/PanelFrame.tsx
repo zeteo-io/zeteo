@@ -23,8 +23,13 @@ export const PANEL_COPY: Record<Exclude<PanelState, "ok">, string> = {
 export const truncatedNotice = (rows: number) =>
   `Showing the first ${rows.toLocaleString("en-US")} rows; aggregate the saved query to see everything.`;
 
+/** HH:MM, 24-hour, in the viewer's zone. */
 const clock = (iso: string) =>
-  new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
 
 interface PanelFrameProps {
   panel: Panel;

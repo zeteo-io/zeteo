@@ -7,9 +7,17 @@ import { useMeError } from "./ZeteoAuthProvider";
 
 /**
  * The app's pages render only for someone signed in with a zeteo permission.
- * A visitor with no session is sent to /signed-out by the provider.
+ * A visitor with no session is sent to /signed-out by the provider; a gate
+ * given `signedOut` shows that instead, so an unattended screen stays put.
  */
-export const AuthGate = ({ children }: { children: ReactNode }) => {
+export const AuthGate = ({
+  children,
+  signedOut,
+}: {
+  children: ReactNode;
+  /** Shown when the session is lost, in place of waiting for the redirect to /signed-out (a wall display). */
+  signedOut?: ReactNode;
+}) => {
   const { user, isLoading, signOut, reloadUser } = useAuth<Me>();
   const meError = useMeError();
   const noSession = !user && !isLoading && !readTokens() && !hasSession();
@@ -19,6 +27,7 @@ export const AuthGate = ({ children }: { children: ReactNode }) => {
   }, [noSession]);
 
   if (user) return user.permissions.length === 0 ? <NoAccess /> : children;
+  if (noSession && signedOut) return signedOut;
   if (isLoading || noSession) {
     return (
       <Centered>

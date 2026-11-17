@@ -6,3 +6,6 @@ export { useDashboard } from "./api/useDashboard";
 export { PanelFrame, PANEL_COPY } from "./components/PanelFrame";
 export { DashboardGrid } from "./components/DashboardGrid";
 export type * from "./api/types";
+export { AdminDashboardsPage } from "./components/AdminDashboardsPage";
+export { AdminSavedPanelsPage } from "./components/AdminSavedPanelsPage";
+export { DisplayPage, DisplaySignedOut } from "./components/DisplayPage";

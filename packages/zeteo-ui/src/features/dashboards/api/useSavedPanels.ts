@@ -8,6 +8,15 @@ export const useSavedPanels = (scope: "mine" | "shared") =>
     scope,
   });
 
+/** Every saved panel (needs `zeteo.dashboards.read`), newest first, narrowed by the filters. */
+export const useAllSavedPanels = (
+  filters: { owner_id?: string; q?: string } = {}
+) =>
+  useCursorList<SavedPanel>(["saved-panels", "all"], "/v1/saved-panels", {
+    scope: "all",
+    ...filters,
+  });
+
 export interface SavedPanelInput {
   name: string;
   description?: string;
