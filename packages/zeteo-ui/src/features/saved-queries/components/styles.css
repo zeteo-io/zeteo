@@ -76,10 +76,16 @@
   max-width: 0;
 }
 
+/* Headers and owners keep to one line; the icon keeps its size, or the
+   table, squeezed by the description, would size the cell too narrow. */
 .z-sq-list th,
 .z-sq-list .z-principal-cell {
   white-space: nowrap;
   flex-wrap: nowrap;
+}
+
+.z-sq-list .z-principal-cell > svg {
+  flex-shrink: 0;
 }
 
 .z-sq-desc {
