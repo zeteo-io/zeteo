@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChartSettings, RunResult } from "../api/types";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { Chart } from "./Chart";
 
 const instance = vi.hoisted(() => ({
@@ -114,5 +114,22 @@ describe("Chart", () => {
   it("says so when a setting names a column the result lacks", () => {
     render(<Chart chart={{ ...line, x: "gone" }} result={result} />);
     expect(screen.getByText(/gone/)).toBeInTheDocument();
+  });
+});
+
+describe("Chart theme", () => {
+  it("sets the option again with the new colours when data-theme changes", async () => {
+    document.documentElement.setAttribute("data-theme", "light");
+    render(<Chart chart={line} result={result} />);
+    const first = instance.setOption.mock.calls.at(-1)![0];
+    await act(async () => {
+      document.documentElement.setAttribute("data-theme", "dark");
+      await Promise.resolve();
+    });
+    const last = instance.setOption.mock.calls.at(-1)![0];
+    expect(instance.setOption.mock.calls.length).toBeGreaterThan(1);
+    expect(last.textStyle.color).not.toBe(first.textStyle.color);
+    expect(last.color).toHaveLength(10);
+    document.documentElement.removeAttribute("data-theme");
   });
 });

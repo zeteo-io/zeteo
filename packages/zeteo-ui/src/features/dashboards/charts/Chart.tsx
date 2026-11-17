@@ -2,8 +2,8 @@ import type { ChartSettings, RunResult } from "../api/types";
 import { useEffect, useMemo, useRef } from "react";
 import { TablePanel } from "./TablePanel";
 import { StatPanel } from "./StatPanel";
+import { useChartTheme } from "./theme";
 import { toOption } from "./toOption";
-import { chartTheme } from "./theme";
 import { init } from "./echarts";
 import "./styles.css";
 
@@ -18,16 +18,17 @@ function Canvas({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const instance = useRef<EChart | null>(null);
+  const theme = useChartTheme();
   const built = useMemo(() => {
     try {
-      return { option: toOption(chart, result, chartTheme()), error: null };
+      return { option: toOption(chart, result, theme), error: null };
     } catch (err) {
       return {
         option: null,
         error: err instanceof Error ? err.message : String(err),
       };
     }
-  }, [chart, result]);
+  }, [chart, result, theme]);
 
   // One instance for the element's life; resized with its box.
   useEffect(() => {

@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 /** The colours a chart is drawn with. */
 export interface ChartTheme {
   /** Ten categorical colours, in the order series take them. */
@@ -8,44 +10,42 @@ export interface ChartTheme {
   background: string;
 }
 
-// Fixed categorical palettes (the same ten hues, tuned for each background).
-const LIGHT_PALETTE = [
-  "#2f6fed",
-  "#e8590c",
-  "#2b9a66",
-  "#9c36b5",
-  "#d6a100",
-  "#0c8599",
-  "#e03177",
-  "#5c7cfa",
-  "#74a30a",
-  "#868e96",
+// Series colours, in order. Colours 1-6 come from kosmeo's variables, read at
+// theme time so dark mode gets kosmeo's dark values: primary, success,
+// warning, danger, link, secondary. Colours 7-10 (kosmeo defines no more
+// accents) are fixed hues, one set per theme. The fallbacks are for where the
+// variable is missing (a test).
+const KOSMEO_COLOURS: [string, string, string][] = [
+  ["--k-primary-color-background", "#3d52db", "#4a5fb5"],
+  ["--k-success-color", "#198754", "#1f7a4e"],
+  ["--k-warning-color", "#ffc107", "#d99e00"],
+  ["--k-danger-color", "#dc3545", "#c94250"],
+  ["--k-text-color-link", "#0062cc", "#6e9fff"],
+  ["--k-secondary-color", "#6b6b6b", "#646a75"],
 ];
-const DARK_PALETTE = [
-  "#6c9cff",
-  "#ff8a4c",
-  "#4cc38a",
-  "#c77ddb",
-  "#f0c040",
-  "#3bc0d4",
-  "#f06595",
-  "#91a7ff",
-  "#a9d34a",
-  "#adb5bd",
-];
+const LIGHT_EXTRA = ["#9c36b5", "#0c8599", "#e03177", "#74a30a"];
+const DARK_EXTRA = ["#c77ddb", "#3bc0d4", "#f06595", "#a9d34a"];
 
-/**
- * Reads kosmeo's CSS variables (falling back to fixed values where one is
- * missing, as in a test) and picks the palette for the current theme.
- */
+/** Whether the page is dark: an explicit data-theme wins, else the system preference. */
+function isDark(): boolean {
+  const explicit = document.documentElement.getAttribute("data-theme");
+  if (explicit) return explicit === "dark";
+  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+}
+
+/** Reads kosmeo's CSS variables for the current theme. */
 export function chartTheme(): ChartTheme {
-  const root = document.documentElement;
-  const style = getComputedStyle(root);
+  const style = getComputedStyle(document.documentElement);
+  const dark = isDark();
   const read = (name: string, fallback: string) =>
     style.getPropertyValue(name).trim() || fallback;
-  const dark = root.getAttribute("data-theme") === "dark";
   return {
-    palette: dark ? DARK_PALETTE : LIGHT_PALETTE,
+    palette: [
+      ...KOSMEO_COLOURS.map(([name, light, dk]) =>
+        read(name, dark ? dk : light)
+      ),
+      ...(dark ? DARK_EXTRA : LIGHT_EXTRA),
+    ],
     text: read("--k-text-color", dark ? "#e8e8e8" : "#1a1a1a"),
     textSecondary: read(
       "--k-text-color-secondary",
@@ -54,4 +54,24 @@ export function chartTheme(): ChartTheme {
     border: read("--k-border-color", dark ? "#3a3a3a" : "#dddddd"),
     background: read("--k-background-color", dark ? "#1a1a1a" : "#ffffff"),
   };
+}
+
+/** The chart theme, re-read when the page switches between light and dark. */
+export function useChartTheme(): ChartTheme {
+  const [theme, setTheme] = useState(chartTheme);
+  useEffect(() => {
+    const update = () => setTheme(chartTheme());
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["data-theme"],
+    });
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    media?.addEventListener?.("change", update);
+    return () => {
+      observer.disconnect();
+      media?.removeEventListener?.("change", update);
+    };
+  }, []);
+  return theme;
 }
