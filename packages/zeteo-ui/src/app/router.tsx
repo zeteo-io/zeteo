@@ -1,4 +1,3 @@
-import { Suspense, lazy, useState, type ComponentType } from "react";
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
@@ -15,6 +14,13 @@ import {
   Navigate,
   RouterProvider,
 } from "react-router-dom";
+import {
+  Suspense,
+  createElement,
+  lazy,
+  useState,
+  type ComponentType,
+} from "react";
 
 const pages = {
   "/sources": lazy(() =>
@@ -29,6 +35,14 @@ const pages = {
   "/runs": lazy(() =>
     import("@/features/runs").then((m) => ({ default: m.RunsPage }))
   ),
+  "/saved-queries": lazy(() =>
+    import("@/features/saved-queries").then((m) => ({
+      default: m.SavedQueriesPage,
+    }))
+  ),
+  "/my": lazy(() =>
+    import("@/features/my").then((m) => ({ default: m.MyPage }))
+  ),
 } as const;
 
 /** `/` goes to the first section the person can read. */
@@ -42,6 +56,24 @@ const DefaultSection = () => {
     <NoAccessSection permission={SECTIONS[0].permission} />
   );
 };
+
+const savedQueryPage = lazy(() =>
+  import("@/features/my").then((m) => ({ default: m.SavedQueryPage }))
+);
+
+/** One saved query: anyone who can see it, so the same permission as My Zeteo. */
+const savedQueryRoutes = [
+  {
+    path: "my/saved-queries/:savedQueryId",
+    element: (
+      <RequirePermission permission="zeteo.data.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(savedQueryPage)}
+        </Suspense>
+      </RequirePermission>
+    ),
+  },
+];
 
 const grantNewPage = lazy(() =>
   import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
@@ -101,6 +133,7 @@ export const routes = [
       }),
       ...sourceRoutes,
       ...grantWriteRoutes,
+      ...savedQueryRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },

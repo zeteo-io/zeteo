@@ -7,7 +7,8 @@ import { App } from "@/app";
 const get = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
-    permissions: ["zeteo.data.read"],
+    // Nothing that opens a section, My Zeteo included.
+    permissions: ["zeteo.mcp.use"],
     api: { get },
   })
 );

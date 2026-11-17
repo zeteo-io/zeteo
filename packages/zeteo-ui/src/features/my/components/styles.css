@@ -1,0 +1,233 @@
+/* One saved query: the query and its runs, the details beside them. */
+.z-sqp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.z-sqp-main,
+.z-sqp-side {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.z-sqp-json {
+  margin: 0;
+  max-height: 28rem;
+}
+
+@media (max-width: 1000px) {
+  .z-sqp-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A saved query's name links to its page. */
+.z-sq-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.z-sq-title a:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}
+
+/* My Zeteo's header: the title and its action on one row. */
+.z-my-header .k-section-header-row {
+  align-items: center;
+}
+
+/* The overview: recently used saved queries beside recent runs; one
+   column on narrow screens. */
+.z-my-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+/* A one-list tab reads better than at full width, centred on the page. */
+.z-my-narrow {
+  max-width: 56rem;
+  margin: 0 auto;
+}
+
+@media (max-width: 1000px) {
+  .z-my-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.z-my-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-my-json {
+  margin: 0.5rem 0 0;
+  padding: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-my-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 0.75rem;
+}
+
+/* Saved query cards. */
+.z-sq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 0.75rem;
+}
+
+.z-sq-card-wrap,
+.z-sq-card-wrap > .k-card {
+  height: 100%;
+}
+
+.z-sq-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+}
+
+.z-sq-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.z-sq-title {
+  margin: 0;
+  font-size: var(--k-text-size-md);
+  overflow-wrap: anywhere;
+}
+
+.z-sq-source {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+  white-space: nowrap;
+}
+
+.z-sq-description {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Last run, then the actions, at the card's foot. */
+.z-sq-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: auto;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--k-border-color);
+}
+
+.z-sq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/* Recent runs and the catalogue: compact rows. */
+.z-run-list,
+.z-catalog-list,
+.z-catalog-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.z-run-row,
+.z-catalog-source {
+  padding: 0.5rem 0;
+}
+
+.z-run-row + .z-run-row,
+.z-catalog-source + .z-catalog-source {
+  border-top: 1px solid var(--k-border-color);
+}
+
+.z-run-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.z-run-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.z-run-what {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.z-run-meta {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-run-actions {
+  display: flex;
+  gap: 0.35rem;
+}
+
+.z-catalog-toggle {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.z-catalog-toggle:hover .z-catalog-name {
+  color: var(--k-primary-color);
+}
+
+.z-catalog-chevron {
+  width: 0.7rem;
+  color: var(--k-text-color-secondary);
+}
+
+.z-catalog-count {
+  margin-left: auto;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+  white-space: nowrap;
+}
+
+.z-catalog-tables {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+  gap: 0.2rem 1rem;
+  margin-top: 0.5rem;
+  padding-left: 1.3rem;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-catalog-tables code {
+  overflow-wrap: anywhere;
+}

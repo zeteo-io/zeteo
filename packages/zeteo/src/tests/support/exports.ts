@@ -27,10 +27,12 @@ export interface ExportRequest {
   search?: string;
   acceptEncoding?: string;
   baseUrl?: string;
+  /** The route, `/v1/export` unless another export route is meant. */
+  path?: string;
 }
 
 /**
- * `POST /v1/export` on a raw HTTP client, which hands over trailers and fails
+ * `POST /v1/export` (or `path`) on a raw HTTP client, which hands over trailers and fails
  * a read that ends without the final chunk. Resolves with the response once
  * it has started; the body is read by the caller.
  */
@@ -40,11 +42,12 @@ export const openExport = ({
   search = "",
   acceptEncoding,
   baseUrl = BASE_URL,
+  path = "/v1/export",
 }: ExportRequest): Promise<IncomingMessage> =>
   new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = request(
-      `${baseUrl}/v1/export${search ? `?${search}` : ""}`,
+      `${baseUrl}${path}${search ? `?${search}` : ""}`,
       {
         method: "POST",
         headers: {

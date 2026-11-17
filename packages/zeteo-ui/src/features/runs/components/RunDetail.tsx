@@ -67,6 +67,12 @@ export const RunDetail = ({ run, sourceLabel, onClose }: RunDetailProps) => {
           </dd>
           <dt>Source</dt>
           <dd>{run.source_id ? (sourceLabel ?? run.source_id) : "None"}</dd>
+          {run.saved_query && (
+            <>
+              <dt>Saved query</dt>
+              <dd>{run.saved_query.name}</dd>
+            </>
+          )}
           <dt>Entry point</dt>
           <dd>{ENTRY_LABEL[run.entry_point]}</dd>
           <dt>Outcome</dt>

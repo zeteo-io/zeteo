@@ -17,6 +17,11 @@
         in: query
         required: false
         schema: { type: string, format: uuid }
+      - name: saved_query_id
+        in: query
+        required: false
+        description: Only the runs of this saved query.
+        schema: { type: string, format: uuid }
       - name: outcome
         in: query
         required: false

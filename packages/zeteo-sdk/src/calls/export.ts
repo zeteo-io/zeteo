@@ -4,6 +4,7 @@ import type { Query, QueryWarning } from "../types/query.js";
 import { LineTooLongError, lines } from "../ndjson.js";
 import type { ColumnType } from "../types/common.js";
 import type { DianemoResponse } from "@dianemo/core";
+import type { OperationId } from "../operations.js";
 import type { Readable } from "node:stream";
 
 export interface ExportEnd {
@@ -46,17 +47,25 @@ export interface ExportInternals {
 const runIdHeader = (response: DianemoResponse): string | undefined =>
   header(response.headers, "x-zeteo-run-id") || undefined;
 
+/** What an export call sends: its operation, path parameters and body. */
+export interface ExportTarget {
+  op: OperationId;
+  params?: Record<string, string>;
+  body?: unknown;
+}
+
 // Axios has already removed a gzip Content-Encoding it decoded.
 async function open(
   ctx: CallContext,
-  query: Query,
+  target: ExportTarget,
   format: "ndjson" | "csv",
   signal?: AbortSignal
 ): Promise<{ runId: string; body: Readable }> {
   const response = (await sendRaw(ctx, {
-    op: "exportQuery",
+    op: target.op,
+    params: target.params,
     query: { format },
-    body: query,
+    body: target.body,
     once: true,
     stream: true,
     signal,
@@ -252,8 +261,14 @@ async function readRows(
   };
 }
 
-export const exportCalls = (
+/**
+ * The streaming reads of one kind of export: `subject` says what is exported
+ * (a query, or a saved query), `target` how it is sent. A saved query's export
+ * reads exactly as a query's does.
+ */
+export const exportMethods = <S>(
   ctx: CallContext,
+  target: (subject: S) => ExportTarget,
   internals: ExportInternals = {}
 ) => ({
   // Never repeated: an export is long, and zeteo records each run.
@@ -262,25 +277,35 @@ export const exportCalls = (
    * only the `signal` bounds the call.
    */
   rows: async (
-    query: Query,
+    subject: S,
     options?: { signal?: AbortSignal }
   ): Promise<ExportRows> =>
     readRows(
-      await open(ctx, query, "ndjson", options?.signal),
+      await open(ctx, target(subject), "ndjson", options?.signal),
       options?.signal,
       internals.maxLineBytes
     ),
 
   stream: async (
-    query: Query,
+    subject: S,
     options?: { format?: "ndjson" | "csv"; signal?: AbortSignal }
   ): Promise<ExportStream> => {
     const { runId, body } = await open(
       ctx,
-      query,
+      target(subject),
       options?.format ?? "ndjson",
       options?.signal
     );
     return { runId, stream: body };
   },
 });
+
+export const exportCalls = (
+  ctx: CallContext,
+  internals: ExportInternals = {}
+) =>
+  exportMethods(
+    ctx,
+    (query: Query): ExportTarget => ({ op: "exportQuery", body: query }),
+    internals
+  );

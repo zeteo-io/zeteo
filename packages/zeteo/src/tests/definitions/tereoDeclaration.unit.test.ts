@@ -11,6 +11,8 @@ import {
   GRANTS_WRITE,
   MCP_USE,
   RUNS_READ,
+  SAVED_QUERIES_READ,
+  SAVED_QUERIES_WRITE,
   SERVICE_SLUG,
   SOURCES_READ,
   SOURCES_WRITE,
@@ -40,7 +42,7 @@ describe("buildTereoDocument", () => {
     ]);
   });
 
-  it("declares exactly the eight zeteo permissions", () => {
+  it("declares exactly the ten zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
     expect(GRANTS_READ).toBe("zeteo.grants.read");
@@ -59,6 +61,8 @@ describe("buildTereoDocument", () => {
         DATA_EXPORT,
         RUNS_READ,
         MCP_USE,
+        SAVED_QUERIES_READ,
+        SAVED_QUERIES_WRITE,
       ].sort()
     );
   });
@@ -84,7 +88,7 @@ describe("buildTereoDocument", () => {
     });
   });
 
-  it("declares zeteo_admin with all eight permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
+  it("declares zeteo_admin with all ten permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
     const roles = Object.fromEntries(
       service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
     );
@@ -103,6 +107,8 @@ describe("buildTereoDocument", () => {
         DATA_EXPORT,
         RUNS_READ,
         MCP_USE,
+        SAVED_QUERIES_READ,
+        SAVED_QUERIES_WRITE,
       ].sort()
     );
     expect(roles.zeteo_user).toEqual([DATA_READ]);
@@ -140,6 +146,46 @@ describe("buildTereoDocument", () => {
     expect(read[AUDIT_EVENTS.principalLimitRemoved]).toBe(GRANTS_READ);
   });
 
+  it("declares the saved query permissions for zeteo_admin only", () => {
+    expect(SAVED_QUERIES_READ).toBe("zeteo.saved_queries.read");
+    expect(SAVED_QUERIES_WRITE).toBe("zeteo.saved_queries.write");
+    const roles = Object.fromEntries(
+      service.systemRoles!.map((r) => [r.name, r.permissions!])
+    );
+    expect(roles.zeteo_admin).toEqual(
+      expect.arrayContaining([SAVED_QUERIES_READ, SAVED_QUERIES_WRITE])
+    );
+    for (const name of ["zeteo_user", "zeteo_mcp_user"]) {
+      expect(
+        roles[name].some((p) => p.startsWith("zeteo.saved_queries."))
+      ).toBe(false);
+    }
+    expect(service.permissions!.map((p) => p.name)).toEqual(
+      expect.arrayContaining([SAVED_QUERIES_READ, SAVED_QUERIES_WRITE])
+    );
+  });
+
+  it("gates the six saved query events on saved queries read", () => {
+    const events = Object.fromEntries(
+      service.eventTypes!.map((e) => [e.eventType, e])
+    );
+    const names = [
+      "created",
+      "updated",
+      "deleted",
+      "shared",
+      "transferred",
+      "copied",
+    ];
+    for (const n of names) {
+      const e = events[`zeteo.saved_query.${n}`];
+      expect(e.readPermission).toBe(SAVED_QUERIES_READ);
+      expect(e.description).toBeTruthy();
+    }
+    expect(AUDIT_EVENTS.savedQueryCreated).toBe("zeteo.saved_query.created");
+    expect(AUDIT_EVENTS.savedQueryCopied).toBe("zeteo.saved_query.copied");
+  });
+
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
       "zeteo.export.run",
@@ -154,6 +200,12 @@ describe("buildTereoDocument", () => {
       "zeteo.relation.declared",
       "zeteo.relation.removed",
       "zeteo.relation.renamed",
+      "zeteo.saved_query.copied",
+      "zeteo.saved_query.created",
+      "zeteo.saved_query.deleted",
+      "zeteo.saved_query.shared",
+      "zeteo.saved_query.transferred",
+      "zeteo.saved_query.updated",
       "zeteo.source.archived",
       "zeteo.source.created",
       "zeteo.source.refreshed",

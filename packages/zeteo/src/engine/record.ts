@@ -20,10 +20,18 @@ export interface RunRecord {
   outcome: RunOutcome;
   errorCode: string | null;
   truncated: boolean;
+  /** The saved query run, when the run came from one. */
+  savedQueryId?: string;
 }
 
 /** Stored in place of a query that could not be stored itself. */
 export const UNRECORDABLE_QUERY = { unrecordable: true } as const;
+
+/**
+ * Stored in place of a saved query's JSON when the caller was refused it:
+ * their own runs would otherwise show them what the refusal withholds.
+ */
+export const WITHHELD_QUERY = { withheld: true } as const;
 
 /** The code recorded for a run whose client went away before it ended. */
 export const CLIENT_CLOSED = "client_closed";
@@ -50,7 +58,7 @@ export const failureOf = (
 
 /** The run's audit metadata: never the query, never any of the result. */
 const runMetadata = (
-  run: Pick<RunRecord, "sourceId" | "entryPoint">,
+  run: Pick<RunRecord, "sourceId" | "entryPoint" | "savedQueryId">,
   end: Pick<RunRecord, "outcome" | "errorCode" | "rowCount" | "durationMs">
 ) => ({
   source_id: run.sourceId,
@@ -59,6 +67,7 @@ const runMetadata = (
   error_code: end.errorCode,
   row_count: end.rowCount,
   duration_ms: end.durationMs,
+  ...(run.savedQueryId !== undefined && { saved_query_id: run.savedQueryId }),
 });
 
 /**
@@ -79,6 +88,7 @@ export const recordRun = (run: RunRecord): Promise<string> =>
         outcome: run.outcome,
         errorCode: run.errorCode,
         truncated: run.truncated,
+        savedQueryId: run.savedQueryId ?? null,
       },
       select: { id: true },
     });
@@ -98,7 +108,10 @@ export const recordRun = (run: RunRecord): Promise<string> =>
   });
 
 /** An export about to send its first row. */
-export type ExportStart = Pick<RunRecord, "caller" | "query" | "durationMs"> & {
+export type ExportStart = Pick<
+  RunRecord,
+  "caller" | "query" | "durationMs" | "savedQueryId"
+> & {
   sourceId: string;
 };
 
@@ -119,6 +132,7 @@ export const recordExportStart = (run: ExportStart): Promise<string> =>
         outcome: "running",
         errorCode: null,
         truncated: false,
+        savedQueryId: run.savedQueryId ?? null,
       },
       select: { id: true },
     });
@@ -127,7 +141,13 @@ export const recordExportStart = (run: ExportStart): Promise<string> =>
       resourceType: "query_run",
       resourceId: row.id,
       actorId: run.caller.userId,
-      metadata: { source_id: run.sourceId, entry_point: "export" },
+      metadata: {
+        source_id: run.sourceId,
+        entry_point: "export",
+        ...(run.savedQueryId !== undefined && {
+          saved_query_id: run.savedQueryId,
+        }),
+      },
     });
     return row.id;
   });
@@ -146,7 +166,9 @@ export type ExportEnd = Pick<
  */
 export const recordExportEnd = (
   runId: string,
-  run: Pick<ExportStart, "sourceId"> & { caller: Pick<Caller, "userId"> },
+  run: Pick<ExportStart, "sourceId" | "savedQueryId"> & {
+    caller: Pick<Caller, "userId">;
+  },
   end: ExportEnd
 ): Promise<boolean> =>
   withAudit(async (tx, audit) => {
@@ -173,7 +195,11 @@ export const recordExportEnd = (
       resourceId: runId,
       actorId: run.caller.userId,
       metadata: runMetadata(
-        { sourceId: run.sourceId, entryPoint: "export" },
+        {
+          sourceId: run.sourceId,
+          entryPoint: "export",
+          savedQueryId: run.savedQueryId,
+        },
         end
       ),
     });
@@ -193,12 +219,17 @@ export const recordInterruptedExport = (
     sourceId: string;
     rowCount: number | null;
     createdAt: Date;
+    savedQueryId?: string | null;
   },
   now: Date
 ): Promise<boolean> =>
   recordExportEnd(
     row.id,
-    { caller: { userId: row.userId }, sourceId: row.sourceId },
+    {
+      caller: { userId: row.userId },
+      sourceId: row.sourceId,
+      savedQueryId: row.savedQueryId ?? undefined,
+    },
     {
       durationMs: Math.min(
         Math.max(now.getTime() - row.createdAt.getTime(), 0),

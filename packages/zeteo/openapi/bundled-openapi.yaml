@@ -14,8 +14,9 @@ info:
 
     With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
     HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
-    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
-    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
+    through tereo uses four read-only tools (`list_sources`, `list_tables`, `describe_table` and
+    `query`) and the saved query tools (`list_saved_queries`, `get_saved_query`, `run_saved_query`,
+    `create_saved_query`, `update_saved_query` and `delete_saved_query`). It is not an HTTP API of this spec; see `docs/mcp.md`.
 
     ## Authentication
 
@@ -64,6 +65,18 @@ info:
     `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
     CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
 
+    ## Saved queries
+
+    A query can be saved under a name (`/v1/saved-queries`), shared with users and groups, copied,
+    handed to another owner, run and exported. A saved query is planned against the caller's own
+    grants each time it is run, so sharing one never widens anyone's access: a recipient who is
+    not granted what it reads is told `403 saved_query_not_accessible`, one answer for every cause
+    that carries nothing about the query, the source or the planner. One the caller may not see at
+    all is `404 not_found`. `GET /v1/me/runs` lists the caller's own runs, and
+    `GET /v1/me/principals` searches the users and groups they may share with; both need only
+    `zeteo.data.read`. `zeteo.saved_queries.read` lets an administrator see every saved query and its
+    shares, and `zeteo.saved_queries.write` change shares, transfer and delete them.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -92,6 +105,8 @@ tags:
     description: Which users and groups may query which tables and columns, and how much at once
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
+  - name: Saved queries
+    description: Queries saved by name, shared with users and groups, and run by whoever may
   - name: Platform
     description: Health and the signed-in caller
 paths:
@@ -1723,6 +1738,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: saved_query_id
+          in: query
+          required: false
+          description: Only the runs of this saved query.
+          schema:
+            type: string
+            format: uuid
         - name: outcome
           in: query
           required: false
@@ -1745,6 +1767,805 @@ paths:
           $ref: '#/components/responses/ForbiddenResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/me/runs:
+    get:
+      tags:
+        - Queries
+      summary: List the caller's own query runs
+      description: |
+        The caller's own runs, newest first, from any entry point. A run of a saved query carries
+        `saved_query` while the caller owns it or it is shared with them. A saved query run that was
+        refused (`saved_query_not_accessible`) shows with its query withheld (`{ "withheld": true }`)
+        and `source_id: null`. The response is not cached.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: listMyRuns
+      parameters:
+        - name: saved_query_id
+          in: query
+          required: false
+          description: Only the caller's own runs of this saved query.
+          schema:
+            type: string
+            format: uuid
+        - name: outcome
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/RunOutcome'
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of runs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListRunsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/me/principals:
+    get:
+      tags:
+        - Saved queries
+      summary: Search users or groups to share a saved query with
+      description: |
+        Finds users (human ones, by name or email) or groups (by name) whose text contains `q`, at
+        most `limit`: groups that are global or of the caller's signed-in organization. The caller's
+        own searches are limited as `GET /v1/principals`'s are (60 a minute). The response is not
+        cached.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (`q` not 2 to 100 characters, `limit` outside 1 to 25, an
+        unknown `type` or query key), `429 too_many_requests`, `502 tereo_unreachable`.
+      operationId: searchMyPrincipals
+      parameters:
+        - name: type
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/PrincipalType'
+        - name: q
+          in: query
+          required: true
+          description: Text the name (or a user's email) contains, case-insensitively
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 25
+            default: 10
+      responses:
+        '200':
+          description: The matches
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListDirectoryPrincipalsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+          headers:
+            Retry-After:
+              description: Seconds to wait before searching again
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`, tereo did not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/saved-queries:
+    get:
+      tags:
+        - Saved queries
+      summary: List saved queries
+      description: |
+        Newest first. `scope=mine` (the default) lists the caller's own, `scope=shared` those shared
+        with them or one of their groups, and `scope=all` every saved query (a holder of
+        `zeteo.saved_queries.read`; `403 forbidden` otherwise). `source_id`, `owner_id`,
+        `shared_with_type` and `shared_with_id` apply to `scope=all` only (`400 invalid_request`
+        otherwise); `source_id` also needs `zeteo.sources.read`; `shared_with_type` and
+        `shared_with_id` go together. `q` matches names, case-insensitively.
+
+        A saved query the caller cannot run is listed with `accessible: false` and without `query`
+        (and without `source`, unless they hold `zeteo.sources.read`).
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: listSavedQueries
+      parameters:
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum:
+              - mine
+              - shared
+              - all
+            default: mine
+        - name: q
+          in: query
+          required: false
+          description: Text to find, 1 to 100 characters
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 100
+        - name: source_id
+          in: query
+          required: false
+          description: '`scope=all` only; needs `zeteo.sources.read`'
+          schema:
+            type: string
+            format: uuid
+        - name: owner_id
+          in: query
+          required: false
+          description: '`scope=all` only'
+          schema:
+            type: string
+            format: uuid
+        - name: shared_with_type
+          in: query
+          required: false
+          description: '`scope=all` only; goes with `shared_with_id`'
+          schema:
+            type: string
+            enum:
+              - user
+              - group
+        - name: shared_with_id
+          in: query
+          required: false
+          description: '`scope=all` only; goes with `shared_with_type`: the saved queries shared directly with this user or group'
+          schema:
+            type: string
+            format: uuid
+        - $ref: '#/components/parameters/LimitParam'
+        - $ref: '#/components/parameters/CursorParam'
+      responses:
+        '200':
+          description: A page of saved queries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSavedQueriesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Saved queries
+      summary: Save a query
+      description: |
+        Saves a query for the caller. It is planned against the caller's own grants exactly as
+        `POST /v1/query` plans it, so the same errors, with their detail, come back (`422`). The
+        name is unique among the caller's saved queries, whatever the case. A `zeteo.saved_query.created`
+        audit entry is written.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: createSavedQuery
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedQueryRequest'
+      responses:
+        '201':
+          description: The saved query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '409':
+          description: Conflict - `conflict` (the caller has a saved query of this name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The query cannot be planned as written - the codes of `POST /v1/query`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/saved-queries/{savedQueryId}:
+    get:
+      tags:
+        - Saved queries
+      summary: Get a saved query
+      description: |
+        For its owner, a user it is shared with (directly or through a group) and a holder of
+        `zeteo.saved_queries.read`; anyone else gets `404 not_found`.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: getSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      responses:
+        '200':
+          description: The saved query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Saved queries
+      summary: Change a saved query
+      description: |
+        Its owner only (anyone else, `404 not_found`). A changed `query` is planned again against the
+        owner's own grants (`422`) and moves the saved query to that query's source. The owner need
+        not be able to run it to rename or describe it. A `zeteo.saved_query.updated` audit entry is
+        written.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: updateSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSavedQueryRequest'
+      responses:
+        '200':
+          description: The saved query
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `conflict` (the caller has another saved query of this name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The query cannot be planned as written - the codes of `POST /v1/query`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Saved queries
+      summary: Delete a saved query
+      description: |
+        Its owner, or a holder of `zeteo.saved_queries.write`; anyone else gets `404 not_found`. Its
+        shares go with it; runs already recorded stay. A `zeteo.saved_query.deleted` audit entry is
+        written.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: deleteSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/saved-queries/{savedQueryId}/copy:
+    post:
+      tags:
+        - Saved queries
+      summary: Copy a saved query
+      description: |
+        Makes the caller's own copy, with the same description and query, of a saved query they can
+        see and run. One they can see but not run is `403 saved_query_not_accessible`, whatever the
+        cause. A `zeteo.saved_query.copied` audit entry is written.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: copySavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CopySavedQueryRequest'
+      responses:
+        '201':
+          description: The copy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedQuery'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/SavedQueryNotAccessibleResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `conflict`, the caller has a saved query of this name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/saved-queries/{savedQueryId}/run:
+    post:
+      tags:
+        - Saved queries
+      summary: Run a saved query
+      description: |
+        Runs the stored query as `POST /v1/query` runs a query, planned against the caller's own
+        grants, and records the run against the saved query (it shows in `GET /v1/me/runs` and
+        `GET /v1/runs`). The body may give `limit` and `offset` in place of the stored ones; no
+        body runs it as stored.
+
+        A saved query the caller cannot run is refused with the one `403 saved_query_not_accessible`
+        for every cause, with no detail about tables, columns or the planner, and is recorded as a
+        refused run whose query is withheld. The errors of the query itself (`429`, `502`, `504` and
+        the rest of `POST /v1/query`) are as there.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: runSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavedQueryPaging'
+      responses:
+        '200':
+          description: The rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResult'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/SavedQueryNotAccessibleResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `source_archived`, the source was archived while the query ran
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: |
+            The stored query cannot be run with the given paging - for example `invalid_order`.
+            Never a planner refusal about access: that is `403 saved_query_not_accessible`.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: Too many queries - `too_many_queries` or `source_busy`; retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `query_failed` or `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+        '504':
+          description: Gateway timeout - `query_timeout`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/saved-queries/{savedQueryId}/export:
+    post:
+      tags:
+        - Saved queries
+      summary: Export a saved query's result
+      description: |
+        Exports the stored query as `POST /v1/export` exports a query: the same NDJSON or CSV stream,
+        the same caps, limits, trailers and run record (entry point `export`, recorded against the
+        saved query). The body may give `limit` and `offset` in place of the stored ones; no body
+        exports it as stored. `offset` above 0 needs an `orderBy` in the stored query.
+
+        A saved query the caller cannot run is refused before the first byte with
+        `403 saved_query_not_accessible`, also when the source's exports are off: never
+        `export_not_enabled` to a caller without access.
+
+        **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
+      operationId: exportSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+        - name: format
+          in: query
+          required: false
+          description: The stream's format. Any other query parameter is `400 invalid_request`.
+          schema:
+            type: string
+            enum:
+              - ndjson
+              - csv
+            default: ndjson
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavedQueryPaging'
+      responses:
+        '200':
+          description: The stream, as `POST /v1/export`'s
+          headers:
+            Content-Disposition:
+              description: '`attachment; filename="zeteo-export-<run id>.<format>"`'
+              schema:
+                type: string
+            Cache-Control:
+              description: '`no-store`'
+              schema:
+                type: string
+            X-Zeteo-Run-Id:
+              description: The run's id in the run log
+              schema:
+                type: string
+                format: uuid
+            Vary:
+              description: '`Accept-Encoding`'
+              schema:
+                type: string
+            Content-Encoding:
+              description: '`gzip` when the request accepts gzip; absent otherwise'
+              schema:
+                type: string
+                enum:
+                  - gzip
+            Trailer:
+              description: 'CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows`'
+              schema:
+                type: string
+            X-Zeteo-Warnings:
+              description: 'CSV only, when the query has warnings: their codes, comma separated'
+              schema:
+                type: string
+            X-Zeteo-Export-Status:
+              description: 'CSV only, an HTTP trailer: `complete` or `truncated`'
+              schema:
+                type: string
+                enum:
+                  - complete
+                  - truncated
+            X-Zeteo-Export-Rows:
+              description: 'CSV only, an HTTP trailer: the rows sent'
+              schema:
+                type: integer
+          content:
+            application/x-ndjson:
+              schema:
+                type: string
+                description: |
+                  Lines of JSON, each ending in `\n`: first `{ "columns": [{ "name", "type" }],
+                  "warnings": [...], "run_id": "<uuid>" }`, then one array per row, last
+                  `{ "status": "complete" | "truncated", "rows": <count> }`. See `POST /v1/export`.
+            text/csv:
+              schema:
+                type: string
+                description: RFC 4180, UTF-8, CRLF line ends. See `POST /v1/export`.
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          description: |
+            Forbidden - `forbidden` (the token lacks `zeteo.data.export`), `saved_query_not_accessible`
+            (the caller may not run the saved query, whatever the cause) or `export_not_enabled` (the
+            caller may run it, but the source's exports are off or capped at no rows)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `source_archived`, the source was archived as the export started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The stored query cannot be exported with the given paging - for example `invalid_order` at path `["offset"]`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: Too many exports - `too_many_exports` or `source_busy`; retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `query_failed` or `source_unreachable`, before the stream starts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+        '504':
+          description: Gateway timeout - `query_timeout`, before the stream starts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/saved-queries/{savedQueryId}/shares:
+    get:
+      tags:
+        - Saved queries
+      summary: List who a saved query is shared with
+      description: |
+        For its owner, or a holder of `zeteo.saved_queries.read`. Anyone else gets `404 not_found`.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: listSavedQueryShares
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      responses:
+        '200':
+          description: The shares
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListSharesResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Saved queries
+      summary: Replace who a saved query is shared with
+      description: |
+        Makes the shares exactly `principals` (at most 100, each once, not the owner): for its
+        owner, or a holder of `zeteo.saved_queries.write` (a holder of `zeteo.saved_queries.read`
+        alone gets `403 forbidden`; anyone else, `404 not_found`). A group being added must be global
+        or of the caller's signed-in organization (`400 invalid_share`); a share already there is not
+        checked again. A user is never limited by organization. Each user newly added who could not
+        run the saved query is listed in `warnings`; sharing still happens. A
+        `zeteo.saved_query.shared` audit entry is written when anything changed.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: replaceSavedQueryShares
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceSharesRequest'
+      responses:
+        '200':
+          description: The shares as they now stand, and the warnings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplaceSharesResponse'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`, or `invalid_share` (the owner among the
+            principals, or a group of another organization or one tereo does not have)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `conflict`, the shares changed while saving; load them again and retry
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/saved-queries/{savedQueryId}/transfer:
+    post:
+      tags:
+        - Saved queries
+      summary: Transfer a saved query to another user
+      description: |
+        Makes `user_id` the owner: for its owner, or a holder of `zeteo.saved_queries.write` (a
+        holder of `zeteo.saved_queries.read` alone gets `403 forbidden`; anyone else, `404
+        not_found`). With `keep_access` (the default) the previous owner keeps a direct share. The
+        new owner may not already have a saved query of that name (`409 conflict`) and may not be a
+        service account (`400 invalid_transfer`, as when the user already owns it or tereo has no
+        such user). `warning` says the new owner could not run it. A `zeteo.saved_query.transferred`
+        audit entry is written.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: transferSavedQuery
+      parameters:
+        - $ref: '#/components/parameters/SavedQueryIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferSavedQueryRequest'
+      responses:
+        '200':
+          description: The saved query as the caller now sees it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransferSavedQueryResponse'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`, or `invalid_transfer` (the user already
+            owns it, tereo has no such user, or the user is a service account)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `conflict`, the new owner has a saved query of this name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
 components:
@@ -1808,6 +2629,14 @@ components:
       in: path
       required: true
       description: The limits row's id. A value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
+    SavedQueryIdParam:
+      name: savedQueryId
+      in: path
+      required: true
+      description: The saved query's id. One the caller may not see is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
       schema:
         type: string
         format: uuid
@@ -1878,6 +2707,17 @@ components:
             $ref: '#/components/schemas/Error'
     NoContentResponse:
       description: Done; no content
+    SavedQueryNotAccessibleResponse:
+      description: |
+        Forbidden - `saved_query_not_accessible`: "You need expanded permissions to run this saved
+        query. Ask an admin to extend your access." One answer, with no details, for every cause (a
+        table or column not granted, a relation not visible, the source archived or not granted, a
+        column gone missing), so none can be told apart. The body never holds the query, the source
+        or anything the planner said. `forbidden` is the other 403: the token lacks the permission.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
   schemas:
     Error:
       type: object
@@ -3299,6 +4139,18 @@ components:
         created_at:
           type: string
           format: date-time
+        saved_query:
+          type: object
+          description: The saved query the run was of; named only while the viewer owns it or it is shared with them (always in the admin list); absent otherwise
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
     ListRunsResponse:
       type: object
       required:
@@ -3474,6 +4326,286 @@ components:
           description: Ordered by slug
           items:
             $ref: '#/components/schemas/DiscoveredSource'
+    SavedQuery:
+      type: object
+      description: |
+        A saved query as the viewer sees it. `source` and `query` are left out (never null) unless the
+        viewer may run it (`accessible`); a viewer who holds `zeteo.sources.read` sees `source`
+        regardless, and never `query` without access. A viewer without access never sees anything the
+        planner said about why.
+      required:
+        - id
+        - name
+        - description
+        - owner
+        - accessible
+        - created_at
+        - updated_at
+        - last_run_at
+        - you_last_ran_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 2000
+        owner:
+          type: object
+          required:
+            - id
+            - name
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type:
+                - string
+                - 'null'
+              description: From tereo's directory; null when it could not be looked up
+        accessible:
+          type: boolean
+          description: Whether the viewer may run it now, planned against what the viewer is granted
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        shared_at:
+          type: string
+          format: date-time
+          description: When it was shared with the viewer (or one of their groups); present only when it was
+        last_run_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: The last run by anyone
+        you_last_ran_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: The viewer's own last run
+        source:
+          type: object
+          description: Present when the viewer may run it, or holds `zeteo.sources.read`
+          required:
+            - id
+            - slug
+          properties:
+            id:
+              type: string
+              format: uuid
+            slug:
+              type: string
+        query:
+          description: The stored query (see `Query`); present only when `accessible`
+          $ref: '#/components/schemas/Query'
+        share_count:
+          type: integer
+          minimum: 0
+          description: How many users and groups it is shared with; present only when the viewer may see the share list (its owner, or a holder of `zeteo.saved_queries.read`)
+    ListSavedQueriesResponse:
+      type: object
+      required:
+        - data
+        - next_cursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavedQuery'
+        next_cursor:
+          type:
+            - string
+            - 'null'
+    CreateSavedQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - query
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Trimmed; unique per owner, whatever the case
+        description:
+          type: string
+          maxLength: 2000
+          default: ''
+        query:
+          description: A query as `POST /v1/query` takes it. It is planned against the caller's own grants when saved.
+          $ref: '#/components/schemas/Query'
+    UpdateSavedQueryRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: Trimmed; unique per owner, whatever the case
+        description:
+          type: string
+          maxLength: 2000
+        query:
+          description: Replaces the stored query; planned again against the caller's own grants
+          $ref: '#/components/schemas/Query'
+    CopySavedQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: The copy's name; unique among the caller's saved queries, whatever the case
+    SavedQueryPaging:
+      type: object
+      additionalProperties: false
+      description: The paging a run or export may give in place of the stored `limit` and `offset`. No body runs the saved query as stored.
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+        offset:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+    SharePrincipal:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - id
+      properties:
+        type:
+          $ref: '#/components/schemas/PrincipalType'
+        id:
+          type: string
+          format: uuid
+    Share:
+      type: object
+      description: A user or group a saved query is shared with. A group has no `email` key.
+      required:
+        - type
+        - id
+        - name
+        - shared_at
+      properties:
+        type:
+          $ref: '#/components/schemas/PrincipalType'
+        id:
+          type: string
+          format: uuid
+        name:
+          type:
+            - string
+            - 'null'
+          description: From tereo's directory; null when it could not be looked up
+        email:
+          type:
+            - string
+            - 'null'
+          description: Users only
+        shared_at:
+          type: string
+          format: date-time
+    ListSharesResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Share'
+    ReplaceSharesRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - principals
+      properties:
+        principals:
+          type: array
+          maxItems: 100
+          description: The whole share list; each principal once, the owner not among them
+          items:
+            $ref: '#/components/schemas/SharePrincipal'
+    ShareWarning:
+      type: object
+      required:
+        - type
+        - id
+        - accessible
+      properties:
+        type:
+          type: string
+          const: user
+        id:
+          type: string
+          format: uuid
+        accessible:
+          type: boolean
+          const: false
+          description: The user could not run the saved query as things stand
+    ReplaceSharesResponse:
+      type: object
+      required:
+        - data
+        - warnings
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Share'
+        warnings:
+          type: array
+          description: Each user newly added who could not run the saved query, judged as if signed in to the caller's organization. Groups never appear.
+          items:
+            $ref: '#/components/schemas/ShareWarning'
+    TransferSavedQueryRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - user_id
+      properties:
+        user_id:
+          type: string
+          format: uuid
+          description: The new owner; a service account is refused (`invalid_transfer`)
+        keep_access:
+          type: boolean
+          default: true
+          description: The previous owner keeps a direct share
+    TransferSavedQueryResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: '#/components/schemas/SavedQuery'
+        warning:
+          type: object
+          description: Present when the new owner could not run the saved query, judged as if signed in to the caller's organization
+          required:
+            - accessible
+          properties:
+            accessible:
+              type: boolean
+              const: false
     RenameRelationRequest:
       type: object
       required:
@@ -3716,6 +4848,7 @@ x-tagGroups:
   - name: Querying
     tags:
       - Queries
+      - Saved queries
   - name: Platform
     tags:
       - Platform

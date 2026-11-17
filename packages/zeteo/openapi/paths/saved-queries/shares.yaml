@@ -1,0 +1,79 @@
+/v1/saved-queries/{savedQueryId}/shares:
+  get:
+    tags: [Saved queries]
+    summary: List who a saved query is shared with
+    description: |
+      For its owner, or a holder of `zeteo.saved_queries.read`. Anyone else gets `404 not_found`.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: listSavedQueryShares
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    responses:
+      '200':
+        description: The shares
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/ListSharesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Saved queries]
+    summary: Replace who a saved query is shared with
+    description: |
+      Makes the shares exactly `principals` (at most 100, each once, not the owner): for its
+      owner, or a holder of `zeteo.saved_queries.write` (a holder of `zeteo.saved_queries.read`
+      alone gets `403 forbidden`; anyone else, `404 not_found`). A group being added must be global
+      or of the caller's signed-in organization (`400 invalid_share`); a share already there is not
+      checked again. A user is never limited by organization. Each user newly added who could not
+      run the saved query is listed in `warnings`; sharing still happens. A
+      `zeteo.saved_query.shared` audit entry is written when anything changed.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: replaceSavedQueryShares
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/ReplaceSharesRequest'
+    responses:
+      '200':
+        description: The shares as they now stand, and the warnings
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/ReplaceSharesResponse'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`, or `invalid_share` (the owner among the
+          principals, or a group of another organization or one tereo does not have)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the shares changed while saving; load them again and retry
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

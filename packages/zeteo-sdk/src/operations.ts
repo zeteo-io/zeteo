@@ -54,6 +54,43 @@ export const OPERATIONS = {
   runQuery: { method: "POST", path: "/v1/query" },
   exportQuery: { method: "POST", path: "/v1/export" },
   listRuns: { method: "GET", path: "/v1/runs" },
+  listMyRuns: { method: "GET", path: "/v1/me/runs" },
+  searchMyPrincipals: { method: "GET", path: "/v1/me/principals" },
+  listSavedQueries: { method: "GET", path: "/v1/saved-queries" },
+  createSavedQuery: { method: "POST", path: "/v1/saved-queries" },
+  getSavedQuery: { method: "GET", path: "/v1/saved-queries/{savedQueryId}" },
+  updateSavedQuery: {
+    method: "PATCH",
+    path: "/v1/saved-queries/{savedQueryId}",
+  },
+  deleteSavedQuery: {
+    method: "DELETE",
+    path: "/v1/saved-queries/{savedQueryId}",
+  },
+  copySavedQuery: {
+    method: "POST",
+    path: "/v1/saved-queries/{savedQueryId}/copy",
+  },
+  runSavedQuery: {
+    method: "POST",
+    path: "/v1/saved-queries/{savedQueryId}/run",
+  },
+  exportSavedQuery: {
+    method: "POST",
+    path: "/v1/saved-queries/{savedQueryId}/export",
+  },
+  listSavedQueryShares: {
+    method: "GET",
+    path: "/v1/saved-queries/{savedQueryId}/shares",
+  },
+  replaceSavedQueryShares: {
+    method: "PUT",
+    path: "/v1/saved-queries/{savedQueryId}/shares",
+  },
+  transferSavedQuery: {
+    method: "POST",
+    path: "/v1/saved-queries/{savedQueryId}/transfer",
+  },
   getMe: { method: "GET", path: "/v1/me" },
   searchPrincipals: { method: "GET", path: "/v1/principals" },
   lookupPrincipals: { method: "POST", path: "/v1/principals/lookup" },

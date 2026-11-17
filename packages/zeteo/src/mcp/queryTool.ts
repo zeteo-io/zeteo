@@ -6,13 +6,13 @@ import { inToolCall } from "./errors.js";
 import { z } from "zod";
 
 /** The longest time limit a source may have (120 s), and room for the run's record. */
-const QUERY_TOOL_TIMEOUT_MS = 135_000;
+export const QUERY_TOOL_TIMEOUT_MS = 135_000;
 
 // Each clause is declared with its JSON type only, because a model client
 // sends an argument the schema does not declare as a string. The engine
 // checks the query itself, as for POST /v1/query, so its errors have the same
 // paths; for the same reason only `source` is required here.
-const QueryInput = z.looseObject({
+export const QueryInput = z.looseObject({
   source: z.string().describe("The source's slug, as list_sources gives it"),
   from: z
     .string()

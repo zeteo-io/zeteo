@@ -293,6 +293,13 @@ Run:
     error_code: { type: [string, 'null'], description: 'The error answered; `client_closed` when the client went away first; for an export, also `shutting_down` (stopped by the service shutting down) and `interrupted` (its process died)' }
     truncated: { type: boolean }
     created_at: { type: string, format: date-time }
+    saved_query:
+      type: object
+      description: The saved query the run was of; named only while the viewer owns it or it is shared with them (always in the admin list); absent otherwise
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
 
 ListRunsResponse:
   type: object

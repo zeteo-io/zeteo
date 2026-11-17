@@ -165,3 +165,30 @@ export const loadVisibleCatalog = async (
   );
   return buildVisibleCatalog(source, tables, columns, relations, access);
 };
+
+/**
+ * The source of a saved query as the caller may see it, by the id the saved
+ * query holds. Never null: a source that is archived or that the caller has
+ * no grant on is answered with no tables and no relations. Its catalogue is
+ * loaded and built either way, so a hidden source costs about what a visible
+ * one does.
+ */
+export const loadSourceVisibleCatalog = async (
+  sourceId: string,
+  access: Access
+): Promise<VisibleCatalog> => {
+  const source = await db.sources.findById(sourceId);
+  // A saved query's source cannot be deleted: its foreign key restricts it.
+  if (!source) throw new Error(`source ${sourceId} does not exist`);
+  const { tables, columns, relations } =
+    await db.catalog.loadSourceCatalog(sourceId);
+  const catalog = buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    access
+  );
+  const visible = !source.archivedAt && access.sourceIds.has(source.id);
+  return visible ? catalog : { ...catalog, tables: [], relations: [] };
+};

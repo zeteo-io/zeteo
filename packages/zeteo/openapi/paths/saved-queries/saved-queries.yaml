@@ -1,0 +1,103 @@
+/v1/saved-queries:
+  get:
+    tags: [Saved queries]
+    summary: List saved queries
+    description: |
+      Newest first. `scope=mine` (the default) lists the caller's own, `scope=shared` those shared
+      with them or one of their groups, and `scope=all` every saved query (a holder of
+      `zeteo.saved_queries.read`; `403 forbidden` otherwise). `source_id`, `owner_id`,
+      `shared_with_type` and `shared_with_id` apply to `scope=all` only (`400 invalid_request`
+      otherwise); `source_id` also needs `zeteo.sources.read`; `shared_with_type` and
+      `shared_with_id` go together. `q` matches names, case-insensitively.
+
+      A saved query the caller cannot run is listed with `accessible: false` and without `query`
+      (and without `source`, unless they hold `zeteo.sources.read`).
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: listSavedQueries
+    parameters:
+      - name: scope
+        in: query
+        required: false
+        schema: { type: string, enum: [mine, shared, all], default: mine }
+      - name: q
+        in: query
+        required: false
+        description: Text to find, 1 to 100 characters
+        schema: { type: string, minLength: 1, maxLength: 100 }
+      - name: source_id
+        in: query
+        required: false
+        description: '`scope=all` only; needs `zeteo.sources.read`'
+        schema: { type: string, format: uuid }
+      - name: owner_id
+        in: query
+        required: false
+        description: '`scope=all` only'
+        schema: { type: string, format: uuid }
+      - name: shared_with_type
+        in: query
+        required: false
+        description: '`scope=all` only; goes with `shared_with_id`'
+        schema: { type: string, enum: [user, group] }
+      - name: shared_with_id
+        in: query
+        required: false
+        description: '`scope=all` only; goes with `shared_with_type`: the saved queries shared directly with this user or group'
+        schema: { type: string, format: uuid }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of saved queries
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/ListSavedQueriesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Saved queries]
+    summary: Save a query
+    description: |
+      Saves a query for the caller. It is planned against the caller's own grants exactly as
+      `POST /v1/query` plans it, so the same errors, with their detail, come back (`422`). The
+      name is unique among the caller's saved queries, whatever the case. A `zeteo.saved_query.created`
+      audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: createSavedQuery
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/CreateSavedQueryRequest'
+    responses:
+      '201':
+        description: The saved query
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/SavedQuery'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '409':
+        description: Conflict - `conflict` (the caller has a saved query of this name)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The query cannot be planned as written - the codes of `POST /v1/query`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

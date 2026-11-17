@@ -3,6 +3,7 @@ import { redis } from "../../utils/redis.js";
 import {
   TEST_DIRECTORY_KEY,
   type Principal,
+  type TestDirectoryEntry,
 } from "../../principals/directory.js";
 import {
   TEST_ORPHANED_KEY,
@@ -40,6 +41,30 @@ export const seedDirectory = async (principals: Principal[]) => {
   );
   await redis.expire(TEST_DIRECTORY_KEY, 600);
 };
+
+/** Adds to the test-mode directory, keeping what is there; an entry may carry a group's `organization_id` or a user's `user_type`. */
+export const addToDirectory = async (entries: TestDirectoryEntry[]) => {
+  if (entries.length === 0) return;
+  await redis.hset(
+    TEST_DIRECTORY_KEY,
+    Object.fromEntries(
+      entries.map((p) => [`${p.type}:${p.id}`, JSON.stringify(p)])
+    )
+  );
+  await redis.expire(TEST_DIRECTORY_KEY, 600);
+};
+
+/** Adds an active human user to the test-mode directory, so a lookup finds them. */
+export const addUserToDirectory = (id: string) =>
+  addToDirectory([
+    {
+      type: "user",
+      id,
+      name: `User ${id.slice(0, 6)}`,
+      email: `${id.slice(0, 6)}@example.com`,
+      status: "active",
+    },
+  ]);
 
 export const clearDirectory = async () => {
   await redis.del(TEST_DIRECTORY_KEY);

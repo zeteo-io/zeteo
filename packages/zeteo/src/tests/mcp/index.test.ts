@@ -17,7 +17,21 @@ import {
   rawRequest,
 } from "../support/mcp.js";
 
-const TOOLS = ["describe_table", "list_sources", "list_tables", "query"];
+const READ_TOOLS = [
+  "describe_table",
+  "get_saved_query",
+  "list_saved_queries",
+  "list_sources",
+  "list_tables",
+  "query",
+  "run_saved_query",
+];
+const WRITE_TOOLS = [
+  "create_saved_query",
+  "delete_saved_query",
+  "update_saved_query",
+];
+const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].sort();
 const RESOURCE_METADATA = `${BASE_URL}/.well-known/oauth-protected-resource/mcp`;
 
 describe("MCP endpoint", () => {
@@ -86,19 +100,30 @@ describe("MCP endpoint", () => {
     }
   });
 
-  it("lists the read-only tools to a user with zeteo.mcp.use and refuses each call without zeteo.data.read", async () => {
+  it("lists the tools to a user with zeteo.mcp.use and refuses each call without zeteo.data.read", async () => {
     const session = await connectMcp(mcpToken([MCP_USE]));
     try {
       const { tools } = await session.client.listTools();
       expect(tools.map((t) => t.name).sort()).toEqual(TOOLS);
       for (const tool of tools) {
-        expect(tool.annotations?.readOnlyHint).toBe(true);
+        expect(tool.annotations?.readOnlyHint).toBe(
+          READ_TOOLS.includes(tool.name)
+        );
       }
       const args: Record<string, Record<string, unknown>> = {
         list_sources: {},
         list_tables: { source: "anything" },
         describe_table: { source: "anything", table: "anything" },
         query: { source: "anything", from: "anything", select: ["x"] },
+        list_saved_queries: {},
+        get_saved_query: { id: "anything" },
+        run_saved_query: { id: "anything" },
+        create_saved_query: {
+          name: "x",
+          query: { source: "anything", from: "anything", select: ["x"] },
+        },
+        update_saved_query: { id: "anything", name: "x" },
+        delete_saved_query: { id: "anything" },
       };
       for (const name of TOOLS) {
         const call = await callTool(session.client, name, args[name]);

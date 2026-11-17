@@ -203,6 +203,7 @@ describe("error codes", () => {
       "invalid_operator",
       "export_not_enabled",
       "too_many_exports",
+      "saved_query_not_accessible",
     ]) {
       expect(codes).toContain(code);
     }

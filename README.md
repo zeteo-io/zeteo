@@ -13,7 +13,8 @@ tables, columns and relations ([docs/catalog.md](packages/zeteo/docs/catalog.md)
 per-user and per-group concurrency limits ([docs/grants.md](packages/zeteo/docs/grants.md)),
 querying: the catalogue of what a caller may query, the query language, `POST /v1/query` and the
 run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming export
-([docs/export.md](packages/zeteo/docs/export.md)) and the MCP endpoint
+([docs/export.md](packages/zeteo/docs/export.md)), saved queries
+([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md)) and the MCP endpoint
 ([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI (`packages/zeteo-ui`) ships in the image
 and is served at `/` once `UI_CLIENT_ID` names its login client in tereo; how to turn it on, what
 each screen does, its local development and its server side (`/v1/me`, the people and groups
@@ -84,12 +85,18 @@ and changes write audit entries to tereo's outbox.
 - **Export.** `POST /v1/export?format=ndjson|csv` streams the result of the same query, up to the
   source's export cap, from sources whose exports are on; gzipped when the client accepts it. An
   NDJSON stream's last line, or a CSV stream's trailers, say whether it ended complete or capped.
+- **Saved queries.** A user keeps a query under a name at `/v1/saved-queries`, runs and exports it,
+  shares it with users and groups, copies it and hands it to another owner. A recipient runs it
+  with their own grants only; one who lacks them is told to ask an admin and sees neither the query
+  nor its source. `GET /v1/me/runs` lists a caller's own runs.
+  ([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md))
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).
-- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves an AI signed in through tereo four
-  read-only tools: `list_sources`, `list_tables` and `describe_table` to discover what it may
+- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves these tools to an AI signed in through
+  tereo: `list_sources`, `list_tables` and `describe_table` to discover what it may
   query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
-  5,000 or 1 MB), with instructions that teach the model the language. A user sees them only with
+  5,000 or 1 MB), and tools to list, run, save, change and delete saved queries, with
+  instructions that teach the model the language. A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
 Not there yet: row filters on grants.

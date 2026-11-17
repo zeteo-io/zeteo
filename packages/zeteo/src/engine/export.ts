@@ -1,10 +1,12 @@
 import { ExportNotEnabledError, QueryTimeoutError } from "../utils/errors.js";
 import type { ColumnType, QueryWarning } from "../adapters/types.js";
+import { stampSavedQueryRun } from "../saved-queries/stamps.js";
 import { ServiceUnavailableError } from "../utils/errors.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { approxRowBytes } from "../adapters/rowSize.js";
 import { loadUserLimits } from "../limits/resolve.js";
 import type { Caller } from "../middleware/auth.js";
+import { planFor, type Progress } from "./plan.js";
 import { performance } from "node:perf_hooks";
 import { nextBatchRows } from "./collect.js";
 import { logger } from "../utils/logger.js";
@@ -28,11 +30,12 @@ import {
 import {
   checkColumns,
   checkRows,
+  loadAndPlanSaved,
   loadCatalogFor,
-  planFor,
+  recordedQueryOf,
   recordRunOrPlaceholder,
   sourceSlugOf,
-  type Progress,
+  type SavedRun,
 } from "./index.js";
 
 /** Where an export's rows go: the response, in whatever format it writes. */
@@ -56,7 +59,56 @@ export interface RunExportInput {
   signal: AbortSignal;
   /** The caller's concurrency limits; read for the caller as the export starts when absent. */
   userLimits?: UserLimits;
+  /**
+   * The saved query `body` is the JSON of, when it is one: planned as a
+   * saved query's run is, and decided before the source's export switch is
+   * read, so a caller without access never learns whether it allows exports.
+   */
+  savedQuery?: SavedRun;
 }
+
+/** Refuses an export from a source that does not allow them. */
+const checkExportEnabled = (source: {
+  exportEnabled: boolean;
+  exportRowCap: number;
+}): void => {
+  if (!source.exportEnabled || source.exportRowCap === 0) {
+    throw new ExportNotEnabledError();
+  }
+};
+
+/**
+ * The export's source, as the caller sees it, and its plan. A query's source
+ * is checked for exports before its body is planned; a saved query is
+ * planned first, so its refusal is the one answer whatever the source allows.
+ */
+const planExport = async (
+  input: RunExportInput,
+  slug: string,
+  progress: Progress
+) => {
+  if (input.savedQuery) {
+    const planned = await loadAndPlanSaved(
+      input.caller,
+      input.savedQuery,
+      input.body,
+      progress
+    );
+    checkExportEnabled(planned.catalog.source);
+    return planned;
+  }
+  const { access, catalog } = await loadCatalogFor(
+    input.caller,
+    slug,
+    progress
+  );
+  checkExportEnabled(catalog.source);
+  return {
+    access,
+    catalog,
+    ...planFor(input.body, access, catalog, progress),
+  };
+};
 
 /** Why an export was stopped before it ended, and what it rejects with. */
 type Halt =
@@ -274,16 +326,12 @@ export const runExport = async (
   /** Rows read from the stream and their bytes, which size the next batch. */
   const read = { rows: 0, bytes: 0 };
   try {
-    const { access, catalog } = await loadCatalogFor(
-      input.caller,
+    const { access, catalog, adapter, plan } = await planExport(
+      input,
       slug,
       progress
     );
     const { source } = catalog;
-    if (!source.exportEnabled || source.exportRowCap === 0) {
-      throw new ExportNotEnabledError();
-    }
-    const { adapter, plan } = planFor(input.body, access, catalog, progress);
     // An export has no default order (sorting everything would hold back
     // its first row), so an offset with no orderBy would skip arbitrary rows.
     if (plan.offset > 0 && plan.defaultOrder === true) {
@@ -332,7 +380,7 @@ export const runExport = async (
           start = {
             caller: input.caller,
             sourceId: source.id,
-            query: input.body,
+            ...recordedQueryOf(input.body, input.savedQuery, progress),
             durationMs: elapsed(),
           };
           runId = await recordStart(start);
@@ -387,6 +435,10 @@ export const runExport = async (
       errorCode: null,
       truncated: tail.status === "truncated",
     });
+    if (input.savedQuery) {
+      // Not waited for: a stamp that fails is logged, and the export stands.
+      void stampSavedQueryRun(input.savedQuery.id, input.caller.userId);
+    }
   } catch (err) {
     const thrown = halted ? halted.err : err;
     if (runId !== undefined && start !== undefined) {
@@ -404,7 +456,7 @@ export const runExport = async (
         caller: input.caller,
         sourceId: progress.sourceId,
         entryPoint: "export",
-        query: input.body,
+        ...recordedQueryOf(input.body, input.savedQuery, progress),
         durationMs: elapsed(),
         rowCount: null,
         truncated: false,

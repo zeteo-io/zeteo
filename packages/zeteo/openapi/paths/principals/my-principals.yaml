@@ -1,0 +1,57 @@
+/v1/me/principals:
+  get:
+    tags: [Saved queries]
+    summary: Search users or groups to share a saved query with
+    description: |
+      Finds users (human ones, by name or email) or groups (by name) whose text contains `q`, at
+      most `limit`: groups that are global or of the caller's signed-in organization. The caller's
+      own searches are limited as `GET /v1/principals`'s are (60 a minute). The response is not
+      cached.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request` (`q` not 2 to 100 characters, `limit` outside 1 to 25, an
+      unknown `type` or query key), `429 too_many_requests`, `502 tereo_unreachable`.
+    operationId: searchMyPrincipals
+    parameters:
+      - name: type
+        in: query
+        required: true
+        schema: { $ref: '../../components/grants/schemas.yaml#/PrincipalType' }
+      - name: q
+        in: query
+        required: true
+        description: Text the name (or a user's email) contains, case-insensitively
+        schema: { type: string, minLength: 2, maxLength: 100 }
+      - name: limit
+        in: query
+        required: false
+        schema: { type: integer, minimum: 1, maximum: 25, default: 10 }
+    responses:
+      '200':
+        description: The matches
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/principals/schemas.yaml#/ListDirectoryPrincipalsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '429':
+        description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+        headers:
+          Retry-After:
+            description: Seconds to wait before searching again
+            schema:
+              type: integer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`, tereo did not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

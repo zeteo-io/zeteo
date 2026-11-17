@@ -1,0 +1,90 @@
+/v1/saved-queries/{savedQueryId}:
+  get:
+    tags: [Saved queries]
+    summary: Get a saved query
+    description: |
+      For its owner, a user it is shared with (directly or through a group) and a holder of
+      `zeteo.saved_queries.read`; anyone else gets `404 not_found`.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: getSavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    responses:
+      '200':
+        description: The saved query
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/SavedQuery'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Saved queries]
+    summary: Change a saved query
+    description: |
+      Its owner only (anyone else, `404 not_found`). A changed `query` is planned again against the
+      owner's own grants (`422`) and moves the saved query to that query's source. The owner need
+      not be able to run it to rename or describe it. A `zeteo.saved_query.updated` audit entry is
+      written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: updateSavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/UpdateSavedQueryRequest'
+    responses:
+      '200':
+        description: The saved query
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/SavedQuery'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict` (the caller has another saved query of this name)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The query cannot be planned as written - the codes of `POST /v1/query`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Saved queries]
+    summary: Delete a saved query
+    description: |
+      Its owner, or a holder of `zeteo.saved_queries.write`; anyone else gets `404 not_found`. Its
+      shares go with it; runs already recorded stay. A `zeteo.saved_query.deleted` audit entry is
+      written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: deleteSavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

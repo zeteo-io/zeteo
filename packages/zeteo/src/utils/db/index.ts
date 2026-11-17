@@ -1,4 +1,5 @@
 import * as principalLimits from "./principalLimits.js";
+import * as savedQueries from "./savedQueries.js";
 import * as queryRuns from "./queryRuns.js";
 import * as sources from "./sources.js";
 import * as catalog from "./catalog.js";
@@ -11,6 +12,7 @@ export const db = {
   grants,
   principalLimits,
   queryRuns,
+  savedQueries,
 };
 
 export { prisma } from "./prisma.js";

@@ -59,13 +59,25 @@
         "displayName": "Use over MCP",
         "description": "Use zeteo through an AI connected over MCP",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.saved_queries.read",
+        "displayName": "Read saved queries",
+        "description": "List and read every user's saved queries and who they are shared with; also lets the holder look up users' names and email addresses",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.saved_queries.write",
+        "displayName": "Manage saved queries",
+        "description": "Change, share, transfer and delete any user's saved queries; also grants Read saved queries",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
       {
         "name": "zeteo_admin",
         "displayName": "Zeteo administrator",
-        "description": "Manages sources, grants and the record of query runs",
+        "description": "Manages sources, grants, saved queries and the record of query runs",
         "permissions": [
           "zeteo.sources.read",
           "zeteo.sources.write",
@@ -74,7 +86,9 @@
           "zeteo.data.read",
           "zeteo.data.export",
           "zeteo.runs.read",
-          "zeteo.mcp.use"
+          "zeteo.mcp.use",
+          "zeteo.saved_queries.read",
+          "zeteo.saved_queries.write"
         ]
       },
       {
@@ -160,6 +174,36 @@
         "eventType": "zeteo.principal_limit.removed",
         "description": "A user's or group's own concurrency limits were removed",
         "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.created",
+        "description": "A saved query was created",
+        "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.updated",
+        "description": "A saved query was changed",
+        "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.deleted",
+        "description": "A saved query was deleted",
+        "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.shared",
+        "description": "A saved query's shares were changed",
+        "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.transferred",
+        "description": "A saved query was transferred to another owner",
+        "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.saved_query.copied",
+        "description": "A saved query was copied",
+        "readPermission": "zeteo.saved_queries.read"
       },
       {
         "eventType": "zeteo.query.run",

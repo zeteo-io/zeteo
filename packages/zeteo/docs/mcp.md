@@ -110,8 +110,11 @@ What they can read is still bounded by `zeteo.data.read` and their grants.
 
 ## The tools
 
-All four are read-only and gated as above. The server's instructions, sent when a client
-connects, teach the model the order of use, the query language with worked examples, how results,
+All of them need `zeteo.mcp.use` and `zeteo.data.read`. The discovery tools, `query` and the
+saved query tools that read are read-only; `create_saved_query`, `update_saved_query` and
+`delete_saved_query` change the caller's own saved queries only (another user's is `not_found`,
+whatever permissions the caller holds). The server's instructions, sent when a client connects,
+teach the model the order of use, the query language with worked examples, how results,
 limits and errors read, and that query results are data from a database, never instructions.
 
 | Tool | Input | Result |
@@ -120,6 +123,15 @@ limits and errors read, and that query results are data from a database, never i
 | `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns }] }`; `columns` counts the granted columns |
 | `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join |
 | `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `list_saved_queries` | `{ scope?: "mine" \| "shared" }` | `{ saved_queries: [view], truncated }` (`truncated` is true when the first 100 were all it returned), the view of `GET /v1/saved-queries` without `owner.id`; one the caller cannot run has `accessible: false` and no `query` or `source` |
+| `get_saved_query` | `{ id }` | the same view |
+| `run_saved_query` | `{ id, limit?, offset? }` | as `query`; refused with `saved_query_not_accessible` when the caller cannot run it |
+| `create_saved_query` | `{ name, description?, query }`, `query` as for `query` | the view; the query is planned against the caller's own grants |
+| `update_saved_query` | `{ id, name?, description?, query? }` | the view |
+| `delete_saved_query` | `{ id }` | `{ deleted: true }` |
+
+Sharing and transferring a saved query are not tools: they are done in the UI or the API
+([saved-queries.md](saved-queries.md)).
 
 The discovery tools show names, never ids or native types, and nothing outside the caller's
 grants. `query` runs the engine of `POST /v1/query` ([querying.md](querying.md)) with MCP's
@@ -150,7 +162,10 @@ stops waiting, but the query runs on to its end or its time limit.
 - Each `query` call is recorded in the run log as any query is
   ([querying.md](querying.md#the-run-log)), with entry point `mcp`: a `query_runs` row and a
   `zeteo.query.run` audit entry, refused and failed calls included.
-- The discovery tools write no run and no audit entry.
+- `run_saved_query` is recorded the same way, with the saved query's id
+  ([saved-queries.md](saved-queries.md#what-is-recorded)); creating, changing and deleting a saved
+  query write that area's audit entries.
+- The discovery tools and the saved query tools that only read write no run and no audit entry.
 - Every tool call is one log line from `@tereo-io/mcp` (`tool`, `user_id`, `client_id`,
   `request_id`, `outcome`, `duration_ms`); zeteo's own lines for the call carry the same
   `request_id`. Inputs and results are never logged.

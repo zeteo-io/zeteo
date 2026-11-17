@@ -31,7 +31,16 @@ export interface PrincipalRef {
   id: string;
 }
 
-/** Test mode's directory: a Redis hash of `${type}:${id}` to a JSON `Principal`. */
+/**
+ * An entry of test mode's directory: a `Principal`, and for a group its
+ * organization (null or absent: global), for a user their type.
+ */
+export type TestDirectoryEntry = Principal & {
+  organization_id?: string | null;
+  user_type?: AuthServiceUser["userType"];
+};
+
+/** Test mode's directory: a Redis hash of `${type}:${id}` to a JSON `TestDirectoryEntry`. */
 export const TEST_DIRECTORY_KEY = "zeteo:test:directory";
 
 /** Tereo's most ids in one `getUsersByIds` request. */
@@ -203,21 +212,47 @@ const searchUsers = async (
   return [...seen.values()].slice(0, limit).map(fromUser);
 };
 
-const searchGroups = async (q: string, limit: number): Promise<Principal[]> => {
-  const page = await requests.auth.listGroups({ q, limit });
-  return page.data.slice(0, limit).map(fromGroup);
+/** Narrows a group search to the global groups and those of `organizationId` (null: global only). */
+export interface SearchScope {
+  organizationId: string | null;
+}
+
+const searchGroups = async (
+  q: string,
+  limit: number,
+  scope?: SearchScope
+): Promise<Principal[]> => {
+  if (scope === undefined) {
+    const page = await requests.auth.listGroups({ q, limit });
+    return page.data.slice(0, limit).map(fromGroup);
+  }
+  const organizations = ["global", scope.organizationId].filter(
+    (o): o is string => o !== null
+  );
+  const pages = await Promise.all(
+    organizations.map((organizationId) =>
+      requests.auth.listGroups({ q, limit, organizationId })
+    )
+  );
+  const seen = new Map<string, Principal>();
+  for (const g of pages.flatMap((page) => page.data))
+    if (!seen.has(g.id)) seen.set(g.id, fromGroup(g));
+  return [...seen.values()].slice(0, limit);
 };
 
 /** `searchPrincipals` against tereo itself. */
 export const searchFromTereo = async (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> => {
   assertNoTransaction(`tereo search ${type}s`);
   try {
     return await withinBudget((signal) =>
-      type === "user" ? searchUsers(q, limit, signal) : searchGroups(q, limit)
+      type === "user"
+        ? searchUsers(q, limit, signal)
+        : searchGroups(q, limit, scope)
     );
   } catch (err) {
     throw unreachable(`searching ${type}s`, err, { limit });
@@ -320,6 +355,43 @@ export const lookupFromTereo = async (
   return distinct.map((r) => found.get(refKey(r)) ?? orphaned(r));
 };
 
+/** `groupOrganizationOf` against tereo itself. */
+export const groupOrganizationFromTereo = async (
+  id: string
+): Promise<string | null | undefined> => {
+  if (!UUID.test(id)) return undefined;
+  assertNoTransaction("tereo getGroup()");
+  try {
+    return await withinBudget(async () => {
+      const group = await getTereo().auth.getGroup(id);
+      return group === null ? undefined : group.organizationId;
+    });
+  } catch (err) {
+    throw unreachable("reading a group", err, { refs: 1 });
+  }
+};
+
+/** `isServiceAccountUser` against tereo itself; uncached, as users' data is kept out of Redis. */
+export const isServiceAccountFromTereo = async (
+  id: string
+): Promise<boolean> => {
+  if (!UUID.test(id)) return false;
+  assertNoTransaction("tereo getUser()");
+  try {
+    return await withinBudget(async () => {
+      try {
+        const user = await requests.auth.getUser(id);
+        return user.userType === "service_account";
+      } catch (err) {
+        if (statusOf(err) === 404) return false;
+        throw err;
+      }
+    });
+  } catch (err) {
+    throw unreachable("reading a user", err, { refs: 1 });
+  }
+};
+
 /** A test-mode seam's Redis read; one that fails or does not answer in time is `tereo_unreachable`. */
 const readSeam = async <T>(command: Promise<T>, refs: number): Promise<T> => {
   try {
@@ -329,15 +401,42 @@ const readSeam = async <T>(command: Promise<T>, refs: number): Promise<T> => {
   }
 };
 
-const seeded = async (): Promise<Principal[]> =>
+/** A seam entry as the directory gives it: without the seam's own fields. */
+const asPrincipal = (json: string): Principal => {
+  const {
+    organization_id: _organization,
+    user_type: _userType,
+    ...principal
+  } = JSON.parse(json) as TestDirectoryEntry;
+  return principal;
+};
+
+const seeded = async (): Promise<TestDirectoryEntry[]> =>
   Object.values(await readSeam(redis.hgetall(TEST_DIRECTORY_KEY), 0)).map(
-    (json) => JSON.parse(json) as Principal
+    (json) => JSON.parse(json) as TestDirectoryEntry
   );
+
+/** The seam's entry for `ref`, or undefined when it has none or the id is marked orphaned. */
+const seamEntry = async (
+  ref: PrincipalRef
+): Promise<TestDirectoryEntry | undefined> => {
+  const [value, mark] = await readSeam(
+    Promise.all([
+      redis.hget(TEST_DIRECTORY_KEY, refKey(ref)),
+      redis.sismember(TEST_ORPHANED_KEY, ref.id),
+    ]),
+    1
+  );
+  return value === null || mark === 1
+    ? undefined
+    : (JSON.parse(value) as TestDirectoryEntry);
+};
 
 const searchSeam = async (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> => {
   const needle = q.toLowerCase();
   return (await seeded())
@@ -345,10 +444,16 @@ const searchSeam = async (
       (p) =>
         p.type === type &&
         p.status !== "orphaned" &&
-        [p.name, p.email].some((v) => v?.toLowerCase().includes(needle))
+        [p.name, p.email].some((v) => v?.toLowerCase().includes(needle)) &&
+        (type === "user" ||
+          scope === undefined ||
+          (p.organization_id ?? null) === null ||
+          p.organization_id === scope.organizationId) &&
+        (type === "group" || p.user_type !== "service_account")
     )
     .sort((a, b) => a.id.localeCompare(b.id))
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((p) => asPrincipal(JSON.stringify(p)));
 };
 
 const lookupSeam = async (refs: PrincipalRef[]): Promise<Principal[]> => {
@@ -367,25 +472,25 @@ const lookupSeam = async (refs: PrincipalRef[]): Promise<Principal[]> => {
     ),
   ]);
   return distinct.map((r, i) =>
-    marks[i] === 1 || values[i] === null
-      ? orphaned(r)
-      : (JSON.parse(values[i]) as Principal)
+    marks[i] === 1 || values[i] === null ? orphaned(r) : asPrincipal(values[i])
   );
 };
 
 /**
  * Users or groups whose name (or a user's email) contains `q`, at most
- * `limit`. A user search leaves out service accounts, an unreachable tereo
- * is a `TereoUnreachableError`.
+ * `limit`. A user search leaves out service accounts; a group search with a
+ * `scope` finds only global groups and those of the scope's organization. An
+ * unreachable tereo is a `TereoUnreachableError`.
  */
 export const searchPrincipals = (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> =>
   env.TEREO_TEST_MODE
-    ? searchSeam(type, q, limit)
-    : searchFromTereo(type, q, limit);
+    ? searchSeam(type, q, limit, scope)
+    : searchFromTereo(type, q, limit, scope);
 
 /**
  * One principal per ref, in the refs' order, a repeated ref collapsed to its
@@ -394,3 +499,27 @@ export const searchPrincipals = (
  */
 export const lookupPrincipals = (refs: PrincipalRef[]): Promise<Principal[]> =>
   env.TEREO_TEST_MODE ? lookupSeam(refs) : lookupFromTereo(refs);
+
+/**
+ * The organization a group belongs to: its id, null for a global group, and
+ * undefined when there is no such group. An unreachable tereo is a
+ * `TereoUnreachableError`. Not to be called inside a transaction.
+ */
+export const groupOrganizationOf = async (
+  id: string
+): Promise<string | null | undefined> => {
+  if (!env.TEREO_TEST_MODE) return groupOrganizationFromTereo(id);
+  const entry = await seamEntry({ type: "group", id });
+  return entry === undefined ? undefined : (entry.organization_id ?? null);
+};
+
+/**
+ * Whether the user is a service account; false when there is no such user.
+ * An unreachable tereo is a `TereoUnreachableError`. Not to be called
+ * inside a transaction.
+ */
+export const isServiceAccountUser = async (id: string): Promise<boolean> => {
+  if (!env.TEREO_TEST_MODE) return isServiceAccountFromTereo(id);
+  const entry = await seamEntry({ type: "user", id });
+  return entry?.user_type === "service_account";
+};
