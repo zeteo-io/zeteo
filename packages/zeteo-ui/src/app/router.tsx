@@ -61,7 +61,7 @@ const pages = {
   ),
 } as const;
 
-/** `/` goes to the first section the person can read. */
+/** `/` goes to the first section the person can read: My Zeteo, else an admin section. */
 const DefaultSection = () => {
   const { hasPermission } = useAuth();
   const section = SECTIONS.find((s) => hasPermission(s.permission));

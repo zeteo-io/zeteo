@@ -219,6 +219,7 @@ describe("the session, with the real @tereo-io/react", () => {
     window.history.replaceState(null, "", "/runs");
     render(<App />);
     const nav = await screen.findByRole("navigation", { name: "Sections" });
+    await userEvent.click(within(nav).getByRole("button", { name: "Admin" }));
     expect(within(nav).getByRole("link", { name: "Grants" })).toBeVisible();
 
     permissions = ["zeteo.runs.read"];

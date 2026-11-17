@@ -21,6 +21,16 @@ import {
 // zeteo's admin UI in a real browser: the image's build, served by zeteo,
 // signing in through the released Tereo's own pages.
 
+/** Opens the top bar's Admin menu, whose links are not in the page until it is open. */
+const openAdmin = async (page: Page) => {
+  const admin = page
+    .getByRole("navigation", { name: "Sections" })
+    .getByRole("button", { name: "Admin" });
+  if ((await admin.getAttribute("aria-expanded")) !== "true") {
+    await admin.click();
+  }
+};
+
 let alice: Person;
 let bob: Person;
 
@@ -95,6 +105,7 @@ test("an admin administers zeteo through the UI", async ({
     );
     sourceId = new URL(page.url()).pathname.split("/")[2];
 
+    await openAdmin(page);
     await page.getByRole("link", { name: "Sources" }).click();
     const row = page.getByRole("row").filter({ hasText: slug });
     // Name (with the slug under it), Database, Status, Last refreshed.
@@ -150,6 +161,7 @@ test("an admin administers zeteo through the UI", async ({
   });
 
   await test.step("grant alice a whole table", async () => {
+    await openAdmin(page);
     await page.getByRole("link", { name: "Grants" }).click();
     await page.getByRole("button", { name: "New grant" }).click();
     await page
@@ -175,6 +187,7 @@ test("an admin administers zeteo through the UI", async ({
   });
 
   await test.step("give alice a limit, then delete it", async () => {
+    await openAdmin(page);
     await page.getByRole("link", { name: "Limits" }).click();
     await page.getByRole("button", { name: "New limit" }).click();
     const dialog = page.getByRole("dialog");
@@ -203,6 +216,7 @@ test("an admin administers zeteo through the UI", async ({
     const ran = await query(stack.zeteoUrl, aliceToken, slug);
     expect(ran.status).toBe(200);
 
+    await openAdmin(page);
     await page.getByRole("link", { name: "Runs" }).click();
     const row = page
       .getByRole("row")
@@ -301,9 +315,7 @@ test("a user without admin permissions sees no sections", async ({
   await page.getByRole("button", { name: "Sign in" }).click();
   await submitTereoSignIn(page, bob.email);
   await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sources" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Grants" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "Runs" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Admin" })).toHaveCount(0);
 
   await context.close();
   expectCleanRun(seen);
@@ -357,6 +369,7 @@ test("a role removed in Tereo hides its sections without a reload", async ({
   await page.getByRole("button", { name: "Sign in" }).click();
   await submitTereoSignIn(page, email);
   const nav = page.getByRole("navigation", { name: "Sections" });
+  await openAdmin(page);
   await expect(nav.getByRole("link", { name: "Sources" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Runs" })).toBeVisible();
 

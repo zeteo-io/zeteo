@@ -1,8 +1,9 @@
 import { AppTopBar, AppTopBarLink } from "@kosmeo-ui/react";
 import { ThemeToggleButton } from "./ThemeToggleButton";
+import { USER_SECTIONS } from "../sections";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "@tereo-io/react";
-import { SECTIONS } from "../sections";
+import { AdminMenu } from "./AdminMenu";
 import { UserMenu } from "./UserMenu";
 
 export const TopBar = () => {
@@ -18,11 +19,12 @@ export const TopBar = () => {
         </>
       }
     >
-      {SECTIONS.filter((s) => hasPermission(s.permission)).map((s) => (
+      {USER_SECTIONS.filter((s) => hasPermission(s.permission)).map((s) => (
         <AppTopBarLink key={s.path} as={NavLink} to={s.path}>
           {s.label}
         </AppTopBarLink>
       ))}
+      <AdminMenu />
     </AppTopBar>
   );
 };

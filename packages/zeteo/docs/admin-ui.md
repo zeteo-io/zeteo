@@ -123,12 +123,18 @@ page and no sections.
   theme, refreshing itself and reloading the dashboard as it does; on a lost session it says
   "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)). A **Full screen** button
   appears in the corner while the mouse moves; an unattended screen should use the browser's kiosk mode, as full screen needs a click.
-- **Dashboards (all)** and **Saved panels (all)** (`/admin/dashboards`, `/admin/saved-panels`,
+- **Dashboards** and **Saved panels** under Admin (`/admin/dashboards`, `/admin/saved-panels`,
   `zeteo.dashboards.read`; share, transfer and delete need `.write`): every user's dashboards and
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
   shown here and the sections have no edit: only the owner changes one.
 
-The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, and
+The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that
+lists the admin sections the person may see (Sources, Grants, Limits, Runs, Saved queries,
+Dashboards, Saved panels) and is absent when they may see none; it is marked active under any of
+their paths. `/` lands on My Zeteo for anyone holding `zeteo.data.read`, admins included, and
+otherwise on their first admin section. The sections are listed once, in `src/app/sections.tsx`.
+
+The top bar's user menu signs out: the UI revokes its refresh token and ends Tereo's session, and
 lands on `/signed-out`; the next sign-in asks for the password again.
 
 **Live permissions.** The UI reads the person's permissions from `GET /v1/me` when it signs in and

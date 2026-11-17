@@ -40,8 +40,8 @@ Nothing in `zeteo` depends on it.
 The admin UI is `packages/zeteo-ui` (Vite + React on `@kosmeo-ui/react`, dev server on port 4200,
 forwarding `/v1` and `/ui-config.json` to zeteo). It belongs to the release group `core`, so its
 version is zeteo's. Its `check` also runs `scripts/check-routes.mjs`, which keeps routes and
-`public/` files clear of the paths zeteo reserves. Its screens are the admin sections (sources,
-grants, limits, runs, and Saved queries for `zeteo.saved_queries.read`) and My Zeteo at `/my` for
+`public/` files clear of the paths zeteo reserves. Its top bar holds My Zeteo, Dashboards and an Admin menu for the admin sections (sources,
+grants, limits, runs, Saved queries for `zeteo.saved_queries.read`, and the two dashboard lists), and My Zeteo at `/my` for
 everyone who may query: their saved queries, those shared with them, their recent runs and what they
 can query; Dashboards at `/dashboards` (with a display mode at `/dashboards/<id>/display`), and
 admin lists of all dashboards and saved panels for `zeteo.dashboards.read`. Its build ships in zeteo's image (the Dockerfile's `ui` stage) and zeteo serves it at `/`
