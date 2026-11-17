@@ -123,7 +123,6 @@ limits and errors read, and that query results are data from a database, never i
 | `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns }] }`; `columns` counts the granted columns |
 | `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join |
 | `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
-
 | `list_saved_queries` | `{ scope?: "mine" \| "shared" }` | `{ saved_queries: [view], truncated }` (`truncated` is true when the first 100 were all it returned), the view of `GET /v1/saved-queries` without `owner.id`; one the caller cannot run has `accessible: false` and no `query` or `source` |
 | `get_saved_query` | `{ id }` | the same view |
 | `run_saved_query` | `{ id, limit?, offset? }` | as `query`; refused with `saved_query_not_accessible` when the caller cannot run it |
