@@ -557,6 +557,10 @@ recorded in the same table, with their own audit entries ([export.md](export.md#
 - Outcomes: `ok`; `refused` for a 4xx answer; `timeout` for `query_timeout`; `failed` for any other
   error, and for a client that went away (`client_closed`); `running` for an export that has
   started and not yet ended.
+- A run of a saved query ([saved-queries.md](saved-queries.md)) is the same row with the saved
+  query's id, and its query is the stored JSON as run. When the caller was refused it as
+  `saved_query_not_accessible`, the row holds `{ "withheld": true }` as the query and a null
+  `source_id`, so the caller's own runs never show what the refusal withholds.
 - When a run cannot be stored, it is stored again with `{ "unrecordable": true }` in place of the
   query (same outcome, code and other fields), and the failure is logged.
 - Rows are sent only once their run is recorded: when neither attempt can be written, a successful
@@ -565,7 +569,8 @@ recorded in the same table, with their own audit entries ([export.md](export.md#
 
 `GET /v1/runs` lists runs newest first, filtered by `user_id`, `source_id` and `outcome`, as
 `{ id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code,
-truncated, created_at }`.
+truncated, created_at }`, and `saved_query: { id, name }` for a run of a saved query that still
+exists. `GET /v1/me/runs` is the same list for the caller alone.
 
 ## Retention and housekeeping
 

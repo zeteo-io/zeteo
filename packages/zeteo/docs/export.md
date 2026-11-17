@@ -8,6 +8,13 @@ how the run is recorded. The reference is `openapi/openapi.yaml`.
 | Route | Permission | Result |
 |-------|------------|--------|
 | `POST /v1/export?format=ndjson\|csv` | `zeteo.data.export` | `200`, a stream; NDJSON unless `format=csv` |
+| `POST /v1/saved-queries/{id}/export?format=ndjson\|csv` | `zeteo.data.export` | the same, for a saved query |
+
+`POST /v1/saved-queries/{id}/export` exports a saved query ([saved-queries.md](saved-queries.md)) as
+the caller: the body is empty or gives `limit` and `offset` to replace the stored ones, and everything
+below applies. A caller who cannot run it is refused `403 saved_query_not_accessible` before the first
+byte, also when the source has exports disabled, so `export_not_enabled` never tells a caller about a
+source they cannot see. Its run is recorded with the saved query's id.
 
 ## Who may export
 

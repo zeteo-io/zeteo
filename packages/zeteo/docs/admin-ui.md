@@ -95,6 +95,22 @@ page and no sections.
   the UI has no query screen of its own. Searching for a person by name needs
   `zeteo.grants.read` too; without it the filter takes a pasted user id.
 
+- **Saved queries** (`zeteo.saved_queries.read`, changes with `.write`): every user's saved queries
+  in a table, filtered by name, owner, source or the person or group a query is shared with. A row
+  shows the owner, the source, the share count and when it last ran; the share and transfer icons
+  and Delete act on any of them. A saved query's JSON is never shown here, and the section has no
+  edit: only the owner changes a saved query.
+- **My Zeteo** (`/my`, `zeteo.data.read`), for everyone who may query; for a person with no admin
+  section it is where they land. Its panels are the caller's own saved queries ("New saved query"
+  takes a query's JSON; each card has **Share**, **Transfer**, **Edit details**, **View JSON** and
+  **Delete**), the ones shared with them (**Copy to mine** and **View JSON**), their recent runs
+  (**Show query**, and **Save as saved query**, which starts a saved query from a run's JSON), and
+  "What I can query", the catalogue as `GET /v1/catalog` gives it. A saved query the person cannot
+  run shows the notice "You need expanded permissions to run this saved query. Ask an admin to
+  extend your access." and carries no query or source. Sharing searches people with
+  `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
+  The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
+
 The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, and
 lands on `/signed-out`; the next sign-in asks for the password again.
 
@@ -169,6 +185,11 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
 | `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
+
+| `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
+| `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
+
+The saved queries the UI manages are in [saved-queries.md](saved-queries.md).
 
 A `Principal` is `{ type, id, name, email?, status }`, with `email` for users only and `status`
 `active`, `inactive` or `orphaned`.

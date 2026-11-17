@@ -130,7 +130,8 @@ limits and errors read, and that query results are data from a database, never i
 | `update_saved_query` | `{ id, name?, description?, query? }` | the view |
 | `delete_saved_query` | `{ id }` | `{ deleted: true }` |
 
-Sharing and transferring a saved query are not tools: they are done in the UI or the API.
+Sharing and transferring a saved query are not tools: they are done in the UI or the API
+([saved-queries.md](saved-queries.md)).
 
 The discovery tools show names, never ids or native types, and nothing outside the caller's
 grants. `query` runs the engine of `POST /v1/query` ([querying.md](querying.md)) with MCP's
@@ -161,7 +162,10 @@ stops waiting, but the query runs on to its end or its time limit.
 - Each `query` call is recorded in the run log as any query is
   ([querying.md](querying.md#the-run-log)), with entry point `mcp`: a `query_runs` row and a
   `zeteo.query.run` audit entry, refused and failed calls included.
-- The discovery tools write no run and no audit entry.
+- `run_saved_query` is recorded the same way, with the saved query's id
+  ([saved-queries.md](saved-queries.md#what-is-recorded)); creating, changing and deleting a saved
+  query write that area's audit entries.
+- The discovery tools and the saved query tools that only read write no run and no audit entry.
 - Every tool call is one log line from `@tereo-io/mcp` (`tool`, `user_id`, `client_id`,
   `request_id`, `outcome`, `duration_ms`); zeteo's own lines for the call carry the same
   `request_id`. Inputs and results are never logged.
