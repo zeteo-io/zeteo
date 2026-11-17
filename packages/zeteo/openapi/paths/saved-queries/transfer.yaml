@@ -1,0 +1,56 @@
+/v1/saved-queries/{savedQueryId}/transfer:
+  post:
+    tags: [Saved queries]
+    summary: Transfer a saved query to another user
+    description: |
+      Makes `user_id` the owner: for its owner, or a holder of `zeteo.saved_queries.write` (a
+      holder of `zeteo.saved_queries.read` alone gets `403 forbidden`; anyone else, `404
+      not_found`). With `keep_access` (the default) the previous owner keeps a direct share. The
+      new owner may not already have a saved query of that name (`409 conflict`) and may not be a
+      service account (`400 invalid_transfer`, as when the user already owns it or tereo has no
+      such user). `warning` says the new owner could not run it. A `zeteo.saved_query.transferred`
+      audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: transferSavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/TransferSavedQueryRequest'
+    responses:
+      '200':
+        description: The saved query as the caller now sees it
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/TransferSavedQueryResponse'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`, or `invalid_transfer` (the user already
+          owns it, tereo has no such user, or the user is a service account)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the new owner has a saved query of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

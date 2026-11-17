@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 32 operations as the description", () => {
+  it("lists the same 45 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(32);
-    expect(Object.keys(found)).toHaveLength(32);
+    expect(blocks).toBe(45);
+    expect(Object.keys(found)).toHaveLength(45);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -78,6 +78,42 @@ describe("operations against the API description", () => {
       ],
       ["runs.list", (c) => c.runs.list()],
       ["me.get", (c) => c.me.get()],
+      ["me.runs", (c) => c.me.runs()],
+      ["me.principals", (c) => c.me.principals({ type: "user", q: "ad" })],
+      ["savedQueries.list", (c) => c.savedQueries.list()],
+      [
+        "savedQueries.create",
+        (c) => c.savedQueries.create({ name: "n", query }),
+      ],
+      ["savedQueries.get", (c) => c.savedQueries.get(ID)],
+      ["savedQueries.update", (c) => c.savedQueries.update(ID, { name: "n" })],
+      ["savedQueries.delete", (c) => c.savedQueries.delete(ID)],
+      ["savedQueries.copy", (c) => c.savedQueries.copy(ID, { name: "n" })],
+      ["savedQueries.run", (c) => c.savedQueries.run(ID)],
+      [
+        "savedQueries.export.rows",
+        async (c) => {
+          const out = await c.savedQueries.export.rows(ID);
+          for await (const row of out.rows) void row;
+        },
+      ],
+      [
+        "savedQueries.export.stream",
+        async (c) => {
+          const out = await c.savedQueries.export.stream(ID);
+          out.stream.resume();
+          await new Promise((ok) => out.stream.once("close", ok));
+        },
+      ],
+      ["savedQueries.listShares", (c) => c.savedQueries.listShares(ID)],
+      [
+        "savedQueries.replaceShares",
+        (c) => c.savedQueries.replaceShares(ID, [{ type: "user", id: ID2 }]),
+      ],
+      [
+        "savedQueries.transfer",
+        (c) => c.savedQueries.transfer(ID, { user_id: ID2 }),
+      ],
       [
         "principals.search",
         (c) => c.principals.search({ type: "user", q: "ad" }),
@@ -173,11 +209,11 @@ describe("operations against the API description", () => {
       expect(methods.sort()).toEqual(calls.map(([name]) => name).sort());
     });
 
-    it("reaches every operation once, and exportQuery twice", async () => {
+    it("reaches every operation once, and each export twice", async () => {
       const run = "0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a";
       t.stub.respond((req) => {
         if (req.path === "/health") return { body: { status: "ok" } };
-        if (req.path === "/v1/export") {
+        if (req.path.endsWith("/export")) {
           return {
             headers: { "x-zeteo-run-id": run },
             chunks: [
@@ -210,7 +246,8 @@ describe("operations against the API description", () => {
       }
 
       for (const id of Object.keys(OPERATIONS) as OperationId[]) {
-        expect(hits.get(id), id).toBe(id === "exportQuery" ? 2 : 1);
+        const exported = id === "exportQuery" || id === "exportSavedQuery";
+        expect(hits.get(id), id).toBe(exported ? 2 : 1);
       }
     });
   });

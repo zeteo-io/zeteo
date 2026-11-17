@@ -34,7 +34,26 @@ export type {
   DiscoveredSource,
   Catalog,
 } from "./types/catalog.js";
-export type { RunOutcome, QueryRun, ListRunsOptions } from "./types/runs.js";
+export type {
+  RunOutcome,
+  QueryRun,
+  ListRunsOptions,
+  ListMyRunsOptions,
+} from "./types/runs.js";
+export type {
+  SavedQuery,
+  ListSavedQueriesOptions,
+  CreateSavedQueryRequest,
+  UpdateSavedQueryRequest,
+  CopySavedQueryRequest,
+  SavedQueryPaging,
+  SharePrincipal,
+  SavedQueryShare,
+  SavedQueryShares,
+  ReplaceSharesResponse,
+  TransferSavedQueryRequest,
+  TransferSavedQueryResponse,
+} from "./types/savedQueries.js";
 export type { ExportEnd, ExportRows, ExportStream } from "./calls/export.js";
 export type {
   PostgresSettings,

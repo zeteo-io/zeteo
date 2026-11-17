@@ -1,4 +1,5 @@
 import { principalLimitsCalls } from "./calls/principalLimits.js";
+import { savedQueriesCalls } from "./calls/savedQueries.js";
 import { principalsCalls } from "./calls/principals.js";
 import { redisBackend } from "@dianemo/backend-redis";
 import { catalogCalls } from "./calls/catalog.js";
@@ -43,6 +44,7 @@ const buildCalls = (ctx: CallContext) => ({
   export: exportCalls(ctx),
   runs: runsCalls(ctx),
   me: meCalls(ctx),
+  savedQueries: savedQueriesCalls(ctx),
   principals: principalsCalls(ctx),
   sources: sourcesCalls(ctx),
   grants: grantsCalls(ctx),

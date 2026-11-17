@@ -1,0 +1,39 @@
+/v1/saved-queries/{savedQueryId}/copy:
+  post:
+    tags: [Saved queries]
+    summary: Copy a saved query
+    description: |
+      Makes the caller's own copy, with the same description and query, of a saved query they can
+      see and run. One they can see but not run is `403 saved_query_not_accessible`, whatever the
+      cause. A `zeteo.saved_query.copied` audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: copySavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/CopySavedQueryRequest'
+    responses:
+      '201':
+        description: The copy
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/SavedQuery'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the caller has a saved query of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

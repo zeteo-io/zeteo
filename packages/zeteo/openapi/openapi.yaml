@@ -64,6 +64,18 @@ info:
     `POST /v1/export` (`zeteo.data.export`) runs the same query and streams its rows as NDJSON or
     CSV, up to the source's export cap, from sources whose exports are on. See `docs/export.md`.
 
+    ## Saved queries
+
+    A query can be saved under a name (`/v1/saved-queries`), shared with users and groups, copied,
+    handed to another owner, run and exported. A saved query is planned against the caller's own
+    grants each time it is run, so sharing one never widens anyone's access: a recipient who is
+    not granted what it reads is told `403 saved_query_not_accessible`, one answer for every cause
+    that carries nothing about the query, the source or the planner. One the caller may not see at
+    all is `404 not_found`. `GET /v1/me/runs` lists the caller's own runs, and
+    `GET /v1/me/principals` searches the users and groups they may share with; both need only
+    `zeteo.data.read`. `zeteo.saved_queries.read` lets an administrator see every saved query and its
+    shares, and `zeteo.saved_queries.write` change shares, transfer and delete them.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -92,6 +104,8 @@ tags:
     description: Which users and groups may query which tables and columns, and how much at once
   - name: Queries
     description: Running and exporting queries over granted tables and columns, and the record of every run
+  - name: Saved queries
+    description: Queries saved by name, shared with users and groups, and run by whoever may
   - name: Platform
     description: Health and the signed-in caller
 x-tagGroups:
@@ -100,7 +114,7 @@ x-tagGroups:
   - name: Access
     tags: [Grants]
   - name: Querying
-    tags: [Queries]
+    tags: [Queries, Saved queries]
   - name: Platform
     tags: [Platform]
 paths:
@@ -146,6 +160,24 @@ paths:
     $ref: './paths/queries/export.yaml#/~1v1~1export'
   /v1/runs:
     $ref: './paths/queries/runs.yaml#/~1v1~1runs'
+  /v1/me/runs:
+    $ref: './paths/queries/my-runs.yaml#/~1v1~1me~1runs'
+  /v1/me/principals:
+    $ref: './paths/principals/my-principals.yaml#/~1v1~1me~1principals'
+  /v1/saved-queries:
+    $ref: './paths/saved-queries/saved-queries.yaml#/~1v1~1saved-queries'
+  /v1/saved-queries/{savedQueryId}:
+    $ref: './paths/saved-queries/saved-query.yaml#/~1v1~1saved-queries~1{savedQueryId}'
+  /v1/saved-queries/{savedQueryId}/copy:
+    $ref: './paths/saved-queries/copy.yaml#/~1v1~1saved-queries~1{savedQueryId}~1copy'
+  /v1/saved-queries/{savedQueryId}/run:
+    $ref: './paths/saved-queries/run.yaml#/~1v1~1saved-queries~1{savedQueryId}~1run'
+  /v1/saved-queries/{savedQueryId}/export:
+    $ref: './paths/saved-queries/export.yaml#/~1v1~1saved-queries~1{savedQueryId}~1export'
+  /v1/saved-queries/{savedQueryId}/shares:
+    $ref: './paths/saved-queries/shares.yaml#/~1v1~1saved-queries~1{savedQueryId}~1shares'
+  /v1/saved-queries/{savedQueryId}/transfer:
+    $ref: './paths/saved-queries/transfer.yaml#/~1v1~1saved-queries~1{savedQueryId}~1transfer'
 components:
   securitySchemes:
     BearerAuth:
@@ -163,6 +195,8 @@ components:
       $ref: './components/parameters.yaml#/GrantIdParam'
     PrincipalLimitIdParam:
       $ref: './components/parameters.yaml#/PrincipalLimitIdParam'
+    SavedQueryIdParam:
+      $ref: './components/parameters.yaml#/SavedQueryIdParam'
   responses:
     BadRequestResponse:
       $ref: './components/responses.yaml#/BadRequestResponse'
@@ -182,6 +216,8 @@ components:
       $ref: './components/responses.yaml#/ServiceUnavailableResponse'
     NoContentResponse:
       $ref: './components/responses.yaml#/NoContentResponse'
+    SavedQueryNotAccessibleResponse:
+      $ref: './components/responses.yaml#/SavedQueryNotAccessibleResponse'
   schemas:
     Error:
       $ref: './components/responses.yaml#/Error'
@@ -279,3 +315,31 @@ components:
       $ref: './components/queries/schemas.yaml#/DiscoveredSource'
     CatalogResponse:
       $ref: './components/queries/schemas.yaml#/CatalogResponse'
+    SavedQuery:
+      $ref: './components/saved-queries/schemas.yaml#/SavedQuery'
+    ListSavedQueriesResponse:
+      $ref: './components/saved-queries/schemas.yaml#/ListSavedQueriesResponse'
+    CreateSavedQueryRequest:
+      $ref: './components/saved-queries/schemas.yaml#/CreateSavedQueryRequest'
+    UpdateSavedQueryRequest:
+      $ref: './components/saved-queries/schemas.yaml#/UpdateSavedQueryRequest'
+    CopySavedQueryRequest:
+      $ref: './components/saved-queries/schemas.yaml#/CopySavedQueryRequest'
+    SavedQueryPaging:
+      $ref: './components/saved-queries/schemas.yaml#/SavedQueryPaging'
+    SharePrincipal:
+      $ref: './components/saved-queries/schemas.yaml#/SharePrincipal'
+    Share:
+      $ref: './components/saved-queries/schemas.yaml#/Share'
+    ListSharesResponse:
+      $ref: './components/saved-queries/schemas.yaml#/ListSharesResponse'
+    ReplaceSharesRequest:
+      $ref: './components/saved-queries/schemas.yaml#/ReplaceSharesRequest'
+    ShareWarning:
+      $ref: './components/saved-queries/schemas.yaml#/ShareWarning'
+    ReplaceSharesResponse:
+      $ref: './components/saved-queries/schemas.yaml#/ReplaceSharesResponse'
+    TransferSavedQueryRequest:
+      $ref: './components/saved-queries/schemas.yaml#/TransferSavedQueryRequest'
+    TransferSavedQueryResponse:
+      $ref: './components/saved-queries/schemas.yaml#/TransferSavedQueryResponse'

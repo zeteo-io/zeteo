@@ -1,0 +1,121 @@
+/v1/saved-queries/{savedQueryId}/export:
+  post:
+    tags: [Saved queries]
+    summary: Export a saved query's result
+    description: |
+      Exports the stored query as `POST /v1/export` exports a query: the same NDJSON or CSV stream,
+      the same caps, limits, trailers and run record (entry point `export`, recorded against the
+      saved query). The body may give `limit` and `offset` in place of the stored ones; no body
+      exports it as stored. `offset` above 0 needs an `orderBy` in the stored query.
+
+      A saved query the caller cannot run is refused before the first byte with
+      `403 saved_query_not_accessible`, also when the source's exports are off: never
+      `export_not_enabled` to a caller without access.
+
+      **Required permissions:** `zeteo.data.export` (`403 forbidden` without).
+    operationId: exportSavedQuery
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedQueryIdParam'
+      - name: format
+        in: query
+        required: false
+        description: The stream's format. Any other query parameter is `400 invalid_request`.
+        schema: { type: string, enum: [ndjson, csv], default: ndjson }
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/SavedQueryPaging'
+    responses:
+      '200':
+        description: The stream, as `POST /v1/export`'s
+        headers:
+          Content-Disposition:
+            description: '`attachment; filename="zeteo-export-<run id>.<format>"`'
+            schema: { type: string }
+          Cache-Control:
+            description: '`no-store`'
+            schema: { type: string }
+          X-Zeteo-Run-Id:
+            description: The run's id in the run log
+            schema: { type: string, format: uuid }
+          Vary:
+            description: '`Accept-Encoding`'
+            schema: { type: string }
+          Content-Encoding:
+            description: '`gzip` when the request accepts gzip; absent otherwise'
+            schema: { type: string, enum: [gzip] }
+          Trailer:
+            description: 'CSV only: `X-Zeteo-Export-Status, X-Zeteo-Export-Rows`'
+            schema: { type: string }
+          X-Zeteo-Warnings:
+            description: 'CSV only, when the query has warnings: their codes, comma separated'
+            schema: { type: string }
+          X-Zeteo-Export-Status:
+            description: 'CSV only, an HTTP trailer: `complete` or `truncated`'
+            schema: { type: string, enum: [complete, truncated] }
+          X-Zeteo-Export-Rows:
+            description: 'CSV only, an HTTP trailer: the rows sent'
+            schema: { type: integer }
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+              description: |
+                Lines of JSON, each ending in `\n`: first `{ "columns": [{ "name", "type" }],
+                "warnings": [...], "run_id": "<uuid>" }`, then one array per row, last
+                `{ "status": "complete" | "truncated", "rows": <count> }`. See `POST /v1/export`.
+          text/csv:
+            schema:
+              type: string
+              description: RFC 4180, UTF-8, CRLF line ends. See `POST /v1/export`.
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403':
+        description: |
+          Forbidden - `forbidden` (the token lacks `zeteo.data.export`), `saved_query_not_accessible`
+          (the caller may not run the saved query, whatever the cause) or `export_not_enabled` (the
+          caller may run it, but the source's exports are off or capped at no rows)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `source_archived`, the source was archived as the export started
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The stored query cannot be exported with the given paging - for example `invalid_order` at path `["offset"]`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '429':
+        description: Too many exports - `too_many_exports` or `source_busy`; retry after `Retry-After`
+        headers:
+          Retry-After:
+            description: Seconds to wait before retrying
+            schema: { type: integer }
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `query_failed` or `source_unreachable`, before the stream starts
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '504':
+        description: Gateway timeout - `query_timeout`, before the stream starts
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

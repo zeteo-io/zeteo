@@ -1,0 +1,171 @@
+SavedQuery:
+  type: object
+  description: |
+    A saved query as the viewer sees it. `source` and `query` are left out (never null) unless the
+    viewer may run it (`accessible`); a viewer who holds `zeteo.sources.read` sees `source`
+    regardless, and never `query` without access. A viewer without access never sees anything the
+    planner said about why.
+  required: [id, name, description, owner, accessible, created_at, updated_at, last_run_at, you_last_ran_at]
+  properties:
+    id: { type: string, format: uuid }
+    name: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: string, maxLength: 2000 }
+    owner:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: [string, 'null'], description: From tereo's directory; null when it could not be looked up }
+    accessible:
+      type: boolean
+      description: Whether the viewer may run it now, planned against what the viewer is granted
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+    shared_at:
+      type: string
+      format: date-time
+      description: When it was shared with the viewer (or one of their groups); present only when it was
+    last_run_at: { type: [string, 'null'], format: date-time, description: The last run by anyone }
+    you_last_ran_at: { type: [string, 'null'], format: date-time, description: The viewer's own last run }
+    source:
+      type: object
+      description: Present when the viewer may run it, or holds `zeteo.sources.read`
+      required: [id, slug]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+    query:
+      description: The stored query (see `Query`); present only when `accessible`
+      $ref: '../queries/schemas.yaml#/Query'
+    share_count:
+      type: integer
+      minimum: 0
+      description: How many users and groups it is shared with; present only when the viewer may see the share list (its owner, or a holder of `zeteo.saved_queries.read`)
+
+ListSavedQueriesResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/SavedQuery' }
+    next_cursor: { type: [string, 'null'] }
+
+CreateSavedQueryRequest:
+  type: object
+  additionalProperties: false
+  required: [name, query]
+  properties:
+    name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Trimmed; unique per owner, whatever the case
+    description: { type: string, maxLength: 2000, default: '' }
+    query:
+      description: A query as `POST /v1/query` takes it. It is planned against the caller's own grants when saved.
+      $ref: '../queries/schemas.yaml#/Query'
+
+UpdateSavedQueryRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: 'Trimmed; unique per owner, whatever the case' }
+    description: { type: string, maxLength: 2000 }
+    query:
+      description: Replaces the stored query; planned again against the caller's own grants
+      $ref: '../queries/schemas.yaml#/Query'
+
+CopySavedQueryRequest:
+  type: object
+  additionalProperties: false
+  required: [name]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: "The copy's name; unique among the caller's saved queries, whatever the case" }
+
+SavedQueryPaging:
+  type: object
+  additionalProperties: false
+  description: The paging a run or export may give in place of the stored `limit` and `offset`. No body runs the saved query as stored.
+  properties:
+    limit: { type: integer, minimum: 1 }
+    offset: { type: integer, minimum: 0 }
+
+SharePrincipal:
+  type: object
+  additionalProperties: false
+  required: [type, id]
+  properties:
+    type: { $ref: '../grants/schemas.yaml#/PrincipalType' }
+    id: { type: string, format: uuid }
+
+Share:
+  type: object
+  description: A user or group a saved query is shared with. A group has no `email` key.
+  required: [type, id, name, shared_at]
+  properties:
+    type: { $ref: '../grants/schemas.yaml#/PrincipalType' }
+    id: { type: string, format: uuid }
+    name: { type: [string, 'null'], description: From tereo's directory; null when it could not be looked up }
+    email: { type: [string, 'null'], description: Users only }
+    shared_at: { type: string, format: date-time }
+
+ListSharesResponse:
+  type: object
+  required: [data]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Share' }
+
+ReplaceSharesRequest:
+  type: object
+  additionalProperties: false
+  required: [principals]
+  properties:
+    principals:
+      type: array
+      maxItems: 100
+      description: The whole share list; each principal once, the owner not among them
+      items: { $ref: '#/SharePrincipal' }
+
+ShareWarning:
+  type: object
+  required: [type, id, accessible]
+  properties:
+    type: { type: string, const: user }
+    id: { type: string, format: uuid }
+    accessible: { type: boolean, const: false, description: The user could not run the saved query as things stand }
+
+ReplaceSharesResponse:
+  type: object
+  required: [data, warnings]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/Share' }
+    warnings:
+      type: array
+      description: Each user newly added who could not run the saved query, judged as if signed in to the caller's organization. Groups never appear.
+      items: { $ref: '#/ShareWarning' }
+
+TransferSavedQueryRequest:
+  type: object
+  additionalProperties: false
+  required: [user_id]
+  properties:
+    user_id: { type: string, format: uuid, description: The new owner; a service account is refused (`invalid_transfer`) }
+    keep_access: { type: boolean, default: true, description: The previous owner keeps a direct share }
+
+TransferSavedQueryResponse:
+  type: object
+  required: [data]
+  properties:
+    data: { $ref: '#/SavedQuery' }
+    warning:
+      type: object
+      description: Present when the new owner could not run the saved query, judged as if signed in to the caller's organization
+      required: [accessible]
+      properties:
+        accessible: { type: boolean, const: false }

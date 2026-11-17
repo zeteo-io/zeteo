@@ -104,3 +104,15 @@ ServiceUnavailableResponse:
 
 NoContentResponse:
   description: Done; no content
+
+SavedQueryNotAccessibleResponse:
+  description: |
+    Forbidden - `saved_query_not_accessible`: "You need expanded permissions to run this saved
+    query. Ask an admin to extend your access." One answer, with no details, for every cause (a
+    table or column not granted, a relation not visible, the source archived or not granted, a
+    column gone missing), so none can be told apart. The body never holds the query, the source
+    or anything the planner said. `forbidden` is the other 403: the token lacks the permission.
+  content:
+    application/json:
+      schema:
+        $ref: '#/Error'

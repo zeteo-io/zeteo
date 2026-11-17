@@ -1,0 +1,31 @@
+/v1/me/runs:
+  get:
+    tags: [Queries]
+    summary: List the caller's own query runs
+    description: |
+      The caller's own runs, newest first, from any entry point. A run of a saved query carries
+      `saved_query` while the caller owns it or it is shared with them. A saved query run that was
+      refused (`saved_query_not_accessible`) shows with its query withheld (`{ "withheld": true }`)
+      and `source_id: null`. The response is not cached.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: listMyRuns
+    parameters:
+      - name: outcome
+        in: query
+        required: false
+        schema: { $ref: '../../components/queries/schemas.yaml#/RunOutcome' }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of runs
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/ListRunsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

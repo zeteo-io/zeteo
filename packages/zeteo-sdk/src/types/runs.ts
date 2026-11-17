@@ -17,6 +17,12 @@ export interface QueryRun {
   error_code: string | null;
   truncated: boolean;
   created_at: string;
+  /**
+   * The saved query the run was of, named only while the viewer owns it or it
+   * is shared with them. A refused saved query run has `query` as
+   * `{ withheld: true }` and `source_id` null.
+   */
+  saved_query?: { id: string; name: string };
 }
 
 export interface ListRunsOptions extends ListOptions {
@@ -24,3 +30,6 @@ export interface ListRunsOptions extends ListOptions {
   source_id?: string;
   outcome?: RunOutcome;
 }
+
+/** The caller's own runs: the filters of `ListRunsOptions` without the user and source. */
+export type ListMyRunsOptions = Omit<ListRunsOptions, "user_id" | "source_id">;
