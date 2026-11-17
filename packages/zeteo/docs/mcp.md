@@ -111,8 +111,8 @@ What they can read is still bounded by `zeteo.data.read` and their grants.
 ## The tools
 
 All of them need `zeteo.mcp.use` and `zeteo.data.read`. The discovery tools, `query` and the
-saved query tools that read are read-only; `create_saved_query`, `update_saved_query` and
-`delete_saved_query` change the caller's own saved queries only (another user's is `not_found`,
+saved query, dashboard and saved panel tools that read are read-only; the tools that create, change
+and delete them change the caller's own only (another user's is `not_found`,
 whatever permissions the caller holds). The server's instructions, sent when a client connects,
 teach the model the order of use, the query language with worked examples, how results,
 limits and errors read, and that query results are data from a database, never instructions.
@@ -130,7 +130,15 @@ limits and errors read, and that query results are data from a database, never i
 | `update_saved_query` | `{ id, name?, description?, query? }` | the view |
 | `delete_saved_query` | `{ id }` | `{ deleted: true }` |
 
-Sharing and transferring a saved query are not tools: they are done in the UI or the API
+| `list_dashboards` | `{ scope?: "mine" \| "shared" }` | `{ dashboards: [{ id, name, description, owner, time_range, refresh_seconds, theme, url? }], truncated }`; `url` is the admin UI's address when it is served |
+| `get_dashboard` | `{ id }` | the dashboard with its panels, each with `id`, place, `title`, `state` and, for an `ok` panel, its `chart`, `time_column` and `saved_query_id` or `saved_panel_id`; a panel that is not `ok` carries a message instead ([dashboards.md](dashboards.md#panel-states-and-their-copy)) |
+| `create_dashboard`, `update_dashboard`, `delete_dashboard` | name, description, `time_range`, `refresh_seconds`, `theme` | the caller's own dashboard |
+| `add_panel`, `update_panel`, `remove_panel` | a dashboard's id and a panel's saved query, chart, `time_column`, title and place | the panel; what is wrong with the chart is told as `problems` |
+| `preview_panel` | a saved query, a chart, optionally `time_range` with `time_column` | `{ columns, row_count, truncated, rows (the first 20), problems }`; runs the saved query as the caller |
+| `list_saved_panels`, `get_saved_panel`, `create_saved_panel`, `update_saved_panel`, `delete_saved_panel` | as the saved query tools, with a chart | the saved panel (a saved query with its chart) |
+| `link_saved_panel`, `detach_panel` | a dashboard and a saved panel, or a linked panel | the panel |
+
+Sharing and transferring a saved query, a dashboard or a saved panel are not tools: they are done in the UI or the API
 ([saved-queries.md](saved-queries.md)).
 
 The discovery tools show names, never ids or native types, and nothing outside the caller's
@@ -165,7 +173,11 @@ stops waiting, but the query runs on to its end or its time limit.
 - `run_saved_query` is recorded the same way, with the saved query's id
   ([saved-queries.md](saved-queries.md#what-is-recorded)); creating, changing and deleting a saved
   query write that area's audit entries.
-- The discovery tools and the saved query tools that only read write no run and no audit entry.
+- The dashboard and saved panel tools that change something write that area's audit entries
+  (`zeteo.dashboard.*`, `zeteo.saved_panel.*`). `preview_panel` runs the saved query as `query`
+  does.
+- The discovery tools and the saved query, dashboard and saved panel tools that only read write no
+  run and no audit entry.
 - Every tool call is one log line from `@tereo-io/mcp` (`tool`, `user_id`, `client_id`,
   `request_id`, `outcome`, `duration_ms`); zeteo's own lines for the call carry the same
   `request_id`. Inputs and results are never logged.

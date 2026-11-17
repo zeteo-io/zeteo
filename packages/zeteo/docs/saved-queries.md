@@ -18,6 +18,8 @@ widens anyone's access to data.
 | `DELETE /v1/saved-queries/{id}` | `zeteo.data.read` | `204`; the owner, or `zeteo.saved_queries.write` |
 | `POST /v1/saved-queries/{id}/run` | `zeteo.data.read` | as `POST /v1/query` |
 | `POST /v1/saved-queries/{id}/export?format=ndjson\|csv` | `zeteo.data.export` | as `POST /v1/export` |
+| `GET /v1/saved-queries?scope=available` | `zeteo.data.read` | the saved queries the caller may put on a dashboard: their own, and others' made available in their organization |
+| `GET /v1/saved-queries/{id}/dashboards` | `zeteo.dashboards.read` | the dashboards and saved panels built on it, `{ data: [{ type, id, name, owner }] }` |
 | `POST /v1/saved-queries/{id}/copy` | `zeteo.data.read` | `201`, the caller's own copy |
 | `GET /v1/saved-queries/{id}/shares` | `zeteo.data.read` | the shares; the owner, or `zeteo.saved_queries.read` |
 | `PUT /v1/saved-queries/{id}/shares` | `zeteo.data.read` | the whole share list, replaced; the owner, or `zeteo.saved_queries.write` |
@@ -124,13 +126,28 @@ accessible: false }` when the new owner could not run it.
 ## Own runs
 
 `GET /v1/me/runs` is `GET /v1/runs` for the caller alone: the same row, `outcome` filter and cursor,
-without `user_id` and `source_id`. A run of a saved query carries `saved_query: { id, name }` while the
+without `user_id` and `source_id`. A run of a saved query the caller can no longer open (it is
+not theirs, not shared with them, not available for dashboards in their organization, and they lack
+`zeteo.saved_queries.read`) has its query withheld as `{ "withheld": true }`: running a panel of someone else's dashboard does not hand over
+the JSON. A run of a saved query carries `saved_query: { id, name }` while the
 caller owns it or it is shared with them; the key is left out otherwise. Rows are `Cache-Control:
 no-store`.
 
 `GET /v1/me/principals?type=user|group&q=&limit=` is the search the sharing dialog uses: as
 `GET /v1/principals` ([admin-ui.md](admin-ui.md#the-api)) but open to `zeteo.data.read`, listing human
 users, and groups that are global or of the caller's organization.
+
+## Available for dashboards
+
+A saved query has a toggle, `available_for_dashboards` (default off), that its owner sets with
+`PATCH`. While it is on, other users' dashboards and saved panels may use the saved query
+([dashboards.md](dashboards.md#which-saved-queries-a-dashboard-may-use-the-reach-rule)), but only for
+viewers signed in to the organization the owner was signed in to when they turned it on
+(`available_organization_id`; turning it off clears it). It publishes the query for use as a
+panel: anyone in that organization can open it like a shared one (its JSON only if their own
+grants let them run it), and every viewer's panel runs against their own grants. `scope=available` lists what the caller may use on a dashboard. A saved
+query's view carries `used_by: { dashboards, saved_panels }` counts for the owner and for holders of
+`zeteo.saved_queries.read`, and `GET /v1/saved-queries/{id}/dashboards` names them.
 
 ## What is recorded
 
