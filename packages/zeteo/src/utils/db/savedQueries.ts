@@ -354,6 +354,36 @@ export const namesVisibleTo = async (
   return new Map(rows.map((r) => [r.id, r.name]));
 };
 
+/**
+ * Those of `ids` the user may open (what `findForViewer` admits): owned,
+ * shared with them or a group of theirs, or available for dashboards in
+ * `organizationId` (null matches null). One read.
+ */
+export const openableAmong = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  organizationId: string | null,
+  tx: Db = prisma
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const rows = await tx.savedQuery.findMany({
+    where: {
+      id: { in: [...ids] },
+      OR: [
+        { ownerId: userId },
+        { shares: { some: reaching(userId, groupIds) } },
+        {
+          availableForDashboards: true,
+          availableOrganizationId: organizationId,
+        },
+      ],
+    },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
+};
+
 /** The names of those of `ids` that exist, by id: one read. */
 export const namesOf = async (
   ids: readonly string[],

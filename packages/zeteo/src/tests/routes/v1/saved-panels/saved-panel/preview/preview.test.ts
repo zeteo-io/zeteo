@@ -1,12 +1,14 @@
 // @module-tag int
 // @module-tag platform
 import { removeDashboardsOf } from "../../../../../support/panelDecisions.js";
+import { BASE_URL, fetchJson } from "../../../../../support/http.js";
 import { chartedQuery } from "../../../../../support/dashboards.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeSources } from "../../../../../support/sources.js";
 import { ENGINES } from "../../../../../support/engines.js";
 import {
   savedQueryOf,
+  shareDirectly,
   userWithOrders,
 } from "../../../../../support/savedQueries.js";
 import {
@@ -123,5 +125,33 @@ describe("POST /v1/saved-panels/:savedPanelId/preview", () => {
     });
     const id = await savedPanelOf(owner.token, sq);
     expect((await preview(id, stranger.token)).status).toBe(404);
+  });
+
+  it("does not hand the saved query's JSON to someone it was not shared with, through their own runs", async () => {
+    const owner = await user();
+    const viewer = await user();
+    const direct = await user();
+    const sq = await savedQueryOf(owner.token, source, {
+      query: chartedQuery(source),
+    });
+    // Reached through the saved panel, not shared, not available.
+    const id = await savedPanelOf(owner.token, sq);
+    await shareSavedPanelDirectly(id, viewer.principal, owner.id);
+    await shareSavedPanelDirectly(id, direct.principal, owner.id);
+    await shareDirectly(sq, direct.principal, owner.id);
+    for (const u of [owner, viewer, direct]) {
+      expect((await preview(id, u.token)).status).toBe(200);
+    }
+    const mine = (token: string) =>
+      fetchJson("GET", `${BASE_URL}/v1/me/runs`, token);
+    expect((await mine(viewer.token)).body.data[0].query).toEqual({
+      withheld: true,
+    });
+    expect((await mine(owner.token)).body.data[0].query).toMatchObject({
+      from: "orders",
+    });
+    expect((await mine(direct.token)).body.data[0].query).toMatchObject({
+      from: "orders",
+    });
   });
 });
