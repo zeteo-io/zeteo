@@ -208,6 +208,21 @@ describe("POST /v1/dashboards/:dashboardId/run", () => {
     expect(line.result!.rows).toHaveLength(5000);
   });
 
+  it("gives no notice when the saved query limited itself", async () => {
+    const limited = await savedQueryRow(owner.id, source, {
+      from: "orders",
+      select: ["id"],
+      orderBy: [{ id: "asc" }],
+      limit: 2,
+    });
+    const dash = await dashboardWith(owner.id, [
+      { kind: "own", savedQueryId: limited.id, chart: TABLE },
+    ]);
+    const line = byPanel(await run(dash.id)).get(dash.panels[0]!.id)!;
+    expect(line.result!.rows).toHaveLength(2);
+    expect(line.result).not.toHaveProperty("notice");
+  });
+
   it("runs only the panels named", async () => {
     const { dash, timed } = await fourPanels();
     const lines = await run(dash.id, { panels: [timed] });

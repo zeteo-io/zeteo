@@ -109,6 +109,8 @@ export interface RunQueryResult {
 export type DashboardRunResult = Omit<RunQueryResult, "run_id"> & {
   run_id?: string;
   cached_at?: string;
+  /** Rows were left out for the dashboard's or the source's row cap, not the query's own `limit`. */
+  capped_by_dashboard?: true;
 };
 
 /** What every query must be before anything else: an object naming a source. */
@@ -593,6 +595,12 @@ const runDashboardQuery = async (
     ...rows,
     warnings: plan.warnings,
     ...(cached && { cached_at: cachedAt }),
+    // The rows were cut by the dashboard's or the source's cap, not by the
+    // saved query's own `limit`.
+    ...(shown.truncated_by === "rows" &&
+      (plan.limit === undefined || plan.limit > maxRows) && {
+        capped_by_dashboard: true,
+      }),
   };
   if (!(await claim(caller.userId, recordAs, windowMinutes))) return result;
   let runId: string;

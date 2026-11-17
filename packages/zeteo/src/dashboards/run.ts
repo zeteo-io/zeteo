@@ -69,7 +69,7 @@ const resultOf = (r: DashboardRunResult): PanelLine["result"] => ({
   rows: r.rows,
   truncated: r.truncated,
   ...(r.truncated_by && { truncated_by: r.truncated_by }),
-  ...(r.truncated_by === "rows" && { notice: truncatedNotice(r.rows.length) }),
+  ...(r.capped_by_dashboard && { notice: truncatedNotice(r.rows.length) }),
 });
 
 /**
