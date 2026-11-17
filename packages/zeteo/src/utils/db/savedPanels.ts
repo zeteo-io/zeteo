@@ -232,3 +232,52 @@ export const sharedWithAmong = async (
   });
   return new Set(shares.map((s) => s.savedPanelId));
 };
+
+/** When each of `ids` was first shared with the user (or a group of theirs), by id; one not shared with them is not in the map. */
+export const sharedAtFor = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, Date>> => {
+  const shared = new Map<string, Date>();
+  if (ids.length === 0) return shared;
+  const shares = await tx.savedPanelShare.findMany({
+    where: {
+      savedPanelId: { in: [...ids] },
+      OR: [
+        { principalType: "user", principalId: userId },
+        ...(groupIds.length > 0
+          ? [
+              {
+                principalType: "group" as const,
+                principalId: { in: [...groupIds] },
+              },
+            ]
+          : []),
+      ],
+    },
+    select: { savedPanelId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const s of shares) {
+    if (!shared.has(s.savedPanelId)) shared.set(s.savedPanelId, s.createdAt);
+  }
+  return shared;
+};
+
+/** How many shares each saved panel has, by id; one with none is 0. */
+export const countShares = async (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, number>> => {
+  const counts = new Map(ids.map((id) => [id, 0]));
+  if (ids.length === 0) return counts;
+  const grouped = await tx.savedPanelShare.groupBy({
+    by: ["savedPanelId"],
+    where: { savedPanelId: { in: [...ids] } },
+    _count: { _all: true },
+  });
+  for (const g of grouped) counts.set(g.savedPanelId, g._count._all);
+  return counts;
+};

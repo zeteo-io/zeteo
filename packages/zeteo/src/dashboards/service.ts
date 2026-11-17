@@ -277,7 +277,7 @@ const NOT_AVAILABLE_QUERY = [
  * it returns. Their own objects, so what is wrong is told: `invalid_panel`
  * with the problems, except a saved query they cannot run.
  */
-const checkOwnPanel = async (
+export const checkOwnPanel = async (
   caller: Caller,
   access: CallerAccess,
   timeRange: TimeRangeKey | null,
@@ -946,6 +946,71 @@ export const removePanel = async (
     await db.dashboards.removePanel(panelId, tx);
     audit(panelAudit(caller, current, { panel_removed: panelId }));
   });
+};
+
+/**
+ * Detaches a linked panel of the caller's own dashboard: it becomes an own
+ * panel with the saved panel's saved query, chart and time column, keeping
+ * its id, place and title (the saved panel's name when it had none). A panel
+ * that is not linked, or whose saved panel the caller cannot run as it is, is
+ * `invalid_panel`: there is nothing sound to copy.
+ */
+export const detachPanel = async (
+  caller: Caller,
+  dashboardId: string,
+  panelId: string
+) => {
+  const found = await findOwned(caller, dashboardId);
+  const row = await db.dashboards.findWithPanels(dashboardId);
+  const panel = row?.panels.find((p) => p.id === panelId);
+  if (!row || !panel) throw notFound();
+  if (panel.kind !== "linked") {
+    throw new BadRequestError("invalid_panel", "This panel is not linked");
+  }
+  const decision = (
+    await decidePanels(caller, row, timeRangeOf(found.timeRange))
+  ).get(panelId)!;
+  if (decision.state !== "ok" || !decision.savedPanel) {
+    throw new InvalidPanelError(
+      decision.message ?? "This panel cannot be detached",
+      decision.problems ?? [{ setting: "saved_panel", problem: decision.state }]
+    );
+  }
+  const { savedPanel, savedQuery } = decision;
+  await withAudit(async (tx, audit) => {
+    await lockRow(tx, dashboardId);
+    const current = await db.dashboards.findWithPanels(dashboardId, tx);
+    const now = current?.panels.find((p) => p.id === panelId);
+    if (!current || current.ownerId !== caller.userId || !now) {
+      throw notFound();
+    }
+    if (now.kind !== "linked" || now.savedPanelId !== savedPanel.id) {
+      throw new ConflictError(
+        "The panel changed while detaching; load it again and retry"
+      );
+    }
+    await orConflict(() =>
+      db.dashboards.updatePanel(
+        panelId,
+        {
+          kind: "own",
+          savedPanelId: null,
+          savedQueryId: savedQuery.id,
+          chart: savedPanel.chart as Prisma.InputJsonValue,
+          timeColumn: savedPanel.timeColumn,
+          title: now.title ?? savedPanel.name,
+        },
+        tx
+      )
+    );
+    audit(
+      panelAudit(caller, current, {
+        panel_detached: panelId,
+        saved_panel_id: savedPanel.id,
+      })
+    );
+  });
+  return presentPanel(caller, dashboardId, panelId);
 };
 
 // --- Shares and transfer -------------------------------------------------
