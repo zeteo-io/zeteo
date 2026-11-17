@@ -25,9 +25,11 @@ export const UpdateSavedQuerySchema = z
  * out-of-range value is this 400, never a refusal of the saved query. No body
  * runs it as stored.
  */
+export const SavedQueryPagingFields = {
+  limit: z.int().min(1).optional(),
+  offset: z.int().min(0).max(MAX_OFFSET).optional(),
+};
+
 export const SavedQueryPagingSchema = z
-  .strictObject({
-    limit: z.int().min(1).optional(),
-    offset: z.int().min(0).max(MAX_OFFSET).optional(),
-  })
+  .strictObject(SavedQueryPagingFields)
   .default({});

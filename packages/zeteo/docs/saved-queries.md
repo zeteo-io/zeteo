@@ -43,7 +43,7 @@ see it at all gets the one `404 not_found`.
 - `name`: trimmed, 1 to 100 characters, unique per owner whatever the case (`409 conflict`).
 - `description`: 0 to 2,000 characters, default empty.
 - `query`: an object, at most 256 KB, in the source's language. The source is the one the query names;
-  the saved query keeps its id, so renaming the source's slug does not break it.
+  the saved query keeps its id.
 
 Saving or changing a query plans it against the caller's own grants, exactly as `POST /v1/query`
 does, so a bad query is refused with the same error and detail (`400`, `422`). It is the caller's own

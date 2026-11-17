@@ -18,6 +18,7 @@ import {
 import {
   grantTo,
   removeRunsOf,
+  runsOf,
   seedQuerySource,
   type SeededSource,
 } from "../support/queries.js";
@@ -129,6 +130,24 @@ describe("MCP saved query tools", () => {
       id: created.json.id,
     });
     expect(got.json.you_last_ran_at).toEqual(expect.any(String));
+  });
+
+  it("run_saved_query refuses an offset past the language's bound as invalid arguments, recording nothing", async () => {
+    const created = await callTool(session.client, "create_saved_query", {
+      name: uniqueName("offset"),
+      query: ordersQuery(source),
+    });
+    const before = (await runsOf([userId])).length;
+    const run = await callTool(session.client, "run_saved_query", {
+      id: created.json.id,
+      offset: 1_000_001,
+    });
+    expect(run.isError).toBe(true);
+    // The tool's input schema refuses it before the handler: an invalid
+    // arguments error, never saved_query_not_accessible.
+    expect(run.text).toMatch(/Invalid arguments.*offset.*1000000/);
+    expect(run.text).not.toContain("saved_query_not_accessible");
+    expect(await runsOf([userId])).toHaveLength(before);
   });
 
   it("does not let a zeteo.saved_queries.write holder delete another user's saved query", async () => {

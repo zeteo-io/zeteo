@@ -1881,7 +1881,7 @@ paths:
         `zeteo.saved_queries.read`; `403 forbidden` otherwise). `source_id`, `owner_id`,
         `shared_with_type` and `shared_with_id` apply to `scope=all` only (`400 invalid_request`
         otherwise); `source_id` also needs `zeteo.sources.read`; `shared_with_type` and
-        `shared_with_id` go together. `q` matches names and descriptions, case-insensitively.
+        `shared_with_id` go together. `q` matches names, case-insensitively.
 
         A saved query the caller cannot run is listed with `accessible: false` and without `query`
         (and without `source`, unless they hold `zeteo.sources.read`).

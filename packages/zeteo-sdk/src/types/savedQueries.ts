@@ -30,7 +30,7 @@ export interface SavedQuery {
 export interface ListSavedQueriesOptions extends ListOptions {
   /** `mine` (the default), `shared` with the caller, or `all` (`zeteo.saved_queries.read`). */
   scope?: "mine" | "shared" | "all";
-  /** 1 to 100 characters of the name or description. */
+  /** 1 to 100 characters of the name, case-insensitively. */
   q?: string;
   /** `scope: "all"` only; also needs `zeteo.sources.read`. */
   source_id?: string;

@@ -1,3 +1,4 @@
+import { SavedQueryPagingFields } from "../routes/v1/saved-queries/saved-query/schemas.js";
 import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import type { SavedQueryView } from "../views/savedQuery.js";
@@ -38,7 +39,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     name: "list_saved_queries",
     title: "List saved queries",
     description:
-      'List the saved queries you own ("mine", the default) or others shared with you ("shared"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }], truncated }; truncated is true when only the first 100 are shown. A saved query with accessible false cannot be run by you and carries no query or source.',
+      'List the saved queries you own ("mine", the default) or others shared with you ("shared"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }], truncated }; truncated is true when only the first 100 are shown. A saved query with accessible false cannot be run by you and carries no query, and no source unless you can read sources.',
     permission: MCP_USE,
     readOnly: true,
     input: z.strictObject({
@@ -83,8 +84,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
     input: z.strictObject({
       id: Id,
-      limit: z.int().min(1).optional(),
-      offset: z.int().min(0).optional(),
+      ...SavedQueryPagingFields,
     }),
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {

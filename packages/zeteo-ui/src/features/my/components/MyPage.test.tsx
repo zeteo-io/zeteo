@@ -70,6 +70,10 @@ const withheldRun = makeRun({
   source_id: null,
   query: { withheld: true },
 });
+const unrecordableRun = makeRun({
+  id: "a8888888-1c7a-4a53-9d0e-6a3b1f2c4d08",
+  query: { unrecordable: true },
+});
 let runs = [run];
 
 const answer = (scope: string | undefined, url: string) => {
@@ -109,6 +113,18 @@ describe("MyPage", () => {
     expect(within(row).queryByText("sales-db")).not.toBeInTheDocument();
     expect(
       within(row).queryByRole("button", { name: "Show query" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save as saved query" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers no query actions for a run whose query was not recorded", async () => {
+    runs = [unrecordableRun];
+    renderWithProviders(<MyPage />);
+    expect(await screen.findByText("Weekly revenue")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Show query" })
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Save as saved query" })

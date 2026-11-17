@@ -19,6 +19,12 @@ export interface CatalogSource {
   tables: CatalogTable[];
 }
 
+/** True for the placeholder of a run whose query could not be recorded. */
+export const isUnrecordable = (query: unknown): boolean =>
+  typeof query === "object" &&
+  query !== null &&
+  (query as { unrecordable?: unknown }).unrecordable === true;
+
 /** True for the placeholder a refused saved-query run carries instead of its JSON. */
 export const isWithheld = (query: unknown): boolean =>
   typeof query === "object" &&

@@ -1,11 +1,11 @@
 import { Badge, BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import { formatCount } from "@/features/sources/components/sourceLabels";
 import { OutcomeBadge } from "@/features/runs/components/OutcomeBadge";
+import { isUnrecordable, isWithheld, type MyRun } from "../api/types";
 import { SaveQueryDialog } from "@/features/saved-queries";
 import { formatDuration } from "@/utils/formatDuration";
 import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { isWithheld, type MyRun } from "../api/types";
 import { formatDate } from "@/utils/formatDate";
 import { useMyRuns } from "../api/useMyRuns";
 import { useState } from "react";
@@ -33,7 +33,10 @@ const RunRow = ({
   const [open, setOpen] = useState(false);
   const withheld = isWithheld(run.query);
   const hasQuery =
-    !withheld && typeof run.query === "object" && run.query !== null;
+    !withheld &&
+    !isUnrecordable(run.query) &&
+    typeof run.query === "object" &&
+    run.query !== null;
   const source = sourceOf(run.query);
   return (
     <li className="z-run-row">
