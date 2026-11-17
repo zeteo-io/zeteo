@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag platform
 import { savedQueriesCall } from "../../../../../support/savedQueries.js";
+import { BASE_URL, fetchJson } from "../../../../../support/http.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { auditRows } from "../../../../../support/sources.js";
 import { runsOf } from "../../../../../support/queries.js";
@@ -69,8 +70,25 @@ describe("POST /v1/saved-queries/:savedQueryId/run: six causes of no access", ()
     }
   });
 
-  // Lands green in Task 6, with GET /v1/me/runs.
-  it.todo(
-    "shows the refused run in GET /v1/me/runs as { withheld: true } with source_id null"
-  );
+  it("shows the refused run in GET /v1/me/runs as { withheld: true } with source_id null", async () => {
+    for (const { cause, recipient, id } of cases) {
+      const res = await fetchJson(
+        "GET",
+        `${BASE_URL}/v1/me/runs`,
+        recipient.token
+      );
+      expect(res.status, cause).toBe(200);
+      const [run] = res.body.data as Array<Record<string, unknown>>;
+      expect(run, cause).toMatchObject({
+        user_id: recipient.id,
+        source_id: null,
+        query: { withheld: true },
+        outcome: "refused",
+        error_code: "saved_query_not_accessible",
+      });
+      expect(JSON.stringify(res.body), cause).not.toMatch(/"orders"|customers/);
+      // Shared with them still, so the saved query's name is attached.
+      expect(run!.saved_query, cause).toMatchObject({ id });
+    }
+  });
 });

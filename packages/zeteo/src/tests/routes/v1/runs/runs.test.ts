@@ -155,6 +155,44 @@ describe("GET /v1/runs", () => {
     }
   });
 
+  it("attaches the saved query to a run of one, whoever it is shared with", async () => {
+    const owner = newQueryUser();
+    const query = { source: source.slug, from: "accounts", select: ["id"] };
+    const saved = await prisma.savedQuery.create({
+      data: {
+        ownerId: owner.id,
+        sourceId: source.id,
+        name: `admin view ${randomUUID().slice(0, 8)}`,
+        query,
+      },
+    });
+    const run = await prisma.queryRun.create({
+      data: {
+        userId: owner.id,
+        sourceId: source.id,
+        savedQueryId: saved.id,
+        entryPoint: "api",
+        query,
+        durationMs: 1,
+        outcome: "ok",
+      },
+    });
+    try {
+      const res = await list({ user_id: owner.id });
+      expect(res.body.data).toEqual([
+        expect.objectContaining({
+          id: run.id,
+          saved_query: { id: saved.id, name: saved.name },
+        }),
+      ]);
+      const plain = await list({ user_id: user.id });
+      expect(plain.body.data[0]).not.toHaveProperty("saved_query");
+    } finally {
+      await removeRunsOf([owner.id]);
+      await prisma.savedQuery.delete({ where: { id: saved.id } });
+    }
+  });
+
   it("refuses a bad filter or cursor with 400 invalid_request", async () => {
     const bad: Record<string, string>[] = [
       { outcome: "maybe" },

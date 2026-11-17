@@ -329,3 +329,37 @@ export const isSharedWith = async (
   (await tx.savedQueryShare.count({
     where: { savedQueryId: id, ...reaching(userId, groupIds) },
   })) > 0;
+
+/** The names of those of `ids` the user owns or that are shared with them or one of `groupIds`, by id: one read. */
+export const namesVisibleTo = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, string>> => {
+  if (ids.length === 0) return new Map();
+  const rows = await tx.savedQuery.findMany({
+    where: {
+      id: { in: [...ids] },
+      OR: [
+        { ownerId: userId },
+        { shares: { some: reaching(userId, groupIds) } },
+      ],
+    },
+    select: { id: true, name: true },
+  });
+  return new Map(rows.map((r) => [r.id, r.name]));
+};
+
+/** The names of those of `ids` that exist, by id: one read. */
+export const namesOf = async (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, string>> => {
+  if (ids.length === 0) return new Map();
+  const rows = await tx.savedQuery.findMany({
+    where: { id: { in: [...ids] } },
+    select: { id: true, name: true },
+  });
+  return new Map(rows.map((r) => [r.id, r.name]));
+};

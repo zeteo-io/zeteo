@@ -212,21 +212,47 @@ const searchUsers = async (
   return [...seen.values()].slice(0, limit).map(fromUser);
 };
 
-const searchGroups = async (q: string, limit: number): Promise<Principal[]> => {
-  const page = await requests.auth.listGroups({ q, limit });
-  return page.data.slice(0, limit).map(fromGroup);
+/** Narrows a group search to the global groups and those of `organizationId` (null: global only). */
+export interface SearchScope {
+  organizationId: string | null;
+}
+
+const searchGroups = async (
+  q: string,
+  limit: number,
+  scope?: SearchScope
+): Promise<Principal[]> => {
+  if (scope === undefined) {
+    const page = await requests.auth.listGroups({ q, limit });
+    return page.data.slice(0, limit).map(fromGroup);
+  }
+  const organizations = ["global", scope.organizationId].filter(
+    (o): o is string => o !== null
+  );
+  const pages = await Promise.all(
+    organizations.map((organizationId) =>
+      requests.auth.listGroups({ q, limit, organizationId })
+    )
+  );
+  const seen = new Map<string, Principal>();
+  for (const g of pages.flatMap((page) => page.data))
+    if (!seen.has(g.id)) seen.set(g.id, fromGroup(g));
+  return [...seen.values()].slice(0, limit);
 };
 
 /** `searchPrincipals` against tereo itself. */
 export const searchFromTereo = async (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> => {
   assertNoTransaction(`tereo search ${type}s`);
   try {
     return await withinBudget((signal) =>
-      type === "user" ? searchUsers(q, limit, signal) : searchGroups(q, limit)
+      type === "user"
+        ? searchUsers(q, limit, signal)
+        : searchGroups(q, limit, scope)
     );
   } catch (err) {
     throw unreachable(`searching ${type}s`, err, { limit });
@@ -385,9 +411,9 @@ const asPrincipal = (json: string): Principal => {
   return principal;
 };
 
-const seeded = async (): Promise<Principal[]> =>
+const seeded = async (): Promise<TestDirectoryEntry[]> =>
   Object.values(await readSeam(redis.hgetall(TEST_DIRECTORY_KEY), 0)).map(
-    asPrincipal
+    (json) => JSON.parse(json) as TestDirectoryEntry
   );
 
 /** The seam's entry for `ref`, or undefined when it has none or the id is marked orphaned. */
@@ -409,7 +435,8 @@ const seamEntry = async (
 const searchSeam = async (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> => {
   const needle = q.toLowerCase();
   return (await seeded())
@@ -417,10 +444,16 @@ const searchSeam = async (
       (p) =>
         p.type === type &&
         p.status !== "orphaned" &&
-        [p.name, p.email].some((v) => v?.toLowerCase().includes(needle))
+        [p.name, p.email].some((v) => v?.toLowerCase().includes(needle)) &&
+        (type === "user" ||
+          scope === undefined ||
+          (p.organization_id ?? null) === null ||
+          p.organization_id === scope.organizationId) &&
+        (type === "group" || p.user_type !== "service_account")
     )
     .sort((a, b) => a.id.localeCompare(b.id))
-    .slice(0, limit);
+    .slice(0, limit)
+    .map((p) => asPrincipal(JSON.stringify(p)));
 };
 
 const lookupSeam = async (refs: PrincipalRef[]): Promise<Principal[]> => {
@@ -445,17 +478,19 @@ const lookupSeam = async (refs: PrincipalRef[]): Promise<Principal[]> => {
 
 /**
  * Users or groups whose name (or a user's email) contains `q`, at most
- * `limit`. A user search leaves out service accounts, an unreachable tereo
- * is a `TereoUnreachableError`.
+ * `limit`. A user search leaves out service accounts; a group search with a
+ * `scope` finds only global groups and those of the scope's organization. An
+ * unreachable tereo is a `TereoUnreachableError`.
  */
 export const searchPrincipals = (
   type: PrincipalType,
   q: string,
-  limit: number
+  limit: number,
+  scope?: SearchScope
 ): Promise<Principal[]> =>
   env.TEREO_TEST_MODE
-    ? searchSeam(type, q, limit)
-    : searchFromTereo(type, q, limit);
+    ? searchSeam(type, q, limit, scope)
+    : searchFromTereo(type, q, limit, scope);
 
 /**
  * One principal per ref, in the refs' order, a repeated ref collapsed to its
