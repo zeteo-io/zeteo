@@ -53,3 +53,9 @@
   height: 100%;
   overflow: auto;
 }
+
+/* One line per row; a wide table scrolls. */
+.z-table-panel th,
+.z-table-panel td {
+  white-space: nowrap;
+}

@@ -37,18 +37,22 @@
   font-size: var(--k-text-size-sm);
 }
 
+/* The chart fills the preview's height and never widens it: a wide table
+   scrolls inside it rather than the dialog. */
 .z-pe-preview {
   border: 1px solid var(--k-border-color);
   border-radius: 0.5rem;
   padding: 0.75rem;
   min-width: 0;
-  display: grid;
-  align-content: start;
+  display: flex;
+  flex-direction: column;
   gap: 0.5rem;
 }
 
 .z-pe-chart {
-  height: 22rem;
+  flex: 1;
+  min-height: 22rem;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
