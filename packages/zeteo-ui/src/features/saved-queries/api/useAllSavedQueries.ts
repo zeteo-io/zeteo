@@ -4,6 +4,8 @@ import { useCursorList } from "@/lib/api";
 export interface AllSavedQueryFilters {
   owner_id?: string;
   source_id?: string;
+  shared_with_type?: "user" | "group";
+  shared_with_id?: string;
   q?: string;
 }
 

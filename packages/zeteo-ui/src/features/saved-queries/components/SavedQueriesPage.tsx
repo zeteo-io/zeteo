@@ -20,6 +20,7 @@ import {
   faShareNodes,
   faTrash,
   faUser,
+  faUserGroup,
 } from "@fortawesome/free-solid-svg-icons";
 import {
   PrincipalLabel,
@@ -42,15 +43,25 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 interface Filters {
   owner_id?: string;
   source_id?: string;
+  shared_with_type?: "user" | "group";
+  shared_with_id?: string;
 }
 
 const idOf = (value: string | null) =>
   value && UUID.test(value) ? value.toLowerCase() : undefined;
 
-const filtersOf = (params: URLSearchParams): Filters => ({
-  owner_id: idOf(params.get("owner_id")),
-  source_id: idOf(params.get("source_id")),
-});
+const filtersOf = (params: URLSearchParams): Filters => {
+  const type = params.get("shared_with_type");
+  const id = idOf(params.get("shared_with_id"));
+  // Both or neither.
+  const shared = (type === "user" || type === "group") && id;
+  return {
+    owner_id: idOf(params.get("owner_id")),
+    source_id: idOf(params.get("source_id")),
+    shared_with_type: shared ? type : undefined,
+    shared_with_id: shared ? id : undefined,
+  };
+};
 
 type Dialog = { kind: "share" | "transfer"; id: string } | null;
 
@@ -61,12 +72,14 @@ export const SavedQueriesPage = () => {
   // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only this.
   const canSearchPeople = hasPermission("zeteo.grants.read");
   const [urlFilters, setFilters] = useUrlFilters(
-    ["owner_id", "source_id"],
+    ["owner_id", "source_id", "shared_with_type", "shared_with_id"],
     filtersOf
   );
   // Without zeteo.sources.read a source filter would only be refused.
   const filters: Filters = {
     owner_id: urlFilters.owner_id,
+    shared_with_type: urlFilters.shared_with_type,
+    shared_with_id: urlFilters.shared_with_id,
     source_id: canReadSources ? urlFilters.source_id : undefined,
   };
   const [search, setSearch] = useState("");
@@ -77,6 +90,7 @@ export const SavedQueriesPage = () => {
   const sources = useAllSources(canReadSources);
   const remove = useDeleteSavedQuery();
   const [pickingPerson, setPickingPerson] = useState(false);
+  const [pickingSharedWith, setPickingSharedWith] = useState(false);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
@@ -85,7 +99,16 @@ export const SavedQueriesPage = () => {
   const ownerRef: PrincipalRef | null = filters.owner_id
     ? { type: "user", id: filters.owner_id }
     : null;
-  const anyFilter = !!(filters.owner_id || filters.source_id || search);
+  const sharedRef: PrincipalRef | null =
+    filters.shared_with_type && filters.shared_with_id
+      ? { type: filters.shared_with_type, id: filters.shared_with_id }
+      : null;
+  const anyFilter = !!(
+    filters.owner_id ||
+    filters.source_id ||
+    sharedRef ||
+    search
+  );
 
   const filterDefs: InfiniteScrollMenuFilter[] = [
     { type: "SEARCH", title: "Search", dataKey: "q" },
@@ -141,6 +164,29 @@ export const SavedQueriesPage = () => {
               <FontAwesomeIcon icon={faUser} /> Owner
             </Button>
           )}
+          {sharedRef ? (
+            <FilterChip
+              clearLabel="Clear shared with"
+              onClear={() =>
+                setFilters({
+                  ...urlFilters,
+                  shared_with_type: undefined,
+                  shared_with_id: undefined,
+                })
+              }
+            >
+              Shared with <PrincipalLabel refValue={sharedRef} />
+            </FilterChip>
+          ) : (
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() => setPickingSharedWith(true)}
+            >
+              <FontAwesomeIcon icon={faUserGroup} /> Shared with
+            </Button>
+          )}
           {filtersReady && (
             <TableFilters filters={filterDefs} onChange={onFiltersChange} />
           )}
@@ -164,6 +210,30 @@ export const SavedQueriesPage = () => {
           onChange={(p) => {
             setFilters({ ...urlFilters, owner_id: p.id });
             setPickingPerson(false);
+          }}
+        />
+      </Modal>
+      <Modal
+        show={pickingSharedWith}
+        title="Show the saved queries shared with a person or group"
+        onClose={() => setPickingSharedWith(false)}
+      >
+        {!canSearchPeople && (
+          <p>
+            Searching by name needs the Read grants permission; paste an id
+            instead.
+          </p>
+        )}
+        <PrincipalPicker
+          search={canSearchPeople}
+          value={sharedRef}
+          onChange={(p) => {
+            setFilters({
+              ...urlFilters,
+              shared_with_type: p.type,
+              shared_with_id: p.id,
+            });
+            setPickingSharedWith(false);
           }}
         />
       </Modal>

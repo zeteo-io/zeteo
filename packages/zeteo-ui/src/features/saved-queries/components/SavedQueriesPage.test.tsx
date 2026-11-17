@@ -8,11 +8,12 @@ import userEvent from "@testing-library/user-event";
 
 const get = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
+const post = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: [] as string[] }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
     permissions: () => held.permissions,
-    api: { get, delete: del },
+    api: { get, post, delete: del },
   })
 );
 
@@ -34,6 +35,22 @@ describe("SavedQueriesPage", () => {
       "zeteo.sources.read",
     ];
     del.mockReset().mockResolvedValue({});
+    post
+      .mockReset()
+      .mockImplementation(
+        async (
+          _url: string,
+          body: { principals: { type: string; id: string }[] }
+        ) => ({
+          data: {
+            data: body.principals.map((p) => ({
+              ...p,
+              name: "Analysts",
+              status: "active",
+            })),
+          },
+        })
+      );
     get.mockReset().mockImplementation(async (url: string) => {
       if (url === "/v1/saved-queries") {
         return { data: { data: [row], next_cursor: null } };
@@ -137,5 +154,25 @@ describe("SavedQueriesPage", () => {
     });
     await screen.findByText("Weekly revenue");
     expect(listParams()[0]).toMatchObject({ owner_id: OWNER_ID });
+  });
+
+  it("filters by the group a saved query is shared with", async () => {
+    const GROUP = "f1111111-1c7a-4a53-9d0e-6a3b1f2c4d01";
+    const user = userEvent.setup();
+    renderWithProviders(<SavedQueriesPage />);
+    await screen.findByText("Weekly revenue");
+    await user.click(screen.getByRole("button", { name: /Shared with/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Groups" }));
+    await user.type(within(dialog).getByLabelText("Or paste an id"), GROUP);
+    await user.click(
+      await within(dialog).findByRole("button", { name: "Select" })
+    );
+    await waitFor(() =>
+      expect(listParams().at(-1)).toMatchObject({
+        shared_with_type: "group",
+        shared_with_id: GROUP,
+      })
+    );
   });
 });
