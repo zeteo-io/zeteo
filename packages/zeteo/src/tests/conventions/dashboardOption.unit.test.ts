@@ -62,6 +62,27 @@ const offendersIn = (file: string, text: string): string[] => {
   return out;
 };
 
+const REFUSAL_RECORDER = "recordDashboardRefusal";
+
+/**
+ * Every mention of `recordDashboardRefusal` in `text` (an import, a call, a
+ * property or a string naming it), as `file:line`: it writes a refused run
+ * attributed to a dashboard, which only a dashboard's run may do.
+ */
+const refusalRecorderIn = (file: string, text: string): string[] => {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
+  const out = new Set<string>();
+  walk(source, (n) => {
+    const named =
+      (ts.isIdentifier(n) && n.text === REFUSAL_RECORDER) ||
+      (ts.isStringLiteralLike(n) && n.text === REFUSAL_RECORDER);
+    if (!named) return;
+    const { line } = source.getLineAndCharacterOfPosition(n.getStart());
+    out.add(`${path.relative(SRC, file)}:${line + 1}`);
+  });
+  return [...out];
+};
+
 describe("the dashboard option of runQuery", () => {
   it("is found by the check", () => {
     expect(
@@ -78,6 +99,27 @@ describe("the dashboard option of runQuery", () => {
     const offenders = sourceFiles(SRC)
       .filter((f) => !ALLOWED.some((dir) => f.startsWith(dir)))
       .flatMap((f) => offendersIn(f, readFileSync(f, "utf8")));
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe("recordDashboardRefusal", () => {
+  it("is found by the check", () => {
+    expect(
+      refusalRecorderIn(
+        path.join(SRC, "x.ts"),
+        `import { recordDashboardRefusal } from "./engine/index.js";
+         await engine.recordDashboardRefusal(caller, id, ref);
+         const f = engine["recordDashboardRefusal"];
+         recordRun({ caller });`
+      )
+    ).toEqual(["x.ts:1", "x.ts:2", "x.ts:3"]);
+  });
+
+  it("is referenced only from src/dashboards/ and src/engine/", () => {
+    const offenders = sourceFiles(SRC)
+      .filter((f) => !ALLOWED.some((dir) => f.startsWith(dir)))
+      .flatMap((f) => refusalRecorderIn(f, readFileSync(f, "utf8")));
     expect(offenders).toEqual([]);
   });
 });
