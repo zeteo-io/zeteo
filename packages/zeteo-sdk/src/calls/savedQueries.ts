@@ -92,7 +92,7 @@ export const savedQueriesCalls = (ctx: CallContext) => {
     },
     listShares: (id: string): Promise<SavedQueryShares> =>
       send(ctx, { op: "listSavedQueryShares", params: { savedQueryId: id } }),
-    // A PUT that replaces whole, so repeating it after a 5xx is harmless.
+    // Never repeated: a second PUT would find the users already added and lose the warnings.
     replaceShares: (
       id: string,
       principals: SharePrincipal[]
@@ -101,7 +101,7 @@ export const savedQueriesCalls = (ctx: CallContext) => {
         op: "replaceSavedQueryShares",
         params: { savedQueryId: id },
         body: { principals },
-        once: false,
+        once: true,
       }),
     transfer: (
       id: string,

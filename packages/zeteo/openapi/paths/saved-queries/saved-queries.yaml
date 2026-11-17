@@ -87,7 +87,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '409':
-        description: Conflict - `conflict` (the caller has a saved query of this name) or `source_archived`
+        description: Conflict - `conflict` (the caller has a saved query of this name)
         content:
           application/json:
             schema:

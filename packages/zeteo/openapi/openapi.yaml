@@ -14,8 +14,9 @@ info:
 
     With `MCP_ALLOWED_CLIENTS` set, the service also serves an MCP endpoint at `/mcp` (Streamable
     HTTP, with its OAuth protected-resource metadata under `/.well-known/`), where an AI signed in
-    through tereo uses four read-only tools: `list_sources`, `list_tables`, `describe_table` and
-    `query`. It is not an HTTP API of this spec; see `docs/mcp.md`.
+    through tereo uses four read-only tools (`list_sources`, `list_tables`, `describe_table` and
+    `query`) and the saved query tools (`list_saved_queries`, `get_saved_query`, `run_saved_query`,
+    `create_saved_query`, `update_saved_query` and `delete_saved_query`). It is not an HTTP API of this spec; see `docs/mcp.md`.
 
     ## Authentication
 
