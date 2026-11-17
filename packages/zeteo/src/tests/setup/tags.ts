@@ -17,6 +17,7 @@ export const ASPECTS = [
   "mssql",
   "calc",
   "relative",
+  "available",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

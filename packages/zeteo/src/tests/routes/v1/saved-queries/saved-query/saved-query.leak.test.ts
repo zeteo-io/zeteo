@@ -1,16 +1,16 @@
 // @module-tag int
 // @module-tag platform
-import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
-import { savedQueriesCall } from "../../../support/savedQueries.js";
+import { DATA_READ } from "../../../../../definitions/tereoDeclaration.js";
+import { savedQueriesCall } from "../../../../support/savedQueries.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { prisma } from "../../../../utils/db/prisma.js";
-import { tokenFor } from "../../../support/tokens.js";
+import { prisma } from "../../../../../utils/db/prisma.js";
+import { tokenFor } from "../../../../support/tokens.js";
 import { randomUUID } from "crypto";
 import {
   removeNoAccessCases,
   seedCauseSources,
   setUpNoAccessCases,
-} from "../../../support/savedQueryCauses.js";
+} from "../../../../support/savedQueryCauses.js";
 
 // An organization A user who cannot run an available saved query learns
 // nothing of why: the six causes look the same.
