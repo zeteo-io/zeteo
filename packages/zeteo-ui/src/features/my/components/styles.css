@@ -1,0 +1,116 @@
+.z-my-page {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 64rem;
+}
+
+.z-my-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-muted {
+  margin: 0;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-my-json {
+  margin: 0;
+  padding: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-sq-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 0.75rem;
+}
+
+.z-sq-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-sq-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.z-sq-name {
+  margin: 0;
+  font-size: var(--k-text-size-md);
+}
+
+.z-sq-source {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-sq-description {
+  margin: 0;
+}
+
+.z-sq-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.z-run-list,
+.z-catalog-list,
+.z-catalog-tables {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.z-run-row,
+.z-catalog-source {
+  padding: 0.5rem 0;
+}
+
+.z-run-row + .z-run-row,
+.z-catalog-source + .z-catalog-source {
+  border-top: 1px solid var(--k-border-color);
+}
+
+.z-run-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.z-run-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+.z-catalog-toggle {
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.z-catalog-tables {
+  columns: 2;
+  margin-top: 0.4rem;
+  padding-left: 1rem;
+  font-size: var(--k-text-size-sm);
+}
