@@ -1,5 +1,6 @@
 import principalLimitsRouter from "./principal-limits/index.js";
 import { dropCachedIntrospection } from "./me/middleware.js";
+import savedQueriesRouter from "./saved-queries/index.js";
 import { authenticate } from "../../middleware/auth.js";
 import principalsRouter from "./principals/index.js";
 import catalogRouter from "./catalog/index.js";
@@ -23,6 +24,7 @@ v1Router.use("/principal-limits", principalLimitsRouter);
 v1Router.use("/principals", principalsRouter);
 v1Router.use("/query", queryRouter);
 v1Router.use("/runs", runsRouter);
+v1Router.use("/saved-queries", savedQueriesRouter);
 v1Router.use("/sources", sourcesRouter);
 
 export default v1Router;

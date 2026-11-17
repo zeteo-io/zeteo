@@ -46,6 +46,8 @@ export const removeSources = async (ids: string[]) => {
       WHERE payload->>'entityId' = ${id}
          OR payload->'metadata'->>'source_id' = ${id}`;
   }
+  // Saved queries restrict deleting their source; their shares go with them.
+  await prisma.savedQuery.deleteMany({ where: { sourceId: { in: ids } } });
   // Grants and runs restrict deleting the tables and the sources they name.
   await prisma.queryRun.deleteMany({ where: { sourceId: { in: ids } } });
   await prisma.grant.deleteMany({

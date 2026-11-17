@@ -253,3 +253,63 @@ export const stampRun = async (
   if (tx) await run(tx);
   else await prisma.$transaction((t) => run(t));
 };
+
+const reaching = (
+  userId: string,
+  groupIds: readonly string[]
+): Prisma.SavedQueryShareWhereInput => ({
+  OR: [
+    { principalType: "user", principalId: userId },
+    ...(groupIds.length > 0
+      ? [
+          {
+            principalType: "group" as const,
+            principalId: { in: [...groupIds] },
+          },
+        ]
+      : []),
+  ],
+});
+
+/** `rows` with what depends on `userId`: their own last run, and the earliest share that reaches them (null for none). */
+export const withViewer = async (
+  rows: SavedQuery[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<SavedQueryRow[]> => {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  const [runs, shares] = await Promise.all([
+    tx.savedQueryUserRun.findMany({
+      where: { userId, savedQueryId: { in: ids } },
+      select: { savedQueryId: true, lastRunAt: true },
+    }),
+    tx.savedQueryShare.findMany({
+      where: { savedQueryId: { in: ids }, ...reaching(userId, groupIds) },
+      select: { savedQueryId: true, createdAt: true },
+      orderBy: { createdAt: "asc" },
+    }),
+  ]);
+  const ran = new Map(runs.map((r) => [r.savedQueryId, r.lastRunAt]));
+  const shared = new Map<string, Date>();
+  for (const s of shares) {
+    if (!shared.has(s.savedQueryId)) shared.set(s.savedQueryId, s.createdAt);
+  }
+  return rows.map((row) => ({
+    ...row,
+    userLastRunAt: ran.get(row.id) ?? null,
+    sharedAt: shared.get(row.id) ?? null,
+  }));
+};
+
+/** Whether the saved query is shared with the user, or with one of `groupIds`. */
+export const isSharedWith = async (
+  id: string,
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<boolean> =>
+  (await tx.savedQueryShare.count({
+    where: { savedQueryId: id, ...reaching(userId, groupIds) },
+  })) > 0;
