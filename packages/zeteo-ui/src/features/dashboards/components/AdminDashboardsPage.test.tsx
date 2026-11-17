@@ -60,6 +60,9 @@ describe("AdminDashboardsPage", () => {
   it("lists every dashboard with owner and share count", async () => {
     renderWithProviders(<AdminDashboardsPage />);
     const row = (await screen.findByText("Sales")).closest("tr")!;
+    expect(
+      screen.getByRole("heading", { name: "All dashboards" })
+    ).toBeInTheDocument();
     expect(row).toHaveTextContent("Olive Owner");
     expect(row).toHaveTextContent("2");
     expect(listParams("/v1/dashboards")[0]).toMatchObject({ scope: "all" });

@@ -3,10 +3,10 @@ import { usedByWarning } from "@/utils/usedBy";
 import type { SavedPanel } from "../api/types";
 import { AdminList } from "./AdminList";
 
-/** Saved panels (all): every saved panel, for those holding `zeteo.dashboards.read`. */
+/** All saved panels: every saved panel, for those holding `zeteo.dashboards.read`. */
 export const AdminSavedPanelsPage = () => (
   <AdminList<SavedPanel>
-    title="Saved panels (all)"
+    title="All saved panels"
     objectType="saved_panel"
     noun="saved panel"
     extraColumn={{

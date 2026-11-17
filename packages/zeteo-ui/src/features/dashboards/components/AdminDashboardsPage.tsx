@@ -3,10 +3,10 @@ import { useAllDashboards } from "../api/useDashboards";
 import type { DashboardSummary } from "../api/types";
 import { AdminList } from "./AdminList";
 
-/** Dashboards (all): every dashboard, for those holding `zeteo.dashboards.read`. */
+/** All dashboards: every dashboard, for those holding `zeteo.dashboards.read`. */
 export const AdminDashboardsPage = () => (
   <AdminList<DashboardSummary>
-    title="Dashboards (all)"
+    title="All dashboards"
     objectType="dashboard"
     noun="dashboard"
     href={(d) => `/dashboards/${d.id}`}
