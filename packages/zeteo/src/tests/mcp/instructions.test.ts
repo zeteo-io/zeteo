@@ -52,7 +52,7 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
     // The two calculation examples use the order_lines and products tables of
     // the examples' schema, which the fixture has under other names; the
     // instructions unit test checks they parse.
-    expect(examples).toHaveLength(5);
+    expect(examples).toHaveLength(6);
     for (const example of examples.slice(0, 3)) {
       expect(example.source).toBe("sales-db");
       const body = { ...example, source: source.slug };

@@ -1,10 +1,14 @@
-import type { QueryPlan, SourceAdapter } from "../adapters/types.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { invalidRequest } from "../utils/validateReq.js";
 import { adapterFor } from "../adapters/index.js";
 import type { Access } from "../grants/access.js";
 import { logger } from "../utils/logger.js";
 import { QueryError } from "./errors.js";
+import type {
+  PlanContext,
+  QueryPlan,
+  SourceAdapter,
+} from "../adapters/types.js";
 
 // Planning a body against a visible catalogue: shared by queries, exports and
 // saved queries, and importing none of them.
@@ -49,7 +53,8 @@ export const planFor = (
   body: unknown,
   access: Access,
   catalog: VisibleCatalog,
-  progress: Progress
+  progress: Progress,
+  ctx?: PlanContext
 ): { adapter: SourceAdapter; plan: QueryPlan } => {
   const adapter = adapterFor(catalog.source.type);
   const parsed = adapter.language.schema.safeParse(body);
@@ -57,7 +62,7 @@ export const planFor = (
     progress.unrecorded = true;
     throw invalidRequest("body", parsed.error);
   }
-  const plan = adapter.language.plan(parsed.data, catalog);
+  const plan = adapter.language.plan(parsed.data, catalog, ctx);
   checkReferences(plan, access, catalog);
   return { adapter, plan };
 };

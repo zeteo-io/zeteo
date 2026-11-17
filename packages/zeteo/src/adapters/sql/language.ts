@@ -1,3 +1,4 @@
+import { relativeDateSchema, type RelativeDate } from "./relative.js";
 import type { QueryLanguage } from "../types.js";
 import { planSql, queryNameOf } from "./plan.js";
 import type { SqlPlan } from "./types.js";
@@ -48,6 +49,9 @@ const scalarSchema = z.union([
   z.number(),
   z.boolean(),
 ]);
+
+/** A value a comparison takes: a literal, or a moment relative to now. */
+const comparedSchema = z.union([scalarSchema, relativeDateSchema]);
 
 export const BUCKET_UNITS = [
   "day",
@@ -459,13 +463,13 @@ const valuesSchema = z.array(scalarSchema).min(1).max(MAX_IN_VALUES);
 /** Exactly one operator and its value. */
 const conditionSchema = z.union(
   [
-    z.strictObject({ eq: scalarSchema }),
-    z.strictObject({ ne: scalarSchema }),
-    z.strictObject({ gt: scalarSchema }),
-    z.strictObject({ gte: scalarSchema }),
-    z.strictObject({ lt: scalarSchema }),
-    z.strictObject({ lte: scalarSchema }),
-    z.strictObject({ between: z.tuple([scalarSchema, scalarSchema]) }),
+    z.strictObject({ eq: comparedSchema }),
+    z.strictObject({ ne: comparedSchema }),
+    z.strictObject({ gt: comparedSchema }),
+    z.strictObject({ gte: comparedSchema }),
+    z.strictObject({ lt: comparedSchema }),
+    z.strictObject({ lte: comparedSchema }),
+    z.strictObject({ between: z.tuple([comparedSchema, comparedSchema]) }),
     z.strictObject({ in: valuesSchema }),
     z.strictObject({ notIn: valuesSchema }),
     z.strictObject({ contains: z.string().refine(noNul) }),
@@ -481,14 +485,15 @@ const conditionSchema = z.union(
 const LOGICAL_KEYS = new Set(["and", "or", "not"]);
 
 export type Scalar = string | number | boolean;
+export type Compared = Scalar | RelativeDate;
 export type Condition =
-  | { eq: Scalar }
-  | { ne: Scalar }
-  | { gt: Scalar }
-  | { gte: Scalar }
-  | { lt: Scalar }
-  | { lte: Scalar }
-  | { between: [Scalar, Scalar] }
+  | { eq: Compared }
+  | { ne: Compared }
+  | { gt: Compared }
+  | { gte: Compared }
+  | { lt: Compared }
+  | { lte: Compared }
+  | { between: [Compared, Compared] }
   | { in: Scalar[] }
   | { notIn: Scalar[] }
   | { contains: string }

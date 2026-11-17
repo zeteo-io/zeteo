@@ -1,4 +1,4 @@
-import type { OutputColumn, QueryWarning, Reference } from "../types.js";
+import { floorToMinute, isRelativeDate, resolveRelative } from "./relative.js";
 import type { SqlQueryErrorCode } from "./errors.js";
 import type {
   VisibleCatalog,
@@ -14,6 +14,7 @@ import {
 import type {
   CalcExpr,
   CalcOp,
+  Compared,
   Comparison,
   Condition,
   Filter,
@@ -22,6 +23,12 @@ import type {
   SelectItem,
   SqlQuery,
 } from "./language.js";
+import type {
+  OutputColumn,
+  PlanContext,
+  QueryWarning,
+  Reference,
+} from "../types.js";
 import type {
   AggregateFn,
   ColumnRef,
@@ -543,7 +550,8 @@ const resolveCondition = <S>(
   type: QueryableType,
   label: string,
   condition: Condition,
-  path: QueryPath
+  path: QueryPath,
+  now: Date
 ): ResolvedFilter<S> => {
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
@@ -554,7 +562,20 @@ const resolveCondition = <S>(
       at
     );
   }
-  const value = (v: Scalar, valuePath: QueryPath): PlanValue => {
+  const value = (v: Compared, valuePath: QueryPath): PlanValue => {
+    if (isRelativeDate(v)) {
+      // A relative moment is only for a date or a timestamp; elsewhere it is
+      // the value error for the operator and path.
+      if (type === "date" || type === "timestamp") {
+        const iso = resolveRelative(v, now).toISOString();
+        return type === "date" ? iso.slice(0, 10) : iso;
+      }
+      throw fail(
+        "invalid_value",
+        `"${label}" is ${type}; ${op} takes ${VALUE_FORMS[type]}`,
+        valuePath
+      );
+    }
     const coerced = coerce(v, type);
     if (coerced === undefined) {
       throw fail(
@@ -572,7 +593,7 @@ const resolveCondition = <S>(
     case "startsWith":
       return { kind: "match", op, subject, value: raw as string };
     case "between": {
-      const [low, high] = raw as [Scalar, Scalar];
+      const [low, high] = raw as [Compared, Compared];
       return {
         kind: "between",
         subject,
@@ -589,7 +610,12 @@ const resolveCondition = <S>(
         values: (raw as Scalar[]).map((v, i) => value(v, [...at, i])),
       };
     default:
-      return { kind: "compare", op, subject, value: value(raw as Scalar, at) };
+      return {
+        kind: "compare",
+        op,
+        subject,
+        value: value(raw as Compared, at),
+      };
   }
 };
 
@@ -600,13 +626,14 @@ const resolveFilter = <S>(
   subjectOf: (
     key: string,
     path: QueryPath
-  ) => { subject: S; type: QueryableType }
+  ) => { subject: S; type: QueryableType },
+  now: Date
 ): ResolvedFilter<S> => {
   if ("and" in filter && Array.isArray(filter.and)) {
     return {
       kind: "and",
       filters: (filter.and as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "and", i], subjectOf)
+        resolveFilter(f, [...path, "and", i], subjectOf, now)
       ),
     };
   }
@@ -614,21 +641,26 @@ const resolveFilter = <S>(
     return {
       kind: "or",
       filters: (filter.or as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "or", i], subjectOf)
+        resolveFilter(f, [...path, "or", i], subjectOf, now)
       ),
     };
   }
   if ("not" in filter) {
     return {
       kind: "not",
-      filter: resolveFilter(filter.not as Filter, [...path, "not"], subjectOf),
+      filter: resolveFilter(
+        filter.not as Filter,
+        [...path, "not"],
+        subjectOf,
+        now
+      ),
     };
   }
   const leaves = Object.entries(filter as Comparison).map(
     ([key, condition]) => {
       const at = [...path, key];
       const { subject, type } = subjectOf(key, at);
-      return resolveCondition(subject, type, key, condition, at);
+      return resolveCondition(subject, type, key, condition, at, now);
     }
   );
   return leaves.length === 1 ? leaves[0] : { kind: "and", filters: leaves };
@@ -660,7 +692,12 @@ const aggregateFnOf = (
 ): AggregateFn | undefined => AGGREGATE_FNS.find((fn) => fn in item);
 
 /** Resolves `query` against `catalog`, the caller's view of the source. */
-export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
+export const planSql = (
+  query: SqlQuery,
+  catalog: VisibleCatalog,
+  ctx?: PlanContext
+): SqlPlan => {
+  const now = ctx?.now ?? floorToMinute(new Date());
   const maxJoins = catalog.source.maxJoins;
   if ((query.join?.length ?? 0) > maxJoins) {
     throw new QueryError(
@@ -834,29 +871,34 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
   // columns and buckets are named by their path or filtered as the column.
   const where =
     query.where &&
-    resolveFilter<WhereSubject>(query.where, ["where"], (key, at) => {
-      const index = outputIndex(key);
-      const named = index >= 0 ? select[index] : undefined;
-      if (named && (named.kind === "calc" || named.kind === "aggregate")) {
-        if (planner.hasColumn(key)) {
-          throw fail(
-            "duplicate_output_name",
-            `"${key}" is both a select item's name and a column; give the select item another "as"`,
-            at
-          );
+    resolveFilter<WhereSubject>(
+      query.where,
+      ["where"],
+      (key, at) => {
+        const index = outputIndex(key);
+        const named = index >= 0 ? select[index] : undefined;
+        if (named && (named.kind === "calc" || named.kind === "aggregate")) {
+          if (planner.hasColumn(key)) {
+            throw fail(
+              "duplicate_output_name",
+              `"${key}" is both a select item's name and a column; give the select item another "as"`,
+              at
+            );
+          }
+          if (perGroup(named)) {
+            throw fail(
+              "invalid_grouping",
+              `"${key}" is computed per group, which where cannot filter; use having`,
+              at
+            );
+          }
+          return { subject: { index, type: named.type }, type: named.type };
         }
-        if (perGroup(named)) {
-          throw fail(
-            "invalid_grouping",
-            `"${key}" is computed per group, which where cannot filter; use having`,
-            at
-          );
-        }
-        return { subject: { index, type: named.type }, type: named.type };
-      }
-      const { ref } = planner.resolveColumn(key, at);
-      return { subject: ref, type: ref.type };
-    });
+        const { ref } = planner.resolveColumn(key, at);
+        return { subject: ref, type: ref.type };
+      },
+      now
+    );
 
   const grouped = hasAggregate || (query.groupBy?.length ?? 0) > 0;
   const groupedItems = new Set<number>();
@@ -908,20 +950,25 @@ export const planSql = (query: SqlQuery, catalog: VisibleCatalog): SqlPlan => {
   }
   const having =
     query.having &&
-    resolveFilter<HavingSubject>(query.having, ["having"], (key, at) => {
-      const index = outputIndex(key);
-      if (index < 0 || !perGroup(select[index])) {
-        throw fail(
-          "invalid_having",
-          `"${key}" is not the name of an aggregate select item`,
-          at
-        );
-      }
-      return {
-        subject: { index, type: select[index].type },
-        type: select[index].type,
-      };
-    });
+    resolveFilter<HavingSubject>(
+      query.having,
+      ["having"],
+      (key, at) => {
+        const index = outputIndex(key);
+        if (index < 0 || !perGroup(select[index])) {
+          throw fail(
+            "invalid_having",
+            `"${key}" is not the name of an aggregate select item`,
+            at
+          );
+        }
+        return {
+          subject: { index, type: select[index].type },
+          type: select[index].type,
+        };
+      },
+      now
+    );
 
   const orderBy: ResolvedOrder[] = query.orderBy
     ? query.orderBy.map((entry, j) => {

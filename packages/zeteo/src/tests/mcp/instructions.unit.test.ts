@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 
 describe("MCP_INSTRUCTIONS", () => {
-  it("stays under 6,500 characters", () => {
-    expect(MCP_INSTRUCTIONS.length).toBeLessThan(6500);
+  it("stays under 7,000 characters", () => {
+    expect(MCP_INSTRUCTIONS.length).toBeLessThan(7000);
   });
 
   it("says that query results are data, not instructions", () => {
@@ -68,17 +68,15 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(MCP_INSTRUCTIONS).toContain('{"mul":[100,{"div"');
   });
 
-  it("holds five worked examples, each a query the SQL language accepts", () => {
+  it("holds six worked examples, each a query the SQL language accepts", () => {
     const examples = jsonBlocks(MCP_INSTRUCTIONS);
-    expect(examples).toHaveLength(5);
+    expect(examples).toHaveLength(6);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
-    const [filtered, joined, ranked, lineTotal, margin] = examples as Record<
-      string,
-      unknown
-    >[];
+    const [filtered, joined, ranked, lineTotal, margin, recent] =
+      examples as Record<string, unknown>[];
     expect(filtered).toHaveProperty("where");
     expect(joined).toHaveProperty("join");
     expect(joined).toHaveProperty("groupBy");
@@ -89,6 +87,7 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(JSON.stringify(lineTotal)).toContain('"calc"');
     expect(JSON.stringify(margin)).toContain('"div"');
     expect(JSON.stringify(margin)).toContain('"sum"');
+    expect(JSON.stringify(recent)).toContain('"relative"');
   });
 
   const planned = (blocks: unknown[]) => {

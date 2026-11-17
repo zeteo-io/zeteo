@@ -154,13 +154,18 @@ export interface QueryPlan {
   defaultOrder?: boolean;
 }
 
+/** What a plan may depend on besides the query: the moment relative dates resolve against. */
+export interface PlanContext {
+  now: Date;
+}
+
 export interface QueryLanguage<Q = unknown, P extends QueryPlan = QueryPlan> {
   id: string;
   schema: z.ZodType<Q>;
   /** JSON Schema of `schema`, for the catalogue and the AI. */
   describe(): unknown;
   /** Resolves a parsed query against what the caller may see; throws `QueryError`. */
-  plan(query: Q, catalog: VisibleCatalog): P;
+  plan(query: Q, catalog: VisibleCatalog, ctx?: PlanContext): P;
   /** The name a query uses for `table` among `tables`. */
   tableName(tables: VisibleTable[], table: VisibleTable): string;
 }
