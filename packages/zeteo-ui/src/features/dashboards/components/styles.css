@@ -55,6 +55,24 @@
   min-width: 0;
 }
 
+/* Side by side, the editor fits the window: the settings scroll and the
+   preview stays in view. (The padding keeps the focus ring unclipped.) */
+@media (min-width: 901px) {
+  .z-pe {
+    height: min(40rem, calc(100vh - 16rem));
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .z-pe-form {
+    overflow-y: auto;
+    padding: 0.125rem 0.5rem 0.125rem 0.125rem;
+  }
+
+  .z-pe-chart {
+    min-height: 0;
+  }
+}
+
 @media (max-width: 900px) {
   .z-pe {
     grid-template-columns: minmax(0, 1fr);
