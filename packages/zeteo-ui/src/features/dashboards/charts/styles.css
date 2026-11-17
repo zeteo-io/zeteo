@@ -1,0 +1,61 @@
+.z-chart {
+  width: 100%;
+  height: 100%;
+  min-height: 160px;
+}
+
+.z-chart-note {
+  margin: 0;
+  padding: 12px;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 100%;
+  min-height: 96px;
+}
+
+.z-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--k-text-size-3xl);
+  font-weight: 600;
+  color: var(--k-text-color);
+}
+
+.z-stat-unit {
+  font-size: var(--k-text-size-lg);
+  font-weight: 400;
+  color: var(--k-text-color-secondary);
+}
+
+.z-stat-change {
+  font-size: var(--k-text-size-md);
+  color: var(--k-text-color-secondary);
+}
+
+.z-stat-change[data-direction="up"] {
+  color: var(--k-success-color);
+}
+
+.z-stat-change[data-direction="down"] {
+  color: var(--k-danger-color);
+}
+
+.z-table-panel {
+  height: 100%;
+  overflow: auto;
+}
+
+/* One line per row; a wide table scrolls. */
+.z-table-panel th,
+.z-table-panel td {
+  white-space: nowrap;
+}

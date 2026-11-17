@@ -1,0 +1,303 @@
+/* The panel editor: the settings beside the live preview. */
+.z-pe {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  min-height: 24rem;
+}
+
+.z-pe-form,
+.z-pe-settings {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.z-pe-kind {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.z-pe-checks {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.z-pe-checks legend {
+  font-size: var(--k-text-size-sm);
+  margin-bottom: 0.25rem;
+}
+
+.z-pe-problem {
+  margin: 0.25rem 0 0;
+  color: var(--k-danger-color);
+  font-size: var(--k-text-size-sm);
+}
+
+/* The chart fills the preview's height and never widens it: a wide table
+   scrolls inside it rather than the dialog. */
+.z-pe-preview {
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.z-pe-chart {
+  flex: 1;
+  min-height: 22rem;
+  min-width: 0;
+}
+
+/* Side by side, the editor fits the window: the settings scroll and the
+   preview stays in view. (The padding keeps the focus ring unclipped.) */
+@media (min-width: 901px) {
+  .z-pe {
+    height: min(40rem, calc(100vh - 16rem));
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .z-pe-form {
+    overflow-y: auto;
+    padding: 0.125rem 0.5rem 0.125rem 0.125rem;
+  }
+
+  .z-pe-chart {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .z-pe {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A dashboard: the range picker and refresh above the grid. */
+.z-dashboard-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.z-dashboard-range {
+  width: 14rem;
+}
+
+.z-dashboard-refresh {
+  width: 10rem;
+}
+
+/* The Live badge and the Refresh all button sit in a box as tall as the
+   pickers' small inputs (39px), so they line up with them, not with their
+   labels. */
+.z-dashboard-live,
+.z-dashboard-refresh-all {
+  display: flex;
+  align-items: center;
+  height: 39px;
+}
+
+.z-dashboard-refresh-all .k-button {
+  height: 39px;
+  width: 39px;
+  padding: 0;
+}
+
+/* Kept at its own size: the square button's padding would squeeze it. */
+.z-dashboard-refresh-all .k-button svg {
+  flex-shrink: 0;
+}
+
+.z-dashboard-grid {
+  margin: 0 -12px;
+}
+
+/* One panel: a bordered card filling its grid cell. */
+.z-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  background: var(--k-background-color, transparent);
+  overflow: hidden;
+}
+
+.z-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--k-border-color);
+}
+
+.react-grid-item.react-draggable .z-panel-head {
+  cursor: move;
+}
+
+.z-panel-title {
+  margin: 0;
+  font-size: var(--k-text-size-md, 1rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.z-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-panel-stale {
+  color: var(--k-warning-color-text, var(--k-warning-color));
+}
+
+.z-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+}
+
+.z-panel-chart {
+  flex: 1;
+  min-height: 0;
+}
+
+.z-panel-message {
+  margin: auto;
+  max-width: 28rem;
+  text-align: center;
+  color: var(--k-text-color-muted, inherit);
+}
+
+.z-panel-notice {
+  margin: 0.25rem 0 0;
+  font-size: var(--k-text-size-sm);
+  color: var(--k-text-color-muted, inherit);
+}
+
+/* The lists: cards in a grid, as My Zeteo's saved queries. */
+.z-db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+
+/* Each card fills its row's height, and its footer (the note and the actions)
+   sits at the bottom, so the actions line up across a row. */
+.z-db-grid > .k-card,
+.z-db-grid > .k-card > .k-card-body {
+  display: flex;
+  flex-direction: column;
+}
+
+.z-db-grid > .k-card > .k-card-body {
+  flex: 1;
+}
+
+.z-db-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.z-db-card > * {
+  min-width: 0;
+}
+
+.z-db-card > .z-db-foot {
+  margin-top: auto;
+}
+
+.z-db-card h3 {
+  margin: 0;
+  font-size: var(--k-text-size-md, 1rem);
+}
+
+.z-db-card h3 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.z-db-card h3 a:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}
+
+.z-db-card p {
+  margin: 0;
+}
+
+/* The note, then the actions under it. */
+.z-db-foot {
+  display: grid;
+  justify-items: start;
+  gap: 0.5rem;
+}
+
+.z-db-actions {
+  display: flex;
+  gap: 0.375rem;
+}
+
+/* The icons keep their size: a squeezed icon button would shrink them away. */
+.z-db-actions .k-button svg {
+  flex-shrink: 0;
+}
+
+.z-db-preview {
+  height: 14rem;
+}
+
+.z-db-sections {
+  display: grid;
+  gap: 1.25rem;
+}
+
+/* Display mode: the dashboard alone, on the whole screen. */
+.z-display {
+  min-height: 100vh;
+  padding: 1rem 1.25rem;
+  background: var(--k-background-color);
+  color: var(--k-text-color);
+}
+
+.z-display-title {
+  margin: 0 0 0.75rem;
+  font-size: var(--k-text-size-lg);
+}
+
+.z-display-fullscreen {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  transition: opacity 0.3s;
+}
+
+.z-display-fullscreen[data-visible="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.z-display-signedout {
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+  text-align: center;
+}

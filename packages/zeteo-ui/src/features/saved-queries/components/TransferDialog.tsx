@@ -1,3 +1,4 @@
+import { NOUNS, type SharedObjectType } from "../api/sharedObjects";
 import { Alert, Button, Checkbox, Modal } from "@kosmeo-ui/react";
 import type { Principal } from "@/features/principals";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -7,16 +8,19 @@ import { useState } from "react";
 import "./styles.css";
 
 interface TransferDialogProps {
-  savedQueryId: string;
+  objectType: SharedObjectType;
+  id: string;
   onClose: () => void;
 }
 
-/** Hands a saved query to another person; the sender can keep access to it. */
+/** Hands a saved query, dashboard or saved panel to another person; the sender can keep access to it. */
 export const TransferDialog = ({
-  savedQueryId,
+  objectType,
+  id,
   onClose,
 }: TransferDialogProps) => {
-  const transfer = useTransfer(savedQueryId);
+  const transfer = useTransfer(objectType, id);
+  const noun = NOUNS[objectType];
   const [person, setPerson] = useState<Principal | null>(null);
   const [keepAccess, setKeepAccess] = useState(true);
   const [warned, setWarned] = useState(false);
@@ -41,7 +45,7 @@ export const TransferDialog = ({
     return (
       <Modal
         show
-        title="Saved query transferred"
+        title={`${noun[0].toUpperCase()}${noun.slice(1)} transferred`}
         onClose={onClose}
         footerButtons={[
           <Button key="done" fullWidth={false} onClick={onClose}>
@@ -59,7 +63,7 @@ export const TransferDialog = ({
   return (
     <Modal
       show
-      title="Transfer saved query"
+      title={`Transfer ${noun}`}
       onClose={onClose}
       dismissible={!busy}
       footerButtons={[
@@ -98,13 +102,13 @@ export const TransferDialog = ({
         />
         <p className="z-note">
           {keepAccess
-            ? "It is shared with you afterwards, so you can still run it."
+            ? `It is shared with you afterwards, so you can still ${objectType === "saved_query" ? "run" : "open"} it.`
             : "You lose access to it unless the new owner shares it back."}
         </p>
         {conflict ? (
           <Alert variant="warning">
-            {name} already has a saved query with this name. Rename this one,
-            then transfer it.
+            {name} already has a {noun} with this name. Rename this one, then
+            transfer it.
           </Alert>
         ) : (
           <ErrorNotice error={transfer.error} />

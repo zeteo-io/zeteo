@@ -15,8 +15,14 @@ export const getSavedQuery = async (req: Request, res: Response) => {
 
 export const updateSavedQuery = async (req: Request, res: Response) => {
   const { savedQueryId } = validateParams(SavedQueryParamsSchema, req);
-  const body = validateBody(UpdateSavedQuerySchema, req);
-  res.status(200).json(await update(callerOf(req), savedQueryId, body));
+  const { available_for_dashboards: availableForDashboards, ...rest } =
+    validateBody(UpdateSavedQuerySchema, req);
+  res.status(200).json(
+    await update(callerOf(req), savedQueryId, {
+      ...rest,
+      availableForDashboards,
+    })
+  );
 };
 
 export const deleteSavedQuery = async (req: Request, res: Response) => {

@@ -1,0 +1,491 @@
+TimeRangeKey:
+  type: string
+  description: |
+    A named time range. The `last_*` ranges run from that long before now to the start of the next
+    minute; `today`, `this_*` and `previous_*` are the calendar day, week (starting Monday), month,
+    quarter or year, in UTC. Applied to a panel's `time_column` as `>= start` and `< end`.
+  enum:
+    - last_15_minutes
+    - last_hour
+    - last_6_hours
+    - last_24_hours
+    - last_7_days
+    - last_30_days
+    - last_90_days
+    - last_6_months
+    - last_year
+    - last_2_years
+    - today
+    - this_week
+    - this_month
+    - this_quarter
+    - this_year
+    - previous_week
+    - previous_month
+    - previous_quarter
+    - previous_year
+
+DashboardTheme:
+  type: string
+  enum: [light, dark, auto]
+
+PanelKind:
+  type: string
+  description: '`own` carries its own saved query, chart and time column; `linked` points to a saved panel that holds them'
+  enum: [own, linked]
+
+PanelState:
+  type: string
+  description: |
+    What the viewer can do with a panel. `ok`: it can be run. `not_accessible`: the viewer is not
+    granted what the saved query reads (one answer for every cause, nothing of why).
+    `saved_query_deleted`, `saved_panel_deleted`: what it was built on is gone. `not_available`: its
+    saved query is no longer available for dashboards (or its saved panel is no longer shared with
+    the dashboard's owner). `needs_update`: the chart no longer fits the saved query's result; the
+    panel's owner must change it.
+  enum: [ok, not_accessible, saved_query_deleted, saved_panel_deleted, not_available, needs_update]
+
+ChartProblem:
+  type: object
+  description: One setting of a chart that does not fit the saved query's result
+  required: [setting, problem]
+  properties:
+    setting: { type: string, description: 'The setting at fault: its key, with the index for a list (`y.1`)' }
+    problem: { type: string, description: 'For a chart: `missing_column`, `wrong_type` or `needs_order`; for a saved query or panel that cannot be used, its state' }
+
+ChartDecimals:
+  type: integer
+  minimum: 0
+  maximum: 6
+  description: Decimal places shown
+
+ChartLegend:
+  type: string
+  enum: [auto, none]
+
+ChartColumn:
+  type: string
+  minLength: 1
+  maxLength: 200
+  description: A result column of the saved query, by its `as` or its path
+
+StatChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, value]
+  properties:
+    type: { type: string, const: stat }
+    version: { type: integer, const: 1 }
+    value: { $ref: '#/ChartColumn', description: A number column }
+    compare: { type: string, const: next_row, description: 'Compare with the next row; the saved query then needs an `orderBy`' }
+    unit: { type: string, maxLength: 20 }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+LineChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, x, y]
+  properties:
+    type: { type: string, const: line }
+    version: { type: integer, const: 1 }
+    x: { $ref: '#/ChartColumn', description: A date, timestamp or number column }
+    y:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: Number columns
+      items: { $ref: '#/ChartColumn' }
+    series: { $ref: '#/ChartColumn', description: A text column }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+AreaChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, x, y]
+  properties:
+    type: { type: string, const: area }
+    version: { type: integer, const: 1 }
+    x: { $ref: '#/ChartColumn', description: A date, timestamp or number column }
+    y:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: Number columns
+      items: { $ref: '#/ChartColumn' }
+    series: { $ref: '#/ChartColumn', description: A text column }
+    stacked: { type: boolean }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+BarChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, x, y]
+  properties:
+    type: { type: string, const: bar }
+    version: { type: integer, const: 1 }
+    x: { $ref: '#/ChartColumn' }
+    y:
+      type: array
+      minItems: 1
+      maxItems: 10
+      description: Number columns
+      items: { $ref: '#/ChartColumn' }
+    series: { $ref: '#/ChartColumn', description: A text column }
+    stacked: { type: boolean }
+    horizontal: { type: boolean }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+PieChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, label, value]
+  properties:
+    type: { type: string, const: pie }
+    version: { type: integer, const: 1 }
+    label: { $ref: '#/ChartColumn', description: A text column }
+    value: { $ref: '#/ChartColumn', description: A number column }
+    donut: { type: boolean }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+TableChart:
+  type: object
+  additionalProperties: false
+  required: [type, version]
+  properties:
+    type: { type: string, const: table }
+    version: { type: integer, const: 1 }
+    columns:
+      type: array
+      minItems: 1
+      maxItems: 50
+      description: The columns shown, in order; all of them when left out
+      items: { $ref: '#/ChartColumn' }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
+ChartSettings:
+  description: |
+    A panel's chart, in Zeteo's own format (version 1). Every field that names a column names a
+    result column of the saved query: a select item's `as`, else its path. Whether the columns exist
+    and have the right types is checked when the chart is saved (`400 invalid_panel`, with
+    `problems`), and again when it is shown (a chart that no longer fits is `needs_update`).
+  oneOf:
+    - { $ref: '#/StatChart' }
+    - { $ref: '#/LineChart' }
+    - { $ref: '#/AreaChart' }
+    - { $ref: '#/BarChart' }
+    - { $ref: '#/PieChart' }
+    - { $ref: '#/TableChart' }
+  discriminator:
+    propertyName: type
+    mapping:
+      stat: '#/StatChart'
+      line: '#/LineChart'
+      area: '#/AreaChart'
+      bar: '#/BarChart'
+      pie: '#/PieChart'
+      table: '#/TableChart'
+
+PanelTitle:
+  type: string
+  minLength: 1
+  maxLength: 100
+  description: Trimmed
+
+PanelTimeColumn:
+  type: string
+  minLength: 1
+  maxLength: 200
+  description: A date or timestamp column of the saved query that the dashboard's time range filters
+
+Panel:
+  type: object
+  description: |
+    A panel as the viewer sees it. What it shows and what it is built on (`chart`, `time_column`,
+    `saved_query_id`, `saved_panel_id`) are present only when `state` is `ok`, and left out (never
+    null) otherwise. Of a saved query or saved panel it cannot run, a viewer is never told more than
+    the state and `message`.
+  required: [id, kind, x, y, w, h, title, state]
+  properties:
+    id: { type: string, format: uuid }
+    kind: { $ref: '#/PanelKind' }
+    x: { type: integer, minimum: 0, maximum: 11, description: Column on the grid of 12 }
+    y: { type: integer, minimum: 0, description: Row }
+    w: { type: integer, minimum: 1, maximum: 12, description: Width in columns }
+    h: { type: integer, minimum: 1, maximum: 24, description: Height in rows }
+    title:
+      type: [string, 'null']
+      description: The panel's own title, else its saved panel's or saved query's name (not that of someone else's for a `not_available` panel, which is `Untitled panel`); null when none is left
+    state: { $ref: '#/PanelState' }
+    message: { type: string, description: What a viewer is told when the state is not `ok` }
+    chart: { $ref: '#/ChartSettings' }
+    time_column: { $ref: '#/PanelTimeColumn' }
+    saved_query_id: { type: string, format: uuid }
+    saved_panel_id: { type: string, format: uuid, description: A linked panel's saved panel }
+    problems:
+      type: array
+      description: What no longer fits, for `needs_update` and only for the panel's editor
+      items: { $ref: '#/ChartProblem' }
+
+DashboardSummary:
+  type: object
+  description: A dashboard as a list shows it, without its panels
+  required: [id, name, description, owner, time_range, refresh_seconds, theme, created_at, updated_at]
+  properties:
+    id: { type: string, format: uuid }
+    name: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: string, maxLength: 2000 }
+    owner:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: [string, 'null'], description: From tereo's directory; null when it could not be looked up }
+    time_range:
+      description: The dashboard's default time range; null for none
+      oneOf:
+        - { $ref: '#/TimeRangeKey' }
+        - { type: 'null' }
+    refresh_seconds: { type: [integer, 'null'], description: Auto-refresh in seconds; null for none }
+    theme: { $ref: '#/DashboardTheme' }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+    shared_at: { type: string, format: date-time, description: When it was first shared with the viewer (or one of their groups); present only when it was }
+    share_count: { type: integer, minimum: 0, description: 'How many users and groups it is shared with; present only when the viewer may see the share list (its owner, or a holder of `zeteo.dashboards.read`)' }
+    url: { type: string, description: 'Where the admin UI shows it; present only when the admin UI is served (`UI_CLIENT_ID` and `PUBLIC_URL` are set)' }
+
+Dashboard:
+  description: A dashboard with its panels, each decided for the viewer
+  allOf:
+    - { $ref: '#/DashboardSummary' }
+    - type: object
+      required: [panels]
+      properties:
+        panels:
+          type: array
+          items: { $ref: '#/Panel' }
+
+ListDashboardsResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/DashboardSummary' }
+    next_cursor: { type: [string, 'null'] }
+
+PlaceX: { type: integer, minimum: 0, maximum: 11, description: 'Column on the grid of 12; goes with `y`, and `x + w` is at most 12' }
+PlaceY: { type: integer, minimum: 0, maximum: 1000, description: Row; goes with `x` }
+PlaceW: { type: integer, minimum: 1, maximum: 12, description: Width in columns }
+PlaceH: { type: integer, minimum: 1, maximum: 24, description: Height in rows }
+
+OwnPanelInput:
+  type: object
+  additionalProperties: false
+  description: A new panel with its own saved query, chart and time column. Without a place it goes in the first free one, in the chart type's default size.
+  required: [kind, saved_query_id, chart]
+  properties:
+    kind: { type: string, const: own }
+    saved_query_id: { type: string, format: uuid }
+    chart: { $ref: '#/ChartSettings' }
+    time_column: { $ref: '#/PanelTimeColumn' }
+    title: { $ref: '#/PanelTitle' }
+    x: { $ref: '#/PlaceX' }
+    y: { $ref: '#/PlaceY' }
+    w: { $ref: '#/PlaceW' }
+    h: { $ref: '#/PlaceH' }
+
+LinkedPanelInput:
+  type: object
+  additionalProperties: false
+  description: A new panel linked to a saved panel
+  required: [kind, saved_panel_id]
+  properties:
+    kind: { type: string, const: linked }
+    saved_panel_id: { type: string, format: uuid }
+    title: { $ref: '#/PanelTitle' }
+    x: { $ref: '#/PlaceX' }
+    y: { $ref: '#/PlaceY' }
+    w: { $ref: '#/PlaceW' }
+    h: { $ref: '#/PlaceH' }
+
+PanelInput:
+  description: A new panel, own or linked
+  oneOf:
+    - { $ref: '#/OwnPanelInput' }
+    - { $ref: '#/LinkedPanelInput' }
+  discriminator:
+    propertyName: kind
+    mapping:
+      own: '#/OwnPanelInput'
+      linked: '#/LinkedPanelInput'
+
+ExistingPanelInput:
+  type: object
+  additionalProperties: false
+  description: |
+    An entry of a replacement list that keeps a panel by its `id`, with its place and optionally a
+    new title, saved query, chart or time column (a linked panel has none of the last three of its
+    own: `400 invalid_panel`).
+  required: [id]
+  properties:
+    id: { type: string, format: uuid, description: A panel of this dashboard }
+    title: { type: [string, 'null'], minLength: 1, maxLength: 100, description: Null removes the panel's own title }
+    saved_query_id: { type: string, format: uuid }
+    chart: { $ref: '#/ChartSettings' }
+    time_column: { type: [string, 'null'], minLength: 1, maxLength: 200, description: Null removes the time column }
+    x: { $ref: '#/PlaceX' }
+    y: { $ref: '#/PlaceY' }
+    w: { $ref: '#/PlaceW' }
+    h: { $ref: '#/PlaceH' }
+
+ReplacementPanel:
+  description: A panel of `PATCH`'s list by its `id`, or a new one
+  oneOf:
+    - { $ref: '#/ExistingPanelInput' }
+    - { $ref: '#/OwnPanelInput' }
+    - { $ref: '#/LinkedPanelInput' }
+
+CreateDashboardRequest:
+  type: object
+  additionalProperties: false
+  required: [name]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: 'Trimmed; unique per owner, whatever the case' }
+    description: { type: string, maxLength: 2000, default: '' }
+    time_range:
+      description: The default time range; null or left out for none
+      oneOf:
+        - { $ref: '#/TimeRangeKey' }
+        - { type: 'null' }
+    refresh_seconds:
+      type: [integer, 'null']
+      minimum: 10
+      maximum: 86400
+      description: Auto-refresh in seconds, at least the deploy's `DASHBOARD_MIN_REFRESH_SECONDS` (default 60); null or left out for none
+    theme: { $ref: '#/DashboardTheme' }
+    panels:
+      type: array
+      maxItems: 50
+      items: { $ref: '#/PanelInput' }
+
+UpdateDashboardRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: 'Trimmed; unique per owner, whatever the case' }
+    description: { type: string, maxLength: 2000 }
+    time_range:
+      oneOf:
+        - { $ref: '#/TimeRangeKey' }
+        - { type: 'null' }
+    refresh_seconds: { type: [integer, 'null'], minimum: 10, maximum: 86400, description: 'At least the deploy''s `DASHBOARD_MIN_REFRESH_SECONDS`; null for none' }
+    theme: { $ref: '#/DashboardTheme' }
+    panels:
+      type: array
+      maxItems: 50
+      description: |
+        The whole panel list: a panel named by `id` is kept (and changed as given), a panel without
+        one is added, and a panel of the dashboard not listed is removed. An `id` not on this
+        dashboard, or named twice, is `400 invalid_panel`.
+      items: { $ref: '#/ReplacementPanel' }
+
+UpdatePanelRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  description: At least one field. `saved_query_id`, `chart` and `time_column` are for an own panel only (`400 invalid_panel` for a linked one).
+  properties:
+    title: { type: [string, 'null'], minLength: 1, maxLength: 100, description: Null removes the panel's own title }
+    saved_query_id: { type: string, format: uuid }
+    chart: { $ref: '#/ChartSettings' }
+    time_column: { type: [string, 'null'], minLength: 1, maxLength: 200, description: Null removes the time column }
+    x: { $ref: '#/PlaceX' }
+    y: { $ref: '#/PlaceY' }
+    w: { $ref: '#/PlaceW' }
+    h: { $ref: '#/PlaceH' }
+
+CopyDashboardRequest:
+  type: object
+  additionalProperties: false
+  required: [name]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: "The copy's name; unique among the caller's dashboards, whatever the case" }
+
+TransferOwnerRequest:
+  type: object
+  additionalProperties: false
+  required: [user_id]
+  properties:
+    user_id: { type: string, format: uuid, description: The new owner; a service account is refused (`invalid_transfer`) }
+    keep_access: { type: boolean, default: true, description: The previous owner keeps a direct share }
+
+RunDashboardRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    panels:
+      type: array
+      minItems: 1
+      maxItems: 100
+      uniqueItems: true
+      description: Run only these panels; the dashboard's others are left out, and an id not on it is ignored
+      items: { type: string, format: uuid }
+    time_range:
+      description: The range for this run; null for none; left out for the dashboard's own
+      oneOf:
+        - { $ref: '#/TimeRangeKey' }
+        - { type: 'null' }
+
+PanelLine:
+  type: object
+  description: |
+    One panel's line of a dashboard's run. Never its chart or its query. A line has `result` only
+    for an `ok` panel that ran, and `error` for an `ok` panel whose run failed.
+  required: [panel_id, state]
+  properties:
+    panel_id: { type: string, format: uuid }
+    state: { $ref: '#/PanelState' }
+    message: { type: string, description: What a viewer is told when the state is not `ok` }
+    result:
+      type: object
+      required: [columns, rows, truncated]
+      properties:
+        columns:
+          type: array
+          items:
+            type: object
+            required: [name, type]
+            properties:
+              name: { type: string }
+              type: { $ref: '../catalog/schemas.yaml#/ColumnType' }
+        rows:
+          type: array
+          description: Each row an array of values in the order of `columns`, in the wire forms of `POST /v1/query`
+          items:
+            type: array
+            items: {}
+        truncated: { type: boolean }
+        truncated_by: { type: string, enum: [rows, bytes], description: Present when `truncated` }
+        notice: { type: string, description: 'Present when rows were left out for the row cap: what the viewer is told' }
+    cached_at: { type: string, format: date-time, description: Present when the result came from the cache; when it was read from the source }
+    error:
+      type: object
+      description: A failure of the panel's run, as an error body of `POST /v1/query` carries it
+      required: [error, error_description]
+      properties:
+        error: { type: string }
+        error_description: { type: string }
+
+DoneLine:
+  type: object
+  description: The last line of a dashboard's run; a stream without it did not end
+  required: [done]
+  properties:
+    done: { type: boolean, const: true }

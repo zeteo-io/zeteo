@@ -16,6 +16,10 @@ export interface SavedQuery {
   you_last_ran_at: string | null;
   /** Direct and group shares, on the admin list; absent until the server sends it. */
   share_count?: number;
+  /** Whether its owner made it available for dashboards. */
+  available_for_dashboards?: boolean;
+  /** What uses it: on the single read, for its owner and admins. */
+  used_by?: { dashboards: number; saved_panels: number };
   source?: { id: string; slug: string };
   query?: unknown;
 }
@@ -31,6 +35,7 @@ export interface CreateSavedQuery {
 export interface UpdateSavedQuery {
   name?: string;
   description?: string;
+  available_for_dashboards?: boolean;
 }
 
 export interface ShareRef {
@@ -52,10 +57,12 @@ export interface ShareWarning {
 
 export interface ReplaceSharesResult {
   data: Share[];
-  warnings: ShareWarning[];
+  /** A saved query's answer only. */
+  warnings?: ShareWarning[];
 }
 
+/** A saved query's answer; a dashboard's or saved panel's is the object itself, with no `warning`. */
 export interface TransferResult {
-  data: SavedQuery;
+  data?: SavedQuery;
   warning?: { accessible: false };
 }

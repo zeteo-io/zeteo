@@ -1,0 +1,53 @@
+/v1/dashboards/{dashboardId}/transfer:
+  post:
+    tags: [Dashboards]
+    summary: Transfer a dashboard to another user
+    description: |
+      Makes `user_id` the owner: for its owner, or a holder of `zeteo.dashboards.write` (a holder of
+      `zeteo.dashboards.read` alone gets `403 forbidden`; anyone else, `404 not_found`). With
+      `keep_access` (the default) the previous owner keeps a direct share. The new owner may not already
+      have a dashboard of that name (`409 conflict`) and may not be a service account (`400
+      invalid_transfer`, as when the user already owns it or tereo has no such user). A
+      `zeteo.dashboard.transferred` audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: transferDashboard
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/dashboards/schemas.yaml#/TransferOwnerRequest'
+    responses:
+      '200':
+        description: The dashboard as the caller now sees it
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/dashboards/schemas.yaml#/Dashboard'
+      '400':
+        description: Bad request - `invalid_request`, with `issues`, or `invalid_transfer` (the user already owns it, tereo has no such user, or the user is a service account)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the caller has a dashboard of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

@@ -1,0 +1,40 @@
+/v1/dashboards/{dashboardId}/panels:
+  post:
+    tags: [Dashboards]
+    summary: Add a panel
+    description: |
+      Adds a panel to the caller's own dashboard (at most 50). An own panel's saved query must be one
+      the caller may see (their own, shared with them, or marked `available_for_dashboards` in their
+      signed-in organization; anything else is `404 not_found`) and that is available for dashboards,
+      its chart must fit the saved query's result, and its time column must be a date or timestamp
+      column of that result; what does not fit is `400 invalid_panel` with `problems`. A saved query the
+      caller may not run is `403 saved_query_not_accessible`. A linked panel's saved panel must be the
+      caller's or shared with them (else `404 not_found`), with its saved query reaching both the
+      caller and the saved panel's owner (else `400 invalid_panel`). Without a place the panel goes in
+      the first free one, in the chart type's default size. A `zeteo.dashboard.updated` audit entry is
+      written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: addDashboardPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/dashboards/schemas.yaml#/PanelInput'
+    responses:
+      '201':
+        description: The panel
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/dashboards/schemas.yaml#/Panel'
+      '400': { $ref: '../../components/responses.yaml#/InvalidPanelResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

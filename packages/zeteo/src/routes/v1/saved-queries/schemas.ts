@@ -18,7 +18,7 @@ export const CreateSavedQuerySchema = z.strictObject({
 
 export const ListSavedQueriesQuerySchema = z
   .strictObject({
-    scope: z.enum(["mine", "shared", "all"]).default("mine"),
+    scope: z.enum(["mine", "shared", "all", "available"]).default("mine"),
     q: noNul(z.string().min(1).max(100)).optional(),
     source_id: IdSchema.optional(),
     owner_id: IdSchema.optional(),

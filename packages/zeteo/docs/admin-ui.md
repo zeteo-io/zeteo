@@ -110,7 +110,31 @@ page and no sections.
   `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
   The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
 
-The top bar's menu signs out: the UI revokes its refresh token and ends Tereo's session, and
+- **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
+  Its tabs list the person's own dashboards and those shared with them, and their saved panels
+  (`/saved-panels` goes to the Saved panels tab). A dashboard (`/dashboards/<id>`) shows its panels
+  on a 12-column grid, runs them as the viewer with a time range picker, a refresh and an **Auto-refresh** picker ([dashboards.md](dashboards.md#auto-refresh-on-the-dashboard-page)), and the
+  owner edits it: add, move, resize and remove panels, a panel editor with a chart form that
+  checks the chart against the query's columns, **Save as saved panel**, **Detach**, **Share**,
+  **Transfer** and **Copy**. A panel that cannot be shown carries the copy of
+  [dashboards.md](dashboards.md#panel-states-and-their-copy) and nothing of the query. A saved query's
+  **Available for dashboards** switch is in My Zeteo.
+- **Display mode** (`/dashboards/<id>/display`): the dashboard alone, with no top bar, in its
+  theme, refreshing itself and reloading the dashboard as it does; on a lost session it says
+  "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)). A **Full screen** button
+  appears in the corner while the mouse moves; an unattended screen should use the browser's kiosk mode, as full screen needs a click.
+- **All dashboards** and **All saved panels** under Admin (`/admin/dashboards`, `/admin/saved-panels`,
+  `zeteo.dashboards.read`; share, transfer and delete need `.write`): every user's dashboards and
+  saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
+  shown here and the sections have no edit: only the owner changes one.
+
+The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that
+lists the admin sections the person may see (Sources, Grants, Limits, Runs, Saved queries,
+Dashboards, Saved panels) and is absent when they may see none; it is marked active under any of
+their paths. `/` lands on My Zeteo for anyone holding `zeteo.data.read`, admins included, and
+otherwise on their first admin section. The sections are listed once, in `src/app/sections.tsx`.
+
+The top bar's user menu signs out: the UI revokes its refresh token and ends Tereo's session, and
 lands on `/signed-out`; the next sign-in asks for the password again.
 
 **Live permissions.** The UI reads the person's permissions from `GET /v1/me` when it signs in and
@@ -161,7 +185,8 @@ service lists the two UI variables, commented out, for a stack that has one.
 ## Reserved paths and the content security policy
 
 The UI may not use these prefixes, which zeteo answers itself: `/v1`, `/health`, `/mcp`,
-`/.well-known`, `/assets` and `/ui-config.json`. Any other path that is not a file of the build
+`/.well-known`, `/assets` and `/ui-config.json`. The UI's routes include `/dashboards`, `/dashboards/<id>`,
+`/dashboards/<id>/display`, `/saved-panels` and `/admin/dashboards`, all clear of them. Any other path that is not a file of the build
 gets the UI's `index.html`. Page routes whose last path segment contains a dot (`/sources/a.b`)
 are not answered by the app shell: they are taken for files and answer `404` when the build has no
 such file, so the UI must not give its routes such segments.

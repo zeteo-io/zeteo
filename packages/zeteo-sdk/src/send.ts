@@ -87,6 +87,9 @@ export function fromResponse(response: {
       ? (body.issues as { path: string; message: string }[])
       : undefined,
     findings: Array.isArray(body.findings) ? body.findings : undefined,
+    problems: Array.isArray(body.problems)
+      ? (body.problems as { setting: string; problem: string }[])
+      : undefined,
   };
   const message =
     str(body.error_description) ?? str(response.statusText) ?? `HTTP ${status}`;

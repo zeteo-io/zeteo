@@ -1,6 +1,7 @@
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
+import { DisplaySignedOut } from "@/features/dashboards";
 import { Callback, SignedOut } from "@/features/auth";
 import { RouteError } from "@/components/RouteError";
 import { RootLayout } from "./layouts/RootLayout";
@@ -40,12 +41,27 @@ const pages = {
       default: m.SavedQueriesPage,
     }))
   ),
+  "/admin/dashboards": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.AdminDashboardsPage,
+    }))
+  ),
+  "/admin/saved-panels": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.AdminSavedPanelsPage,
+    }))
+  ),
   "/my": lazy(() =>
     import("@/features/my").then((m) => ({ default: m.MyPage }))
   ),
+  "/dashboards": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.DashboardsPage,
+    }))
+  ),
 } as const;
 
-/** `/` goes to the first section the person can read. */
+/** `/` goes to the first section the person can read: My Zeteo, else an admin section. */
 const DefaultSection = () => {
   const { hasPermission } = useAuth();
   const section = SECTIONS.find((s) => hasPermission(s.permission));
@@ -74,6 +90,47 @@ const savedQueryRoutes = [
     ),
   },
 ];
+
+const dashboardPage = lazy(() =>
+  import("@/features/dashboards").then((m) => ({ default: m.DashboardView }))
+);
+
+/** One dashboard, for anyone who can see it; saved panels live in the Dashboards section. */
+const dashboardRoutes = [
+  {
+    path: "dashboards/:dashboardId",
+    element: (
+      <RequirePermission permission="zeteo.data.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(dashboardPage)}
+        </Suspense>
+      </RequirePermission>
+    ),
+  },
+  {
+    path: "saved-panels",
+    element: <Navigate to="/dashboards?tab=panels" replace />,
+  },
+];
+
+const displayPage = lazy(() =>
+  import("@/features/dashboards").then((m) => ({ default: m.DisplayPage }))
+);
+
+/** Display mode: outside the layout (no top bar), behind sign-in, and never redirecting on a lost session. */
+const displayRoute = {
+  path: "/dashboards/:dashboardId/display",
+  element: (
+    <AuthGate signedOut={<DisplaySignedOut />}>
+      <RequirePermission permission="zeteo.data.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(displayPage)}
+        </Suspense>
+      </RequirePermission>
+    </AuthGate>
+  ),
+  errorElement: <RouteError />,
+};
 
 const grantNewPage = lazy(() =>
   import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
@@ -108,6 +165,7 @@ export const routes = [
     element: <SignedOut />,
     errorElement: <RouteError />,
   },
+  displayRoute,
   {
     path: "/",
     element: (
@@ -134,6 +192,7 @@ export const routes = [
       ...sourceRoutes,
       ...grantWriteRoutes,
       ...savedQueryRoutes,
+      ...dashboardRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },

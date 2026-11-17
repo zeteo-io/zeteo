@@ -91,6 +91,83 @@ export const OPERATIONS = {
     method: "POST",
     path: "/v1/saved-queries/{savedQueryId}/transfer",
   },
+  listSavedQueryDashboards: {
+    method: "GET",
+    path: "/v1/saved-queries/{savedQueryId}/dashboards",
+  },
+  listDashboards: { method: "GET", path: "/v1/dashboards" },
+  createDashboard: { method: "POST", path: "/v1/dashboards" },
+  getDashboard: { method: "GET", path: "/v1/dashboards/{dashboardId}" },
+  updateDashboard: { method: "PATCH", path: "/v1/dashboards/{dashboardId}" },
+  deleteDashboard: { method: "DELETE", path: "/v1/dashboards/{dashboardId}" },
+  copyDashboard: {
+    method: "POST",
+    path: "/v1/dashboards/{dashboardId}/copy",
+  },
+  runDashboard: { method: "POST", path: "/v1/dashboards/{dashboardId}/run" },
+  listDashboardShares: {
+    method: "GET",
+    path: "/v1/dashboards/{dashboardId}/shares",
+  },
+  replaceDashboardShares: {
+    method: "PUT",
+    path: "/v1/dashboards/{dashboardId}/shares",
+  },
+  transferDashboard: {
+    method: "POST",
+    path: "/v1/dashboards/{dashboardId}/transfer",
+  },
+  addDashboardPanel: {
+    method: "POST",
+    path: "/v1/dashboards/{dashboardId}/panels",
+  },
+  updateDashboardPanel: {
+    method: "PATCH",
+    path: "/v1/dashboards/{dashboardId}/panels/{panelId}",
+  },
+  removeDashboardPanel: {
+    method: "DELETE",
+    path: "/v1/dashboards/{dashboardId}/panels/{panelId}",
+  },
+  detachDashboardPanel: {
+    method: "POST",
+    path: "/v1/dashboards/{dashboardId}/panels/{panelId}/detach",
+  },
+  saveDashboardPanel: {
+    method: "POST",
+    path: "/v1/dashboards/{dashboardId}/panels/{panelId}/save",
+  },
+  listSavedPanels: { method: "GET", path: "/v1/saved-panels" },
+  createSavedPanel: { method: "POST", path: "/v1/saved-panels" },
+  getSavedPanel: { method: "GET", path: "/v1/saved-panels/{savedPanelId}" },
+  updateSavedPanel: {
+    method: "PATCH",
+    path: "/v1/saved-panels/{savedPanelId}",
+  },
+  deleteSavedPanel: {
+    method: "DELETE",
+    path: "/v1/saved-panels/{savedPanelId}",
+  },
+  copySavedPanel: {
+    method: "POST",
+    path: "/v1/saved-panels/{savedPanelId}/copy",
+  },
+  previewSavedPanel: {
+    method: "POST",
+    path: "/v1/saved-panels/{savedPanelId}/preview",
+  },
+  listSavedPanelShares: {
+    method: "GET",
+    path: "/v1/saved-panels/{savedPanelId}/shares",
+  },
+  replaceSavedPanelShares: {
+    method: "PUT",
+    path: "/v1/saved-panels/{savedPanelId}/shares",
+  },
+  transferSavedPanel: {
+    method: "POST",
+    path: "/v1/saved-panels/{savedPanelId}/transfer",
+  },
   getMe: { method: "GET", path: "/v1/me" },
   searchPrincipals: { method: "GET", path: "/v1/principals" },
   lookupPrincipals: { method: "POST", path: "/v1/principals/lookup" },

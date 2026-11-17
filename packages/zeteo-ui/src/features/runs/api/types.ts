@@ -1,7 +1,7 @@
 // Field for field the OpenAPI `Run` schema.
 
 export type RunOutcome = "ok" | "refused" | "failed" | "timeout" | "running";
-export type EntryPoint = "api" | "mcp" | "export";
+export type EntryPoint = "api" | "mcp" | "export" | "dashboard";
 
 export const RUN_OUTCOMES: RunOutcome[] = [
   "ok",

@@ -19,16 +19,32 @@ import {
 
 const READ_TOOLS = [
   "describe_table",
+  "get_dashboard",
+  "get_saved_panel",
   "get_saved_query",
+  "list_dashboards",
+  "list_saved_panels",
   "list_saved_queries",
   "list_sources",
   "list_tables",
+  "preview_panel",
   "query",
   "run_saved_query",
 ];
 const WRITE_TOOLS = [
+  "add_panel",
+  "create_dashboard",
+  "create_saved_panel",
   "create_saved_query",
+  "delete_dashboard",
+  "delete_saved_panel",
   "delete_saved_query",
+  "detach_panel",
+  "link_saved_panel",
+  "remove_panel",
+  "update_dashboard",
+  "update_panel",
+  "update_saved_panel",
   "update_saved_query",
 ];
 const TOOLS = [...READ_TOOLS, ...WRITE_TOOLS].sort();
@@ -124,6 +140,33 @@ describe("MCP endpoint", () => {
         },
         update_saved_query: { id: "anything", name: "x" },
         delete_saved_query: { id: "anything" },
+        list_dashboards: {},
+        get_dashboard: { id: "anything" },
+        create_dashboard: { name: "x" },
+        update_dashboard: { id: "anything", name: "x" },
+        delete_dashboard: { id: "anything" },
+        add_panel: {
+          dashboard_id: "anything",
+          saved_query_id: "anything",
+          chart: { type: "table", version: 1 },
+        },
+        update_panel: { dashboard_id: "anything", panel_id: "anything" },
+        remove_panel: { dashboard_id: "anything", panel_id: "anything" },
+        link_saved_panel: { dashboard_id: "anything", saved_panel_id: "x" },
+        detach_panel: { dashboard_id: "anything", panel_id: "anything" },
+        list_saved_panels: {},
+        get_saved_panel: { id: "anything" },
+        create_saved_panel: {
+          name: "x",
+          saved_query_id: "anything",
+          chart: { type: "table", version: 1 },
+        },
+        update_saved_panel: { id: "anything", name: "x" },
+        delete_saved_panel: { id: "anything" },
+        preview_panel: {
+          saved_query_id: "anything",
+          chart: { type: "table", version: 1 },
+        },
       };
       for (const name of TOOLS) {
         const call = await callTool(session.client, name, args[name]);

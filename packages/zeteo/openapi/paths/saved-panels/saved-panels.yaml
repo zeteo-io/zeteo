@@ -1,0 +1,69 @@
+/v1/saved-panels:
+  get:
+    tags: [Dashboards]
+    summary: List saved panels
+    description: |
+      Newest first. `scope=mine` (the default) lists the caller's own, `scope=shared` those shared with
+      them or one of their groups, and `scope=all` every saved panel (a holder of
+      `zeteo.dashboards.read`; `403 forbidden` otherwise). `owner_id` applies to `scope=all` only (`400
+      invalid_request` otherwise). `q` matches names, case-insensitively. One the caller cannot run is
+      listed with its `state` and no chart.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: listSavedPanels
+    parameters:
+      - { name: scope, in: query, required: false, schema: { type: string, enum: [mine, shared, all], default: mine } }
+      - { name: q, in: query, required: false, description: 'Text to find, 1 to 100 characters', schema: { type: string, minLength: 1, maxLength: 100 } }
+      - { name: owner_id, in: query, required: false, description: '`scope=all` only', schema: { type: string, format: uuid } }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of saved panels
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-panels/schemas.yaml#/ListSavedPanelsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Dashboards]
+    summary: Create a saved panel
+    description: |
+      A saved panel is a chart on a saved query that dashboards can link. The saved query must be one
+      the caller may run and that is available for dashboards; the chart and time column are checked as
+      for a dashboard's panel (`400 invalid_panel` with `problems`; `403 saved_query_not_accessible`
+      for a saved query the caller may not run). The name is unique among the caller's saved panels,
+      whatever the case. A `zeteo.saved_panel.created` audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: createSavedPanel
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-panels/schemas.yaml#/CreateSavedPanelRequest'
+    responses:
+      '201':
+        description: The saved panel
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-panels/schemas.yaml#/SavedPanel'
+      '400': { $ref: '../../components/responses.yaml#/InvalidPanelResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the caller has a saved panel of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

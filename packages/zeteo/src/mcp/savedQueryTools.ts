@@ -39,11 +39,11 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     name: "list_saved_queries",
     title: "List saved queries",
     description:
-      'List the saved queries you own ("mine", the default) or others shared with you ("shared"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }], truncated }; truncated is true when only the first 100 are shown. A saved query with accessible false cannot be run by you and carries no query, and no source unless you can read sources.',
+      'List the saved queries you own ("mine", the default), others shared with you ("shared"), or saved queries of others available for dashboards in your organization ("available"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }], truncated }; truncated is true when only the first 100 are shown. A saved query with accessible false cannot be run by you and carries no query, and no source unless you can read sources.',
     permission: MCP_USE,
     readOnly: true,
     input: z.strictObject({
-      scope: z.enum(["mine", "shared"]).optional(),
+      scope: z.enum(["mine", "shared", "available"]).optional(),
     }),
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {

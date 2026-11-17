@@ -43,6 +43,12 @@ export const SAVED_QUERIES_READ = "zeteo.saved_queries.read";
 /** Changes, shares, transfers and deletes any saved query. */
 export const SAVED_QUERIES_WRITE = "zeteo.saved_queries.write";
 
+/** Lists and reads every dashboard and saved panel, whoever owns it or shares it. */
+export const DASHBOARDS_READ = "zeteo.dashboards.read";
+
+/** Changes, shares, transfers and deletes any dashboard or saved panel. */
+export const DASHBOARDS_WRITE = "zeteo.dashboards.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -64,6 +70,18 @@ export const AUDIT_EVENTS = {
   savedQueryShared: "zeteo.saved_query.shared",
   savedQueryTransferred: "zeteo.saved_query.transferred",
   savedQueryCopied: "zeteo.saved_query.copied",
+  dashboardCreated: "zeteo.dashboard.created",
+  dashboardUpdated: "zeteo.dashboard.updated",
+  dashboardDeleted: "zeteo.dashboard.deleted",
+  dashboardShared: "zeteo.dashboard.shared",
+  dashboardTransferred: "zeteo.dashboard.transferred",
+  dashboardCopied: "zeteo.dashboard.copied",
+  savedPanelCreated: "zeteo.saved_panel.created",
+  savedPanelUpdated: "zeteo.saved_panel.updated",
+  savedPanelDeleted: "zeteo.saved_panel.deleted",
+  savedPanelShared: "zeteo.saved_panel.shared",
+  savedPanelTransferred: "zeteo.saved_panel.transferred",
+  savedPanelCopied: "zeteo.saved_panel.copied",
   queryRun: "zeteo.query.run",
   exportStarted: "zeteo.export.started",
   exportRun: "zeteo.export.run",
@@ -96,6 +114,20 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedQueryTransferred]:
     "A saved query was transferred to another owner",
   [AUDIT_EVENTS.savedQueryCopied]: "A saved query was copied",
+  [AUDIT_EVENTS.dashboardCreated]: "A dashboard was created",
+  [AUDIT_EVENTS.dashboardUpdated]: "A dashboard was changed",
+  [AUDIT_EVENTS.dashboardDeleted]: "A dashboard was deleted",
+  [AUDIT_EVENTS.dashboardShared]: "A dashboard's shares were changed",
+  [AUDIT_EVENTS.dashboardTransferred]:
+    "A dashboard was transferred to another owner",
+  [AUDIT_EVENTS.dashboardCopied]: "A dashboard was copied",
+  [AUDIT_EVENTS.savedPanelCreated]: "A saved panel was created",
+  [AUDIT_EVENTS.savedPanelUpdated]: "A saved panel was changed",
+  [AUDIT_EVENTS.savedPanelDeleted]: "A saved panel was deleted",
+  [AUDIT_EVENTS.savedPanelShared]: "A saved panel's shares were changed",
+  [AUDIT_EVENTS.savedPanelTransferred]:
+    "A saved panel was transferred to another owner",
+  [AUDIT_EVENTS.savedPanelCopied]: "A saved panel was copied",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
   [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
   [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
@@ -121,6 +153,18 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedQueryShared]: SAVED_QUERIES_READ,
   [AUDIT_EVENTS.savedQueryTransferred]: SAVED_QUERIES_READ,
   [AUDIT_EVENTS.savedQueryCopied]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.dashboardCreated]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.dashboardUpdated]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.dashboardDeleted]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.dashboardShared]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.dashboardTransferred]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.dashboardCopied]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelCreated]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelUpdated]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelDeleted]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelShared]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelTransferred]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.savedPanelCopied]: DASHBOARDS_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
   [AUDIT_EVENTS.exportStarted]: RUNS_READ,
   [AUDIT_EVENTS.exportRun]: RUNS_READ,
@@ -211,6 +255,20 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           "Change, share, transfer and delete any user's saved queries; also grants Read saved queries",
         orgAssignable: false,
       },
+      {
+        name: DASHBOARDS_READ,
+        displayName: "Read dashboards",
+        description:
+          "List and read every user's dashboards and saved panels and who they are shared with",
+        orgAssignable: false,
+      },
+      {
+        name: DASHBOARDS_WRITE,
+        displayName: "Manage dashboards",
+        description:
+          "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
@@ -218,7 +276,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         name: "zeteo_admin",
         displayName: "Zeteo administrator",
         description:
-          "Manages sources, grants, saved queries and the record of query runs",
+          "Manages sources, grants, saved queries, dashboards and the record of query runs",
         permissions: [
           SOURCES_READ,
           SOURCES_WRITE,
@@ -230,6 +288,8 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           MCP_USE,
           SAVED_QUERIES_READ,
           SAVED_QUERIES_WRITE,
+          DASHBOARDS_READ,
+          DASHBOARDS_WRITE,
         ],
       },
       {

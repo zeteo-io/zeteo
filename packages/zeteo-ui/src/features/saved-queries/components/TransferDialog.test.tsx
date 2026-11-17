@@ -40,7 +40,11 @@ describe("TransferDialog", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();
     renderWithProviders(
-      <TransferDialog savedQueryId={SAVED_ID} onClose={onClose} />
+      <TransferDialog
+        objectType="saved_query"
+        id={SAVED_ID}
+        onClose={onClose}
+      />
     );
     await user.type(
       await screen.findByLabelText("Search by name or email"),

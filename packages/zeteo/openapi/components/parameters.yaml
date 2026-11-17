@@ -60,3 +60,24 @@ SavedQueryIdParam:
   required: true
   description: The saved query's id. One the caller may not see is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
+
+DashboardIdParam:
+  name: dashboardId
+  in: path
+  required: true
+  description: The dashboard's id. One the caller may not see is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+PanelIdParam:
+  name: panelId
+  in: path
+  required: true
+  description: The panel's id, on the dashboard named by the path. A panel of another dashboard is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+SavedPanelIdParam:
+  name: savedPanelId
+  in: path
+  required: true
+  description: The saved panel's id. One the caller may not see is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

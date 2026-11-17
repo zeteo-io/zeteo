@@ -48,6 +48,8 @@ describe("saved query access", () => {
     name: "q",
     description: "",
     lastRunAt: null,
+    availableForDashboards: false,
+    availableOrganizationId: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...queryOn(on, select),

@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag platform
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
+import { removeDashboardsOf } from "../support/panelDecisions.js";
 import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { describeEachEngine } from "../support/engines.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
@@ -39,6 +40,7 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
   });
   afterAll(async () => {
     await session?.close();
+    await removeDashboardsOf([userId]);
     await removeRunsOf([userId]);
     await removeSources([source.id]);
   });
@@ -52,7 +54,7 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
     // The two calculation examples use the order_lines and products tables of
     // the examples' schema, which the fixture has under other names; the
     // instructions unit test checks they parse.
-    expect(examples).toHaveLength(5);
+    expect(examples).toHaveLength(7);
     for (const example of examples.slice(0, 3)) {
       expect(example.source).toBe("sales-db");
       const body = { ...example, source: source.slug };
@@ -67,5 +69,35 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
       );
       expect(api.body.rows).toEqual(call.json.rows);
     }
+  });
+
+  it("hold an add_panel example that adds its panel once its ids are filled in", async () => {
+    const example = jsonBlocks(MCP_INSTRUCTIONS)[6] as Record<string, unknown>;
+    const query = await callTool(session.client, "create_saved_query", {
+      name: `doc ${randomUUID()}`.slice(0, 60),
+      query: {
+        source: source.slug,
+        from: "orders",
+        join: ["customers"],
+        select: ["customers.region", { sum: "total", as: "revenue" }],
+        groupBy: ["customers.region"],
+      },
+    });
+    expect(query.isError, query.text).toBe(false);
+    const dashboard = await callTool(session.client, "create_dashboard", {
+      name: `doc ${randomUUID()}`.slice(0, 60),
+      time_range: "last_30_days",
+    });
+    const call = await callTool(session.client, "add_panel", {
+      ...example,
+      dashboard_id: dashboard.json.id,
+      saved_query_id: query.json.id,
+    });
+    expect(call.isError, call.text).toBe(false);
+    expect(call.json).toMatchObject({
+      state: "ok",
+      title: "Revenue by region",
+      time_column: "created_at",
+    });
   });
 });

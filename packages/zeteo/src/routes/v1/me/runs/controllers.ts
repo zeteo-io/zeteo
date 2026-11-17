@@ -1,6 +1,9 @@
+import { SAVED_QUERIES_READ } from "../../../../definitions/tereoDeclaration.js";
 import { runsPage, savedQueryIdsOf } from "../../runs/controllers.js";
 import { validateQuery } from "../../../../utils/validateReq.js";
+import { hasPermission } from "../../../../utils/permissions.js";
 import { groupIdsOf } from "../../../../grants/principals.js";
+import { WITHHELD_QUERY } from "../../../../engine/record.js";
 import { parseCursor } from "../../../../utils/cursor.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { RunCursorSchema } from "../../runs/schemas.js";
@@ -33,6 +36,21 @@ export const listMyRuns = async (req: Request, res: Response) => {
           caller.userId,
           await groupIdsOf(caller)
         );
+  // The JSON of a saved query is shown only while the caller could open it:
+  // running a panel of someone else's dashboard does not hand it over.
+  const canOpen = hasPermission(caller.permissions, SAVED_QUERIES_READ)
+    ? new Set(ids)
+    : await db.savedQueries.openableAmong(
+        ids,
+        caller.userId,
+        await groupIdsOf(caller),
+        caller.organizationId
+      );
+  const rows = page.rows.map((row) =>
+    row.savedQueryId !== null && !canOpen.has(row.savedQueryId)
+      ? { ...row, query: WITHHELD_QUERY }
+      : row
+  );
   res.setHeader("Cache-Control", "no-store");
-  res.status(200).json(runsPage(page, names));
+  res.status(200).json(runsPage({ ...page, rows }, names));
 };

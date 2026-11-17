@@ -8,12 +8,13 @@ import env from "../env.js";
 export const LIMIT_PROFILES = {
   api: { defaultRows: 1000, maxRows: 50_000, maxBytes: 10 * 1024 * 1024 },
   mcp: { defaultRows: 100, maxRows: 5000, maxBytes: 1024 * 1024 },
+  dashboard: { defaultRows: 1000, maxRows: 5000, maxBytes: 2 * 1024 * 1024 },
 } as const;
 
 /** Where a run came from: a query over the API or MCP, or an export. */
-export type EntryPoint = "api" | "mcp" | "export";
+export type EntryPoint = "api" | "mcp" | "export" | "dashboard";
 
-/** The entry points that run a query and return its rows at once. */
+/** The entry points that run a query and return its rows at once; `dashboard` only from src/dashboards/. */
 export type QueryEntryPoint = keyof typeof LIMIT_PROFILES;
 
 /** How many queries and exports one user may have running at once, across every replica. */

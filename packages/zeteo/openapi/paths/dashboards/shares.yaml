@@ -1,0 +1,76 @@
+/v1/dashboards/{dashboardId}/shares:
+  get:
+    tags: [Dashboards]
+    summary: List who a dashboard is shared with
+    description: |
+      For its owner, or a holder of `zeteo.dashboards.read`. Anyone else gets `404 not_found`.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: listDashboardShares
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+    responses:
+      '200':
+        description: The shares
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/ListSharesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Dashboards]
+    summary: Replace who a dashboard is shared with
+    description: |
+      Makes the shares exactly `principals` (at most 100, each once, not the owner): for its owner, or a
+      holder of `zeteo.dashboards.write` (a holder of `zeteo.dashboards.read` alone gets `403 forbidden`;
+      anyone else, `404 not_found`). A group being added must be global or of the caller's signed-in
+      organization (`400 invalid_share`). A user is never limited by organization. Recipients' access to
+      what the dashboard is built on is not checked: each panel is decided as its viewer looks, so sharing
+      never widens anyone's access. A `zeteo.dashboard.shared` audit entry is written when anything changed.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: replaceDashboardShares
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-queries/schemas.yaml#/ReplaceSharesRequest'
+    responses:
+      '200':
+        description: The shares as they now stand
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-queries/schemas.yaml#/ListSharesResponse'
+      '400':
+        description: Bad request - `invalid_request`, with `issues`, or `invalid_share` (the owner among the principals, or a group of another organization or one tereo does not have)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the shares changed while saving; load them again and retry
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

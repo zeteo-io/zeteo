@@ -11,6 +11,8 @@ export interface SavedQueryViewOptions {
   showSource: boolean;
   /** How many shares it has; given only when the viewer may see the share list (the owner, or `zeteo.saved_queries.read`). */
   shareCount?: number;
+  /** What uses it; given only on the single read, for the owner and `zeteo.saved_queries.read`. */
+  usedBy?: { dashboards: number; savedPanels: number };
 }
 
 /**
@@ -26,6 +28,7 @@ export const savedQueryView = (
     sourceSlug,
     showSource,
     shareCount,
+    usedBy,
   }: SavedQueryViewOptions
 ) => ({
   id: row.id,
@@ -36,12 +39,19 @@ export const savedQueryView = (
   created_at: row.createdAt.toISOString(),
   updated_at: row.updatedAt.toISOString(),
   ...(row.sharedAt && { shared_at: row.sharedAt.toISOString() }),
+  available_for_dashboards: row.availableForDashboards,
   last_run_at: row.lastRunAt?.toISOString() ?? null,
   you_last_ran_at: row.userLastRunAt?.toISOString() ?? null,
   ...((accessible || showSource) &&
     sourceSlug !== null && { source: { id: row.sourceId, slug: sourceSlug } }),
   ...(accessible && { query: row.query }),
   ...(shareCount !== undefined && { share_count: shareCount }),
+  ...(usedBy && {
+    used_by: {
+      dashboards: usedBy.dashboards,
+      saved_panels: usedBy.savedPanels,
+    },
+  }),
 });
 
 export type SavedQueryView = ReturnType<typeof savedQueryView>;

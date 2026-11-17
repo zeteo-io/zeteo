@@ -1,0 +1,85 @@
+/v1/saved-panels/{savedPanelId}:
+  get:
+    tags: [Dashboards]
+    summary: Get a saved panel
+    description: |
+      For its owner, a user it is shared with (directly or through a group) and a holder of
+      `zeteo.dashboards.read`; anyone else gets `404 not_found`. One the viewer cannot run carries its
+      `state` and `message` and nothing of why, and neither the saved query's name nor its id.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: getSavedPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedPanelIdParam'
+    responses:
+      '200':
+        description: The saved panel
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-panels/schemas.yaml#/SavedPanel'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Dashboards]
+    summary: Change a saved panel
+    description: |
+      Its owner only (anyone else, `404 not_found`). Give at least one field. A new saved query, chart
+      or time column is checked as for a new saved panel (`400 invalid_panel` with `problems`; `403
+      saved_query_not_accessible`). Dashboards that link it show the change at once. A
+      `zeteo.saved_panel.updated` audit entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: updateSavedPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedPanelIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-panels/schemas.yaml#/UpdateSavedPanelRequest'
+    responses:
+      '200':
+        description: The saved panel
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/saved-panels/schemas.yaml#/SavedPanel'
+      '400': { $ref: '../../components/responses.yaml#/InvalidPanelResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the caller has a saved panel of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Dashboards]
+    summary: Delete a saved panel
+    description: |
+      Its owner, or a holder of `zeteo.dashboards.write`; anyone else gets `404 not_found`. A panel
+      that linked it shows `saved_panel_deleted`. A `zeteo.saved_panel.deleted` audit entry is
+      written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: deleteSavedPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedPanelIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

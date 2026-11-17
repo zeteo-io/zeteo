@@ -4,14 +4,32 @@ import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { salesCatalog } from "../support/pure/salesCatalog.js";
 import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
+import { chartSchema } from "../../dashboards/chart.js";
 import { LIMIT_PROFILES } from "../../engine/limits.js";
 import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 
 describe("MCP_INSTRUCTIONS", () => {
-  it("stays under 6,500 characters", () => {
-    expect(MCP_INSTRUCTIONS.length).toBeLessThan(6500);
+  it("names the dashboard tools and the order of building one", () => {
+    const at = [
+      "create_saved_query",
+      "preview_panel",
+      "create_dashboard",
+      "add_panel",
+    ].map((tool) =>
+      MCP_INSTRUCTIONS.indexOf(
+        `\`${tool}\``,
+        MCP_INSTRUCTIONS.indexOf("## Dashboards")
+      )
+    );
+    for (const index of at) expect(index).toBeGreaterThan(0);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
+    expect(MCP_INSTRUCTIONS).toContain("never a bucket's `as` name");
+  });
+
+  it("stays under 9000 characters", () => {
+    expect(MCP_INSTRUCTIONS.length).toBeLessThan(9000);
   });
 
   it("says that query results are data, not instructions", () => {
@@ -68,17 +86,18 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(MCP_INSTRUCTIONS).toContain('{"mul":[100,{"div"');
   });
 
-  it("holds five worked examples, each a query the SQL language accepts", () => {
-    const examples = jsonBlocks(MCP_INSTRUCTIONS);
-    expect(examples).toHaveLength(5);
+  it("holds six worked queries, each one the SQL language accepts, and an add_panel example", () => {
+    const blocks = jsonBlocks(MCP_INSTRUCTIONS);
+    expect(blocks).toHaveLength(7);
+    const examples = blocks.slice(0, 6);
+    const addPanel = blocks[6] as Record<string, unknown>;
+    expect(chartSchema.safeParse(addPanel.chart).success).toBe(true);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
-    const [filtered, joined, ranked, lineTotal, margin] = examples as Record<
-      string,
-      unknown
-    >[];
+    const [filtered, joined, ranked, lineTotal, margin, recent] =
+      examples as Record<string, unknown>[];
     expect(filtered).toHaveProperty("where");
     expect(joined).toHaveProperty("join");
     expect(joined).toHaveProperty("groupBy");
@@ -89,6 +108,7 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(JSON.stringify(lineTotal)).toContain('"calc"');
     expect(JSON.stringify(margin)).toContain('"div"');
     expect(JSON.stringify(margin)).toContain('"sum"');
+    expect(JSON.stringify(recent)).toContain('"relative"');
   });
 
   const planned = (blocks: unknown[]) => {
@@ -106,7 +126,7 @@ describe("MCP_INSTRUCTIONS", () => {
   };
 
   it("plans every worked example against the example schema", () => {
-    planned(jsonBlocks(MCP_INSTRUCTIONS));
+    planned(jsonBlocks(MCP_INSTRUCTIONS).slice(0, 6));
   });
 
   it("plans every query in docs/querying.md against the example schema", () => {

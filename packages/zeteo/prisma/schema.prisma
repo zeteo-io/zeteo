@@ -210,6 +210,7 @@ enum EntryPoint {
   api
   mcp
   export
+  dashboard
 
   @@map("entry_point")
   @@schema("zeteo")
@@ -297,13 +298,16 @@ model QueryRun {
   truncated    Boolean    @default(false)
   createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamp(3)
   savedQueryId String?    @map("saved_query_id") @db.Uuid
+  dashboardId  String?    @map("dashboard_id") @db.Uuid
 
   source     Source?     @relation(fields: [sourceId], references: [id], onDelete: Restrict)
   savedQuery SavedQuery? @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
+  dashboard  Dashboard?  @relation(fields: [dashboardId], references: [id], onDelete: SetNull)
 
   @@index([userId, id])
   @@index([sourceId, id])
   @@index([savedQueryId])
+  @@index([dashboardId])
   @@map("query_runs")
   @@schema("zeteo")
 }
@@ -323,13 +327,19 @@ model SavedQuery {
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamp(3)
 
-  source   Source              @relation(fields: [sourceId], references: [id], onDelete: Restrict)
-  shares   SavedQueryShare[]
-  userRuns SavedQueryUserRun[]
-  runs     QueryRun[]
+  availableForDashboards  Boolean @default(false) @map("available_for_dashboards")
+  availableOrganizationId String? @map("available_organization_id") @db.Uuid
+
+  source      Source              @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  shares      SavedQueryShare[]
+  userRuns    SavedQueryUserRun[]
+  runs        QueryRun[]
+  panels      DashboardPanel[]
+  savedPanels SavedPanel[]
 
   @@index([ownerId])
   @@index([sourceId])
+  @@index([availableForDashboards, availableOrganizationId])
   @@map("saved_queries")
   @@schema("zeteo")
 }
@@ -358,5 +368,124 @@ model SavedQueryUserRun {
 
   @@id([savedQueryId, userId])
   @@map("saved_query_user_runs")
+  @@schema("zeteo")
+}
+
+// ===========================================================================
+// Dashboards
+// ===========================================================================
+
+enum DashboardTheme {
+  light
+  dark
+  auto
+
+  @@map("dashboard_theme")
+  @@schema("zeteo")
+}
+
+enum PanelKind {
+  own
+  linked
+
+  @@map("panel_kind")
+  @@schema("zeteo")
+}
+
+model Dashboard {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  ownerId        String         @map("owner_id") @db.Uuid
+  name           String
+  description    String         @default("")
+  timeRange      String?        @map("time_range")
+  refreshSeconds Int?           @map("refresh_seconds")
+  theme          DashboardTheme @default(auto)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  panels DashboardPanel[]
+  shares DashboardShare[]
+  runs   QueryRun[]
+
+  @@index([ownerId])
+  @@map("dashboards")
+  @@schema("zeteo")
+}
+
+model DashboardPanel {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  dashboardId  String    @map("dashboard_id") @db.Uuid
+  kind         PanelKind
+  x            Int
+  y            Int
+  w            Int
+  h            Int
+  title        String?
+  savedQueryId String?   @map("saved_query_id") @db.Uuid
+  savedPanelId String?   @map("saved_panel_id") @db.Uuid
+  chart        Json?
+  timeColumn   String?   @map("time_column")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  dashboard  Dashboard   @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+  savedQuery SavedQuery? @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
+  savedPanel SavedPanel? @relation(fields: [savedPanelId], references: [id], onDelete: SetNull)
+
+  @@index([dashboardId])
+  @@index([savedQueryId])
+  @@index([savedPanelId])
+  @@map("dashboard_panels")
+  @@schema("zeteo")
+}
+
+model DashboardShare {
+  dashboardId   String        @map("dashboard_id") @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+
+  dashboard Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  @@id([dashboardId, principalType, principalId])
+  @@index([principalType, principalId])
+  @@map("dashboard_shares")
+  @@schema("zeteo")
+}
+
+model SavedPanel {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  ownerId      String   @map("owner_id") @db.Uuid
+  name         String
+  description  String   @default("")
+  savedQueryId String?  @map("saved_query_id") @db.Uuid
+  chart        Json
+  timeColumn   String?  @map("time_column")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  savedQuery SavedQuery?       @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
+  shares     SavedPanelShare[]
+  panels     DashboardPanel[]
+
+  @@index([ownerId])
+  @@index([savedQueryId])
+  @@map("saved_panels")
+  @@schema("zeteo")
+}
+
+model SavedPanelShare {
+  savedPanelId  String        @map("saved_panel_id") @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+
+  savedPanel SavedPanel @relation(fields: [savedPanelId], references: [id], onDelete: Cascade)
+
+  @@id([savedPanelId, principalType, principalId])
+  @@index([principalType, principalId])
+  @@map("saved_panel_shares")
   @@schema("zeteo")
 }

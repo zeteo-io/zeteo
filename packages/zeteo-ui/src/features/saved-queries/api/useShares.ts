@@ -1,18 +1,23 @@
 import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import { useQuery } from "@tanstack/react-query";
 import type { Share } from "./types";
+import {
+  objectPath,
+  resourceKey,
+  type SharedObjectType,
+} from "./sharedObjects";
 
-/** Who a saved query is shared with. */
-export const useShares = (savedQueryId: string) => {
+/** Who a saved query, dashboard or saved panel is shared with. */
+export const useShares = (objectType: SharedObjectType, id: string) => {
   const api = useZeteoApi();
   return useQuery<Share[], ApiError>({
-    queryKey: ["saved-queries", savedQueryId, "shares"],
+    queryKey: [...resourceKey(objectType), id, "shares"],
     retry: false,
     queryFn: async () => {
       try {
         return (
           await api.get<{ data: Share[] }>(
-            `/v1/saved-queries/${savedQueryId}/shares`
+            `${objectPath(objectType, id)}/shares`
           )
         ).data.data;
       } catch (err) {

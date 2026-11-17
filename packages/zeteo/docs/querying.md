@@ -153,6 +153,24 @@ Types only one engine has behave as that engine's section says: on Postgres, an 
 text and a money column computes as numeric (see *Postgres's own types*); float `NaN` and
 `Infinity` are Postgres's alone.
 
+### Relative dates
+
+A date or timestamp in a comparison (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`) or in `between` (not `in`) may be
+a moment relative to now: `{ "relative": { "unit": "day", "offset": -30 } }`. `unit` is `minute`,
+`hour`, `day`, `week`, `month`, `quarter` or `year`; `offset` is a whole number from -1000 to 1000;
+`startOf: true` cuts the result back to the start of the unit (a week starts on Monday). It is
+resolved in UTC when the query is planned: `now` is the minute the run started (the dashboard
+run's own minute, for all of its panels), a date column takes the date of the moment, and a
+relative moment against any other type is `invalid_value`. Orders in the last 30 days:
+
+```json
+{ "source": "sales-db", "from": "orders", "select": [{ "count": "*", "as": "orders" }],
+  "where": { "created_at": { "gte": { "relative": { "unit": "day", "offset": -30 } } } } }
+```
+
+A saved query keeps the relative date as written, so each run answers for its own now.
+Dashboards ([dashboards.md](dashboards.md)) build their time ranges from it.
+
 ### Json columns
 
 A json column can be selected and tested with `isNull`, nothing else: it cannot be compared,
@@ -550,7 +568,7 @@ recorded, refused and failed ones included, in one transaction that writes a `qu
 recorded in the same table, with their own audit entries ([export.md](export.md#what-is-recorded)).
 
 - The row holds the query as sent, who ran it, the source (null when the caller could not see the
-  one named), the entry point (`api`, `mcp`, `export`), the duration, the rows returned, the
+  one named), the entry point (`api`, `mcp`, `export`, `dashboard`), the duration, the rows returned, the
   outcome, the error code and whether rows were left out. It never holds result data.
 - The audit entry's metadata is `{ source_id, entry_point, outcome, error_code, row_count,
   duration_ms }`; the query itself is only in the row.
@@ -566,6 +584,13 @@ recorded in the same table, with their own audit entries ([export.md](export.md#
 - Rows are sent only once their run is recorded: when neither attempt can be written, a successful
   query answers `500 server_error` and no rows. When a failed query's record cannot be written
   either way, the failure is logged and the query's own error is answered.
+
+A dashboard panel's run has the entry point `dashboard` and the saved query's id. It is recorded at
+most once per viewer per query in `DASHBOARD_RECORD_WINDOW_MINUTES` (default 60), a query being the
+saved query's body as the panel sends it, relative dates unresolved, so a moving `now` does not
+make it a new one; its row keeps whether
+the result was served from the dashboard cache; every other entry point records every run
+([dashboards.md](dashboards.md#the-recording-window)).
 
 `GET /v1/runs` lists runs newest first, filtered by `user_id`, `source_id` and `outcome`, as
 `{ id, user_id, source_id, entry_point, query, duration_ms, row_count, outcome, error_code,

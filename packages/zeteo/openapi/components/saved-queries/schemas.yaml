@@ -25,6 +25,9 @@ SavedQuery:
       type: string
       format: date-time
       description: When it was shared with the viewer (or one of their groups); present only when it was
+    available_for_dashboards:
+      type: boolean
+      description: Whether its owner offers it to dashboards, to everyone in the organization they are signed in to
     last_run_at: { type: [string, 'null'], format: date-time, description: The last run by anyone }
     you_last_ran_at: { type: [string, 'null'], format: date-time, description: The viewer's own last run }
     source:
@@ -41,6 +44,13 @@ SavedQuery:
       type: integer
       minimum: 0
       description: How many users and groups it is shared with; present only when the viewer may see the share list (its owner, or a holder of `zeteo.saved_queries.read`)
+    used_by:
+      type: object
+      description: What is built on it; present only on a single read (`GET /v1/saved-queries/{savedQueryId}`), and only for its owner and a holder of `zeteo.saved_queries.read`
+      required: [dashboards, saved_panels]
+      properties:
+        dashboards: { type: integer, minimum: 0, description: How many dashboards have a panel on it }
+        saved_panels: { type: integer, minimum: 0, description: How many saved panels are on it }
 
 ListSavedQueriesResponse:
   type: object
@@ -76,6 +86,9 @@ UpdateSavedQueryRequest:
     query:
       description: Replaces the stored query; planned again against the caller's own grants
       $ref: '../queries/schemas.yaml#/Query'
+    available_for_dashboards:
+      type: boolean
+      description: Offers it to dashboards (true) or withdraws it (false). A panel built on a saved query withdrawn from dashboards shows `not_available` to others.
 
 CopySavedQueryRequest:
   type: object
@@ -169,3 +182,27 @@ TransferSavedQueryResponse:
       required: [accessible]
       properties:
         accessible: { type: boolean, const: false }
+
+SavedQueryUse:
+  type: object
+  description: A dashboard or saved panel built on a saved query
+  required: [type, id, name, owner]
+  properties:
+    type: { type: string, enum: [dashboard, saved_panel] }
+    id: { type: string, format: uuid }
+    name: { type: string }
+    owner:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: [string, 'null'], description: From tereo's directory; null when it could not be looked up }
+
+ListSavedQueryUsesResponse:
+  type: object
+  required: [data]
+  properties:
+    data:
+      type: array
+      description: Dashboards, then saved panels, each newest first
+      items: { $ref: '#/SavedQueryUse' }

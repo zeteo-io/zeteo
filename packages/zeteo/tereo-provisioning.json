@@ -71,13 +71,25 @@
         "displayName": "Manage saved queries",
         "description": "Change, share, transfer and delete any user's saved queries; also grants Read saved queries",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.dashboards.read",
+        "displayName": "Read dashboards",
+        "description": "List and read every user's dashboards and saved panels and who they are shared with",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.dashboards.write",
+        "displayName": "Manage dashboards",
+        "description": "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
       {
         "name": "zeteo_admin",
         "displayName": "Zeteo administrator",
-        "description": "Manages sources, grants, saved queries and the record of query runs",
+        "description": "Manages sources, grants, saved queries, dashboards and the record of query runs",
         "permissions": [
           "zeteo.sources.read",
           "zeteo.sources.write",
@@ -88,7 +100,9 @@
           "zeteo.runs.read",
           "zeteo.mcp.use",
           "zeteo.saved_queries.read",
-          "zeteo.saved_queries.write"
+          "zeteo.saved_queries.write",
+          "zeteo.dashboards.read",
+          "zeteo.dashboards.write"
         ]
       },
       {
@@ -204,6 +218,66 @@
         "eventType": "zeteo.saved_query.copied",
         "description": "A saved query was copied",
         "readPermission": "zeteo.saved_queries.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.created",
+        "description": "A dashboard was created",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.updated",
+        "description": "A dashboard was changed",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.deleted",
+        "description": "A dashboard was deleted",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.shared",
+        "description": "A dashboard's shares were changed",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.transferred",
+        "description": "A dashboard was transferred to another owner",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.dashboard.copied",
+        "description": "A dashboard was copied",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.created",
+        "description": "A saved panel was created",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.updated",
+        "description": "A saved panel was changed",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.deleted",
+        "description": "A saved panel was deleted",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.shared",
+        "description": "A saved panel's shares were changed",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.transferred",
+        "description": "A saved panel was transferred to another owner",
+        "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.saved_panel.copied",
+        "description": "A saved panel was copied",
+        "readPermission": "zeteo.dashboards.read"
       },
       {
         "eventType": "zeteo.query.run",

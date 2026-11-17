@@ -1,0 +1,77 @@
+.z-admin-menu-container {
+  position: relative;
+}
+
+.z-admin-trigger {
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  background: none;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.z-admin-chevron {
+  width: 0.7rem;
+  font-size: 0.7rem;
+}
+
+.z-admin-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  background-color: var(--k-background-color);
+  border-radius: 0.5rem;
+  border: 1px solid var(--k-border-color);
+  box-shadow:
+    0 0.5rem 1.5rem var(--k-shadow-color-hover),
+    0 0.25rem 0.5rem var(--k-shadow-color);
+  min-width: 12rem;
+  padding: 0.25rem 0;
+  z-index: 200;
+}
+
+.z-admin-menu-item {
+  display: block;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  color: var(--k-text-color);
+  text-decoration: none;
+  transition: background-color 0.15s;
+}
+
+.z-admin-menu-item:hover {
+  background-color: var(--k-background-color-hover);
+}
+
+.z-admin-menu-item.active {
+  font-weight: 600;
+}
+
+/* In the folded menu the items sit inline under the trigger. */
+.k-app-top-bar-nav-menu .z-admin-trigger {
+  width: 100%;
+  border-left: 3px solid transparent;
+}
+
+.k-app-top-bar-nav-menu .z-admin-trigger.active {
+  border-left-color: var(--k-text-color-light);
+}
+
+.k-app-top-bar-nav-menu .z-admin-menu {
+  position: static;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: none;
+}
+
+.k-app-top-bar-nav-menu .z-admin-menu-item {
+  padding: 0.5rem 1.25rem 0.5rem 2.25rem;
+  color: var(--k-text-color-light);
+}
+
+.k-app-top-bar-nav-menu .z-admin-menu-item:hover {
+  background-color: var(--k-overlay-light-weak);
+}

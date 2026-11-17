@@ -1,5 +1,6 @@
 import { savedQueryView, type SavedQueryView } from "../views/savedQuery.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
+import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { loadCatalogFor, sourceSlugOf } from "../engine/index.js";
 import type { SavedQueryRow } from "../utils/db/savedQueries.js";
 import { db, prisma, type Prisma } from "../utils/db/index.js";
@@ -12,7 +13,6 @@ import type { Caller } from "../middleware/auth.js";
 import { withAudit } from "../utils/transaction.js";
 import { planSaved } from "../engine/savedPlan.js";
 import { encodeCursor } from "../utils/cursor.js";
-import { logger } from "../utils/logger.js";
 import { decideAccess } from "./access.js";
 import {
   AUDIT_EVENTS,
@@ -21,22 +21,26 @@ import {
   SOURCES_READ,
 } from "../definitions/tereoDeclaration.js";
 import {
-  GROUP_READS_IN_FLIGHT,
-  groupOrganizationOf,
-  isServiceAccountUser,
-  lookupPrincipals,
-} from "../principals/directory.js";
+  alreadyOwnerError,
+  assertGroupsChecked,
+  checkNewGroups,
+  checkTransferTarget,
+  idsOfType,
+  includesOwner,
+  ownerNames,
+  ownerShareError,
+  shareViews,
+  transferNameTaken,
+  type ShareView,
+  type SharePrincipal,
+} from "../sharing/shares.js";
 import {
   loadAccess,
   loadAccessAs,
   type CallerAccess,
 } from "../grants/access.js";
-import {
-  BadRequestError,
-  ConflictError,
-  ForbiddenError,
-  NotFoundError,
-} from "../utils/errors.js";
+
+const NOUN = "saved query";
 
 const notFound = () => new NotFoundError("Saved query not found");
 
@@ -69,27 +73,6 @@ const mayManage = (
 const lockRow = (tx: Prisma.TransactionClient, id: string) =>
   tx.$queryRaw`SELECT "id" FROM "zeteo"."saved_queries" WHERE "id" = ${id}::uuid FOR UPDATE`;
 
-/** The owners' names from the directory; a name it cannot give, or a failed lookup, is null. */
-const ownerNames = async (
-  ownerIds: string[]
-): Promise<Map<string, string | null>> => {
-  const names = new Map<string, string | null>(
-    ownerIds.map((id) => [id, null])
-  );
-  if (ownerIds.length === 0) return names;
-  try {
-    const found = await lookupPrincipals(
-      ownerIds.map((id) => ({ type: "user" as const, id }))
-    );
-    for (const p of found) {
-      if (p.status !== "orphaned") names.set(p.id, p.name);
-    }
-  } catch (err) {
-    logger.warn({ err }, "Could not look up the owners of saved queries");
-  }
-  return names;
-};
-
 /**
  * `rows` as views for the caller: whether each can be run by them (planned as
  * them, so no cause is told apart), the owners' names, and the source slug
@@ -99,7 +82,8 @@ const ownerNames = async (
 const present = async (
   caller: Caller,
   access: CallerAccess,
-  rows: SavedQueryRow[]
+  rows: SavedQueryRow[],
+  withUsedBy = false
 ): Promise<SavedQueryView[]> => {
   const decided = await decideAccess(access, rows);
   const showSource = hasPermission(caller.permissions, SOURCES_READ);
@@ -118,8 +102,20 @@ const present = async (
       .filter((r) => mayManage(caller, r, SAVED_QUERIES_READ))
       .map((r) => r.id)
   );
+  const usedBy = new Map<string, { dashboards: number; savedPanels: number }>();
+  if (withUsedBy) {
+    for (const r of rows.filter((r) =>
+      mayManage(caller, r, SAVED_QUERIES_READ)
+    )) {
+      usedBy.set(r.id, {
+        dashboards: await db.dashboards.countUsingSavedQuery(r.id),
+        savedPanels: await db.savedPanels.countUsingSavedQuery(r.id),
+      });
+    }
+  }
   return rows.map((row) =>
     savedQueryView(row, {
+      usedBy: usedBy.get(row.id),
       accessible: decided.get(row.id) ?? false,
       ownerName: names.get(row.ownerId) ?? null,
       sourceSlug: slugs.get(row.sourceId) ?? null,
@@ -139,13 +135,14 @@ const presentOne = async (
     caller.userId,
     access.groupIds
   );
-  return (await present(caller, access, [withViewer!]))[0]!;
+  return (await present(caller, access, [withViewer!], true))[0]!;
 };
 
 /**
  * The saved query, when the caller may see it that it exists at all: they own
- * it, it is shared with them or one of their groups, or they hold
- * `zeteo.saved_queries.read`. Anything else is the one 404.
+ * it, it is shared with them or one of their groups, it is available for
+ * dashboards in the organization they are signed in to (null matches null), or
+ * they hold `zeteo.saved_queries.read`. Anything else is the one 404.
  */
 export const findForViewer = async (
   caller: Caller,
@@ -157,6 +154,12 @@ export const findForViewer = async (
   if (
     row.ownerId === caller.userId ||
     hasPermission(caller.permissions, SAVED_QUERIES_READ)
+  ) {
+    return row;
+  }
+  if (
+    row.availableForDashboards &&
+    row.availableOrganizationId === caller.organizationId
   ) {
     return row;
   }
@@ -173,7 +176,7 @@ const findOwned = async (caller: Caller, id: string): Promise<SavedQuery> => {
 };
 
 export interface ListSavedQueriesInput {
-  scope: "mine" | "shared" | "all";
+  scope: "mine" | "shared" | "all" | "available";
   q?: string;
   sourceId?: string;
   ownerId?: string;
@@ -215,14 +218,31 @@ export const listSavedQueries = async (
             ),
             hasMore,
           }))
-      : await db.savedQueries.listVisibleTo({
-          userId: caller.userId,
-          groupIds: [...access.groupIds],
-          scope: input.scope,
-          q: input.q,
-          cursor: input.cursor,
-          limit: input.limit,
-        });
+      : input.scope === "available"
+        ? await db.savedQueries
+            .listAvailable({
+              organizationId: caller.organizationId,
+              excludeOwnerId: caller.userId,
+              q: input.q,
+              cursor: input.cursor,
+              limit: input.limit,
+            })
+            .then(async ({ rows, hasMore }) => ({
+              rows: await db.savedQueries.withViewer(
+                rows,
+                caller.userId,
+                access.groupIds
+              ),
+              hasMore,
+            }))
+        : await db.savedQueries.listVisibleTo({
+            userId: caller.userId,
+            groupIds: [...access.groupIds],
+            scope: input.scope,
+            q: input.q,
+            cursor: input.cursor,
+            limit: input.limit,
+          });
   const last = page.rows.at(-1);
   return {
     data: await present(caller, access, page.rows),
@@ -290,6 +310,7 @@ export interface UpdateSavedQueryInput {
   name?: string;
   description?: string;
   query?: Record<string, unknown>;
+  availableForDashboards?: boolean;
 }
 
 /**
@@ -332,6 +353,12 @@ export const updateSavedQuery = async (
               query: patch.query as Prisma.InputJsonObject,
               sourceId,
             }),
+            ...(patch.availableForDashboards !== undefined && {
+              availableForDashboards: patch.availableForDashboards,
+              availableOrganizationId: patch.availableForDashboards
+                ? caller.organizationId
+                : null,
+            }),
           },
           tx
         ),
@@ -347,9 +374,18 @@ export const updateSavedQuery = async (
         ...auditMetadata(updated),
         ...(patch.name !== undefined &&
           patch.name !== current.name && { previous_name: current.name }),
-        changed: (["name", "description", "query"] as const).filter(
-          (field) => patch[field] !== undefined
-        ),
+        ...(patch.availableForDashboards !== undefined && {
+          available_for_dashboards: updated.availableForDashboards,
+          available_organization_id: updated.availableOrganizationId,
+        }),
+        changed: [
+          ...(["name", "description", "query"] as const).filter(
+            (field) => patch[field] !== undefined
+          ),
+          ...(patch.availableForDashboards !== undefined
+            ? ["available_for_dashboards"]
+            : []),
+        ],
       },
     });
     return updated;
@@ -458,24 +494,6 @@ export const savedQueryToRun = async (
   };
 };
 
-/** A user or group a saved query is shared with. */
-export interface SharePrincipal {
-  type: "user" | "group";
-  id: string;
-}
-
-/** A share as `GET` and `PUT .../shares` list it; `email` for users only. */
-export interface ShareView {
-  type: "user" | "group";
-  id: string;
-  name: string | null;
-  email?: string | null;
-  shared_at: string;
-}
-
-const SHARE_OTHER_ORGANIZATION =
-  "Groups can only be shared with in your signed-in organization";
-
 /** How many users' access a share or transfer judges at once; each asks tereo for the user's groups. */
 const ACCESS_CHECKS_IN_FLIGHT = 4;
 
@@ -512,40 +530,8 @@ const lockManaged = async (
   return current;
 };
 
-/** The shares with the directory's names; a name it cannot give, or a failed lookup, is null. */
-const shareViews = async (id: string): Promise<ShareView[]> => {
-  const shares = await db.savedQueries.listShares(id);
-  const refs = shares.map((s) => ({
-    type: s.principalType,
-    id: s.principalId,
-  }));
-  const found = new Map<
-    string,
-    { name: string | null; email: string | null }
-  >();
-  try {
-    for (let i = 0; i < refs.length; i += 100) {
-      for (const p of await lookupPrincipals(refs.slice(i, i + 100))) {
-        found.set(`${p.type}:${p.id}`, {
-          name: p.name,
-          email: p.email ?? null,
-        });
-      }
-    }
-  } catch (err) {
-    logger.warn({ err }, "Could not look up the principals of shares");
-  }
-  return shares.map((s) => {
-    const p = found.get(`${s.principalType}:${s.principalId}`);
-    return {
-      type: s.principalType,
-      id: s.principalId,
-      name: p?.name ?? null,
-      ...(s.principalType === "user" && { email: p?.email ?? null }),
-      shared_at: s.createdAt.toISOString(),
-    };
-  });
-};
+const shareViewsOf = async (id: string): Promise<ShareView[]> =>
+  shareViews(await db.savedQueries.listShares(id));
 
 /** Whether `userId` could run the saved query, judged as if signed in to `organizationId`. Asks tereo: never inside a transaction. */
 const canRunAs = async (
@@ -575,7 +561,7 @@ export const listShares = async (
   id: string
 ): Promise<ShareView[]> => {
   const row = await findManaged(caller, id, SAVED_QUERIES_READ);
-  return shareViews(row.id);
+  return shareViewsOf(row.id);
 };
 
 /**
@@ -595,39 +581,19 @@ export const replaceShares = async (
   warnings: Array<{ type: "user"; id: string; accessible: false }>;
 }> => {
   const found = await findManaged(caller, id, SAVED_QUERIES_WRITE);
-  const ownerShare = () =>
-    new BadRequestError(
-      "invalid_share",
-      "A saved query cannot be shared with its owner"
-    );
-  const isOwner = (owner: string) =>
-    principals.some((p) => p.type === "user" && p.id === owner);
-  if (isOwner(found.ownerId)) throw ownerShare();
+  if (includesOwner(principals, found.ownerId)) {
+    throw ownerShareError(NOUN);
+  }
 
   const existing = await db.savedQueries.listShares(id);
-  const had = (type: "user" | "group") =>
-    new Set(
-      existing.filter((s) => s.principalType === type).map((s) => s.principalId)
-    );
-  const [usersBefore, groupsBefore] = [had("user"), had("group")];
+  const usersBefore = idsOfType(existing, "user");
   // Tereo is asked here, before the transaction. Only groups being added are
   // checked: a share carried over unchanged stands as it was made.
-  const newGroups = principals
-    .filter((p) => p.type === "group" && !groupsBefore.has(p.id))
-    .map((p) => p.id);
-  const organizations = await mapConcurrently(
-    newGroups,
-    GROUP_READS_IN_FLIGHT,
-    groupOrganizationOf
+  const newGroups = await checkNewGroups(
+    caller,
+    principals,
+    idsOfType(existing, "group")
   );
-  if (
-    organizations.some(
-      (org) =>
-        org === undefined || (org !== null && org !== caller.organizationId)
-    )
-  ) {
-    throw new BadRequestError("invalid_share", SHARE_OTHER_ORGANIZATION);
-  }
   const newUsers = principals
     .filter((p) => p.type === "user" && !usersBefore.has(p.id))
     .map((p) => p.id);
@@ -635,7 +601,9 @@ export const replaceShares = async (
 
   const { row, added } = await withAudit(async (tx, audit) => {
     const current = await lockManaged(tx, caller, id);
-    if (isOwner(current.ownerId)) throw ownerShare();
+    if (includesOwner(principals, current.ownerId)) {
+      throw ownerShareError(NOUN);
+    }
     const changes = await db.savedQueries.replaceShares(
       tx,
       id,
@@ -643,13 +611,7 @@ export const replaceShares = async (
       caller.userId
     );
     // A group removed by someone else meanwhile would be added here unchecked.
-    if (
-      changes.added.some((p) => p.type === "group" && !newGroups.includes(p.id))
-    ) {
-      throw new ConflictError(
-        "The shares changed while saving; load them again and retry"
-      );
-    }
+    assertGroupsChecked(changes.added, newGroups);
     if (changes.added.length > 0 || changes.removed.length > 0) {
       audit({
         action: AUDIT_EVENTS.savedQueryShared,
@@ -673,7 +635,7 @@ export const replaceShares = async (
     unable.add(u);
   }
   return {
-    data: await shareViews(id),
+    data: await shareViewsOf(id),
     warnings: addedUsers
       .filter((u) => unable.has(u))
       .map((u) => ({
@@ -698,29 +660,15 @@ export const transferSavedQuery = async (
   { userId, keepAccess }: { userId: string; keepAccess: boolean }
 ): Promise<{ data: SavedQueryView; warning?: { accessible: false } }> => {
   const found = await findManaged(caller, id, SAVED_QUERIES_WRITE);
-  const alreadyOwner = () =>
-    new BadRequestError(
-      "invalid_transfer",
-      "The user already owns this saved query"
-    );
-  if (found.ownerId === userId) throw alreadyOwner();
+  if (found.ownerId === userId) throw alreadyOwnerError(NOUN);
   // Tereo is asked here, before the transaction.
-  const [target] = await lookupPrincipals([{ type: "user", id: userId }]);
-  if (!target || target.status === "orphaned") {
-    throw new BadRequestError("invalid_transfer", "No such user");
-  }
-  if (await isServiceAccountUser(userId)) {
-    throw new BadRequestError(
-      "invalid_transfer",
-      "A saved query cannot be transferred to a service account"
-    );
-  }
+  await checkTransferTarget(userId, NOUN);
   const accessible = await canRunAs(found, userId, caller.organizationId);
   const access = await loadAccess(caller);
 
   const row = await withAudit(async (tx, audit) => {
     const current = await lockManaged(tx, caller, id);
-    if (current.ownerId === userId) throw alreadyOwner();
+    if (current.ownerId === userId) throw alreadyOwnerError(NOUN);
     const updated = await mapUniqueViolation(
       () =>
         db.savedQueries.transfer(
@@ -729,7 +677,7 @@ export const transferSavedQuery = async (
           userId,
           keepAccess ? current.ownerId : null
         ),
-      "The new owner already has a saved query with this name; names are unique whatever their case",
+      transferNameTaken(NOUN),
       "conflict"
     );
     audit({
@@ -751,3 +699,46 @@ export const transferSavedQuery = async (
     ...(!accessible && { warning: { accessible: false as const } }),
   };
 };
+
+export type SavedQueryUse = {
+  type: "dashboard" | "saved_panel";
+  id: string;
+  name: string;
+  owner: { id: string; name: string | null };
+};
+
+/**
+ * The dashboards and saved panels built on the saved query, for an admin who
+ * may read dashboards (the route checks the permission). Not to be called
+ * inside a transaction: it asks tereo for the owners' names.
+ */
+export const listUses = async (id: string): Promise<SavedQueryUse[]> => {
+  if (!(await db.savedQueries.findById(id))) throw notFound();
+  const [dashboards, panels] = await Promise.all([
+    db.dashboards.listUsingSavedQuery(id),
+    db.savedPanels.listUsingSavedQuery(id),
+  ]);
+  const names = await ownerNames([
+    ...new Set([...dashboards, ...panels].map((r) => r.ownerId)),
+  ]);
+  const owner = (ownerId: string) => ({
+    id: ownerId,
+    name: names.get(ownerId) ?? null,
+  });
+  return [
+    ...dashboards.map((d) => ({
+      type: "dashboard" as const,
+      id: d.id,
+      name: d.name,
+      owner: owner(d.ownerId),
+    })),
+    ...panels.map((p) => ({
+      type: "saved_panel" as const,
+      id: p.id,
+      name: p.name,
+      owner: owner(p.ownerId),
+    })),
+  ];
+};
+
+export type { ShareView, SharePrincipal };

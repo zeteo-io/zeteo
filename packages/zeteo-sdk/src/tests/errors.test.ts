@@ -16,6 +16,13 @@ describe("errors", () => {
     expect(error.cause).toEqual(new Error("inner"));
   });
 
+  it("ZeteoError carries the problems of an invalid_panel", () => {
+    const problems = [{ setting: "y.0", problem: "wrong_type" }];
+    expect(
+      new ZeteoError("m", { code: "invalid_panel", problems }).problems
+    ).toBe(problems);
+  });
+
   it("status defaults to null", () => {
     expect(new ZeteoError("m", { code: "c" }).status).toBeNull();
   });

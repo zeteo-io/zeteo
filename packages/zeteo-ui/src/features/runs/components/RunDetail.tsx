@@ -8,7 +8,12 @@ import { OutcomeBadge } from "./OutcomeBadge";
 import type { Run } from "../api/types";
 import "./styles.css";
 
-const ENTRY_LABEL = { api: "API", mcp: "MCP", export: "Export" } as const;
+const ENTRY_LABEL = {
+  api: "API",
+  mcp: "MCP",
+  export: "Export",
+  dashboard: "Dashboard",
+} as const;
 
 const COPIED_MS = 2000;
 

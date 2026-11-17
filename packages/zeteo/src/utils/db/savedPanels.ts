@@ -1,0 +1,283 @@
+import { diffPrincipals } from "../../sharing/principals.js";
+import { prisma, type Prisma } from "./prisma.js";
+import type { Principal } from "./grants.js";
+import type {
+  SavedPanel,
+  SavedPanelShare,
+} from "../../../prisma/generated/client/index.js";
+
+/** The client or the open transaction a repository function runs on. */
+type Db = Prisma.TransactionClient | typeof prisma;
+
+export interface SavedPanelInput {
+  ownerId: string;
+  name: string;
+  description: string;
+  savedQueryId: string | null;
+  chart: Prisma.InputJsonValue;
+  timeColumn: string | null;
+}
+
+export type SavedPanelChanges = Partial<Omit<SavedPanelInput, "ownerId">>;
+
+const nameFilter = (q: string | undefined) =>
+  q ? { name: { contains: q, mode: "insensitive" as const } } : {};
+
+export const findById = (
+  id: string,
+  tx: Db = prisma
+): Promise<SavedPanel | null> => tx.savedPanel.findUnique({ where: { id } });
+
+/**
+ * One page, newest first (ids are time-ordered), starting after the `cursor` id.
+ * `"mine"` is what `userId` owns; `"shared"` is what is shared with the user or
+ * with any of their groups, never what they own.
+ */
+export const listVisibleTo = async (
+  options: {
+    userId: string;
+    groupIds: string[];
+    scope: "mine" | "shared";
+    q?: string;
+    cursor?: string;
+    limit: number;
+  },
+  tx: Db = prisma
+): Promise<{ rows: SavedPanel[]; hasMore: boolean }> => {
+  const { userId, groupIds, scope, q, cursor, limit } = options;
+  const reaching: Prisma.SavedPanelShareWhereInput = {
+    OR: [
+      { principalType: "user", principalId: userId },
+      ...(groupIds.length > 0
+        ? [{ principalType: "group" as const, principalId: { in: groupIds } }]
+        : []),
+    ],
+  };
+  const rows = await tx.savedPanel.findMany({
+    where: {
+      ...(scope === "mine"
+        ? { ownerId: userId }
+        : { ownerId: { not: userId }, shares: { some: reaching } }),
+      ...nameFilter(q),
+      ...(cursor && { id: { lt: cursor } }),
+    },
+    orderBy: { id: "desc" },
+    take: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+};
+
+/** Every one, optionally narrowed to an owner or a name, newest first, after the `cursor` id. */
+export const listAll = async (
+  options: { ownerId?: string; q?: string; cursor?: string; limit: number },
+  tx: Db = prisma
+): Promise<{ rows: SavedPanel[]; hasMore: boolean }> => {
+  const { ownerId, q, cursor, limit } = options;
+  const rows = await tx.savedPanel.findMany({
+    where: {
+      ...(ownerId && { ownerId }),
+      ...nameFilter(q),
+      ...(cursor && { id: { lt: cursor } }),
+    },
+    orderBy: { id: "desc" },
+    take: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+};
+
+export const create = (
+  data: SavedPanelInput,
+  tx: Db = prisma
+): Promise<SavedPanel> => tx.savedPanel.create({ data });
+
+export const update = (
+  id: string,
+  data: SavedPanelChanges,
+  tx: Db = prisma
+): Promise<SavedPanel> => tx.savedPanel.update({ where: { id }, data });
+
+/** Deletes the saved panel; its shares go with it, and a dashboard panel linked to it stays, with no link. */
+export const remove = (id: string, tx: Db = prisma): Promise<SavedPanel> =>
+  tx.savedPanel.delete({ where: { id } });
+
+/** How many saved panels are built on the saved query. */
+export const countUsingSavedQuery = async (
+  savedQueryId: string,
+  tx: Db = prisma
+): Promise<number> => tx.savedPanel.count({ where: { savedQueryId } });
+
+/** The saved panels built on the saved query (for an admin). */
+export const listUsingSavedQuery = async (
+  savedQueryId: string,
+  tx: Db = prisma
+): Promise<SavedPanel[]> =>
+  tx.savedPanel.findMany({ where: { savedQueryId }, orderBy: { id: "desc" } });
+
+/** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */
+export const replaceShares = async (
+  tx: Db,
+  savedPanelId: string,
+  principals: Principal[],
+  createdBy: string
+): Promise<{ added: Principal[]; removed: Principal[] }> => {
+  const existing = await tx.savedPanelShare.findMany({
+    where: { savedPanelId },
+  });
+  const { added, removed } = diffPrincipals(
+    existing.map((s) => ({ type: s.principalType, id: s.principalId })),
+    principals
+  );
+  if (removed.length > 0) {
+    await tx.savedPanelShare.deleteMany({
+      where: {
+        savedPanelId,
+        OR: removed.map((p) => ({ principalType: p.type, principalId: p.id })),
+      },
+    });
+  }
+  if (added.length > 0) {
+    await tx.savedPanelShare.createMany({
+      data: added.map((p) => ({
+        savedPanelId,
+        principalType: p.type,
+        principalId: p.id,
+        createdBy,
+      })),
+    });
+  }
+  return { added, removed };
+};
+
+export const listShares = (
+  id: string,
+  tx: Db = prisma
+): Promise<SavedPanelShare[]> =>
+  tx.savedPanelShare.findMany({
+    where: { savedPanelId: id },
+    orderBy: [{ createdAt: "asc" }, { principalId: "asc" }],
+  });
+
+/**
+ * Hands it to `newOwnerId`. `keepAccessFor` (the previous owner) gets a user
+ * share so they keep reading it, or null for none. A share the new owner held
+ * is dropped, as an owner needs none.
+ */
+export const transfer = async (
+  tx: Db,
+  id: string,
+  newOwnerId: string,
+  keepAccessFor: string | null
+): Promise<SavedPanel> => {
+  const updated = await tx.savedPanel.update({
+    where: { id },
+    data: { ownerId: newOwnerId },
+  });
+  await tx.savedPanelShare.deleteMany({
+    where: { savedPanelId: id, principalType: "user", principalId: newOwnerId },
+  });
+  if (keepAccessFor !== null && keepAccessFor !== newOwnerId) {
+    await tx.savedPanelShare.upsert({
+      where: {
+        savedPanelId_principalType_principalId: {
+          savedPanelId: id,
+          principalType: "user",
+          principalId: keepAccessFor,
+        },
+      },
+      create: {
+        savedPanelId: id,
+        principalType: "user",
+        principalId: keepAccessFor,
+        createdBy: newOwnerId,
+      },
+      update: {},
+    });
+  }
+  return updated;
+};
+
+/** Those of `ids` that exist, in one read. */
+export const findByIds = (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<SavedPanel[]> =>
+  ids.length === 0
+    ? Promise.resolve([])
+    : tx.savedPanel.findMany({ where: { id: { in: [...ids] } } });
+
+/** Those of `ids` shared with the user or with one of `groupIds`, in one read. */
+export const sharedWithAmong = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const shares = await tx.savedPanelShare.findMany({
+    where: {
+      savedPanelId: { in: [...ids] },
+      OR: [
+        { principalType: "user", principalId: userId },
+        ...(groupIds.length > 0
+          ? [
+              {
+                principalType: "group" as const,
+                principalId: { in: [...groupIds] },
+              },
+            ]
+          : []),
+      ],
+    },
+    select: { savedPanelId: true },
+  });
+  return new Set(shares.map((s) => s.savedPanelId));
+};
+
+/** When each of `ids` was first shared with the user (or a group of theirs), by id; one not shared with them is not in the map. */
+export const sharedAtFor = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, Date>> => {
+  const shared = new Map<string, Date>();
+  if (ids.length === 0) return shared;
+  const shares = await tx.savedPanelShare.findMany({
+    where: {
+      savedPanelId: { in: [...ids] },
+      OR: [
+        { principalType: "user", principalId: userId },
+        ...(groupIds.length > 0
+          ? [
+              {
+                principalType: "group" as const,
+                principalId: { in: [...groupIds] },
+              },
+            ]
+          : []),
+      ],
+    },
+    select: { savedPanelId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const s of shares) {
+    if (!shared.has(s.savedPanelId)) shared.set(s.savedPanelId, s.createdAt);
+  }
+  return shared;
+};
+
+/** How many shares each saved panel has, by id; one with none is 0. */
+export const countShares = async (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, number>> => {
+  const counts = new Map(ids.map((id) => [id, 0]));
+  if (ids.length === 0) return counts;
+  const grouped = await tx.savedPanelShare.groupBy({
+    by: ["savedPanelId"],
+    where: { savedPanelId: { in: [...ids] } },
+    _count: { _all: true },
+  });
+  for (const g of grouped) counts.set(g.savedPanelId, g._count._all);
+  return counts;
+};

@@ -2,9 +2,9 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { formatRelative } from "@/utils/formatRelative";
 import { NoAccessNotice } from "./NoAccessNotice";
 import { formatDate } from "@/utils/formatDate";
+import { Badge, Card } from "@kosmeo-ui/react";
 import { IconAction } from "./IconAction";
 import { savedQueryHref } from "./tabs";
-import { Card } from "@kosmeo-ui/react";
 import { Link } from "react-router-dom";
 import { useState } from "react";
 import {
@@ -68,6 +68,11 @@ export const SavedQueryCard = ({
             </h3>
             {sq.accessible && sq.source && (
               <code className="z-sq-source">{sq.source.slug}</code>
+            )}
+            {sq.available_for_dashboards && (
+              <Badge size="sm" variant="secondary">
+                Available for dashboards
+              </Badge>
             )}
           </div>
           {sq.description ? (
@@ -138,10 +143,10 @@ export const SavedQueryCard = ({
         </div>
       </Card>
       {dialog === "share" && (
-        <ShareDialog savedQueryId={sq.id} onClose={close} />
+        <ShareDialog objectType="saved_query" id={sq.id} onClose={close} />
       )}
       {dialog === "transfer" && (
-        <TransferDialog savedQueryId={sq.id} onClose={close} />
+        <TransferDialog objectType="saved_query" id={sq.id} onClose={close} />
       )}
       {dialog === "edit" && (
         <EditDetailsDialog savedQuery={sq} onClose={close} />

@@ -48,7 +48,7 @@ describe("ShareDialog", () => {
   const search = async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderWithProviders(
-      <ShareDialog savedQueryId={SAVED_ID} onClose={vi.fn()} />
+      <ShareDialog objectType="saved_query" id={SAVED_ID} onClose={vi.fn()} />
     );
     await user.type(
       await screen.findByLabelText("Search by name or email"),
@@ -70,7 +70,7 @@ describe("ShareDialog", () => {
 
   it("says the name and description are visible to everyone", async () => {
     renderWithProviders(
-      <ShareDialog savedQueryId={SAVED_ID} onClose={vi.fn()} />
+      <ShareDialog objectType="saved_query" id={SAVED_ID} onClose={vi.fn()} />
     );
     expect(
       await screen.findByText(
@@ -93,5 +93,37 @@ describe("ShareDialog", () => {
         principals: [{ type: "user", id: PERSON_ID }],
       })
     );
+  });
+
+  it("works for a dashboard: its own path, title and note, no warnings", async () => {
+    const DASHBOARD_ID = "a2222222-1c7a-4a53-9d0e-6a3b1f2c4d01";
+    put.mockResolvedValue({ data: { data: [makeShare()] } });
+    const onClose = vi.fn();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWithProviders(
+      <ShareDialog objectType="dashboard" id={DASHBOARD_ID} onClose={onClose} />
+    );
+    expect(await screen.findByText("Share dashboard")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Everyone it's shared with can open it. Each panel shows only what their own access lets them run."
+      )
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith(`/v1/dashboards/${DASHBOARD_ID}/shares`)
+    );
+    await user.type(screen.getByLabelText("Search by name or email"), "pat");
+    await advance(600);
+    await user.click(await screen.findByRole("option", { name: /Pat Person/ }));
+    await user.click(screen.getByRole("button", { name: "Save sharing" }));
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith(
+        `/v1/dashboards/${DASHBOARD_ID}/shares`,
+        {
+          principals: [{ type: "user", id: PERSON_ID }],
+        }
+      )
+    );
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

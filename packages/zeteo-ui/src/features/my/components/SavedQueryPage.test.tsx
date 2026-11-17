@@ -15,11 +15,12 @@ import {
 
 const get = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
+const patch = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: ["zeteo.data.read"] }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
     permissions: () => held.permissions,
-    api: { get, delete: del },
+    api: { get, delete: del, patch },
   })
 );
 
@@ -55,6 +56,9 @@ describe("SavedQueryPage", () => {
     held.permissions = ["zeteo.data.read"];
     current = mine;
     del.mockReset().mockResolvedValue({});
+    patch.mockReset().mockImplementation(async (_url, body) => ({
+      data: { ...current, ...body },
+    }));
     get.mockReset().mockImplementation(async (url: string) => {
       if (url === `/v1/saved-queries/${SAVED_ID}`) return { data: current };
       if (url === `/v1/saved-queries/${SAVED_ID}/shares`) {
@@ -181,5 +185,97 @@ describe("SavedQueryPage", () => {
     expect(
       screen.getByRole("link", { name: "My saved queries" })
     ).toHaveAttribute("href", "/my?tab=mine");
+  });
+
+  describe("available for dashboards", () => {
+    const AVAILABLE_NOTE =
+      "Anyone can see its name and description and use it in their dashboards. They can only run it if their own access allows.";
+    const USED_WARNING =
+      "Used by 2 dashboards and 3 saved panels. They'll change too.";
+
+    it("shows the owner the toggle with its note, and turns it on", async () => {
+      const user = userEvent.setup();
+      current = { ...mine, available_for_dashboards: false };
+      renderPage();
+      const toggle = await screen.findByRole("checkbox", {
+        name: "Available for dashboards",
+      });
+      expect(toggle).not.toBeChecked();
+      expect(screen.getByText(AVAILABLE_NOTE)).toBeInTheDocument();
+      await user.click(toggle);
+      await waitFor(() =>
+        expect(patch).toHaveBeenCalledWith(`/v1/saved-queries/${SAVED_ID}`, {
+          available_for_dashboards: true,
+        })
+      );
+    });
+
+    it("warns before turning it off while dashboards use it", async () => {
+      const user = userEvent.setup();
+      current = {
+        ...mine,
+        available_for_dashboards: true,
+        used_by: { dashboards: 2, saved_panels: 3 },
+      };
+      renderPage();
+      await user.click(
+        await screen.findByRole("checkbox", {
+          name: "Available for dashboards",
+        })
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText(USED_WARNING)).toBeInTheDocument();
+      expect(patch).not.toHaveBeenCalled();
+      await user.click(
+        within(dialog).getByRole("button", { name: "Turn off" })
+      );
+      await waitFor(() =>
+        expect(patch).toHaveBeenCalledWith(`/v1/saved-queries/${SAVED_ID}`, {
+          available_for_dashboards: false,
+        })
+      );
+    });
+
+    it("warns before editing a saved query something uses, and edits only once confirmed", async () => {
+      const user = userEvent.setup();
+      current = { ...mine, used_by: { dashboards: 2, saved_panels: 3 } };
+      renderPage();
+      await user.click(
+        await screen.findByRole("button", { name: "Edit details" })
+      );
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByText(USED_WARNING)).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText("Name")).not.toBeInTheDocument();
+      await user.click(
+        within(dialog).getByRole("button", { name: "Continue" })
+      );
+      expect(await screen.findByLabelText("Name")).toHaveValue(
+        "Weekly revenue"
+      );
+    });
+
+    it("opens the editor straight away when nothing uses it", async () => {
+      const user = userEvent.setup();
+      current = { ...mine, used_by: { dashboards: 0, saved_panels: 0 } };
+      renderPage();
+      await user.click(
+        await screen.findByRole("button", { name: "Edit details" })
+      );
+      expect(await screen.findByLabelText("Name")).toBeInTheDocument();
+      expect(screen.queryByText(/They'll change too/)).not.toBeInTheDocument();
+    });
+
+    it("shows a recipient no toggle", async () => {
+      current = makeSavedQuery({
+        owner: { id: OWNER_ID, name: "Olive Owner" },
+        shared_at: "2026-11-05T10:00:00.000Z",
+        available_for_dashboards: true,
+      });
+      renderPage();
+      await screen.findByRole("heading", { name: "Weekly revenue" });
+      expect(
+        screen.queryByRole("checkbox", { name: "Available for dashboards" })
+      ).not.toBeInTheDocument();
+    });
   });
 });

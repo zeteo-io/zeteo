@@ -1,5 +1,7 @@
 import { buildTereoDocument } from "../definitions/tereoDeclaration.js";
 import { defineSavedQueryTools } from "./savedQueryTools.js";
+import { defineSavedPanelTools } from "./savedPanelTools.js";
+import { defineDashboardTools } from "./dashboardTools.js";
 import { MCP_INSTRUCTIONS } from "./instructions.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
@@ -53,6 +55,8 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   defineDiscoveryTools(mcp);
   defineQueryTool(mcp);
   defineSavedQueryTools(mcp);
+  defineSavedPanelTools(mcp);
+  defineDashboardTools(mcp);
   return mcp;
 };
 

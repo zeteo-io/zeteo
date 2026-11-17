@@ -15,6 +15,7 @@ const saved: SavedQuery = {
   description: "",
   owner: { id: USER, name: "Ada" },
   accessible: true,
+  available_for_dashboards: false,
   created_at: "2026-11-17T10:00:00.000Z",
   updated_at: "2026-11-17T10:00:00.000Z",
   last_run_at: null,
@@ -75,6 +76,44 @@ describe("savedQueries", () => {
       method: "POST",
       path: "/v1/saved-queries",
       body,
+    });
+  });
+
+  it("list takes the available scope", async () => {
+    t.stub.respond(() => ({ body: { data: [], next_cursor: null } }));
+    await t.client.savedQueries.list({ scope: "available" });
+    expect(t.stub.requests[0].query).toEqual({ scope: "available" });
+  });
+
+  it("update can offer it to dashboards", async () => {
+    t.stub.respond(() => ({
+      body: { ...saved, available_for_dashboards: true },
+    }));
+    const out = await t.client.savedQueries.update(ID, {
+      available_for_dashboards: true,
+    });
+    expect(out.available_for_dashboards).toBe(true);
+    expect(t.stub.requests[0]).toMatchObject({
+      method: "PATCH",
+      path: `/v1/saved-queries/${ID}`,
+      body: { available_for_dashboards: true },
+    });
+  });
+
+  it("dashboards sends GET .../dashboards", async () => {
+    const data = [
+      {
+        type: "dashboard",
+        id: ID,
+        name: "Sales",
+        owner: { id: USER, name: "Ada" },
+      },
+    ];
+    t.stub.respond(() => ({ body: { data } }));
+    expect(await t.client.savedQueries.dashboards(ID)).toEqual({ data });
+    expect(t.stub.requests[0]).toMatchObject({
+      method: "GET",
+      path: `/v1/saved-queries/${ID}/dashboards`,
     });
   });
 

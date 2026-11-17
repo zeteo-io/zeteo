@@ -22,6 +22,10 @@ export interface RunRecord {
   truncated: boolean;
   /** The saved query run, when the run came from one. */
   savedQueryId?: string;
+  /** The dashboard that ran it, for a dashboard run. */
+  dashboardId?: string;
+  /** For a dashboard run: whether its result came from the cache. */
+  cached?: boolean;
 }
 
 /** Stored in place of a query that could not be stored itself. */
@@ -58,7 +62,10 @@ export const failureOf = (
 
 /** The run's audit metadata: never the query, never any of the result. */
 const runMetadata = (
-  run: Pick<RunRecord, "sourceId" | "entryPoint" | "savedQueryId">,
+  run: Pick<
+    RunRecord,
+    "sourceId" | "entryPoint" | "savedQueryId" | "dashboardId" | "cached"
+  >,
   end: Pick<RunRecord, "outcome" | "errorCode" | "rowCount" | "durationMs">
 ) => ({
   source_id: run.sourceId,
@@ -68,6 +75,10 @@ const runMetadata = (
   row_count: end.rowCount,
   duration_ms: end.durationMs,
   ...(run.savedQueryId !== undefined && { saved_query_id: run.savedQueryId }),
+  ...(run.dashboardId !== undefined && {
+    dashboard_id: run.dashboardId,
+    cached: run.cached === true,
+  }),
 });
 
 /**
@@ -89,6 +100,7 @@ export const recordRun = (run: RunRecord): Promise<string> =>
         errorCode: run.errorCode,
         truncated: run.truncated,
         savedQueryId: run.savedQueryId ?? null,
+        dashboardId: run.dashboardId ?? null,
       },
       select: { id: true },
     });

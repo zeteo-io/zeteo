@@ -1,7 +1,7 @@
+import { diffPrincipals } from "../../sharing/principals.js";
 import { prisma, type Prisma } from "./prisma.js";
 import type { Principal } from "./grants.js";
 import type {
-  PrincipalType,
   SavedQuery,
   SavedQueryShare,
 } from "../../../prisma/generated/client/index.js";
@@ -21,10 +21,20 @@ export interface SavedQueryInput {
   name: string;
   description: string;
   query: Prisma.InputJsonValue;
+  availableForDashboards?: boolean;
+  availableOrganizationId?: string | null;
 }
 
 export type SavedQueryChanges = Partial<
-  Pick<SavedQueryInput, "name" | "description" | "query" | "sourceId">
+  Pick<
+    SavedQueryInput,
+    | "name"
+    | "description"
+    | "query"
+    | "sourceId"
+    | "availableForDashboards"
+    | "availableOrganizationId"
+  >
 >;
 
 const nameFilter = (q: string | undefined) =>
@@ -163,8 +173,6 @@ export const countShares = async (
   return counts;
 };
 
-const key = (p: Principal) => `${p.type}:${p.id}`;
-
 /** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */
 export const replaceShares = async (
   tx: Db,
@@ -175,15 +183,10 @@ export const replaceShares = async (
   const existing = await tx.savedQueryShare.findMany({
     where: { savedQueryId },
   });
-  const wanted = new Map(principals.map((p) => [key(p), p]));
-  const have = new Map<string, Principal>(
-    existing.map((s) => {
-      const p = { type: s.principalType as PrincipalType, id: s.principalId };
-      return [key(p), p];
-    })
+  const { added, removed } = diffPrincipals(
+    existing.map((s) => ({ type: s.principalType, id: s.principalId })),
+    principals
   );
-  const added = [...wanted].filter(([k]) => !have.has(k)).map(([, p]) => p);
-  const removed = [...have].filter(([k]) => !wanted.has(k)).map(([, p]) => p);
   if (removed.length > 0) {
     await tx.savedQueryShare.deleteMany({
       where: {
@@ -351,6 +354,36 @@ export const namesVisibleTo = async (
   return new Map(rows.map((r) => [r.id, r.name]));
 };
 
+/**
+ * Those of `ids` the user may open (what `findForViewer` admits): owned,
+ * shared with them or a group of theirs, or available for dashboards in
+ * `organizationId` (null matches null). One read.
+ */
+export const openableAmong = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  organizationId: string | null,
+  tx: Db = prisma
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const rows = await tx.savedQuery.findMany({
+    where: {
+      id: { in: [...ids] },
+      OR: [
+        { ownerId: userId },
+        { shares: { some: reaching(userId, groupIds) } },
+        {
+          availableForDashboards: true,
+          availableOrganizationId: organizationId,
+        },
+      ],
+    },
+    select: { id: true },
+  });
+  return new Set(rows.map((r) => r.id));
+};
+
 /** The names of those of `ids` that exist, by id: one read. */
 export const namesOf = async (
   ids: readonly string[],
@@ -363,3 +396,42 @@ export const namesOf = async (
   });
   return new Map(rows.map((r) => [r.id, r.name]));
 };
+
+/**
+ * Saved queries their owners made available for dashboards in `organizationId`
+ * (null matches null), never those `excludeOwnerId` owns. Newest first, after
+ * the `cursor` id.
+ */
+export const listAvailable = async (
+  options: {
+    organizationId: string | null;
+    excludeOwnerId: string;
+    q?: string;
+    cursor?: string;
+    limit: number;
+  },
+  tx: Db = prisma
+): Promise<{ rows: SavedQuery[]; hasMore: boolean }> => {
+  const { organizationId, excludeOwnerId, q, cursor, limit } = options;
+  const rows = await tx.savedQuery.findMany({
+    where: {
+      availableForDashboards: true,
+      availableOrganizationId: organizationId,
+      ownerId: { not: excludeOwnerId },
+      ...nameFilter(q),
+      ...(cursor && { id: { lt: cursor } }),
+    },
+    orderBy: { id: "desc" },
+    take: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+};
+
+/** Those of `ids` that exist, in one read. */
+export const findByIds = (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<SavedQuery[]> =>
+  ids.length === 0
+    ? Promise.resolve([])
+    : tx.savedQuery.findMany({ where: { id: { in: [...ids] } } });

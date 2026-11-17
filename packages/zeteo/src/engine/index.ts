@@ -1,31 +1,47 @@
-import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
+import { claim, failureWindowOf, release } from "./recordWindow.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { stampSavedQueryRun } from "../saved-queries/stamps.js";
+import { coalesce, waitForLeases } from "./dashboardRun.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
 import { loadUserLimits } from "../limits/resolve.js";
+import type { CachedResult } from "./resultCache.js";
 import type { Caller } from "../middleware/auth.js";
 import { planFor, type Progress } from "./plan.js";
 import type { QueryEntryPoint } from "./limits.js";
+import * as resultCache from "./resultCache.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import { notFound } from "./errors.js";
 import { collect } from "./collect.js";
+import env from "../env.js";
 import { z } from "zod";
 import type {
   ColumnType,
+  PlanContext,
   QueryPlan,
   QueryResult,
   QueryWarning,
   SourceAdapter,
 } from "../adapters/types.js";
 import {
+  QueryFailedError,
+  SavedQueryNotAccessibleError,
+  ValidationError,
+} from "../utils/errors.js";
+import {
+  fingerprintOf,
+  recordIdentityOf,
+  refusalFingerprintOf,
+} from "./fingerprint.js";
+import {
   acquireRunLeases,
   LEASE_GRACE_MS,
+  LIMIT_PROFILES,
   runLimits,
   type UserLimits,
 } from "./limits.js";
@@ -53,6 +69,21 @@ export interface RunQueryInput {
    * `saved_query_not_accessible`, and the run is recorded against it.
    */
   savedQuery?: SavedRun;
+  /**
+   * Set only by src/dashboards/ (a convention test holds it to that), never
+   * from a request: the run is a dashboard panel's, with entry point
+   * `dashboard` and a saved query. It plans against `now`, reads and fills
+   * the result cache, shares an execution with identical runs in this
+   * process, waits for its leases, and is recorded at most once per window.
+   */
+  dashboard?: DashboardRun;
+}
+
+/** A dashboard's run of one panel's query. */
+export interface DashboardRun {
+  dashboardId: string;
+  /** The minute relative dates and the dashboard's time range resolve against. */
+  now: Date;
 }
 
 /** A saved query being run: its id, and the source it is planned against. */
@@ -70,6 +101,17 @@ export interface RunQueryResult {
   warnings: QueryWarning[];
   run_id: string;
 }
+
+/**
+ * A dashboard run's result: `run_id` only when this run was recorded, and
+ * `cached_at` when its rows came from the cache.
+ */
+export type DashboardRunResult = Omit<RunQueryResult, "run_id"> & {
+  run_id?: string;
+  cached_at?: string;
+  /** Rows were left out for the dashboard's or the source's row cap, not the query's own `limit`. */
+  capped_by_dashboard?: true;
+};
 
 /** What every query must be before anything else: an object naming a source. */
 const ShapeSchema = z.looseObject({
@@ -214,20 +256,24 @@ export const loadAndPlanSaved = async (
   caller: Caller,
   saved: SavedRun,
   body: unknown,
-  progress: Progress
-): Promise<{
-  access: CallerAccess;
-  catalog: VisibleCatalog;
-  adapter: SourceAdapter;
-  plan: QueryPlan;
-}> => {
+  progress: Progress,
+  ctx?: PlanContext
+): Promise<Planned> => {
   const access = await loadAccess(caller);
   const toPlan: SavedQueryToPlan = {
     sourceId: saved.sourceId,
     query: body as SavedQueryToPlan["query"],
   };
-  return { access, ...(await planSaved(access, toPlan, progress)) };
+  return { access, ...(await planSaved(access, toPlan, progress, ctx)) };
 };
+
+/** A query planned for its caller. */
+interface Planned {
+  access: CallerAccess;
+  catalog: VisibleCatalog;
+  adapter: SourceAdapter;
+  plan: QueryPlan;
+}
 
 /**
  * What a run is recorded with: the body, and the saved query it came from.
@@ -267,16 +313,29 @@ export const recordRunOrPlaceholder = async (
 
 /** Steps 2 to 6. */
 const execute = async (
-  { caller, entryPoint, body, signal, userLimits, savedQuery }: RunQueryInput,
+  input: RunQueryInput,
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
-  const { access, catalog, adapter, plan } = savedQuery
+  const { caller, body, savedQuery } = input;
+  const planned = savedQuery
     ? await loadAndPlanSaved(caller, savedQuery, body, progress)
     : await loadCatalogFor(caller, slug, progress).then((loaded) => ({
         ...loaded,
         ...planFor(body, loaded.access, loaded.catalog, progress),
       }));
+  return { plan: planned.plan, result: await runPlanned(input, planned) };
+};
+
+/**
+ * Steps 4 to 6 for a planned query: compiled, leases taken (waited for on a
+ * dashboard's run, refused at once otherwise), run on the source within the
+ * entry point's limits and one deadline, and checked against the plan.
+ */
+const runPlanned = async (
+  { caller, entryPoint, signal, userLimits, dashboard }: RunQueryInput,
+  { access, catalog, adapter, plan }: Planned
+): Promise<QueryResult> => {
   const sourceId = catalog.source.id;
   const ownLimits = userLimits ?? (await loadUserLimits(access));
 
@@ -291,12 +350,16 @@ const execute = async (
   const deadlineAt = performance.now() + limits.timeoutMs;
   signal?.throwIfAborted();
   // The source's limit as this run's catalogue read it.
-  const release = await acquireRunLeases(
-    caller.userId,
-    catalog.source,
-    limits.timeoutMs + LEASE_GRACE_MS,
-    ownLimits
-  );
+  const acquire = () =>
+    acquireRunLeases(
+      caller.userId,
+      catalog.source,
+      limits.timeoutMs + LEASE_GRACE_MS,
+      ownLimits
+    );
+  const release = dashboard
+    ? await waitForLeases(acquire, deadlineAt, signal)
+    : await acquire();
   let result: QueryResult;
   try {
     result = await withSourceConnection(sourceId, async (conn) => {
@@ -316,7 +379,7 @@ const execute = async (
     void release();
   }
   checkResult(plan, result, sourceId);
-  return { plan, result };
+  return result;
 };
 
 /**
@@ -326,9 +389,27 @@ const execute = async (
  * recorded, refused and failed ones included; rows are returned only once
  * their run is recorded.
  */
-export const runQuery = async (
+export function runQuery(
+  input: RunQueryInput & { dashboard: DashboardRun }
+): Promise<DashboardRunResult>;
+export function runQuery(
+  input: RunQueryInput & { dashboard?: undefined }
+): Promise<RunQueryResult>;
+export async function runQuery(
   input: RunQueryInput
-): Promise<RunQueryResult> => {
+): Promise<RunQueryResult | DashboardRunResult> {
+  const isDashboard = input.entryPoint === "dashboard";
+  if (
+    isDashboard !== (input.dashboard !== undefined) ||
+    (isDashboard && !input.savedQuery)
+  ) {
+    throw new Error(
+      "a dashboard run needs the dashboard entry point, the dashboard option and a saved query, all three"
+    );
+  }
+  if (input.dashboard && input.savedQuery) {
+    return runDashboardQuery(input, input.dashboard, input.savedQuery);
+  }
   const slug = sourceSlugOf(input.body);
   const started = performance.now();
   const progress: Progress = { sourceId: null, unrecorded: false };
@@ -393,4 +474,198 @@ export const runQuery = async (
     warnings: plan.warnings,
     run_id: runId,
   };
+}
+
+/** The rows of a run as they are shown and kept in the cache. */
+const shownOf = (result: QueryResult, at: Date): CachedResult => ({
+  columns: result.columns,
+  rows: result.rows,
+  truncated: result.truncated !== false,
+  ...(result.truncated !== false && { truncated_by: result.truncated }),
+  cached_at: at.toISOString(),
+});
+
+/**
+ * A dashboard panel's run of a saved query: planned as the viewer against
+ * the dashboard's `now`, then served from the cache, or executed (once for
+ * every identical run in this process) and kept there. It is recorded, and
+ * the saved query stamped, only when it opens the viewer's recording window
+ * for this query; a refusal likewise, with its query withheld. The window is
+ * keyed on `recordIdentityOf` (the body as written, so a `last_*` range is
+ * one query whatever `now` is); the plan's fingerprint keys only the cache
+ * and the shared execution. Rows are returned only once a recorded run is
+ * recorded.
+ */
+const runDashboardQuery = async (
+  input: RunQueryInput,
+  dashboard: DashboardRun,
+  savedQuery: SavedRun
+): Promise<DashboardRunResult> => {
+  sourceSlugOf(input.body);
+  const { caller, signal } = input;
+  const started = performance.now();
+  const progress: Progress = { sourceId: null, unrecorded: false };
+  const windowMinutes = env.DASHBOARD_RECORD_WINDOW_MINUTES;
+  let cached = false;
+  const record = (
+    outcome: Pick<RunRecord, "outcome" | "errorCode" | "rowCount" | "truncated">
+  ): Promise<string> =>
+    recordRunOrPlaceholder({
+      caller,
+      sourceId: progress.sourceId,
+      entryPoint: "dashboard",
+      ...recordedQueryOf(input.body, savedQuery, progress),
+      dashboardId: dashboard.dashboardId,
+      cached,
+      durationMs: Math.round(performance.now() - started),
+      ...outcome,
+    });
+  const recordFailure = async (err: unknown, fingerprint: string) => {
+    if (progress.unrecorded) return;
+    if (!(await claim(caller.userId, fingerprint, windowMinutes))) return;
+    const closed = signal?.aborted === true && err === signal.reason;
+    try {
+      await record({
+        ...(closed
+          ? { outcome: "failed" as const, errorCode: CLIENT_CLOSED }
+          : failureOf(err)),
+        rowCount: null,
+        truncated: false,
+      });
+    } catch (recordErr) {
+      logger.error(
+        { err: recordErr, source_id: progress.sourceId },
+        "a failed dashboard run could not be recorded, even without its query"
+      );
+      await release(caller.userId, fingerprint);
+    }
+  };
+
+  let planned: Planned;
+  try {
+    planned = await loadAndPlanSaved(caller, savedQuery, input.body, progress, {
+      now: dashboard.now,
+    });
+  } catch (err) {
+    await recordFailure(err, refusalFingerprintOf(savedQuery.id));
+    throw err;
+  }
+  const { plan, catalog } = planned;
+  const profile = LIMIT_PROFILES.dashboard;
+  const { maxRows } = runLimits("dashboard", plan.limit, catalog.source);
+  const fingerprint = fingerprintOf(catalog.source.id, plan, {
+    limit: maxRows,
+    offset: plan.offset,
+  });
+  const recordAs = recordIdentityOf(
+    catalog.source.id,
+    savedQuery.id,
+    input.body,
+    maxRows
+  );
+
+  let shown: CachedResult;
+  try {
+    const hit = await resultCache.get(fingerprint);
+    if (hit) {
+      cached = true;
+      shown = hit;
+    } else {
+      shown = await coalesce(fingerprint, signal, async () => {
+        const result = await runPlanned(input, planned);
+        const fresh = shownOf(result, new Date());
+        await resultCache.set(
+          fingerprint,
+          fresh,
+          env.DASHBOARD_CACHE_TTL_SECONDS,
+          profile.maxBytes
+        );
+        return fresh;
+      });
+    }
+  } catch (err) {
+    // Its own window, so a run that failed (or whose caller went away) never
+    // keeps the next successful one from being recorded.
+    await recordFailure(err, failureWindowOf(recordAs));
+    throw err;
+  }
+
+  const { cached_at: cachedAt, ...rows } = shown;
+  const result: DashboardRunResult = {
+    ...rows,
+    warnings: plan.warnings,
+    ...(cached && { cached_at: cachedAt }),
+    // The rows were cut by the dashboard's or the source's cap, not by the
+    // saved query's own `limit`.
+    ...(shown.truncated_by === "rows" &&
+      (plan.limit === undefined || plan.limit > maxRows) && {
+        capped_by_dashboard: true,
+      }),
+  };
+  if (!(await claim(caller.userId, recordAs, windowMinutes))) return result;
+  let runId: string;
+  try {
+    runId = await record({
+      outcome: "ok",
+      errorCode: null,
+      rowCount: shown.rows.length,
+      truncated: shown.truncated,
+    });
+  } catch (err) {
+    logger.error(
+      { err, source_id: progress.sourceId },
+      "a dashboard run could not be recorded, even without its query; its rows are withheld"
+    );
+    // The window stays closed, so the next run records instead.
+    await release(caller.userId, recordAs);
+    throw err;
+  }
+  // Not waited for: a stamp that fails is logged, and the run stands.
+  void stampSavedQueryRun(savedQuery.id, caller.userId);
+  return { ...result, run_id: runId };
+};
+
+/**
+ * A dashboard panel refused before it ran: the viewer's decision found they
+ * cannot run its saved query, so nothing is planned or run again. Recorded as
+ * `runDashboardQuery` records a refusal: at most once per viewer, saved query
+ * and window, with its query withheld and no source. Never throws; a record
+ * that fails is logged and leaves the window open for the next run.
+ */
+export const recordDashboardRefusal = async (
+  caller: Caller,
+  savedQueryId: string,
+  dashboard: Pick<DashboardRun, "dashboardId">
+): Promise<void> => {
+  const fingerprint = refusalFingerprintOf(savedQueryId);
+  if (
+    !(await claim(
+      caller.userId,
+      fingerprint,
+      env.DASHBOARD_RECORD_WINDOW_MINUTES
+    ))
+  ) {
+    return;
+  }
+  try {
+    await recordRunOrPlaceholder({
+      caller,
+      sourceId: null,
+      entryPoint: "dashboard",
+      query: WITHHELD_QUERY,
+      savedQueryId,
+      dashboardId: dashboard.dashboardId,
+      cached: false,
+      durationMs: 0,
+      ...failureOf(new SavedQueryNotAccessibleError()),
+      rowCount: null,
+      truncated: false,
+    });
+  } catch (err) {
+    logger.error(
+      { err, saved_query_id: savedQueryId },
+      "a refused dashboard panel could not be recorded"
+    );
+    await release(caller.userId, fingerprint);
+  }
 };

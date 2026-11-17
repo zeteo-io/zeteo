@@ -264,17 +264,19 @@ export const SavedQueriesPage = () => {
               {
                 title: "Name",
                 cellElement: (sq) => (
-                  <span className="z-sq-name">
-                    <TableCellLink as={Link} to={`/my/saved-queries/${sq.id}`}>
-                      {sq.name}
-                    </TableCellLink>
-                    {sq.description && (
-                      <span className="z-muted" title={sq.description}>
-                        {sq.description}
-                      </span>
-                    )}
-                  </span>
+                  <TableCellLink as={Link} to={`/my/saved-queries/${sq.id}`}>
+                    {sq.name}
+                  </TableCellLink>
                 ),
+              },
+              {
+                title: "Description",
+                cellElement: (sq) =>
+                  sq.description ? (
+                    <span className="z-sq-desc" title={sq.description}>
+                      {sq.description}
+                    </span>
+                  ) : null,
               },
               {
                 title: "Owner",
@@ -389,11 +391,16 @@ export const SavedQueriesPage = () => {
         </div>
       )}
       {dialog?.kind === "share" && (
-        <ShareDialog savedQueryId={dialog.id} onClose={() => setDialog(null)} />
+        <ShareDialog
+          objectType="saved_query"
+          id={dialog.id}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "transfer" && (
         <TransferDialog
-          savedQueryId={dialog.id}
+          objectType="saved_query"
+          id={dialog.id}
           onClose={() => setDialog(null)}
         />
       )}

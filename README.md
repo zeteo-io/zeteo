@@ -14,7 +14,8 @@ per-user and per-group concurrency limits ([docs/grants.md](packages/zeteo/docs/
 querying: the catalogue of what a caller may query, the query language, `POST /v1/query` and the
 run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming export
 ([docs/export.md](packages/zeteo/docs/export.md)), saved queries
-([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md)) and the MCP endpoint
+([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md)), dashboards
+([docs/dashboards.md](packages/zeteo/docs/dashboards.md)) and the MCP endpoint
 ([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI (`packages/zeteo-ui`) ships in the image
 and is served at `/` once `UI_CLIENT_ID` names its login client in tereo; how to turn it on, what
 each screen does, its local development and its server side (`/v1/me`, the people and groups
@@ -90,12 +91,21 @@ and changes write audit entries to tereo's outbox.
   with their own grants only; one who lacks them is told to ask an admin and sees neither the query
   nor its source. `GET /v1/me/runs` lists a caller's own runs.
   ([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md))
+- **Dashboards.** A dashboard is a grid of panels, each a saved query shown as a chart, a stat or a
+  table, with saved panels to reuse a chart on many dashboards. Dashboards and saved panels are
+  shared and copied as saved queries are; a saved query's owner makes it "Available for
+  dashboards" for others' panels. Every viewer runs every panel with their own grants, over a
+  time range built from relative dates, as a stream of one line per panel
+  (`POST /v1/dashboards/{id}/run`). Dashboard results are cached briefly in Redis
+  (`DASHBOARD_CACHE_TTL_SECONDS`) and a dashboard's runs are recorded once per viewer per query
+  per `DASHBOARD_RECORD_WINDOW_MINUTES`. The UI has Dashboards, a display mode for wall screens
+  and admin pages. ([docs/dashboards.md](packages/zeteo/docs/dashboards.md))
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).
 - **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves these tools to an AI signed in through
   tereo: `list_sources`, `list_tables` and `describe_table` to discover what it may
   query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
-  5,000 or 1 MB), and tools to list, run, save, change and delete saved queries, with
+  5,000 or 1 MB), and tools for saved queries, dashboards and saved panels, with
   instructions that teach the model the language. A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 

@@ -1,0 +1,87 @@
+SavedPanel:
+  type: object
+  description: |
+    A saved panel as the viewer sees it: a chart on a saved query that dashboards can link. `chart`,
+    `time_column` and `saved_query_id` are present only when `state` is `ok` (never null). Neither the
+    saved query's name nor anything of why a viewer cannot run it is carried.
+  required: [id, name, description, owner, state, created_at, updated_at]
+  properties:
+    id: { type: string, format: uuid }
+    name: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: string, maxLength: 2000 }
+    owner:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: [string, 'null'], description: From tereo's directory; null when it could not be looked up }
+    state: { $ref: '../dashboards/schemas.yaml#/PanelState' }
+    message: { type: string }
+    chart: { $ref: '../dashboards/schemas.yaml#/ChartSettings' }
+    time_column: { $ref: '../dashboards/schemas.yaml#/PanelTimeColumn' }
+    saved_query_id: { type: string, format: uuid }
+    problems:
+      type: array
+      items: { $ref: '../dashboards/schemas.yaml#/ChartProblem' }
+    used_by:
+      type: object
+      description: Present only for its owner and a holder of `zeteo.dashboards.read`
+      required: [dashboards]
+      properties:
+        dashboards: { type: integer, minimum: 0, description: How many dashboards link it }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+    shared_at: { type: string, format: date-time, description: When it was first shared with the viewer; present only when it was }
+    share_count: { type: integer, minimum: 0, description: Present only when the viewer may see the share list }
+
+ListSavedPanelsResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/SavedPanel' }
+    next_cursor: { type: [string, 'null'] }
+
+CreateSavedPanelRequest:
+  type: object
+  additionalProperties: false
+  required: [name, saved_query_id, chart]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: 'Trimmed; unique per owner, whatever the case' }
+    description: { type: string, maxLength: 2000, default: '' }
+    saved_query_id: { type: string, format: uuid }
+    chart: { $ref: '../dashboards/schemas.yaml#/ChartSettings' }
+    time_column: { $ref: '../dashboards/schemas.yaml#/PanelTimeColumn' }
+
+UpdateSavedPanelRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: string, maxLength: 2000 }
+    saved_query_id: { type: string, format: uuid }
+    chart: { $ref: '../dashboards/schemas.yaml#/ChartSettings' }
+    time_column: { type: [string, 'null'], minLength: 1, maxLength: 200, description: Null removes the time column }
+
+CopySavedPanelRequest:
+  type: object
+  additionalProperties: false
+  required: [name]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: "The copy's name; unique among the caller's saved panels, whatever the case" }
+
+SaveAsSavedPanelRequest:
+  type: object
+  additionalProperties: false
+  required: [name]
+  properties:
+    name: { type: string, minLength: 1, maxLength: 100, description: 'Unique among the caller''s saved panels, whatever the case' }
+    description: { type: string, maxLength: 2000 }
+
+PreviewSavedPanelRequest:
+  type: object
+  additionalProperties: false
+  properties:
+    time_range: { $ref: '../dashboards/schemas.yaml#/TimeRangeKey' }

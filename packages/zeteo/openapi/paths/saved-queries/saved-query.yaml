@@ -3,8 +3,10 @@
     tags: [Saved queries]
     summary: Get a saved query
     description: |
-      For its owner, a user it is shared with (directly or through a group) and a holder of
-      `zeteo.saved_queries.read`; anyone else gets `404 not_found`.
+      For its owner, a user it is shared with (directly or through a group), anyone in the
+      organization it is available to when it is `available_for_dashboards`, and a holder of
+      `zeteo.saved_queries.read`; anyone else gets `404 not_found`. `used_by` counts the dashboards
+      and saved panels built on it, for its owner and a holder of `zeteo.saved_queries.read`.
 
       **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
     operationId: getSavedQuery
@@ -29,7 +31,8 @@
     description: |
       Its owner only (anyone else, `404 not_found`). A changed `query` is planned again against the
       owner's own grants (`422`) and moves the saved query to that query's source. The owner need
-      not be able to run it to rename or describe it. A `zeteo.saved_query.updated` audit entry is
+      not be able to run it to rename or describe it. `available_for_dashboards` offers it to
+      dashboards in the organization the owner is signed in to, or withdraws it. A `zeteo.saved_query.updated` audit entry is
       written.
 
       **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
