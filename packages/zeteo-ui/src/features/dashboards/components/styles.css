@@ -69,6 +69,14 @@
   width: 14rem;
 }
 
+.z-dashboard-refresh {
+  width: 10rem;
+}
+
+.z-dashboard-live {
+  align-self: center;
+}
+
 .z-dashboard-grid {
   margin: 0 -12px;
 }

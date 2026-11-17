@@ -7,6 +7,7 @@ import { ConfirmButton } from "@/components/ConfirmButton";
 import { Badge, Button, Spinner } from "@kosmeo-ui/react";
 import { useRunDashboard } from "../api/useRunDashboard";
 import type { Panel, TimeRangeKey } from "../api/types";
+import { useAutoRefresh } from "../api/useAutoRefresh";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
@@ -15,6 +16,7 @@ import { TimeRangePicker } from "./TimeRangePicker";
 import { useDashboard } from "../api/useDashboard";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
+import { RefreshPicker } from "./RefreshPicker";
 import { usePanels } from "../api/usePanels";
 import { useAuth } from "@tereo-io/react";
 import { PanelFrame } from "./PanelFrame";
@@ -33,6 +35,11 @@ import {
   useDeleteDashboard,
   useSaveDashboard,
 } from "../api/useSaveDashboard";
+import {
+  intervalLabel,
+  readRefreshChoice,
+  writeRefreshChoice,
+} from "../refreshOptions";
 
 type Dialog =
   | { kind: "share" | "transfer" | "details" | "copy" | "add" }
@@ -46,7 +53,12 @@ export const DashboardView = () => {
 };
 
 const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
-  const { data: dashboard, error, isLoading } = useDashboard(dashboardId);
+  const {
+    data: dashboard,
+    error,
+    isLoading,
+    refetch,
+  } = useDashboard(dashboardId);
   const { user, hasPermission } = useAuth<Me>();
   const panelIds = useMemo(
     () => dashboard?.panels.map((p) => p.id) ?? [],
@@ -60,6 +72,11 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
   const navigate = useNavigate();
   // The viewer's own range: undefined until they choose (the dashboard's default).
   const [chosen, setChosen] = useState<TimeRangeKey | null | undefined>();
+  // The viewer's own auto-refresh, remembered in this browser: undefined until
+  // they choose or one was remembered (then the dashboard's own interval).
+  const [refreshChoice, setRefreshChoice] = useState<number | null | undefined>(
+    () => readRefreshChoice(dashboardId)
+  );
   const [editing, setEditing] = useState(false);
   const [places, setPlaces] = useState<Record<string, Place>>({});
   const [dialog, setDialog] = useState<Dialog>(null);
@@ -76,6 +93,22 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
   useEffect(() => {
     if (loaded) void run({ timeRange: chosen });
   }, [loaded, chosen, run]);
+
+  const refreshSeconds =
+    refreshChoice === undefined
+      ? (dashboard?.refresh_seconds ?? null)
+      : refreshChoice;
+  useAutoRefresh({
+    seconds: refreshSeconds,
+    enabled: loaded,
+    restartKey: chosen,
+    running: runner.running,
+    pauseWhenHidden: true,
+    onTick: () => {
+      void refetch();
+      void run({ timeRange: chosen });
+    },
+  });
 
   if (isLoading) return <Spinner size="lg" />;
   if (!dashboard) {
@@ -321,6 +354,22 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
         <div className="z-dashboard-range">
           <TimeRangePicker value={timeRange} onChange={setChosen} />
         </div>
+        <div className="z-dashboard-refresh">
+          <RefreshPicker
+            value={refreshSeconds}
+            onChange={(v) => {
+              setRefreshChoice(v);
+              writeRefreshChoice(dashboardId, v);
+            }}
+          />
+        </div>
+        {refreshSeconds !== null && (
+          <span className="z-dashboard-live">
+            <Badge size="sm" variant="secondary">
+              Live · every {intervalLabel(refreshSeconds)}
+            </Badge>
+          </span>
+        )}
         <IconAction
           icon={faArrowsRotate}
           label="Refresh all"

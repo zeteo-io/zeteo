@@ -154,6 +154,18 @@ the source, the saved query, the body as the panel sends it (relative dates and 
 unresolved) and the row cap, so a `last_24_hours` panel stays one query as `now` moves. Every other path (API, MCP, export) records every run. A run that cannot
 be recorded closes its window again and the rows are withheld, as for any query.
 
+## Auto-refresh on the dashboard page
+
+The dashboard page has an **Auto-refresh** picker beside the time range: Off, 1 min, 5 min, 15 min,
+30 min or 1 hour. It starts at the viewer's remembered choice, else the dashboard's
+`refresh_seconds` (shown as its own option when it is none of these), else Off, and the choice is
+not saved to the dashboard: it is remembered per dashboard in the viewer's browser
+(`localStorage`). While on, the page shows "Live · every N min" and each interval reloads the
+dashboard and re-runs all panels with the viewer's time range; a tick never cuts a run still going,
+and a failed refresh keeps the last chart with "Stale since". A background tab does not refresh;
+when it is shown again it refreshes once if an interval has passed. Results are cached for
+`DASHBOARD_CACHE_TTL_SECONDS`, so the intervals are minutes, not seconds.
+
 ## Display mode
 
 `/dashboards/<id>/display` in the admin UI shows one dashboard alone, without the top bar, in the

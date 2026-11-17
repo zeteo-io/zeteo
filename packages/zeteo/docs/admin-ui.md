@@ -113,7 +113,7 @@ page and no sections.
 - **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
   Its tabs list the person's own dashboards and those shared with them, and their saved panels
   (`/saved-panels` goes to the Saved panels tab). A dashboard (`/dashboards/<id>`) shows its panels
-  on a 12-column grid, runs them as the viewer with a time range picker and a refresh, and the
+  on a 12-column grid, runs them as the viewer with a time range picker, a refresh and an **Auto-refresh** picker ([dashboards.md](dashboards.md#auto-refresh-on-the-dashboard-page)), and the
   owner edits it: add, move, resize and remove panels, a panel editor with a chart form that
   checks the chart against the query's columns, **Save as saved panel**, **Detach**, **Share**,
   **Transfer** and **Copy**. A panel that cannot be shown carries the copy of
@@ -123,7 +123,7 @@ page and no sections.
   theme, refreshing itself and reloading the dashboard as it does; on a lost session it says
   "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)). A **Full screen** button
   appears in the corner while the mouse moves; an unattended screen should use the browser's kiosk mode, as full screen needs a click.
-- **Dashboards** and **Saved panels** under Admin (`/admin/dashboards`, `/admin/saved-panels`,
+- **All dashboards** and **All saved panels** under Admin (`/admin/dashboards`, `/admin/saved-panels`,
   `zeteo.dashboards.read`; share, transfer and delete need `.write`): every user's dashboards and
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
   shown here and the sections have no edit: only the owner changes one.

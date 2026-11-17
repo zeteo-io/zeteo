@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Dashboard, DashboardTheme } from "../api/types";
 import { faExpand } from "@fortawesome/free-solid-svg-icons";
 import { useRunDashboard } from "../api/useRunDashboard";
+import { useAutoRefresh } from "../api/useAutoRefresh";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { PanelRun } from "../api/useRunDashboard";
 import { useDashboard } from "../api/useDashboard";
@@ -191,15 +192,15 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
   }, [loaded, runUnlessRunning]);
 
   // Each tick reloads the dashboard too, so the owner's changes appear.
-  useEffect(() => {
-    if (!loaded || refreshSeconds === null || signedOut) return;
-    const timer = setInterval(() => {
+  useAutoRefresh({
+    seconds: refreshSeconds,
+    enabled: loaded && !signedOut,
+    onTick: () => {
       if (running.current) return;
       void refetch();
       runUnlessRunning();
-    }, refreshSeconds * 1000);
-    return () => clearInterval(timer);
-  }, [loaded, refreshSeconds, signedOut, runUnlessRunning, refetch]);
+    },
+  });
 
   // A line that disagrees with the dashboard (a panel fixed or added since it
   // loaded) reloads it, once for each new disagreement.
