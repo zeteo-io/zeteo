@@ -1,10 +1,11 @@
-import { useUpdateSavedQuery } from "@/features/saved-queries/api/useUpdateSavedQuery";
-import { useCreateSavedQuery } from "@/features/saved-queries/api/useCreateSavedQuery";
-import { useCopySavedQuery } from "@/features/saved-queries/api/useCopySavedQuery";
+import "./styles.css";
 import { Alert, Button, Input, Modal, TextArea } from "@kosmeo-ui/react";
-import type { SavedQuery } from "@/features/saved-queries/api/types";
+import { useUpdateSavedQuery } from "../api/useUpdateSavedQuery";
+import { useCreateSavedQuery } from "../api/useCreateSavedQuery";
+import { useCopySavedQuery } from "../api/useCopySavedQuery";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useState, type ReactNode } from "react";
+import type { SavedQuery } from "../api/types";
 import type { ApiError } from "@/lib/api";
 
 const NAME_CONFLICT = "You already have a saved query with this name.";

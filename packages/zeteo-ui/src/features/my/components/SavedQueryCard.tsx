@@ -1,6 +1,3 @@
-import { useDeleteSavedQuery } from "@/features/saved-queries/api/useDeleteSavedQuery";
-import { ShareDialog, TransferDialog } from "@/features/saved-queries";
-import type { SavedQuery } from "@/features/saved-queries/api/types";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { formatRelative } from "@/utils/formatRelative";
 import { NoAccessNotice } from "./NoAccessNotice";
@@ -10,8 +7,12 @@ import { useState } from "react";
 import {
   CopyDialog,
   EditDetailsDialog,
+  ShareDialog,
+  TransferDialog,
   ViewJsonDialog,
-} from "./SavedQueryDialogs";
+  useDeleteSavedQuery,
+  type SavedQuery,
+} from "@/features/saved-queries";
 
 interface SavedQueryCardProps {
   savedQuery: SavedQuery;

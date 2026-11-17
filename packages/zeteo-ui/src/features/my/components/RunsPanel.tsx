@@ -1,10 +1,10 @@
 import { Badge, BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import { formatCount } from "@/features/sources/components/sourceLabels";
 import { OutcomeBadge } from "@/features/runs/components/OutcomeBadge";
+import { SaveQueryDialog } from "@/features/saved-queries";
 import { formatDuration } from "@/utils/formatDuration";
 import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { SaveQueryDialog } from "./SavedQueryDialogs";
 import { isWithheld, type MyRun } from "../api/types";
 import { formatDate } from "@/utils/formatDate";
 import { useMyRuns } from "../api/useMyRuns";
@@ -57,6 +57,7 @@ const RunRow = ({
         )}
         <span className="z-muted">{formatDuration(run.duration_ms)}</span>
         {run.error_code && <code>{run.error_code}</code>}
+        {withheld && <span className="z-muted">Query withheld</span>}
         <span className="z-run-actions">
           {hasQuery && (
             <>

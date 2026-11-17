@@ -1,7 +1,6 @@
 import { BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import type { SavedQuery } from "@/features/saved-queries";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { SaveQueryDialog } from "./SavedQueryDialogs";
 import { PageHeader } from "@/components/PageHeader";
 import { SavedQueryCard } from "./SavedQueryCard";
 import { CatalogPanel } from "./CatalogPanel";
@@ -10,6 +9,7 @@ import { RunsPanel } from "./RunsPanel";
 import { useState } from "react";
 import "./styles.css";
 import {
+  SaveQueryDialog,
   useMySavedQueries,
   useSharedSavedQueries,
 } from "@/features/saved-queries";

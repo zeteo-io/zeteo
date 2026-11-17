@@ -6,4 +6,10 @@ export { useDeleteSavedQuery } from "./api/useDeleteSavedQuery";
 export { useCopySavedQuery } from "./api/useCopySavedQuery";
 export { TransferDialog } from "./components/TransferDialog";
 export { ShareDialog } from "./components/ShareDialog";
+export {
+  CopyDialog,
+  EditDetailsDialog,
+  SaveQueryDialog,
+  ViewJsonDialog,
+} from "./components/SavedQueryDialogs";
 export type { SavedQuery } from "./api/types";

@@ -63,6 +63,14 @@ const catalog = {
 };
 
 const run = makeRun({ query: { source: "sales-db", from: "orders" } });
+const withheldRun = makeRun({
+  id: "a9999999-1c7a-4a53-9d0e-6a3b1f2c4d09",
+  outcome: "refused",
+  row_count: null,
+  source_id: null,
+  query: { withheld: true },
+});
+let runs = [run];
 
 const answer = (scope: string | undefined, url: string) => {
   if (url === "/v1/saved-queries") {
@@ -73,8 +81,7 @@ const answer = (scope: string | undefined, url: string) => {
       },
     };
   }
-  if (url === "/v1/me/runs")
-    return { data: { data: [run], next_cursor: null } };
+  if (url === "/v1/me/runs") return { data: { data: runs, next_cursor: null } };
   if (url === "/v1/catalog") return { data: catalog };
   if (url === "/v1/me/principals") return { data: { data: [] } };
   return { data: { data: [], next_cursor: null } };
@@ -82,6 +89,7 @@ const answer = (scope: string | undefined, url: string) => {
 
 describe("MyPage", () => {
   beforeEach(() => {
+    runs = [run];
     get
       .mockReset()
       .mockImplementation(
@@ -91,6 +99,79 @@ describe("MyPage", () => {
     post.mockReset().mockResolvedValue({ data: mine });
     patch.mockReset().mockResolvedValue({ data: mine });
     del.mockReset().mockResolvedValue({});
+  });
+
+  it("shows a withheld run without its source or query actions", async () => {
+    runs = [withheldRun];
+    renderWithProviders(<MyPage />);
+    expect(await screen.findByText("Query withheld")).toBeInTheDocument();
+    const row = screen.getByText("Query withheld").closest("li") as HTMLElement;
+    expect(within(row).queryByText("sales-db")).not.toBeInTheDocument();
+    expect(
+      within(row).queryByRole("button", { name: "Show query" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Save as saved query" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("deletes a saved query after confirming", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<MyPage />);
+    const card = (await screen.findByText("Weekly revenue")).closest(
+      "[data-saved-query]"
+    ) as HTMLElement;
+    await user.click(within(card).getByRole("button", { name: "Delete" }));
+    expect(del).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(del).toHaveBeenCalledWith(`/v1/saved-queries/${SAVED_ID}`)
+    );
+  });
+
+  it("copies a shared saved query under a name", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<MyPage />);
+    const card = (await screen.findByText("Team signups")).closest(
+      "[data-saved-query]"
+    ) as HTMLElement;
+    await user.click(
+      within(card).getByRole("button", { name: "Copy to mine" })
+    );
+    const dialog = await screen.findByRole("dialog");
+    const name = within(dialog).getByLabelText("Name");
+    expect(name).toHaveValue("Team signups (copy)");
+    await user.clear(name);
+    await user.type(name, "My signups");
+    await user.click(within(dialog).getByRole("button", { name: "Copy" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        `/v1/saved-queries/${sharedOk.id}/copy`,
+        {
+          name: "My signups",
+        }
+      )
+    );
+  });
+
+  it("says a copy's name is taken on 409", async () => {
+    const user = userEvent.setup();
+    post.mockRejectedValue({ status: 409, code: "conflict", message: "dup" });
+    renderWithProviders(<MyPage />);
+    const card = (await screen.findByText("Team signups")).closest(
+      "[data-saved-query]"
+    ) as HTMLElement;
+    await user.click(
+      within(card).getByRole("button", { name: "Copy to mine" })
+    );
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Copy" }));
+    expect(
+      await within(dialog).findByText(
+        "You already have a saved query with this name."
+      )
+    ).toBeInTheDocument();
   });
 
   it("has the four panels", async () => {
