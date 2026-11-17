@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Centered, Spinner } from "@kosmeo-ui/react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import type { DashboardTheme } from "../api/types";
 import { faExpand } from "@fortawesome/free-solid-svg-icons";
 import { useRunDashboard } from "../api/useRunDashboard";
 import { useAutoRefresh } from "../api/useAutoRefresh";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import type { DashboardTheme } from "../api/types";
 import { useDashboard } from "../api/useDashboard";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { DashboardGrid } from "./DashboardGrid";
+import { disagreement } from "./disagreement";
 import { useAuth } from "@tereo-io/react";
 import { PanelFrame } from "./PanelFrame";
-import { disagreement } from "./disagreement";
 import "./styles.css";
 
 const DARK = "(prefers-color-scheme: dark)";
