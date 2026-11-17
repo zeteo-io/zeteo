@@ -20,6 +20,8 @@ export type StubResponse = {
   body?: unknown;
   chunks?: (string | Buffer)[];
   cutAfterChunks?: boolean;
+  /** With cutAfterChunks: cut only once this settles, not right after the chunks. */
+  cutWhen?: Promise<unknown>;
   /** Neither end nor cut the response after its chunks. */
   holdOpen?: boolean;
 };
@@ -68,8 +70,10 @@ async function send(
       res.write(chunk);
       await tick();
     }
-    if (out.cutAfterChunks) res.destroy();
-    else if (!out.holdOpen) res.end();
+    if (out.cutAfterChunks) {
+      await out.cutWhen;
+      res.destroy();
+    } else if (!out.holdOpen) res.end();
     return;
   }
   res.writeHead(status, { "content-type": "application/json", ...out.headers });
