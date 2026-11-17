@@ -7,11 +7,11 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { SavedQueryCard } from "./SavedQueryCard";
 import { CatalogList } from "./CatalogPanel";
-import { useEffect, useState } from "react";
 import type { ApiError } from "@/lib/api";
 import { useAuth } from "@tereo-io/react";
 import { RunsList } from "./RunsPanel";
 import type { Me } from "@/lib/auth";
+import { useState } from "react";
 import "./styles.css";
 import {
   SaveQueryDialog,
@@ -31,20 +31,11 @@ const SavedQueryList = ({
   state,
   kind,
   empty,
-  picked,
 }: {
   state: ListState;
   kind: "mine" | "shared";
   empty: string;
-  picked?: string;
 }) => {
-  // Brings the saved query an overview link picked into view, once loaded.
-  useEffect(() => {
-    if (!picked || state.isLoading) return;
-    document
-      .querySelector(`[data-saved-query="${CSS.escape(picked)}"]`)
-      ?.scrollIntoView?.({ block: "center" });
-  }, [picked, state.isLoading]);
   return (
     <>
       {state.isLoading && <Spinner size="sm" />}
@@ -55,12 +46,7 @@ const SavedQueryList = ({
       {state.items.length > 0 && (
         <div className="z-sq-grid">
           {state.items.map((sq) => (
-            <SavedQueryCard
-              key={sq.id}
-              savedQuery={sq}
-              kind={kind}
-              picked={sq.id === picked}
-            />
+            <SavedQueryCard key={sq.id} savedQuery={sq} kind={kind} />
           ))}
         </div>
       )}
@@ -90,7 +76,6 @@ export const MyPage = () => {
   const [params] = useSearchParams();
   const raw = params.get("tab");
   const tab: MyTab = isTab(raw) ? raw : "overview";
-  const picked = params.get("saved_query") ?? undefined;
   const mine = useMySavedQueries();
   const shared = useSharedSavedQueries();
   const { user } = useAuth<Me>();
@@ -148,7 +133,6 @@ export const MyPage = () => {
         <SavedQueryList
           state={mine}
           kind="mine"
-          picked={picked}
           empty="Save a query from one of your recent runs, or ask your AI assistant to save one."
         />
       )}
@@ -156,7 +140,6 @@ export const MyPage = () => {
         <SavedQueryList
           state={shared}
           kind="shared"
-          picked={picked}
           empty="Nothing has been shared with you yet."
         />
       )}

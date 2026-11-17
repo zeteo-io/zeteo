@@ -94,6 +94,31 @@ describe("GET /v1/me/runs", () => {
     expect(after.body.data[0]).not.toHaveProperty("saved_query");
   });
 
+  it("filters to the runs of one saved query", async () => {
+    const query = { source: source.slug, from: "orders", select: ["id"] };
+    expect((await postQuery(owner.token, query)).status).toBe(200);
+    const ran = await fetchJson(
+      "POST",
+      `${BASE_URL}/v1/saved-queries/${savedId}/run`,
+      owner.token,
+      {}
+    );
+    expect(ran.status).toBe(200);
+
+    const res = await myRuns(owner.token, `?saved_query_id=${savedId}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.map((r: { id: string }) => r.id)).toEqual([
+      ran.body.run_id,
+    ]);
+    // Another user's runs of it stay theirs.
+    expect(
+      (await myRuns(other.token, `?saved_query_id=${savedId}`)).body.data
+    ).toEqual([]);
+    expect((await myRuns(owner.token, "?saved_query_id=nope")).status).toBe(
+      400
+    );
+  });
+
   it("pages with a cursor", async () => {
     const query = { source: source.slug, from: "orders", select: ["id"] };
     for (let i = 0; i < 2; i++) await postQuery(other.token, query);

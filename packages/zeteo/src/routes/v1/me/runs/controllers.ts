@@ -17,6 +17,8 @@ export const listMyRuns = async (req: Request, res: Response) => {
       : parseCursor(query.cursor, RunCursorSchema)[0];
   const page = await db.queryRuns.listPage({
     userId: caller.userId,
+    // Only ever the caller's own runs, so naming any id reveals nothing.
+    savedQueryId: query.saved_query_id,
     outcome: query.outcome,
     cursor,
     limit: query.limit,

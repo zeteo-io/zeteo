@@ -246,21 +246,18 @@ describe("MyPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("links a recent saved query to its tab, with that card picked out", async () => {
-    const user = userEvent.setup();
+  it("links each saved query to its own page", async () => {
     at();
-    await user.click(await screen.findByRole("link", { name: "Team signups" }));
     expect(
-      await screen.findByRole("link", { name: "Shared with me" })
-    ).toHaveAttribute("aria-current", "page");
-    const card = (await screen.findByText("Signups by day")).closest(
-      "[data-saved-query]"
-    ) as HTMLElement;
-    expect(card).toHaveClass("z-sq-picked");
-    const other = screen
-      .getByText("Finance close")
-      .closest("[data-saved-query]") as HTMLElement;
-    expect(other).not.toHaveClass("z-sq-picked");
+      await screen.findByRole("link", { name: "Team signups" })
+    ).toHaveAttribute("href", `/my/saved-queries/${sharedOk.id}`);
+  });
+
+  it("links a card's name to the saved query's page", async () => {
+    at("mine");
+    expect(
+      await screen.findByRole("link", { name: "Weekly revenue" })
+    ).toHaveAttribute("href", `/my/saved-queries/${SAVED_ID}`);
   });
 
   it("shows ten runs, then ten more on Show more", async () => {

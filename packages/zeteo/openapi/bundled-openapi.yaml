@@ -1738,6 +1738,13 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: saved_query_id
+          in: query
+          required: false
+          description: Only the runs of this saved query.
+          schema:
+            type: string
+            format: uuid
         - name: outcome
           in: query
           required: false
@@ -1776,6 +1783,13 @@ paths:
         **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
       operationId: listMyRuns
       parameters:
+        - name: saved_query_id
+          in: query
+          required: false
+          description: Only the caller's own runs of this saved query.
+          schema:
+            type: string
+            format: uuid
         - name: outcome
           in: query
           required: false

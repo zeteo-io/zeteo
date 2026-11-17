@@ -1,3 +1,40 @@
+/* One saved query: the query and its runs, the details beside them. */
+.z-sqp-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.z-sqp-main,
+.z-sqp-side {
+  display: grid;
+  gap: 1.25rem;
+  min-width: 0;
+}
+
+.z-sqp-json {
+  margin: 0;
+  max-height: 28rem;
+}
+
+@media (max-width: 1000px) {
+  .z-sqp-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A saved query's name links to its page. */
+.z-sq-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.z-sq-title a:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}
+
 /* My Zeteo's header: the title and its action on one row. */
 .z-my-header .k-section-header-row {
   align-items: center;
@@ -16,12 +53,6 @@
 .z-my-narrow {
   max-width: 56rem;
   margin: 0 auto;
-}
-
-/* The saved query an overview link opened. */
-.z-sq-picked > .k-card {
-  outline: 2px solid var(--k-primary-color);
-  outline-offset: 2px;
 }
 
 @media (max-width: 1000px) {

@@ -3,7 +3,9 @@ import { formatRelative } from "@/utils/formatRelative";
 import { NoAccessNotice } from "./NoAccessNotice";
 import { formatDate } from "@/utils/formatDate";
 import { IconAction } from "./IconAction";
+import { savedQueryHref } from "./tabs";
 import { Card } from "@kosmeo-ui/react";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import {
   faCode,
@@ -27,8 +29,6 @@ interface SavedQueryCardProps {
   savedQuery: SavedQuery;
   /** Mine: share, transfer, edit, delete. Shared: copy and view JSON. */
   kind: "mine" | "shared";
-  /** Picked by a link from the overview: drawn out. */
-  picked?: boolean;
 }
 
 type Dialog = "share" | "transfer" | "edit" | "copy" | "json" | null;
@@ -42,7 +42,6 @@ const Time = ({ iso }: { iso: string }) => (
 export const SavedQueryCard = ({
   savedQuery: sq,
   kind,
-  picked = false,
 }: SavedQueryCardProps) => {
   const [dialog, setDialog] = useState<Dialog>(null);
   const remove = useDeleteSavedQuery();
@@ -60,14 +59,13 @@ export const SavedQueryCard = ({
   );
 
   return (
-    <div
-      data-saved-query={sq.id}
-      className={`z-sq-card-wrap${picked ? " z-sq-picked" : ""}`}
-    >
+    <div data-saved-query={sq.id} className="z-sq-card-wrap">
       <Card>
         <div className="z-sq-card">
           <div className="z-sq-head">
-            <h3 className="z-sq-title">{sq.name}</h3>
+            <h3 className="z-sq-title">
+              <Link to={savedQueryHref(sq.id)}>{sq.name}</Link>
+            </h3>
             {sq.accessible && sq.source && (
               <code className="z-sq-source">{sq.source.slug}</code>
             )}

@@ -106,9 +106,22 @@ const RunRow = ({
   );
 };
 
-/** Every run, paged with "Show more"; with `limit`, only that many and no paging. */
-export const RunsList = ({ limit }: { limit?: number }) => {
-  const { items, isLoading, error, hasMore, loadMore } = useMyRuns();
+interface RunsListProps {
+  /** Only that many, and no paging. */
+  limit?: number;
+  /** Only the caller's runs of this saved query. */
+  savedQueryId?: string;
+  empty?: string;
+}
+
+/** The caller's runs, newest first, paged with "Show more". */
+export const RunsList = ({
+  limit,
+  savedQueryId,
+  empty = "You have not run anything yet.",
+}: RunsListProps) => {
+  const { items, isLoading, error, hasMore, loadMore } =
+    useMyRuns(savedQueryId);
   const [shown, setShown] = useState(limit ?? RUNS_STEP);
   const [saving, setSaving] = useState<{ query: unknown } | null>(null);
   const visible = items.slice(0, shown);
@@ -125,7 +138,7 @@ export const RunsList = ({ limit }: { limit?: number }) => {
       {isLoading && <Spinner size="sm" />}
       <ErrorNotice error={error} />
       {!isLoading && !error && items.length === 0 && (
-        <p className="z-note">You have not run anything yet.</p>
+        <p className="z-note">{empty}</p>
       )}
       {visible.length > 0 && (
         <ul className="z-run-list" aria-label="Recent runs">

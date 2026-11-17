@@ -15,3 +15,5 @@ export {
   ViewJsonDialog,
 } from "./components/SavedQueryDialogs";
 export type { SavedQuery } from "./api/types";
+export { useSavedQuery } from "./api/useSavedQuery";
+export { useShares } from "./api/useShares";

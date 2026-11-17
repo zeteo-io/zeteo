@@ -14,6 +14,7 @@ import type { SavedQuery } from "../api/types";
 import { useEffect, useState } from "react";
 import { ShareDialog } from "./ShareDialog";
 import { useAuth } from "@tereo-io/react";
+import { Link } from "react-router-dom";
 import "./styles.css";
 import {
   faRightLeft,
@@ -34,6 +35,7 @@ import {
   RowActions,
   Spinner,
   Table,
+  TableCellLink,
   TableFilters,
   type InfiniteScrollMenuFilter,
 } from "@kosmeo-ui/react";
@@ -263,7 +265,9 @@ export const SavedQueriesPage = () => {
                 title: "Name",
                 cellElement: (sq) => (
                   <span className="z-sq-name">
-                    <span>{sq.name}</span>
+                    <TableCellLink as={Link} to={`/my/saved-queries/${sq.id}`}>
+                      {sq.name}
+                    </TableCellLink>
                     {sq.description && (
                       <span className="z-muted" title={sq.description}>
                         {sq.description}

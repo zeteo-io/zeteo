@@ -39,6 +39,7 @@ export const listRuns = async (req: Request, res: Response) => {
   const page = await db.queryRuns.listPage({
     userId: query.user_id,
     sourceId: query.source_id,
+    savedQueryId: query.saved_query_id,
     outcome: query.outcome,
     cursor,
     limit: query.limit,

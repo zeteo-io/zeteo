@@ -4,7 +4,7 @@ import { ErrorNotice } from "@/components/ErrorNotice";
 import { formatDate } from "@/utils/formatDate";
 import { Spinner } from "@kosmeo-ui/react";
 import { Link } from "react-router-dom";
-import { tabHref } from "./tabs";
+import { savedQueryHref } from "./tabs";
 
 /** How many saved queries the overview lists. */
 export const RECENT_SAVED_QUERIES = 5;
@@ -51,7 +51,7 @@ export const RecentSavedQueries = ({
                 <div className="z-run-main">
                   <Link
                     className="z-plain-link z-run-what"
-                    to={tabHref(tab, sq.id)}
+                    to={savedQueryHref(sq.id)}
                   >
                     {sq.name}
                   </Link>

@@ -11,11 +11,9 @@ export const TABS: { id: MyTab; label: string }[] = [
 export const isTab = (value: string | null): value is MyTab =>
   TABS.some((t) => t.id === value);
 
-/** The address of a tab, optionally with one saved query picked out. */
-export const tabHref = (tab: MyTab, savedQueryId?: string) => {
-  const params = new URLSearchParams();
-  if (tab !== "overview") params.set("tab", tab);
-  if (savedQueryId) params.set("saved_query", savedQueryId);
-  const search = params.toString();
-  return search ? `/my?${search}` : "/my";
-};
+/** A saved query's own page. */
+export const savedQueryHref = (id: string) => `/my/saved-queries/${id}`;
+
+/** The address of a tab. */
+export const tabHref = (tab: MyTab) =>
+  tab === "overview" ? "/my" : `/my?tab=${tab}`;

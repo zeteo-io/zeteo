@@ -29,6 +29,8 @@ export interface QueryRun {
 export interface ListRunsOptions extends ListOptions {
   user_id?: string;
   source_id?: string;
+  /** Only the runs of this saved query. */
+  saved_query_id?: string;
   outcome?: RunOutcome;
 }
 
