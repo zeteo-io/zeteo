@@ -211,6 +211,11 @@
   gap: 0.375rem;
 }
 
+/* The icons keep their size: a squeezed icon button would shrink them away. */
+.z-db-actions .k-button svg {
+  flex-shrink: 0;
+}
+
 .z-db-preview {
   height: 14rem;
 }
