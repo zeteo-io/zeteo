@@ -1,4 +1,3 @@
-import { fingerprintOf, refusalFingerprintOf } from "./fingerprint.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
@@ -34,6 +33,11 @@ import {
   SavedQueryNotAccessibleError,
   ValidationError,
 } from "../utils/errors.js";
+import {
+  fingerprintOf,
+  recordIdentityOf,
+  refusalFingerprintOf,
+} from "./fingerprint.js";
 import {
   acquireRunLeases,
   LEASE_GRACE_MS,
@@ -484,8 +488,11 @@ const shownOf = (result: QueryResult, at: Date): CachedResult => ({
  * the dashboard's `now`, then served from the cache, or executed (once for
  * every identical run in this process) and kept there. It is recorded, and
  * the saved query stamped, only when it opens the viewer's recording window
- * for this query; a refusal likewise, with its query withheld. Rows are
- * returned only once a recorded run is recorded.
+ * for this query; a refusal likewise, with its query withheld. The window is
+ * keyed on `recordIdentityOf` (the body as written, so a `last_*` range is
+ * one query whatever `now` is); the plan's fingerprint keys only the cache
+ * and the shared execution. Rows are returned only once a recorded run is
+ * recorded.
  */
 const runDashboardQuery = async (
   input: RunQueryInput,
@@ -548,6 +555,12 @@ const runDashboardQuery = async (
     limit: maxRows,
     offset: plan.offset,
   });
+  const recordAs = recordIdentityOf(
+    catalog.source.id,
+    savedQuery.id,
+    input.body,
+    maxRows
+  );
 
   let shown: CachedResult;
   try {
@@ -571,7 +584,7 @@ const runDashboardQuery = async (
   } catch (err) {
     // Its own window, so a run that failed (or whose caller went away) never
     // keeps the next successful one from being recorded.
-    await recordFailure(err, failureWindowOf(fingerprint));
+    await recordFailure(err, failureWindowOf(recordAs));
     throw err;
   }
 
@@ -581,7 +594,7 @@ const runDashboardQuery = async (
     warnings: plan.warnings,
     ...(cached && { cached_at: cachedAt }),
   };
-  if (!(await claim(caller.userId, fingerprint, windowMinutes))) return result;
+  if (!(await claim(caller.userId, recordAs, windowMinutes))) return result;
   let runId: string;
   try {
     runId = await record({
@@ -596,7 +609,7 @@ const runDashboardQuery = async (
       "a dashboard run could not be recorded, even without its query; its rows are withheld"
     );
     // The window stays closed, so the next run records instead.
-    await release(caller.userId, fingerprint);
+    await release(caller.userId, recordAs);
     throw err;
   }
   // Not waited for: a stamp that fails is logged, and the run stands.

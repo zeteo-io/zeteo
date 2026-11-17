@@ -20,8 +20,9 @@ const sha256 = (text: string): string =>
 
 /**
  * The identity of a dashboard run: one source, one plan, one row cap. Runs
- * with the same fingerprint share one execution, one cache entry and one
- * recording window.
+ * with the same fingerprint share one execution and one cache entry. It holds
+ * relative dates resolved against the dashboard's `now`, so it is not the
+ * identity a run is recorded under (`recordIdentityOf` is).
  *
  * The plan stands in for the compiled SQL, and that is why a cache entry may
  * be shared between viewers: the planner builds a plan only from the viewer's
@@ -36,6 +37,20 @@ export const fingerprintOf = (
   plan: QueryPlan,
   rows: { limit: number; offset: number }
 ): string => sha256(canonical({ sourceId, plan, rows }));
+
+/**
+ * The identity a dashboard run of a saved query is recorded under, once per
+ * viewer and window: the source, the saved query, the body as the panel
+ * wrote it (relative dates and the dashboard's time range unresolved) and the
+ * row cap. Unlike the plan's fingerprint it does not change as `now` moves,
+ * so a `last_24_hours` panel on a wall display is not a new query each minute.
+ */
+export const recordIdentityOf = (
+  sourceId: string,
+  savedQueryId: string,
+  body: unknown,
+  maxRows: number
+): string => sha256(canonical({ sourceId, savedQueryId, body, maxRows }));
 
 /**
  * The identity a refused dashboard run of a saved query is recorded under:

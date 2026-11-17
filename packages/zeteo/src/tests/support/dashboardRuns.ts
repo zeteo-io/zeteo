@@ -14,13 +14,14 @@ export const readerOf = (userId: string): Caller => ({
   isServiceAccount: false,
 });
 
-/** A saved query over `orders` of the source and a dashboard, straight in the database. */
+/** A saved query over `orders` (or `from`) of the source and a dashboard, straight in the database. */
 export const seedDashboardQuery = async (
   source: SeededSource,
   ownerId: string,
-  select: string[] = ["id", "status"]
+  select: string[] = ["id", "status"],
+  from = "orders"
 ) => {
-  const query = { source: source.slug, from: "orders", select };
+  const query = { source: source.slug, from, select };
   const saved = await prisma.savedQuery.create({
     data: { ownerId, sourceId: source.id, name: uniqueName(), query },
     select: { id: true },

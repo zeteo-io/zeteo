@@ -2,6 +2,7 @@
 // @module-tag platform
 import { SavedQueryNotAccessibleError } from "../../utils/errors.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
+import { withTimeFilter } from "../../dashboards/timeRange.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { WITHHELD_QUERY } from "../../engine/record.js";
 import { removeSources } from "../support/sources.js";
@@ -82,6 +83,7 @@ describe("the recording window of dashboard runs", () => {
   let source: SeededSource;
   let seeded: SeededDashboardQuery;
   let refused: SeededDashboardQuery;
+  let timed: SeededDashboardQuery;
   const owner = newQueryUser();
 
   /** Moves the clock, the process's and Redis's for the windows, to `minutes` after T0. */
@@ -99,6 +101,12 @@ describe("the recording window of dashboard runs", () => {
     seeded = await seedDashboardQuery(source, owner.id);
     // `total` is not granted: every run of it is refused.
     refused = await seedDashboardQuery(source, owner.id, ["id", "total"]);
+    await grantTo(owner.principal, source.tables.typed_values!, [
+      "id",
+      "naive",
+      "aware",
+    ]);
+    timed = await seedDashboardQuery(source, owner.id, ["id"], "typed_values");
   });
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -161,6 +169,25 @@ describe("the recording window of dashboard runs", () => {
       ...seeded.query,
       limit: 5,
     });
+    expect(other.run_id).toBeDefined();
+    expect(await runsOf([owner.id])).toHaveLength(2);
+  });
+
+  it("records a display with a `last_*` time range once per window, though its start moves each minute", async () => {
+    const lastDay = (column: string) =>
+      withTimeFilter(timed.query, column, "last_24_hours");
+    const recorded: (string | undefined)[] = [];
+    for (const minutes of [0, 1, 2, 30]) {
+      await advanceTo(minutes);
+      const result = await runOnDashboard(owner.id, timed, lastDay("aware"));
+      recorded.push(result.run_id);
+    }
+    expect(recorded[0]).toBeDefined();
+    expect(recorded.slice(1)).toEqual([undefined, undefined, undefined]);
+    expect(await runsOf([owner.id])).toHaveLength(1);
+
+    // Another time column is another query, in its own window.
+    const other = await runOnDashboard(owner.id, timed, lastDay("naive"));
     expect(other.run_id).toBeDefined();
     expect(await runsOf([owner.id])).toHaveLength(2);
   });
