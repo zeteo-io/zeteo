@@ -4,15 +4,19 @@
 #   e2e/run.sh                     # or: npm run test:e2e
 #   KEEP=1 e2e/run.sh              # leave the stack running afterwards
 #   e2e/run.sh down                # tear down a stack left by KEEP=1
+#   e2e/run.sh --browser           # only the browser test (Playwright)
+#   PLAYWRIGHT=0 e2e/run.sh        # only the Vitest files
 #
 # Tereo is a released image, TEREO_IMAGE (default
-# ghcr.io/tereo-io/tereo:0.8.1), pulled when missing. zeteo's image is built
+# ghcr.io/tereo-io/tereo:0.8.2), pulled when missing. zeteo's image is built
 # from this checkout as zeteo:e2e (ZETEO_IMAGE).
 #
 # Everything runs in the compose project zeteo-e2e on free host ports bound to
 # 127.0.0.1. Secrets and the source's certificates are generated for the run
 # and removed with the containers, networks and volumes at the end, pass or
-# fail, unless KEEP=1. Extra arguments are passed to vitest.
+# fail, unless KEEP=1. Extra arguments are passed to vitest, or with
+# --browser to Playwright. The browser test runs after the Vitest files pass,
+# against the same stack.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,6 +24,8 @@ E2E="$ROOT/e2e"
 PROJECT=zeteo-e2e
 ENV_FILE="$E2E/.env.run"
 CERTS="$E2E/certs"
+# Files generated for the run's ports: Tereo's provisioning of the login clients.
+RUN_DIR="$E2E/.run"
 COMPOSE=(docker compose -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")
 
 log() { printf '\n==> %s\n' "$*" >&2; }
@@ -45,12 +51,22 @@ teardown() {
     echo "Tearing down $PROJECT failed; e2e/run.sh down tries again" >&2
     return $ok
   fi
-  rm -rf "$CERTS" "$ENV_FILE"
+  rm -rf "$CERTS" "$RUN_DIR" "$ENV_FILE"
 }
 
 if [[ "${1:-}" == "down" ]]; then
   teardown
   exit $?
+fi
+
+BROWSER_ONLY=0
+if [[ "${1:-}" == "--browser" ]]; then
+  BROWSER_ONLY=1
+  shift
+fi
+if [[ "${PLAYWRIGHT:-}" == "0" && $BROWSER_ONLY -eq 1 ]]; then
+  echo "--browser runs only the browser test, which PLAYWRIGHT=0 skips" >&2
+  exit 1
 fi
 
 if docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" | grep -q . ||
@@ -63,6 +79,13 @@ for tool in docker node npx openssl; do
   command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
 done
 
+# Before the stack and the Vitest files, so a missing browser fails fast.
+if [[ "${PLAYWRIGHT:-}" != "0" ]] &&
+  ! (cd "$ROOT" && node -e 'process.exit(require("fs").existsSync(require("@playwright/test").chromium.executablePath()) ? 0 : 1)' 2>/dev/null); then
+  echo "The browser test needs Playwright's Chromium: npx playwright install chromium (or PLAYWRIGHT=0 to skip it)" >&2
+  exit 1
+fi
+
 STARTED=$SECONDS
 
 # Before any image or container, so a build failure fails fast.
@@ -70,7 +93,7 @@ log "Building @zeteo-io/sdk for the SDK's cases"
 (cd "$ROOT" && npx nx run @zeteo-io/sdk:build) >&2
 
 # --- Images --------------------------------------------------------------
-TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.1}"
+TEREO_IMAGE="${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.2}"
 if ! docker image inspect "$TEREO_IMAGE" >/dev/null 2>&1; then
   log "Pulling $TEREO_IMAGE"
   if ! docker pull "$TEREO_IMAGE" >&2; then
@@ -125,6 +148,19 @@ rm -f "$CERTS/ca.key" "$CERTS/server.csr" "$CERTS/server.ext" "$CERTS/ca.srl"
 # The postgres image copies the key with its own ownership; it only has to be readable here.
 chmod 0644 "$CERTS/server.key"
 
+# The admin UI's login client gets this run's zeteo origin: Tereo matches
+# redirect URIs exactly, port included.
+rm -rf "$RUN_DIR" && mkdir -p "$RUN_DIR"
+node -e '
+  const fs = require("fs");
+  const [template, origin] = process.argv.slice(1);
+  const doc = JSON.parse(fs.readFileSync(template, "utf8"));
+  const ui = doc.clients.find((c) => c.clientId === "e2e-ui");
+  ui.redirectUris.push(`${origin}/callback`);
+  ui.postLogoutRedirectUris = [`${origin}/`];
+  console.log(JSON.stringify(doc, null, 2));
+' "$E2E/provisioning/e2e-clients.json" "http://127.0.0.1:$ZETEO_PORT" >"$RUN_DIR/e2e-clients.json"
+
 # Throwaway values for this run only.
 cat >"$ENV_FILE" <<EOF
 TEREO_IMAGE=$TEREO_IMAGE
@@ -165,9 +201,17 @@ E2E_COMPOSE_ARGS="$(node -e 'console.log(JSON.stringify(process.argv.slice(1)))'
   -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")"
 export E2E_COMPOSE_ARGS
 
-log "Running the tests"
 status=0
-(cd "$ROOT" && npx vitest run --config e2e/vitest.config.ts "$@") || status=$?
+if [[ $BROWSER_ONLY -eq 0 ]]; then
+  log "Running the tests"
+  (cd "$ROOT" && npx vitest run --config e2e/vitest.config.ts "$@") || status=$?
+fi
+if [[ $status -eq 0 && "${PLAYWRIGHT:-}" != "0" ]]; then
+  log "Running the browser test"
+  browser_args=()
+  [[ $BROWSER_ONLY -eq 1 ]] && browser_args=("$@")
+  (cd "$ROOT" && npx playwright test --config e2e/playwright.config.ts ${browser_args[@]+"${browser_args[@]}"}) || status=$?
+fi
 
 if [[ $status -ne 0 ]]; then
   log "Tests failed; the last log lines of Tereo and zeteo"

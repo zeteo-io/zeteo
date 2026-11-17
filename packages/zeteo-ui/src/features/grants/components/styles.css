@@ -1,0 +1,117 @@
+.z-grants-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.z-grants-filters > * {
+  min-width: 12rem;
+}
+
+.z-grants-principal-filter {
+  margin-bottom: 0.75rem;
+}
+
+.z-grants-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.z-grants-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-grant-form {
+  max-width: 48rem;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.z-grant-form h2 {
+  font-size: var(--k-text-size-lg);
+  margin: 0;
+}
+
+.z-grant-columns-tools {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.5rem 0;
+}
+
+.z-grants-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.75rem;
+}
+
+.z-grants-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-grants-select {
+  min-width: 13rem;
+}
+
+.z-grant-form form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.z-grant-form .k-bordered-section {
+  margin: 0;
+}
+
+.z-grant-table,
+.z-grant-note {
+  margin: 0;
+}
+
+/* The column checklist in two columns. */
+.z-grant-form .k-options-group-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.25rem 1.5rem;
+}
+
+.z-grant-columns-tools {
+  flex-wrap: wrap;
+  margin: 0 0 1rem;
+}
+
+.z-grant-columns-note {
+  color: var(--k-warning-color, #e0a526);
+  font-size: var(--k-text-size-sm);
+}
+
+/* The prompt on the left, the select buttons pushed to the right. */
+.z-grant-columns-tools > .k-button:first-of-type,
+.z-grant-columns-tools > button:first-of-type {
+  margin-left: auto;
+}
+
+/* Person first, then the source and table filters with Reset at the end. */
+.z-grants-toolbar {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.z-grants-tablefilters {
+  flex: 1;
+  min-width: 0;
+}

@@ -30,6 +30,13 @@ The other package is `@zeteo-io/sdk` (`packages/zeteo-sdk`), the TypeScript clie
 published to npm in its own release group, `sdk` (see [docs/code-style.md](docs/code-style.md)).
 Nothing in `zeteo` depends on it.
 
+The admin UI is `packages/zeteo-ui` (Vite + React on `@kosmeo-ui/react`, dev server on port 4200,
+forwarding `/v1` and `/ui-config.json` to zeteo). It belongs to the release group `core`, so its
+version is zeteo's. Its `check` also runs `scripts/check-routes.mjs`, which keeps routes and
+`public/` files clear of the paths zeteo reserves. Its build ships in zeteo's image (the Dockerfile's
+`ui` stage) and zeteo serves it at `/` when `UI_CLIENT_ID` is set. Server side, screens and local
+development: `packages/zeteo/docs/admin-ui.md`. Its browser test is `e2e/browser/` (Playwright).
+
 ## Layout of `packages/zeteo`
 
 One ordinary package:
@@ -58,8 +65,9 @@ One ordinary package:
 | `prisma/` | The one schema and migrations |
 
 Outside the package, `e2e/` is a local end-to-end run (`e2e/run.sh`, not run by CI): a released
-Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.1`), zeteo's own image built from
-the checkout, and a TLS source Postgres, with real sign-ins; see [e2e/README.md](e2e/README.md).
+Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.2`), zeteo's own image built from
+the checkout, and a TLS source Postgres, with real sign-ins, then a Playwright test of the admin UI
+in Chromium (`e2e/run.sh --browser` runs only that); see [e2e/README.md](e2e/README.md).
 Zeteo depends on Tereo only through released artifacts: `@tereo-io/sdk` and `@tereo-io/mcp` from
 npm, and Tereo's published image in `e2e/`. Nothing here builds Tereo from source.
 

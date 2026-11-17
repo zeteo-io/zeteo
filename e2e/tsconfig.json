@@ -6,7 +6,9 @@
     "noEmit": true,
     "declaration": false,
     "declarationMap": false,
-    "types": ["node"]
+    "types": ["node"],
+    // The browser test's page.evaluate callbacks run in the page.
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["**/*.ts"]
 }

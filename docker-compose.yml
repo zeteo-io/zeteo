@@ -101,6 +101,12 @@ services:
       TEREO_TEST_MODE: "true"
       # Sources may reach this stack's own Postgres by its service name.
       SOURCE_ALLOWED_HOSTS: ${SOURCE_ALLOWED_HOSTS:-postgres}
+      # The admin UI (packages/zeteo/docs/admin-ui.md) needs a real Tereo to
+      # sign in to, which test mode lacks. With one: its login client's id,
+      # which makes zeteo serve the UI at /.
+      # UI_CLIENT_ID: zeteo-ui
+      # Tereo as the browser reaches it (TEREO_URL may be an internal address).
+      # UI_TEREO_URL: http://localhost:4001
     ports:
       - "127.0.0.1:${ZETEO_PORT:-4201}:4201"
     depends_on:

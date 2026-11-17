@@ -1,0 +1,102 @@
+.z-runs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.z-runs-filters > * {
+  min-width: 12rem;
+}
+
+.z-runs-person {
+  margin-bottom: 0.75rem;
+}
+
+.z-runs-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-run-detail dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0 0 1rem;
+}
+
+.z-run-detail dt {
+  font-weight: 600;
+}
+
+.z-run-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.z-run-query {
+  max-height: 20rem;
+  overflow: auto;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid currentColor;
+  border-radius: 0.375rem;
+}
+
+.z-run-query-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.z-run-query-head h3 {
+  margin: 0;
+}
+
+.z-runs-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.z-runs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-runs-select {
+  min-width: 11rem;
+}
+
+.z-runs-rows {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-runs-list td,
+.z-runs-list th {
+  white-space: nowrap;
+}
+
+/* Person first, then the outcome and source filters with Reset at the end. */
+.z-runs-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.z-runs-tablefilters {
+  flex: 1;
+  min-width: 0;
+}

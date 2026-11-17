@@ -39,7 +39,7 @@
   "release": {
     "groups": {
       "core": {
-        "projects": ["zeteo"],
+        "projects": ["zeteo", "zeteo-ui"],
         "projectsRelationship": "fixed",
         "releaseTag": {
           "pattern": "zeteo@{version}"
@@ -60,6 +60,9 @@
         "packages/zeteo/vitest.config.ts",
         "packages/zeteo-sdk/src/tests/**",
         "packages/zeteo-sdk/vitest.config.ts",
+        "packages/zeteo-ui/src/**/*.test.*",
+        "packages/zeteo-ui/src/test/**",
+        "packages/zeteo-ui/vitest.config.mts",
         "docker/test/**"
       ]
     },

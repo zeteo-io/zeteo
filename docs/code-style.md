@@ -122,13 +122,14 @@ To sort on save in VS Code, install *Run on Save* (`emeraldwalk.runonsave`) and 
 
 ## Releases
 
-`zeteo` is versioned with Nx release version plans, in the release group `core`, tagged
-`zeteo@<version>`. It is the image's version; the package is not published to npm.
+`zeteo` and `zeteo-ui` (the admin UI) are versioned with Nx release version plans, in the fixed
+release group `core`, tagged `zeteo@<version>`. It is the image's version; neither package is
+published to npm.
 `@zeteo-io/sdk` (`packages/zeteo-sdk`) is the group `sdk`, versioned on its own, tagged
 `@zeteo-io/sdk@<version>` and published to npm.
 
-A PR that changes `packages/zeteo` or `packages/zeteo-sdk` needs a plan (naming `"zeteo"` or
-`"@zeteo-io/sdk"`): `npm run version-plan`, then commit the file in
+A PR that changes `packages/zeteo`, `packages/zeteo-ui` or `packages/zeteo-sdk` needs a plan
+(naming `"zeteo"` or `"@zeteo-io/sdk"`): `npm run version-plan`, then commit the file in
 `.nx/version-plans/`. CI's version-plan check says when one is missing.
 
 Merging a PR into `master` while plans are pending opens (or updates) the release PR,

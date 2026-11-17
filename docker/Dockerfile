@@ -17,6 +17,7 @@ WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo-sdk/package.json ./packages/zeteo-sdk/
+COPY packages/zeteo-ui/package.json ./packages/zeteo-ui/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
 
@@ -31,6 +32,27 @@ COPY packages/zeteo/src ./packages/zeteo/src
 RUN npx tsc -p packages/zeteo
 
 # ---------------------------------------------------------------------------
+# UI: the admin UI's static build. Only its dist/ reaches the runtime image.
+# ---------------------------------------------------------------------------
+FROM node:22-alpine AS ui
+
+WORKDIR /app
+
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/zeteo/package.json ./packages/zeteo/
+COPY packages/zeteo-sdk/package.json ./packages/zeteo-sdk/
+COPY packages/zeteo-ui/package.json ./packages/zeteo-ui/
+
+RUN --mount=type=cache,target=/root/.npm,sharing=shared \
+    npm ci --workspace=packages/zeteo-ui
+
+COPY packages/zeteo-ui/index.html packages/zeteo-ui/tsconfig.json packages/zeteo-ui/vite.config.ts ./packages/zeteo-ui/
+COPY packages/zeteo-ui/public ./packages/zeteo-ui/public/
+COPY packages/zeteo-ui/src ./packages/zeteo-ui/src/
+
+RUN npm run build --workspace=packages/zeteo-ui
+
+# ---------------------------------------------------------------------------
 # Runtime: production dependencies and compiled output only.
 # ---------------------------------------------------------------------------
 FROM node:22-alpine AS runtime
@@ -43,6 +65,7 @@ RUN apk add --no-cache dumb-init wget
 COPY package.json package-lock.json ./
 COPY packages/zeteo/package.json ./packages/zeteo/
 COPY packages/zeteo-sdk/package.json ./packages/zeteo-sdk/
+COPY packages/zeteo-ui/package.json ./packages/zeteo-ui/
 COPY packages/zeteo/prisma.config.ts ./packages/zeteo/
 COPY packages/zeteo/prisma ./packages/zeteo/prisma/
 
@@ -52,6 +75,10 @@ RUN --mount=type=cache,target=/root/.npm,sharing=shared \
 RUN cd packages/zeteo && npx prisma generate
 
 COPY --from=build /app/packages/zeteo/dist ./packages/zeteo/dist
+
+# Served at / when UI_CLIENT_ID is set (UI_DIST_PATH's default). Root-owned
+# and world-readable: the service only reads it.
+COPY --from=ui --chmod=a+rX /app/packages/zeteo-ui/dist ./packages/zeteo-ui/dist
 
 COPY docker/migrate.sh ./packages/zeteo/
 

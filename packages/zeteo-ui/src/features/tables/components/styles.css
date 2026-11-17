@@ -1,0 +1,61 @@
+.z-tables-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.z-tables-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-table-section {
+  margin-bottom: 1.5rem;
+}
+
+.z-table-section h2 {
+  font-size: var(--k-text-size-lg);
+  margin: 0 0 0.5rem;
+}
+
+.z-table-description {
+  max-width: 48rem;
+  margin: 0 0 1rem;
+  overflow-wrap: anywhere;
+}
+
+.z-table-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.z-table-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.z-wrap td,
+.z-wrap th {
+  overflow-wrap: anywhere;
+}
+
+.z-tables-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Name and schema stay narrow; the description takes the rest. */
+.z-tables-list th:nth-child(1),
+.z-tables-list th:nth-child(2) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+.z-tables-list td:nth-child(1),
+.z-tables-list td:nth-child(2) {
+  white-space: nowrap;
+}

@@ -1,0 +1,127 @@
+import { MAX_GRANT_COLUMNS } from "../api/types";
+import "./styles.css";
+import {
+  Alert,
+  Button,
+  CheckboxGroup,
+  RadioGroup,
+  Spinner,
+} from "@kosmeo-ui/react";
+
+export interface ChooserColumn {
+  id: string;
+  name: string;
+  missing: boolean;
+}
+
+export interface ColumnChoice {
+  allColumns: boolean;
+  selected: string[];
+}
+
+interface ColumnChooserProps {
+  value: ColumnChoice;
+  onChange: (value: ColumnChoice) => void;
+  /** The columns that can be ticked; missing ones are those a grant still holds. */
+  columns: ChooserColumn[];
+  /** Why the columns cannot be listed, when they cannot. */
+  unavailable?: string;
+  /** The columns are still being read: the checklist waits for them. */
+  loading?: boolean;
+  /** False when the page offers its own all-columns switch. */
+  showMode?: boolean;
+}
+
+/** Whether a choice can be sent: every column, or 1 to 500 columns. */
+export const isValidChoice = ({ allColumns, selected }: ColumnChoice) =>
+  allColumns || (selected.length >= 1 && selected.length <= MAX_GRANT_COLUMNS);
+
+export const ColumnChooser = ({
+  value,
+  onChange,
+  columns,
+  unavailable,
+  loading = false,
+  showMode = true,
+}: ColumnChooserProps) => {
+  const live = columns.filter((c) => !c.missing);
+  const chosenCount = value.selected.length;
+  return (
+    <div>
+      {showMode && (
+        <RadioGroup
+          label="Columns"
+          name="grant-columns"
+          value={value.allColumns ? "all" : "some"}
+          onChange={(v) => onChange({ ...value, allColumns: v === "all" })}
+          options={[
+            { value: "all", label: "All columns" },
+            { value: "some", label: "Choose columns" },
+          ]}
+        />
+      )}
+      {unavailable && <Alert variant="warning">{unavailable}</Alert>}
+      {!value.allColumns && loading && <Spinner size="md" />}
+      {!value.allColumns && !loading && (
+        <>
+          <div className="z-grant-columns-tools">
+            {chosenCount === 0 && (
+              <span role="alert" className="z-grant-columns-note">
+                Choose at least one column, or grant all columns.
+              </span>
+            )}
+            {chosenCount > MAX_GRANT_COLUMNS && (
+              <span role="alert" className="z-grant-columns-note">
+                A grant lists at most {MAX_GRANT_COLUMNS} columns; grant all
+                columns instead.
+              </span>
+            )}
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              disabled={live.length === 0}
+              onClick={() =>
+                // A column the grant holds but the table lost stays ticked.
+                onChange({
+                  ...value,
+                  selected: columns
+                    .filter((c) => !c.missing || value.selected.includes(c.id))
+                    .map((c) => c.id),
+                })
+              }
+            >
+              Select all
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() => onChange({ ...value, selected: [] })}
+            >
+              Select none
+            </Button>
+          </div>
+          <CheckboxGroup
+            name="grant-column-ids"
+            values={value.selected}
+            onChange={(selected) => {
+              // Keep the order of the table, whatever order they were ticked in.
+              const ticked = new Set(selected);
+              onChange({
+                ...value,
+                selected: columns
+                  .filter((c) => ticked.has(c.id))
+                  .map((c) => c.id),
+              });
+            }}
+            options={columns.map((c) => ({
+              value: c.id,
+              label: c.missing ? `${c.name} (missing)` : c.name,
+            }))}
+          />
+        </>
+      )}
+    </div>
+  );
+};

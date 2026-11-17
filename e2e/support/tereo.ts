@@ -41,6 +41,56 @@ export const roleId = async (token: string, name: string): Promise<string> => {
   return role.id;
 };
 
+/** The id of the permission named `name`. */
+export const permissionId = async (
+  token: string,
+  name: string
+): Promise<string> => {
+  const page = await expectJson(
+    200,
+    "GET",
+    url(
+      `/v1/admin/permissions?${new URLSearchParams({ "filter[name]": name, limit: "100" })}`
+    ),
+    { token }
+  );
+  const permission = (page.data as Array<{ id: string; name: string }>).find(
+    (p) => p.name === name
+  );
+  if (!permission) throw new Error(`Tereo has no permission ${name}`);
+  return permission.id;
+};
+
+/**
+ * The custom role `name` holding exactly `permissions`, created on first use;
+ * returns its id. Its permissions are set again each time, so a rerun against
+ * the same Tereo finds it as it was made.
+ */
+export const ensureRole = async (
+  token: string,
+  name: string,
+  permissions: string[]
+): Promise<string> => {
+  let id: string;
+  try {
+    id = await roleId(token, name);
+  } catch {
+    const role = await expectJson(201, "POST", url("/v1/admin/roles"), {
+      token,
+      body: { name, displayName: name },
+    });
+    id = role.id as string;
+  }
+  const permissionIds = await Promise.all(
+    permissions.map((p) => permissionId(token, p))
+  );
+  await expectJson(200, "PUT", url(`/v1/admin/roles/${id}/permissions`), {
+    token,
+    body: { permissionIds },
+  });
+  return id;
+};
+
 /** A password user holding `roleIds` directly; returns the user's id. */
 export const createUser = async (
   token: string,
@@ -59,6 +109,17 @@ export const createUser = async (
   }
   return user.id as string;
 };
+
+/** Replaces the user's directly held roles (an empty list removes them all). */
+export const setUserRoles = (
+  token: string,
+  userId: string,
+  roleIds: string[]
+) =>
+  expectJson(200, "PUT", url(`/v1/admin/users/${userId}/roles`), {
+    token,
+    body: { roleIds },
+  });
 
 export const createGroup = async (
   token: string,

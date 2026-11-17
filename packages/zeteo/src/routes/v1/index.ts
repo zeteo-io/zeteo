@@ -1,4 +1,5 @@
 import principalLimitsRouter from "./principal-limits/index.js";
+import { dropCachedIntrospection } from "./me/middleware.js";
 import { authenticate } from "../../middleware/auth.js";
 import principalsRouter from "./principals/index.js";
 import catalogRouter from "./catalog/index.js";
@@ -12,6 +13,7 @@ import { Router } from "express";
 
 const v1Router = Router();
 
+v1Router.use("/me", dropCachedIntrospection);
 v1Router.use(authenticate);
 v1Router.use("/catalog", catalogRouter);
 v1Router.use("/export", exportRouter);

@@ -1,0 +1,80 @@
+.z-relations-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.z-relations-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-relation-form {
+  min-width: min(36rem, 80vw);
+}
+
+.z-relation-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.z-relation-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+
+.z-wrap td,
+.z-wrap th {
+  overflow-wrap: anywhere;
+}
+
+.z-relation-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.z-relation-table {
+  white-space: nowrap;
+}
+
+.z-relations-list td:nth-child(5),
+.z-relations-list th:nth-child(5) {
+  width: 1%;
+  white-space: nowrap;
+}
+
+/* From and To side by side, over their column pairs. */
+.z-relation-tables {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.z-relation-form .k-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* The remove button is a square as tall as the column fields (SearchSelect, 46px). */
+.z-relation-remove {
+  display: flex;
+}
+
+.z-relation-remove .k-button {
+  height: 46px;
+  width: 46px;
+  padding: 0;
+  justify-content: center;
+}
+
+.z-relation-columns-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
