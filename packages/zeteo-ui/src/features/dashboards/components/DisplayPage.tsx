@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Centered, Spinner } from "@kosmeo-ui/react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { Dashboard, DashboardTheme } from "../api/types";
+import { faExpand } from "@fortawesome/free-solid-svg-icons";
 import { useRunDashboard } from "../api/useRunDashboard";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { PanelRun } from "../api/useRunDashboard";
@@ -37,6 +39,57 @@ const useDisplayTheme = (theme: DashboardTheme | undefined) => {
       else root.setAttribute("data-theme", before);
     };
   }, [theme]);
+};
+
+const HIDE_AFTER_MS = 3000;
+
+/**
+ * A "Full screen" button in the top-right corner: shown on load and while the
+ * mouse moves, hidden after 3 seconds without movement (an unattended screen
+ * stays clean) and while the document is full screen. Not rendered where the
+ * browser has no Fullscreen API. A refused request is ignored.
+ */
+export const FullScreenButton = () => {
+  const [visible, setVisible] = useState(true);
+  const [fullscreen, setFullscreen] = useState(
+    () => document.fullscreenElement != null
+  );
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const show = () => {
+      setVisible(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => setVisible(false), HIDE_AFTER_MS);
+    };
+    const onChange = () => setFullscreen(document.fullscreenElement != null);
+    show();
+    document.addEventListener("mousemove", show);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("mousemove", show);
+      document.removeEventListener("fullscreenchange", onChange);
+    };
+  }, []);
+
+  if (!document.fullscreenEnabled || fullscreen) return null;
+  return (
+    <div className="z-display-fullscreen" data-visible={visible}>
+      <Button
+        size="sm"
+        variant="secondary"
+        fullWidth={false}
+        onClick={() => {
+          void Promise.resolve(
+            document.documentElement.requestFullscreen()
+          ).catch(() => undefined);
+        }}
+      >
+        <FontAwesomeIcon icon={faExpand} /> Full screen
+      </Button>
+    </div>
+  );
 };
 
 /** A wall screen must not bounce into a sign-in loop: it says so and waits to be signed in again. */
@@ -180,6 +233,7 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
 
   return (
     <div className="z-display">
+      <FullScreenButton />
       <h1 className="z-display-title">{dashboard.name}</h1>
       {dashboard.panels.length === 0 ? (
         <p className="z-note">This dashboard has no panels yet.</p>

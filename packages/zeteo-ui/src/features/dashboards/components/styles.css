@@ -208,6 +208,19 @@
   font-size: var(--k-text-size-lg);
 }
 
+.z-display-fullscreen {
+  position: fixed;
+  top: 0.75rem;
+  right: 0.75rem;
+  z-index: 10;
+  transition: opacity 0.3s;
+}
+
+.z-display-fullscreen[data-visible="false"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .z-display-signedout {
   display: grid;
   gap: 1rem;

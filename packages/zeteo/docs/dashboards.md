@@ -165,6 +165,9 @@ retried with back-off (1 second, doubling up to a minute) unless it was a 401 or
 not redirect to Tereo on a lost session: it shows
 "Signed out — sign in again on this screen" and a **Sign in** button, so an unattended wall
 screen never loops through sign-in.
+A **Full screen** button in the top-right corner (shown on load and while the mouse moves, hidden
+after 3 seconds idle and while in full screen) uses the browser's Fullscreen API; browsers allow
+that only after a click, so an unattended screen should use the browser's kiosk mode instead.
 
 **A dedicated display user.** A screen shows what its user may see, so give it a user of its own:
 create a user in Tereo with the role `zeteo_user`, grant it only the tables the dashboards need

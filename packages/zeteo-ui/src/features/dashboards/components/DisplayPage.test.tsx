@@ -268,3 +268,102 @@ describe("DisplayPage", () => {
     expect(screen.getByText("Failed with 404")).toBeInTheDocument();
   });
 });
+
+describe("DisplayPage full screen button", () => {
+  let enabled: boolean;
+  let element: Element | null;
+  let request: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers({
+      toFake: [
+        "setInterval",
+        "clearInterval",
+        "Date",
+        "setTimeout",
+        "clearTimeout",
+      ],
+    });
+    enabled = true;
+    element = null;
+    request = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(document, "fullscreenEnabled", {
+      configurable: true,
+      get: () => enabled,
+    });
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => element,
+    });
+    document.documentElement.requestFullscreen =
+      request as unknown as typeof document.documentElement.requestFullscreen;
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, "fullscreenEnabled");
+    Reflect.deleteProperty(document, "fullscreenElement");
+  });
+
+  const settle = () => act(async () => vi.advanceTimersByTimeAsync(10));
+  const shown = () =>
+    screen
+      .getByRole("button", { name: /full screen/i })
+      .closest(".z-display-fullscreen")!
+      .getAttribute("data-visible");
+
+  it("shows on load and requests full screen when clicked", async () => {
+    renderDisplay();
+    await settle();
+    const button = screen.getByRole("button", { name: /full screen/i });
+    expect(shown()).toBe("true");
+    await act(async () => button.click());
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a refused request", async () => {
+    request.mockRejectedValue(new TypeError("denied"));
+    renderDisplay();
+    await settle();
+    await act(async () =>
+      screen.getByRole("button", { name: /full screen/i }).click()
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides after 3 seconds idle and reappears on mouse movement", async () => {
+    renderDisplay();
+    await settle();
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(shown()).toBe("false");
+    await act(async () => {
+      document.dispatchEvent(new MouseEvent("mousemove"));
+    });
+    expect(shown()).toBe("true");
+    await act(async () => vi.advanceTimersByTimeAsync(3000));
+    expect(shown()).toBe("false");
+  });
+
+  it("is hidden while the document is full screen", async () => {
+    renderDisplay();
+    await settle();
+    element = document.documentElement;
+    await act(async () => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    expect(screen.queryByRole("button", { name: /full screen/i })).toBeNull();
+    element = null;
+    await act(async () => {
+      document.dispatchEvent(new Event("fullscreenchange"));
+    });
+    expect(
+      screen.getByRole("button", { name: /full screen/i })
+    ).toBeInTheDocument();
+  });
+
+  it("is not rendered where full screen is unavailable", async () => {
+    enabled = false;
+    renderDisplay();
+    await settle();
+    expect(screen.queryByRole("button", { name: /full screen/i })).toBeNull();
+  });
+});

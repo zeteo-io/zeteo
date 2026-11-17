@@ -121,7 +121,8 @@ page and no sections.
   **Available for dashboards** switch is in My Zeteo.
 - **Display mode** (`/dashboards/<id>/display`): the dashboard alone, with no top bar, in its
   theme, refreshing itself and reloading the dashboard as it does; on a lost session it says
-  "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)).
+  "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)). A **Full screen** button
+  appears in the corner while the mouse moves; an unattended screen should use the browser's kiosk mode, as full screen needs a click.
 - **Dashboards (all)** and **Saved panels (all)** (`/admin/dashboards`, `/admin/saved-panels`,
   `zeteo.dashboards.read`; share, transfer and delete need `.write`): every user's dashboards and
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
