@@ -11,7 +11,7 @@ import { useAutoRefresh } from "../api/useAutoRefresh";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { TimeRangePicker } from "./TimeRangePicker";
 import { useDashboard } from "../api/useDashboard";
 import { useUuidParam } from "@/lib/useUuidParam";
@@ -20,6 +20,7 @@ import { RefreshPicker } from "./RefreshPicker";
 import { usePanels } from "../api/usePanels";
 import { useAuth } from "@tereo-io/react";
 import { PanelFrame } from "./PanelFrame";
+import { disagreement } from "./disagreement";
 import { dashboardsHref } from "./tabs";
 import type { Me } from "@/lib/auth";
 import "./styles.css";
@@ -109,6 +110,16 @@ const DashboardPage = ({ dashboardId }: { dashboardId: string }) => {
       void run({ timeRange: chosen });
     },
   });
+
+  // A line that disagrees with the dashboard (a panel fixed or added since it
+  // loaded) reloads it, once for each new disagreement, as display mode does.
+  const differs = disagreement(dashboard, runner.panels);
+  const reloadedFor = useRef("");
+  useEffect(() => {
+    if (differs === reloadedFor.current) return;
+    reloadedFor.current = differs;
+    if (differs !== "") void refetch();
+  }, [differs, refetch]);
 
   if (isLoading) return <Spinner size="lg" />;
   if (!dashboard) {

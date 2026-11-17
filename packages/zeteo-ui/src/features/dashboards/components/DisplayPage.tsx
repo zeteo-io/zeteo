@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Centered, Spinner } from "@kosmeo-ui/react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import type { Dashboard, DashboardTheme } from "../api/types";
+import type { DashboardTheme } from "../api/types";
 import { faExpand } from "@fortawesome/free-solid-svg-icons";
 import { useRunDashboard } from "../api/useRunDashboard";
 import { useAutoRefresh } from "../api/useAutoRefresh";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import type { PanelRun } from "../api/useRunDashboard";
 import { useDashboard } from "../api/useDashboard";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { DashboardGrid } from "./DashboardGrid";
 import { useAuth } from "@tereo-io/react";
 import { PanelFrame } from "./PanelFrame";
+import { disagreement } from "./disagreement";
 import "./styles.css";
 
 const DARK = "(prefers-color-scheme: dark)";
@@ -111,32 +111,6 @@ export const DisplaySignedOut = () => {
       </div>
     </Centered>
   );
-};
-
-/**
- * The panels whose last line disagrees with the dashboard as loaded: a state
- * other than the panel's, or a panel the dashboard does not have yet. Empty
- * when they agree; a key that changes when what disagrees does.
- */
-export const disagreement = (
-  dashboard: Dashboard | undefined,
-  runs: Record<string, PanelRun>
-): string => {
-  if (!dashboard) return "";
-  const byId = new Map(dashboard.panels.map((p) => [p.id, p]));
-  return Object.entries(runs)
-    .filter(([id, run]) => {
-      if (run.state === undefined || run.loading) return false;
-      const panel = byId.get(id);
-      return (
-        !panel ||
-        panel.state !== run.state ||
-        (run.state === "ok" && panel.chart === undefined)
-      );
-    })
-    .map(([id, run]) => `${id}:${run.state}`)
-    .sort()
-    .join(",");
 };
 
 /** `/dashboards/:dashboardId/display`: the dashboard alone, refreshing itself. */

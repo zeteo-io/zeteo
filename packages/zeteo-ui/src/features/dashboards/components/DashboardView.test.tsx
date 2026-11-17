@@ -77,6 +77,33 @@ beforeEach(() => {
 });
 
 describe("DashboardView", () => {
+  it("reloads the dashboard once when a run's line has another state than its panel", async () => {
+    current = makeDashboard({
+      panels: [
+        makePanel({
+          state: "needs_update",
+          message: COPY.needs_update,
+          chart: undefined,
+        }),
+      ],
+    });
+    const fixed = makeDashboard();
+    let loads = 0;
+    get.mockImplementation(async (url: string) => {
+      if (url !== `/v1/dashboards/${DASHBOARD_ID}`) {
+        return { data: { data: [], next_cursor: null } };
+      }
+      loads += 1;
+      return { data: loads === 1 ? current : fixed };
+    });
+    renderView();
+    expect(await screen.findByTestId("chart")).toBeInTheDocument();
+    expect(
+      screen.queryByText("This panel changed; reloading the dashboard.")
+    ).not.toBeInTheDocument();
+    expect(loads).toBe(2);
+  });
+
   it("draws each panel from the run, with its title and when it was updated", async () => {
     renderView();
     expect(
