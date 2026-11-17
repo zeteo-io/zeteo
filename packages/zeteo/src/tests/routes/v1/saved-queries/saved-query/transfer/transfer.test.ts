@@ -19,7 +19,10 @@ import {
 } from "../../../../../support/savedQueries.js";
 import {
   addToDirectory,
+  addUserToDirectory,
   clearDirectory,
+  markOrphaned,
+  clearOrphaned,
 } from "../../../../../support/principals.js";
 import {
   grantTo,
@@ -34,6 +37,7 @@ describe("POST /v1/saved-queries/:savedQueryId/transfer", () => {
   const user = async (columns: string[] | "all" = ["id", "status"]) => {
     const u = await userWithOrders(source, columns);
     users.push(u.id);
+    await addUserToDirectory(u.id);
     return u;
   };
   const transfer = (id: string, token: string, body: unknown) =>
@@ -119,6 +123,24 @@ describe("POST /v1/saved-queries/:savedQueryId/transfer", () => {
     expect(res.body.error).toBe("invalid_transfer");
     const still = await savedQueriesCall("GET", `/${id}`, owner.token);
     expect(still.body.owner.id).toBe(owner.id);
+  });
+
+  it("refuses a user the directory does not have, or has as orphaned", async () => {
+    const owner = await user();
+    const orphan = await user();
+    await markOrphaned(orphan.id);
+    try {
+      const id = await savedQueryOf(owner.token, source);
+      for (const target of [randomUUID(), orphan.id]) {
+        const res = await transfer(id, owner.token, { user_id: target });
+        expect(res.status).toBe(400);
+        expect(res.body.error).toBe("invalid_transfer");
+      }
+      const still = await savedQueriesCall("GET", `/${id}`, owner.token);
+      expect(still.body.owner.id).toBe(owner.id);
+    } finally {
+      await clearOrphaned(orphan.id);
+    }
   });
 
   it("refuses the current owner as the new owner", async () => {

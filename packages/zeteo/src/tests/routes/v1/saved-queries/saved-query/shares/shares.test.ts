@@ -1,11 +1,14 @@
 // @module-tag int
 // @module-tag platform
-import { DATA_READ } from "../../../../../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeSources } from "../../../../../support/sources.js";
 import { tokenFor } from "../../../../../support/tokens.js";
 import { ENGINES } from "../../../../../support/engines.js";
 import { randomUUID } from "crypto";
+import {
+  DATA_READ,
+  SAVED_QUERIES_WRITE,
+} from "../../../../../../definitions/tereoDeclaration.js";
 import {
   savedQueriesCall,
   savedQueryOf,
@@ -193,6 +196,44 @@ describe("/v1/saved-queries/:savedQueryId/shares", () => {
     }
     const listed = await savedQueriesCall("GET", `/${id}/shares`, owner.token);
     expect(listed.body.data).toEqual([]);
+  });
+
+  it("checks only groups being added: another organization's admin keeps an existing group share", async () => {
+    const orgA = randomUUID();
+    const orgB = randomUUID();
+    const owner = await user();
+    const ownerInA = tokenFor({
+      userId: owner.id,
+      org: orgA,
+      permissions: [DATA_READ],
+    });
+    const groupOfA = await group(orgA);
+    const id = await savedQueryOf(owner.token, source);
+    const kept = { type: "group", id: groupOfA };
+    expect((await put(id, ownerInA, [kept])).status).toBe(200);
+
+    const adminInB = tokenFor({
+      org: orgB,
+      permissions: [DATA_READ, SAVED_QUERIES_WRITE],
+    });
+    const recipient = await user();
+    const resaved = await put(id, adminInB, [kept, recipient.principal]);
+    expect(resaved.status).toBe(200);
+    expect(resaved.body.data.map((s: { id: string }) => s.id).sort()).toEqual(
+      [groupOfA, recipient.id].sort()
+    );
+
+    const another = await group(orgA);
+    const refused = await put(id, adminInB, [
+      kept,
+      recipient.principal,
+      { type: "group", id: another },
+    ]);
+    expect(refused.status).toBe(400);
+    expect(refused.body).toMatchObject({
+      error: "invalid_share",
+      error_description: OTHER_ORG_MESSAGE,
+    });
   });
 
   it("replaces the list: a removed recipient no longer finds it", async () => {

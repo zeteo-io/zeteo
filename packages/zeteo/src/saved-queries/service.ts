@@ -33,6 +33,7 @@ import {
 } from "../grants/access.js";
 import {
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
 } from "../utils/errors.js";
@@ -579,8 +580,9 @@ export const listShares = async (
 
 /**
  * Makes the saved query's shares exactly `principals`: for its owner, or a
- * holder of `zeteo.saved_queries.write`. Every group must be global or of the
- * caller's signed-in organization. Each user newly added who could not run it,
+ * holder of `zeteo.saved_queries.write`. Every group being added must be global
+ * or of the caller's signed-in organization; one already shared is not
+ * checked again. Each user newly added who could not run it,
  * judged as if signed in to that organization, is in `warnings`; groups never
  * are. Replacements of one saved query's shares run one at a time.
  */
@@ -602,10 +604,19 @@ export const replaceShares = async (
     principals.some((p) => p.type === "user" && p.id === owner);
   if (isOwner(found.ownerId)) throw ownerShare();
 
-  // Tereo is asked here, before the transaction.
-  const groups = principals.filter((p) => p.type === "group").map((p) => p.id);
+  const existing = await db.savedQueries.listShares(id);
+  const had = (type: "user" | "group") =>
+    new Set(
+      existing.filter((s) => s.principalType === type).map((s) => s.principalId)
+    );
+  const [usersBefore, groupsBefore] = [had("user"), had("group")];
+  // Tereo is asked here, before the transaction. Only groups being added are
+  // checked: a share carried over unchanged stands as it was made.
+  const newGroups = principals
+    .filter((p) => p.type === "group" && !groupsBefore.has(p.id))
+    .map((p) => p.id);
   const organizations = await mapConcurrently(
-    groups,
+    newGroups,
     GROUP_READS_IN_FLIGHT,
     groupOrganizationOf
   );
@@ -617,13 +628,8 @@ export const replaceShares = async (
   ) {
     throw new BadRequestError("invalid_share", SHARE_OTHER_ORGANIZATION);
   }
-  const before = new Set(
-    (await db.savedQueries.listShares(id))
-      .filter((s) => s.principalType === "user")
-      .map((s) => s.principalId)
-  );
   const newUsers = principals
-    .filter((p) => p.type === "user" && !before.has(p.id))
+    .filter((p) => p.type === "user" && !usersBefore.has(p.id))
     .map((p) => p.id);
   const unable = await unableToRun(found, newUsers, caller.organizationId);
 
@@ -636,6 +642,14 @@ export const replaceShares = async (
       principals,
       caller.userId
     );
+    // A group removed by someone else meanwhile would be added here unchecked.
+    if (
+      changes.added.some((p) => p.type === "group" && !newGroups.includes(p.id))
+    ) {
+      throw new ConflictError(
+        "The shares changed while saving; load them again and retry"
+      );
+    }
     if (changes.added.length > 0 || changes.removed.length > 0) {
       audit({
         action: AUDIT_EVENTS.savedQueryShared,
@@ -691,6 +705,10 @@ export const transferSavedQuery = async (
     );
   if (found.ownerId === userId) throw alreadyOwner();
   // Tereo is asked here, before the transaction.
+  const [target] = await lookupPrincipals([{ type: "user", id: userId }]);
+  if (!target || target.status === "orphaned") {
+    throw new BadRequestError("invalid_transfer", "No such user");
+  }
   if (await isServiceAccountUser(userId)) {
     throw new BadRequestError(
       "invalid_transfer",

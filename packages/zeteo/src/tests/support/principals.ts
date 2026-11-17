@@ -54,6 +54,18 @@ export const addToDirectory = async (entries: TestDirectoryEntry[]) => {
   await redis.expire(TEST_DIRECTORY_KEY, 600);
 };
 
+/** Adds an active human user to the test-mode directory, so a lookup finds them. */
+export const addUserToDirectory = (id: string) =>
+  addToDirectory([
+    {
+      type: "user",
+      id,
+      name: `User ${id.slice(0, 6)}`,
+      email: `${id.slice(0, 6)}@example.com`,
+      status: "active",
+    },
+  ]);
+
 export const clearDirectory = async () => {
   await redis.del(TEST_DIRECTORY_KEY);
 };

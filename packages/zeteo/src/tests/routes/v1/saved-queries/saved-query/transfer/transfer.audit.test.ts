@@ -16,6 +16,10 @@ import {
   userWithOrders,
 } from "../../../../../support/savedQueries.js";
 import {
+  addUserToDirectory,
+  clearDirectory,
+} from "../../../../../support/principals.js";
+import {
   removeRunsOf,
   seedQuerySource,
   type SeededSource,
@@ -27,6 +31,7 @@ describe("saved query transfer audit entries", () => {
   const user = async () => {
     const u = await userWithOrders(source);
     users.push(u.id);
+    await addUserToDirectory(u.id);
     return u;
   };
 
@@ -34,6 +39,7 @@ describe("saved query transfer audit entries", () => {
     source = await seedQuerySource(ENGINES[0]!, {}, "savedtransferaudit");
   });
   afterAll(async () => {
+    await clearDirectory();
     await removeRunsOf(users);
     await removeSources([source.id]);
   });
