@@ -1,7 +1,7 @@
 import { AppError, SavedQueryNotAccessibleError } from "../utils/errors.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
 import type { QueryPlan, SourceAdapter } from "../adapters/types.js";
-import { planFor, type Progress } from "./index.js";
+import { planFor, type Progress } from "./plan.js";
 import type { Access } from "../grants/access.js";
 import { logger } from "../utils/logger.js";
 import {

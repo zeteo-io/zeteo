@@ -6,6 +6,7 @@ import { withSourceConnection } from "../sources/pools.js";
 import { approxRowBytes } from "../adapters/rowSize.js";
 import { loadUserLimits } from "../limits/resolve.js";
 import type { Caller } from "../middleware/auth.js";
+import { planFor, type Progress } from "./plan.js";
 import { performance } from "node:perf_hooks";
 import { nextBatchRows } from "./collect.js";
 import { logger } from "../utils/logger.js";
@@ -31,11 +32,9 @@ import {
   checkRows,
   loadAndPlanSaved,
   loadCatalogFor,
-  planFor,
   recordedQueryOf,
   recordRunOrPlaceholder,
   sourceSlugOf,
-  type Progress,
   type SavedRun,
 } from "./index.js";
 

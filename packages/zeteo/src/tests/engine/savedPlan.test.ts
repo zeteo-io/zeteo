@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
 import { planSaved } from "../../engine/savedPlan.js";
-import type { Progress } from "../../engine/index.js";
+import type { Progress } from "../../engine/plan.js";
 import { loadAccess } from "../../grants/access.js";
 import { ENGINES } from "../support/engines.js";
 import {

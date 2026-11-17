@@ -2,10 +2,12 @@ import { savedQueryView, type SavedQueryView } from "../views/savedQuery.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { ForbiddenError, NotFoundError } from "../utils/errors.js";
+import { loadCatalogFor, sourceSlugOf } from "../engine/index.js";
 import type { SavedQueryRow } from "../utils/db/savedQueries.js";
 import { db, prisma, type Prisma } from "../utils/db/index.js";
 import { lookupPrincipals } from "../principals/directory.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
+import { planFor, type Progress } from "../engine/plan.js";
 import { hasPermission } from "../utils/permissions.js";
 import { groupIdsOf } from "../grants/principals.js";
 import type { Caller } from "../middleware/auth.js";
@@ -20,12 +22,6 @@ import {
   SAVED_QUERIES_WRITE,
   SOURCES_READ,
 } from "../definitions/tereoDeclaration.js";
-import {
-  loadCatalogFor,
-  planFor,
-  sourceSlugOf,
-  type Progress,
-} from "../engine/index.js";
 
 const notFound = () => new NotFoundError("Saved query not found");
 

@@ -219,12 +219,17 @@ export const recordInterruptedExport = (
     sourceId: string;
     rowCount: number | null;
     createdAt: Date;
+    savedQueryId?: string | null;
   },
   now: Date
 ): Promise<boolean> =>
   recordExportEnd(
     row.id,
-    { caller: { userId: row.userId }, sourceId: row.sourceId },
+    {
+      caller: { userId: row.userId },
+      sourceId: row.sourceId,
+      savedQueryId: row.savedQueryId ?? undefined,
+    },
     {
       durationMs: Math.min(
         Math.max(now.getTime() - row.createdAt.getTime(), 0),

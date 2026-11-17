@@ -48,6 +48,7 @@ describe("runs housekeeping", () => {
       outcome?: RunOutcome;
       entryPoint?: "api" | "export";
       rowCount?: number | null;
+      savedQueryId?: string;
     } = {}
   ) => {
     const userId = randomUUID();
@@ -62,6 +63,7 @@ describe("runs housekeeping", () => {
         rowCount: extra.rowCount ?? null,
         outcome: extra.outcome ?? "running",
         errorCode: null,
+        savedQueryId: extra.savedQueryId ?? null,
         createdAt: new Date(NOW.getTime() - ageMs),
       },
     });
@@ -122,6 +124,25 @@ describe("runs housekeeping", () => {
         },
       });
       expect(await auditRows(recent.id)).toHaveLength(0);
+    });
+
+    it("names the saved query an interrupted export ran in its entry", async () => {
+      const saved = await prisma.savedQuery.create({
+        data: {
+          ownerId: randomUUID(),
+          sourceId,
+          name: `house ${randomUUID()}`,
+          query: { from: "customers" },
+        },
+      });
+      const old = await newRun(16 * MINUTE, { savedQueryId: saved.id });
+      expect(await closeInterruptedExports(NOW)).toBe(1);
+      const audit = (await auditRows(old.id)).map((r) => r.payload);
+      expect(audit).toHaveLength(1);
+      expect(audit[0]!.metadata).toMatchObject({
+        event: "zeteo.export.run",
+        saved_query_id: saved.id,
+      });
     });
 
     it("keeps a null row count, caps the duration at the export limit and ignores queries and closed exports", async () => {
