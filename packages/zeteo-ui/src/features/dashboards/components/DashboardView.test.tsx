@@ -111,8 +111,24 @@ describe("DashboardView", () => {
     }
   );
 
-  it("shows the notice of a panel cut at the row cap", async () => {
+  it("shows the notice the server sends for a panel cut at the row cap", async () => {
+    const notice =
+      "Showing the first 5,000 rows; aggregate the saved query to see everything.";
     const rows = Array.from({ length: 5000 }, (_, i) => [`r${i}`, i]);
+    post.mockImplementation(async () => ({
+      data: streamOf([
+        okLine(PANEL_A, {
+          ...makeResult({ rows, truncated: true, truncated_by: "rows" }),
+          notice,
+        }),
+      ]),
+    }));
+    renderView();
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+  });
+
+  it("shows no notice when the server sends none, as for a saved query's own limit", async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => [`r${i}`, i]);
     post.mockImplementation(async () => ({
       data: streamOf([
         okLine(
@@ -122,11 +138,8 @@ describe("DashboardView", () => {
       ]),
     }));
     renderView();
-    expect(
-      await screen.findByText(
-        "Showing the first 5,000 rows; aggregate the saved query to see everything."
-      )
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("chart")).toBeInTheDocument();
+    expect(screen.queryByText(/Showing the first/)).not.toBeInTheDocument();
   });
 
   it("re-runs with the time range chosen, without saving it", async () => {

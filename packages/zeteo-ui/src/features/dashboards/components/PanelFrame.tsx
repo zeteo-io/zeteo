@@ -19,10 +19,6 @@ export const PANEL_COPY: Record<Exclude<PanelState, "ok">, string> = {
   needs_update: "This panel needs updating by its owner.",
 };
 
-/** What a viewer is told of a result cut at the row cap. */
-export const truncatedNotice = (rows: number) =>
-  `Showing the first ${rows.toLocaleString("en-US")} rows; aggregate the saved query to see everything.`;
-
 /** HH:MM, 24-hour, in the viewer's zone. */
 const clock = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-GB", {
@@ -55,10 +51,9 @@ export const PanelFrame = ({
       ? undefined
       : (run?.message ?? panel.message ?? PANEL_COPY[state]);
   const result = state === "ok" ? run?.result : undefined;
-  const notice =
-    result?.truncated_by === "rows"
-      ? (result.notice ?? truncatedNotice(result.rows.length))
-      : undefined;
+  // Only the server knows whether the dashboard's cap or the saved query's own
+  // limit cut the rows, so its notice is shown as given and never made up here.
+  const notice = result?.notice;
 
   return (
     <section
