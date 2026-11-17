@@ -6251,7 +6251,7 @@ components:
         h:
           type: integer
           minimum: 1
-          maximum: 50
+          maximum: 24
           description: Height in rows
         title:
           type:
@@ -7231,7 +7231,7 @@ components:
     PlaceH:
       type: integer
       minimum: 1
-      maximum: 50
+      maximum: 24
       description: Height in rows
 x-tagGroups:
   - name: Sources

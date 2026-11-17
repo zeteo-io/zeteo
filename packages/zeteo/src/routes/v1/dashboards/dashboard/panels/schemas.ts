@@ -12,7 +12,8 @@ export const PanelTitleSchema = noNul(z.string().trim().min(1).max(100));
 export const TimeColumnSchema = z.string().min(1).max(200);
 
 /** The most rows tall a panel may be, and the lowest row it may start at. */
-export const MAX_PANEL_HEIGHT = 50;
+/** The tallest a panel may be, in rows; the database checks the same bound. */
+export const MAX_PANEL_HEIGHT = 24;
 export const MAX_PANEL_ROW = 1000;
 
 /** A panel's place on the 12-column grid; each part may be left out when the panel is added. */

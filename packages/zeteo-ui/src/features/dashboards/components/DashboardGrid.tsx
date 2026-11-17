@@ -12,6 +12,8 @@ export interface Place {
 
 /** The grid's columns, as the server lays panels out. */
 export const GRID_COLUMNS = 12;
+/** The tallest a panel may be, in rows, as the server allows. */
+export const MAX_PANEL_HEIGHT = 24;
 
 interface DashboardGridProps {
   panels: Panel[];
@@ -37,6 +39,8 @@ export const DashboardGrid = ({
     ...(places[p.id] ?? { x: p.x, y: p.y, w: p.w, h: p.h }),
     minW: 2,
     minH: 2,
+    // The server refuses a panel taller than 24 rows.
+    maxH: MAX_PANEL_HEIGHT,
   }));
 
   return (

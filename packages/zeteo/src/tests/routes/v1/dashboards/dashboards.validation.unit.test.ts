@@ -97,6 +97,7 @@ describe("PanelInputSchema", () => {
     ["w of 13", { x: 0, y: 0, w: 13, h: 2 }],
     ["w of 0", { x: 0, y: 0, w: 0, h: 2 }],
     ["h of 0", { x: 0, y: 0, w: 2, h: 0 }],
+    ["h of 25", { x: 0, y: 0, w: 2, h: 25 }],
     ["a negative x", { x: -1, y: 0 }],
     ["a negative y", { x: 0, y: -1 }],
     ["a fractional x", { x: 0.5, y: 0 }],
@@ -132,6 +133,7 @@ describe("PanelInputSchema", () => {
   it("accepts a place on the edge of the grid", () => {
     expect(panel({ x: 6, y: 0, w: 6, h: 1 }).success).toBe(true);
     expect(panel({ x: 0, y: 3, w: 12, h: 10 }).success).toBe(true);
+    expect(panel({ x: 0, y: 3, w: 12, h: 24 }).success).toBe(true);
   });
 });
 
