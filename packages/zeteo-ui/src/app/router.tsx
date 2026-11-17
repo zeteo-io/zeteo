@@ -29,6 +29,14 @@ const pages = {
   "/runs": lazy(() =>
     import("@/features/runs").then((m) => ({ default: m.RunsPage }))
   ),
+  "/saved-queries": lazy(() =>
+    import("@/features/saved-queries").then((m) => ({
+      default: m.SavedQueriesPage,
+    }))
+  ),
+  "/my": lazy(() =>
+    import("@/features/my").then((m) => ({ default: m.MyPage }))
+  ),
 } as const;
 
 /** `/` goes to the first section the person can read. */

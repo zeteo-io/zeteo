@@ -1,0 +1,56 @@
+.z-share-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-my-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-my-json {
+  margin: 0;
+  padding: 0.75rem;
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-muted {
+  margin: 0;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-share-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+}
+
+.z-share-list li + li {
+  border-top: 1px solid var(--k-border-color);
+}
+
+.z-share-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+}
+
+.z-share-row .k-button {
+  margin-left: auto;
+}
+
+.z-sq-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}

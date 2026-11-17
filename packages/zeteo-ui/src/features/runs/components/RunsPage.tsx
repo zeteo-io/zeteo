@@ -256,6 +256,15 @@ export const RunsPage = () => {
                   ),
               },
               {
+                title: "Saved query",
+                cellElement: (run) =>
+                  run.saved_query ? (
+                    run.saved_query.name
+                  ) : (
+                    <span className="z-muted">—</span>
+                  ),
+              },
+              {
                 title: "Entry point",
                 cellElement: (run) => ENTRY_LABEL[run.entry_point],
               },

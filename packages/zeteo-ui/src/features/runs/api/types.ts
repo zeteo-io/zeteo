@@ -26,6 +26,8 @@ export interface Run {
   error_code: string | null;
   truncated: boolean;
   created_at: string;
+  /** The saved query the run came from, when it came from one. */
+  saved_query?: { id: string; name: string };
 }
 
 export interface RunFilters {

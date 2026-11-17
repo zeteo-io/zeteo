@@ -121,6 +121,41 @@ describe("RunsPage", () => {
     expect(rows[2]).toHaveTextContent("Export");
   });
 
+  it("shows the saved query a run came from", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === "/v1/runs") {
+        return {
+          data: {
+            data: [
+              makeRun({
+                saved_query: {
+                  id: "c1111111-1c7a-4a53-9d0e-6a3b1f2c4d01",
+                  name: "Weekly revenue",
+                },
+              }),
+              hostile,
+            ],
+            next_cursor: null,
+          },
+        };
+      }
+      if (url === "/v1/sources") {
+        return { data: { data: [makeSource()], next_cursor: null } };
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />);
+    await screen.findAllByText("Ada Lovelace");
+    const rows = screen.getAllByRole("row").slice(1);
+    expect(rows[0]).toHaveTextContent("Weekly revenue");
+    expect(rows[1]).not.toHaveTextContent("Weekly revenue");
+    await user.click(within(rows[0]).getByRole("button", { name: "Details" }));
+    expect(await screen.findByRole("dialog")).toHaveTextContent(
+      "Weekly revenue"
+    );
+  });
+
   it("shows the raw source id without zeteo.sources.read", async () => {
     held.permissions = ["zeteo.runs.read"];
     renderWithProviders(<RunsPage />);
