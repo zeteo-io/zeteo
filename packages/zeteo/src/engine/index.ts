@@ -1,6 +1,7 @@
 import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import { fingerprintOf, refusalFingerprintOf } from "./fingerprint.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
+import { claim, failureWindowOf, release } from "./recordWindow.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
@@ -16,7 +17,6 @@ import type { QueryEntryPoint } from "./limits.js";
 import * as resultCache from "./resultCache.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
-import { claim } from "./recordWindow.js";
 import { db } from "../utils/db/index.js";
 import { notFound } from "./errors.js";
 import { collect } from "./collect.js";
@@ -524,6 +524,7 @@ const runDashboardQuery = async (
         { err: recordErr, source_id: progress.sourceId },
         "a failed dashboard run could not be recorded, even without its query"
       );
+      await release(caller.userId, fingerprint);
     }
   };
 
@@ -564,7 +565,9 @@ const runDashboardQuery = async (
       });
     }
   } catch (err) {
-    await recordFailure(err, fingerprint);
+    // Its own window, so a run that failed (or whose caller went away) never
+    // keeps the next successful one from being recorded.
+    await recordFailure(err, failureWindowOf(fingerprint));
     throw err;
   }
 
@@ -588,6 +591,8 @@ const runDashboardQuery = async (
       { err, source_id: progress.sourceId },
       "a dashboard run could not be recorded, even without its query; its rows are withheld"
     );
+    // The window stays closed, so the next run records instead.
+    await release(caller.userId, fingerprint);
     throw err;
   }
   // Not waited for: a stamp that fails is logged, and the run stands.

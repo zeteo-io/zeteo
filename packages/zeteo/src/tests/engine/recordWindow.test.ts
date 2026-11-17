@@ -36,6 +36,31 @@ import {
   vi,
 } from "vitest";
 
+// Fails the next `failures.left` writes of a run's record, when a test asks.
+// The engine runs in this process.
+const failures = vi.hoisted(() => ({ left: 0 }));
+
+vi.mock(import("../../engine/record.js"), async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    recordRun: (run: Parameters<typeof actual.recordRun>[0]) => {
+      if (failures.left > 0) {
+        failures.left -= 1;
+        return Promise.reject(new Error("the record could not be written"));
+      }
+      return actual.recordRun(run);
+    },
+  };
+});
+
+/** A signal that has already aborted, as when the viewer's tab closed. */
+const closedTab = (): AbortSignal => {
+  const controller = new AbortController();
+  controller.abort(new Error("the client went away"));
+  return controller.signal;
+};
+
 const MINUTE = 60_000;
 const T0 = new Date("2026-11-17T09:00:00Z").getTime();
 
@@ -81,6 +106,7 @@ describe("the recording window of dashboard runs", () => {
     at = 0;
   });
   afterEach(async () => {
+    failures.left = 0;
     vi.useRealTimers();
     await clearDashboardKeys();
     await removeRunsOf([owner.id]);
@@ -162,5 +188,43 @@ describe("the recording window of dashboard runs", () => {
     await refuse();
     runs = await runsOf([owner.id]);
     expect(runs).toHaveLength(2);
+  });
+
+  it("records a success in the window a failed run of the same query was recorded in", async () => {
+    await expect(
+      runOnDashboard(owner.id, seeded, seeded.query, closedTab())
+    ).rejects.toThrow("the client went away");
+    const ok = await runOnDashboard(owner.id, seeded);
+    expect(ok.run_id).toBeDefined();
+    const runs = await runsOf([owner.id]);
+    expect(runs.map((r) => [r.outcome, r.errorCode])).toEqual([
+      ["failed", "client_closed"],
+      ["ok", null],
+    ]);
+    expect(runs[1]!.id).toBe(ok.run_id);
+  });
+
+  it("withholds the rows of a run whose record failed, and records the next run", async () => {
+    // The record and its placeholder retry both fail.
+    failures.left = 2;
+    await expect(runOnDashboard(owner.id, seeded)).rejects.toThrow(
+      "the record could not be written"
+    );
+    expect(await runsOf([owner.id])).toHaveLength(0);
+    const retry = await runOnDashboard(owner.id, seeded);
+    expect(retry.run_id).toBeDefined();
+    expect(await runsOf([owner.id])).toHaveLength(1);
+  });
+
+  it("records the next failure when a failed run's record could not be written", async () => {
+    failures.left = 2;
+    await expect(
+      runOnDashboard(owner.id, seeded, seeded.query, closedTab())
+    ).rejects.toThrow("the client went away");
+    expect(await runsOf([owner.id])).toHaveLength(0);
+    await expect(
+      runOnDashboard(owner.id, seeded, seeded.query, closedTab())
+    ).rejects.toThrow("the client went away");
+    expect(await runsOf([owner.id])).toHaveLength(1);
   });
 });

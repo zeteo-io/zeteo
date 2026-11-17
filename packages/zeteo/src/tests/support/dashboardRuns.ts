@@ -44,12 +44,14 @@ export type SeededDashboardQuery = Awaited<
 export const runOnDashboard = (
   userId: string,
   seeded: SeededDashboardQuery,
-  body: unknown = seeded.query
+  body: unknown = seeded.query,
+  signal?: AbortSignal
 ) =>
   runQuery({
     caller: readerOf(userId),
     entryPoint: "dashboard",
     body,
+    signal,
     savedQuery: seeded.savedQuery,
     dashboard: { dashboardId: seeded.dashboardId, now: new Date() },
   });

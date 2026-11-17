@@ -26,3 +26,26 @@ export const claim = async (
     return true;
   }
 };
+
+/**
+ * Closes the window `claim` opened, for a run whose record could not be
+ * written: the next run then records instead. Never throws; a window that
+ * cannot be closed lapses at its expiry.
+ */
+export const release = async (
+  userId: string,
+  fingerprint: string
+): Promise<void> => {
+  try {
+    await withinRedisTimeout(redis.del(windowKey(userId, fingerprint)));
+  } catch (err) {
+    logger.warn({ err }, "closing a dashboard recording window failed");
+  }
+};
+
+/**
+ * The window a failed run of the query under `fingerprint` is recorded in:
+ * apart from its successful runs', so a failure never hides a success.
+ */
+export const failureWindowOf = (fingerprint: string): string =>
+  `${fingerprint}:failed`;
