@@ -27,7 +27,8 @@ describe("check-routes", () => {
   it("passes a clean tree", () => {
     expect(
       run({
-        "src/app/router.tsx": 'export const r = [{ path: "/sources" }];',
+        "src/app/router.tsx":
+          'export const r = [{ path: "/sources" }, { path: "/dashboards" }, { path: "dashboards/:dashboardId" }, { path: "saved-panels" }];',
         "public/favicon.svg": "",
       })
     ).toBe(0);

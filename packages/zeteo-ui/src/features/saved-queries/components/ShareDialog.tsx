@@ -1,3 +1,4 @@
+import { NOUNS, type SharedObjectType } from "../api/sharedObjects";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Alert, Button, Modal, Spinner } from "@kosmeo-ui/react";
 import type { ReplaceSharesResult, Share } from "../api/types";
@@ -15,19 +16,26 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 
 interface ShareDialogProps {
-  savedQueryId: string;
+  objectType: SharedObjectType;
+  id: string;
   onClose: () => void;
 }
 
-const NOTE =
-  "The name and description are visible to everyone it's shared with, including people who can't run it.";
+const NOTES: Record<SharedObjectType, string> = {
+  saved_query:
+    "The name and description are visible to everyone it's shared with, including people who can't run it.",
+  dashboard:
+    "Everyone it's shared with can open it. Each panel shows only what their own access lets them run.",
+  saved_panel:
+    "Everyone it's shared with can see it and add it to their dashboards. It shows only what their own access lets them run.",
+};
 
 const labelOf = (s: { name: string | null; id: string }) => s.name ?? s.id;
 
-/** Who a saved query is shared with: search, add, remove, then save the whole list. */
-export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
-  const current = useShares(savedQueryId);
-  const replace = useReplaceShares(savedQueryId);
+/** Who a saved query, dashboard or saved panel is shared with: search, add, remove, then save the whole list. */
+export const ShareDialog = ({ objectType, id, onClose }: ShareDialogProps) => {
+  const current = useShares(objectType, id);
+  const replace = useReplaceShares(objectType, id);
   const [list, setList] = useState<Share[] | null>(null);
   const [saved, setSaved] = useState<ReplaceSharesResult | null>(null);
 
@@ -60,7 +68,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
       (list ?? []).map(({ type, id }) => ({ type, id })),
       {
         onSuccess: (result) => {
-          if (result.warnings.length === 0) onClose();
+          if (!result.warnings?.length) onClose();
           else setSaved(result);
         },
       }
@@ -81,7 +89,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
         ]}
       >
         <div className="z-share-form">
-          {saved.warnings.map((w) => {
+          {(saved.warnings ?? []).map((w) => {
             const who = saved.data.find((s) => s.id === w.id);
             const name = who ? labelOf(who) : w.id;
             return (
@@ -99,7 +107,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
   return (
     <Modal
       show
-      title="Share saved query"
+      title={`Share ${NOUNS[objectType]}`}
       onClose={onClose}
       dismissible={!busy}
       footerButtons={[
@@ -156,7 +164,7 @@ export const ShareDialog = ({ savedQueryId, onClose }: ShareDialogProps) => {
             ))}
           </ul>
         )}
-        <p className="z-note">{NOTE}</p>
+        <p className="z-note">{NOTES[objectType]}</p>
         <ErrorNotice error={replace.error} />
       </div>
     </Modal>

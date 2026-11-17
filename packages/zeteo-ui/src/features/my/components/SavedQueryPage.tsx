@@ -1,9 +1,10 @@
-import { Badge, BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import { faUser, faUserGroup } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { formatRelative } from "@/utils/formatRelative";
+import { isUsed, usedByWarning } from "@/utils/usedBy";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { WarnDialog } from "@/components/WarnDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
 import { useUuidParam } from "@/lib/useUuidParam";
@@ -24,10 +25,28 @@ import {
   useDeleteSavedQuery,
   useSavedQuery,
   useShares,
+  useUpdateSavedQuery,
   type SavedQuery,
 } from "@/features/saved-queries";
+import {
+  Badge,
+  BorderedSection,
+  Button,
+  Spinner,
+  Switch,
+} from "@kosmeo-ui/react";
 
-type Dialog = "share" | "transfer" | "edit" | "copy" | null;
+type Dialog =
+  | "share"
+  | "transfer"
+  | "edit"
+  | "edit-warning"
+  | "off-warning"
+  | "copy"
+  | null;
+
+export const AVAILABLE_NOTE =
+  "Anyone can see its name and description and use it in their dashboards. They can only run it if their own access allows.";
 
 const When = ({ iso, never }: { iso: string | null; never: string }) =>
   iso ? (
@@ -44,7 +63,7 @@ export const SavedQueryPage = () => {
 };
 
 const SharesList = ({ savedQueryId }: { savedQueryId: string }) => {
-  const shares = useShares(savedQueryId);
+  const shares = useShares("saved_query", savedQueryId);
   if (shares.isLoading) return <Spinner size="sm" />;
   if (shares.error) return <ErrorNotice error={shares.error} />;
   const list = shares.data ?? [];
@@ -74,6 +93,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
   const { data: sq, error, isLoading } = useSavedQuery(savedQueryId);
   const { user, hasPermission } = useAuth<Me>();
   const remove = useDeleteSavedQuery();
+  const update = useUpdateSavedQuery();
   const navigate = useNavigate();
   const [dialog, setDialog] = useState<Dialog>(null);
   const [copied, setCopied] = useState(false);
@@ -96,6 +116,12 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
   const seesShares = sq.share_count !== undefined;
   const backTab = isOwner ? "mine" : sq.shared_at ? "shared" : "mine";
   const close = () => setDialog(null);
+  const used = isUsed(sq.used_by);
+  const available = sq.available_for_dashboards === true;
+  const setAvailable = (on: boolean) => {
+    setDialog(null);
+    update.mutate({ id: sq.id, body: { available_for_dashboards: on } });
+  };
 
   const copyJson = async (query: SavedQuery["query"]) => {
     try {
@@ -114,7 +140,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
           size="sm"
           variant="secondary"
           fullWidth={false}
-          onClick={() => setDialog("edit")}
+          onClick={() => setDialog(used ? "edit-warning" : "edit")}
         >
           Edit details
         </Button>
@@ -259,6 +285,31 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
               </dd>
             </dl>
           </BorderedSection>
+          {isOwner && (
+            <BorderedSection
+              title="Dashboards"
+              as="h2"
+              actions={
+                <Switch
+                  label="Available for dashboards"
+                  labelLocation="left"
+                  size="sm"
+                  checked={available}
+                  isLoading={update.isPending}
+                  onChange={(e) =>
+                    e.target.checked
+                      ? setAvailable(true)
+                      : used
+                        ? setDialog("off-warning")
+                        : setAvailable(false)
+                  }
+                />
+              }
+            >
+              <p className="z-note">{AVAILABLE_NOTE}</p>
+              <ErrorNotice error={update.error} />
+            </BorderedSection>
+          )}
           {seesShares && (
             <BorderedSection title="Shared with" as="h2">
               <SharesList savedQueryId={sq.id} />
@@ -268,13 +319,31 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
       </div>
 
       {dialog === "share" && (
-        <ShareDialog savedQueryId={sq.id} onClose={close} />
+        <ShareDialog objectType="saved_query" id={sq.id} onClose={close} />
       )}
       {dialog === "transfer" && (
-        <TransferDialog savedQueryId={sq.id} onClose={close} />
+        <TransferDialog objectType="saved_query" id={sq.id} onClose={close} />
       )}
       {dialog === "edit" && (
         <EditDetailsDialog savedQuery={sq} onClose={close} />
+      )}
+      {dialog === "edit-warning" && sq.used_by && (
+        <WarnDialog
+          title="Edit saved query"
+          warning={usedByWarning(sq.used_by)}
+          confirmLabel="Continue"
+          onConfirm={() => setDialog("edit")}
+          onClose={close}
+        />
+      )}
+      {dialog === "off-warning" && sq.used_by && (
+        <WarnDialog
+          title="Turn off for dashboards"
+          warning={usedByWarning(sq.used_by)}
+          confirmLabel="Turn off"
+          onConfirm={() => setAvailable(false)}
+          onClose={close}
+        />
       )}
       {dialog === "copy" && <CopyDialog savedQuery={sq} onClose={close} />}
     </>

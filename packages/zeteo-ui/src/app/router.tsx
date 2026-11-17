@@ -43,6 +43,11 @@ const pages = {
   "/my": lazy(() =>
     import("@/features/my").then((m) => ({ default: m.MyPage }))
   ),
+  "/dashboards": lazy(() =>
+    import("@/features/dashboards").then((m) => ({
+      default: m.DashboardsPage,
+    }))
+  ),
 } as const;
 
 /** `/` goes to the first section the person can read. */
@@ -72,6 +77,28 @@ const savedQueryRoutes = [
         </Suspense>
       </RequirePermission>
     ),
+  },
+];
+
+const dashboardPage = lazy(() =>
+  import("@/features/dashboards").then((m) => ({ default: m.DashboardView }))
+);
+
+/** One dashboard, for anyone who can see it; saved panels live in the Dashboards section. */
+const dashboardRoutes = [
+  {
+    path: "dashboards/:dashboardId",
+    element: (
+      <RequirePermission permission="zeteo.data.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(dashboardPage)}
+        </Suspense>
+      </RequirePermission>
+    ),
+  },
+  {
+    path: "saved-panels",
+    element: <Navigate to="/dashboards?tab=panels" replace />,
   },
 ];
 
@@ -134,6 +161,7 @@ export const routes = [
       ...sourceRoutes,
       ...grantWriteRoutes,
       ...savedQueryRoutes,
+      ...dashboardRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },

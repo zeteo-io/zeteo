@@ -7,6 +7,8 @@ export interface ApiError {
   message: string;
   issues?: { path: string; message: string }[];
   findings?: { code: string; detail: string }[];
+  /** `invalid_panel`: each chart or panel setting at fault and why. */
+  problems?: { setting: string; problem: string }[];
   /** Seconds, from `Retry-After`. */
   retryAfter?: number;
 }
@@ -35,6 +37,14 @@ const findingsOf = (v: unknown): ApiError["findings"] =>
     ? v.filter(isRecord).map((f) => ({
         code: String(f.code ?? ""),
         detail: String(f.detail ?? ""),
+      }))
+    : undefined;
+
+const problemsOf = (v: unknown): ApiError["problems"] =>
+  Array.isArray(v)
+    ? v.filter(isRecord).map((p) => ({
+        setting: String(p.setting ?? ""),
+        problem: String(p.problem ?? ""),
       }))
     : undefined;
 
@@ -94,6 +104,8 @@ export const toApiError = (err: unknown): ApiError => {
   if (issues) out.issues = issues;
   const findings = findingsOf(body.findings);
   if (findings) out.findings = findings;
+  const problems = problemsOf(body.problems);
+  if (problems) out.problems = problems;
   const retry = retryAfterSeconds(res.headers?.["retry-after"]);
   if (retry !== undefined) out.retryAfter = retry;
   return out;

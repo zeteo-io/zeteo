@@ -16,6 +16,8 @@ export const SECTIONS: Section[] = [
     label: "Saved queries",
     permission: "zeteo.saved_queries.read",
   },
-  // Last, so admins still land on their first admin section and others here.
+  // Near the end, so admins still land on their first admin section and
+  // others on My Zeteo, which comes before Dashboards.
   { path: "/my", label: "My Zeteo", permission: "zeteo.data.read" },
+  { path: "/dashboards", label: "Dashboards", permission: "zeteo.data.read" },
 ];

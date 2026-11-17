@@ -1,0 +1,196 @@
+/* The panel editor: the settings beside the live preview. */
+.z-pe {
+  display: grid;
+  grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  min-height: 24rem;
+}
+
+.z-pe-form,
+.z-pe-settings {
+  display: grid;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.z-pe-kind {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.z-pe-checks {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.z-pe-checks legend {
+  font-size: var(--k-text-size-sm);
+  margin-bottom: 0.25rem;
+}
+
+.z-pe-problem {
+  margin: 0.25rem 0 0;
+  color: var(--k-danger-color);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-pe-preview {
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 0.5rem;
+}
+
+.z-pe-chart {
+  height: 22rem;
+}
+
+@media (max-width: 900px) {
+  .z-pe {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A dashboard: the range picker and refresh above the grid. */
+.z-dashboard-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+
+.z-dashboard-range {
+  width: 14rem;
+}
+
+.z-dashboard-grid {
+  margin: 0 -12px;
+}
+
+/* One panel: a bordered card filling its grid cell. */
+.z-panel {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  background: var(--k-background-color, transparent);
+  overflow: hidden;
+}
+
+.z-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--k-border-color);
+}
+
+.react-grid-item.react-draggable .z-panel-head {
+  cursor: move;
+}
+
+.z-panel-title {
+  margin: 0;
+  font-size: var(--k-text-size-md, 1rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.z-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  font-size: var(--k-text-size-sm);
+}
+
+.z-panel-stale {
+  color: var(--k-warning-color-text, var(--k-warning-color));
+}
+
+.z-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+}
+
+.z-panel-chart {
+  flex: 1;
+  min-height: 0;
+}
+
+.z-panel-message {
+  margin: auto;
+  max-width: 28rem;
+  text-align: center;
+  color: var(--k-text-color-muted, inherit);
+}
+
+.z-panel-notice {
+  margin: 0.25rem 0 0;
+  font-size: var(--k-text-size-sm);
+  color: var(--k-text-color-muted, inherit);
+}
+
+/* The lists: cards in a grid, as My Zeteo's saved queries. */
+.z-db-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+  gap: 1rem;
+}
+
+.z-db-card {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-db-card h3 {
+  margin: 0;
+  font-size: var(--k-text-size-md, 1rem);
+}
+
+.z-db-card h3 a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.z-db-card h3 a:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}
+
+.z-db-card p {
+  margin: 0;
+}
+
+.z-db-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.z-db-actions {
+  display: flex;
+  gap: 0.375rem;
+}
+
+.z-db-preview {
+  height: 14rem;
+}
+
+.z-db-sections {
+  display: grid;
+  gap: 1.25rem;
+}

@@ -34,6 +34,17 @@ describe("toApiError", () => {
     });
   });
 
+  it("keeps the problems of an invalid_panel", () => {
+    const err = toApiError(
+      axiosError(400, {
+        error: "invalid_panel",
+        error_description: "The chart does not fit",
+        problems: [{ setting: "y.1", problem: "wrong_type" }],
+      })
+    );
+    expect(err.problems).toEqual([{ setting: "y.1", problem: "wrong_type" }]);
+  });
+
   it("maps a network failure to status null and code network", () => {
     const err = toApiError(new AxiosError("Network Error", "ERR_NETWORK"));
     expect(err.status).toBeNull();

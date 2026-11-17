@@ -1,9 +1,14 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { ReplaceSharesResult, ShareRef } from "./types";
+import {
+  objectPath,
+  resourceKey,
+  type SharedObjectType,
+} from "./sharedObjects";
 
-/** Replaces the whole list of people and groups a saved query is shared with. */
-export const useReplaceShares = (savedQueryId: string) => {
+/** Replaces the whole list of people and groups an object is shared with. */
+export const useReplaceShares = (objectType: SharedObjectType, id: string) => {
   const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<ReplaceSharesResult, ApiError, ShareRef[]>({
@@ -11,7 +16,7 @@ export const useReplaceShares = (savedQueryId: string) => {
       try {
         return (
           await api.put<ReplaceSharesResult>(
-            `/v1/saved-queries/${savedQueryId}/shares`,
+            `${objectPath(objectType, id)}/shares`,
             { principals }
           )
         ).data;
@@ -20,6 +25,6 @@ export const useReplaceShares = (savedQueryId: string) => {
       }
     },
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["saved-queries"] }),
+      queryClient.invalidateQueries({ queryKey: resourceKey(objectType) }),
   });
 };

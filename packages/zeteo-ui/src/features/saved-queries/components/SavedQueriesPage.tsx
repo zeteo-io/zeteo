@@ -389,11 +389,16 @@ export const SavedQueriesPage = () => {
         </div>
       )}
       {dialog?.kind === "share" && (
-        <ShareDialog savedQueryId={dialog.id} onClose={() => setDialog(null)} />
+        <ShareDialog
+          objectType="saved_query"
+          id={dialog.id}
+          onClose={() => setDialog(null)}
+        />
       )}
       {dialog?.kind === "transfer" && (
         <TransferDialog
-          savedQueryId={dialog.id}
+          objectType="saved_query"
+          id={dialog.id}
           onClose={() => setDialog(null)}
         />
       )}
