@@ -1,6 +1,6 @@
+import { formatAxisNumber, MAX_SERIES, toOption } from "./toOption";
 import type { ChartSettings, RunResult } from "../api/types";
 import { DARK_PALETTE, LIGHT_PALETTE } from "./theme";
-import { formatAxisNumber, MAX_SERIES, toOption } from "./toOption";
 import { describe, expect, it } from "vitest";
 import type { ChartTheme } from "./theme";
 
