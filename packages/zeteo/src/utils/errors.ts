@@ -96,6 +96,22 @@ export class ExportNotEnabledError extends AppError {
   }
 }
 
+/**
+ * A saved query the caller may not use. Every cause (a grant missing, a
+ * relation not visible, the source archived or not granted, a column gone
+ * missing) answers this one error, with no details, so none can be told apart.
+ */
+export class SavedQueryNotAccessibleError extends AppError {
+  constructor() {
+    super(
+      403,
+      "saved_query_not_accessible",
+      "You need expanded permissions to run this saved query. Ask an admin to extend your access."
+    );
+    this.name = "SavedQueryNotAccessibleError";
+  }
+}
+
 export class NotFoundError extends AppError {
   constructor(message = "Not found") {
     super(404, "not_found", message);

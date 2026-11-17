@@ -2,9 +2,9 @@
 // @module-tag platform
 import { clearTestGroups, setTestGroups } from "../support/principals.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { loadAccess, loadAccessAs } from "../../grants/access.js";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
-import { loadAccess } from "../../grants/access.js";
 import { prisma } from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 
@@ -173,5 +173,46 @@ describe("loadAccess", () => {
     const caller = newCaller();
     await grant("user", caller.userId, table.id, []);
     expect((await loadAccess(caller)).sourceIds.size).toBe(0);
+  });
+});
+
+describe("loadAccessAs", () => {
+  afterAll(async () => {
+    for (const u of userIds) await clearTestGroups(u);
+    await removeSources(sourceIds);
+  });
+
+  it("counts the user's global groups and those of the organization given, not another's", async () => {
+    const { table, columns } = await newSource("as");
+    const { userId } = newCaller();
+    const orgA = randomUUID();
+    const ofA = randomUUID();
+    const global = randomUUID();
+    const ofB = randomUUID();
+    await setTestGroups(userId, [
+      { id: ofA, organizationId: orgA },
+      { id: global, organizationId: null },
+      { id: ofB, organizationId: randomUUID() },
+    ]);
+    await grant("group", ofA, table.id, [columns[0].id]);
+    await grant("group", global, table.id, [columns[1].id]);
+    await grant("group", ofB, table.id, [columns[2].id]);
+
+    const access = await loadAccessAs(userId, orgA);
+    expect(access.userId).toBe(userId);
+    expect([...access.groupIds].sort()).toEqual([ofA, global].sort());
+    expect(access.allows(table.id, columns[0].id)).toBe(true);
+    expect(access.allows(table.id, columns[1].id)).toBe(true);
+    expect(access.allows(table.id, columns[2].id)).toBe(false);
+  });
+
+  it("counts only global groups for no organization", async () => {
+    const { userId } = newCaller();
+    const global = randomUUID();
+    await setTestGroups(userId, [
+      { id: global, organizationId: null },
+      { id: randomUUID(), organizationId: randomUUID() },
+    ]);
+    expect((await loadAccessAs(userId, null)).groupIds).toEqual([global]);
   });
 });

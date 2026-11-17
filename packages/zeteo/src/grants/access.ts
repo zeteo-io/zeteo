@@ -53,3 +53,20 @@ export const loadAccess = async (caller: Caller): Promise<CallerAccess> => {
     },
   };
 };
+
+/**
+ * `loadAccess` for a user who is not the caller, as if signed in to
+ * `organizationId`: their own grants and those of their global groups and
+ * that organization's. It asks tereo for the groups, so it never runs inside
+ * `withAudit`.
+ */
+export const loadAccessAs = (
+  userId: string,
+  organizationId: string | null
+): Promise<CallerAccess> =>
+  loadAccess({
+    userId,
+    organizationId,
+    permissions: [],
+    isServiceAccount: false,
+  });
