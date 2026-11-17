@@ -126,6 +126,21 @@ describe("/v1/saved-queries/:savedQueryId", () => {
       const res = await savedQueriesCall("GET", "/nope", user.token);
       expect(res.status).toBe(400);
     });
+
+    it("gives share_count to the owner and an admin, and not to a recipient", async () => {
+      const user = await owner();
+      const recipient = await owner();
+      const id = await savedQueryOf(user.token, source);
+      await shareDirectly(id, recipient.principal, user.id);
+      const mine = await savedQueriesCall("GET", `/${id}`, user.token);
+      expect(mine.body.share_count).toBe(1);
+      const admin = tokenFor({ permissions: [DATA_READ, SAVED_QUERIES_WRITE] });
+      const theirs = await savedQueriesCall("GET", `/${id}`, admin);
+      expect(theirs.body.share_count).toBe(1);
+      const shared = await savedQueriesCall("GET", `/${id}`, recipient.token);
+      expect(shared.status).toBe(200);
+      expect(shared.body).not.toHaveProperty("share_count");
+    });
   });
 
   describe("PATCH", () => {

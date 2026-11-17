@@ -22,11 +22,22 @@ export const ListSavedQueriesQuerySchema = z
     q: noNul(z.string().min(1).max(100)).optional(),
     source_id: IdSchema.optional(),
     owner_id: IdSchema.optional(),
+    shared_with_type: z.enum(["user", "group"]).optional(),
+    shared_with_id: IdSchema.optional(),
     cursor: z.string().max(512).optional(),
     limit: z.coerce.number().int().min(1).max(100).default(50),
   })
-  .refine((q) => q.scope === "all" || (!q.source_id && !q.owner_id), {
-    message: "source_id and owner_id apply to scope=all only",
+  .refine(
+    (q) =>
+      q.scope === "all" ||
+      (!q.source_id && !q.owner_id && !q.shared_with_type && !q.shared_with_id),
+    {
+      message: "source_id, owner_id and shared_with_* apply to scope=all only",
+    }
+  )
+  .refine((q) => (q.shared_with_type === undefined) === !q.shared_with_id, {
+    message: "shared_with_type and shared_with_id go together",
+    path: ["shared_with_id"],
   });
 
 /** A list cursor's values: the saved query's id (ids are time-ordered). */

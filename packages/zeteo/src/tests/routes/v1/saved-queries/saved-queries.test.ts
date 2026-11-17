@@ -329,6 +329,71 @@ describe("/v1/saved-queries", () => {
       expect(res2.status).toBe(400);
     });
 
+    it("counts shares for the owner and an admin, and never for a recipient", async () => {
+      const user = await owner();
+      const recipient = await owner();
+      const other = await owner();
+      const id = await savedQueryOf(user.token, source);
+      await shareDirectly(id, recipient.principal, user.id);
+      await shareDirectly(id, other.principal, user.id);
+      const mine = await savedQueriesCall("GET", "", user.token);
+      expect(mine.body.data[0]).toMatchObject({ id, share_count: 2 });
+      const admin = tokenFor({ permissions: [DATA_READ, SAVED_QUERIES_READ] });
+      const all = await savedQueriesCall(
+        "GET",
+        `?scope=all&owner_id=${user.id}`,
+        admin
+      );
+      expect(all.body.data[0]).toMatchObject({ id, share_count: 2 });
+      const shared = await savedQueriesCall(
+        "GET",
+        "?scope=shared",
+        recipient.token
+      );
+      expect(shared.body.data.map((s: { id: string }) => s.id)).toEqual([id]);
+      expect(shared.body.data[0]).not.toHaveProperty("share_count");
+      const unshared = await savedQueryOf(user.token, source);
+      const again = await savedQueriesCall("GET", "", user.token);
+      expect(
+        again.body.data.find((s: { id: string }) => s.id === unshared)
+      ).toMatchObject({ share_count: 0 });
+    });
+
+    it("lists under all what is shared with one user or group", async () => {
+      const user = await owner();
+      const recipient = await owner();
+      const group = randomUUID();
+      const toUser = await savedQueryOf(user.token, source);
+      const toGroup = await savedQueryOf(user.token, source);
+      await savedQueryOf(user.token, source);
+      await shareDirectly(toUser, recipient.principal, user.id);
+      await shareDirectly(toGroup, { type: "group", id: group }, user.id);
+      const admin = tokenFor({ permissions: [DATA_READ, SAVED_QUERIES_READ] });
+      const byUser = await savedQueriesCall(
+        "GET",
+        `?scope=all&shared_with_type=user&shared_with_id=${recipient.id}`,
+        admin
+      );
+      expect(byUser.status).toBe(200);
+      expect(byUser.body.data.map((s: { id: string }) => s.id)).toEqual([
+        toUser,
+      ]);
+      const byGroup = await savedQueriesCall(
+        "GET",
+        `?scope=all&shared_with_type=group&shared_with_id=${group}`,
+        admin
+      );
+      expect(byGroup.body.data.map((s: { id: string }) => s.id)).toEqual([
+        toGroup,
+      ]);
+      const half = await savedQueriesCall(
+        "GET",
+        `?scope=all&shared_with_id=${group}`,
+        admin
+      );
+      expect(half.status).toBe(400);
+    });
+
     it("refuses an unknown scope", async () => {
       const user = await owner();
       const res = await savedQueriesCall(

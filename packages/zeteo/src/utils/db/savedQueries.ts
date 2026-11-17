@@ -147,6 +147,22 @@ export const listShares = (
     orderBy: [{ createdAt: "asc" }, { principalId: "asc" }],
   });
 
+/** How many shares each saved query has, by id; one with none is 0. */
+export const countShares = async (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, number>> => {
+  const counts = new Map(ids.map((id) => [id, 0]));
+  if (ids.length === 0) return counts;
+  const grouped = await tx.savedQueryShare.groupBy({
+    by: ["savedQueryId"],
+    where: { savedQueryId: { in: [...ids] } },
+    _count: { _all: true },
+  });
+  for (const g of grouped) counts.set(g.savedQueryId, g._count._all);
+  return counts;
+};
+
 const key = (p: Principal) => `${p.type}:${p.id}`;
 
 /** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */

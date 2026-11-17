@@ -94,8 +94,23 @@ describe("ListSavedQueriesQuerySchema", () => {
       true
     );
   });
+  it("accepts shared_with_type and shared_with_id together with all", () => {
+    expect(
+      list({ scope: "all", shared_with_type: "group", shared_with_id: ID }).data
+    ).toMatchObject({ shared_with_type: "group", shared_with_id: ID });
+  });
   it.each([
     ["source_id without all", { source_id: ID }],
+    ["shared_with_type alone", { scope: "all", shared_with_type: "user" }],
+    ["shared_with_id alone", { scope: "all", shared_with_id: ID }],
+    [
+      "shared_with_* without all",
+      { scope: "mine", shared_with_type: "user", shared_with_id: ID },
+    ],
+    [
+      "an unknown shared_with_type",
+      { scope: "all", shared_with_type: "role", shared_with_id: ID },
+    ],
     ["owner_id with shared", { scope: "shared", owner_id: ID }],
     ["an unknown scope", { scope: "x" }],
     ["limit 0", { limit: 0 }],

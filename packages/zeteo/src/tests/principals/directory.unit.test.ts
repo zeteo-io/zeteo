@@ -9,6 +9,8 @@ import {
   GROUP_CACHE_TTL_SECONDS,
   GROUP_READS_IN_FLIGHT,
   groupCacheKey,
+  groupOrganizationFromTereo,
+  isServiceAccountFromTereo,
   lookupFromTereo,
   MAX_USER_IDS_PER_REQUEST,
   searchFromTereo,
@@ -20,6 +22,7 @@ const MISSING = "01a1d7a8-0000-7000-8000-0000000000ff";
 const G = "01a1d7a8-0000-7000-8000-0000000000a1";
 
 const sdk = vi.hoisted(() => ({
+  getUser: vi.fn(),
   getUsersByIds: vi.fn(),
   listGroups: vi.fn(),
   handleRequest: vi.fn(),
@@ -53,7 +56,11 @@ vi.mock("../../utils/redis.js", () => ({
 vi.mock("@tereo-io/sdk/handler", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tereo-io/sdk/handler")>()),
   requests: {
-    auth: { getUsersByIds: sdk.getUsersByIds, listGroups: sdk.listGroups },
+    auth: {
+      getUser: sdk.getUser,
+      getUsersByIds: sdk.getUsersByIds,
+      listGroups: sdk.listGroups,
+    },
   },
   getHandler: () => ({ handleRequest: sdk.handleRequest }),
   purgeServiceToken: sdk.purgeServiceToken,
@@ -410,6 +417,74 @@ describe("searchFromTereo", () => {
   it("is refused inside a transaction", async () => {
     await runInTransactionScope(async () => {
       await expect(searchFromTereo("user", "a", 1)).rejects.toThrow(
+        /withAudit transaction/
+      );
+    });
+  });
+});
+
+describe("groupOrganizationFromTereo", () => {
+  it("is the group's organization, null for a global one", async () => {
+    auth.getGroup.mockResolvedValueOnce(group(G, { organizationId: A }));
+    expect(await groupOrganizationFromTereo(G)).toBe(A);
+    auth.getGroup.mockResolvedValueOnce(group(G, { organizationId: null }));
+    expect(await groupOrganizationFromTereo(G)).toBeNull();
+  });
+
+  it("is undefined for a group tereo has not got, or an id that is no UUID", async () => {
+    auth.getGroup.mockResolvedValue(null);
+    expect(await groupOrganizationFromTereo(G)).toBeUndefined();
+    expect(await groupOrganizationFromTereo("nope")).toBeUndefined();
+    expect(auth.getGroup).toHaveBeenCalledTimes(1);
+  });
+
+  it("a failed read is tereo_unreachable", async () => {
+    auth.getGroup.mockRejectedValue(
+      new RequestError("AS_0001", "forbidden", { httpStatus: 403 })
+    );
+    await expect(groupOrganizationFromTereo(G)).rejects.toBeInstanceOf(
+      TereoUnreachableError
+    );
+  });
+
+  it("is refused inside a transaction", async () => {
+    await runInTransactionScope(async () => {
+      await expect(groupOrganizationFromTereo(G)).rejects.toThrow(
+        /withAudit transaction/
+      );
+    });
+  });
+});
+
+describe("isServiceAccountFromTereo", () => {
+  it("is true for a service account and false for a human", async () => {
+    sdk.getUser.mockResolvedValueOnce(user(A, { userType: "service_account" }));
+    expect(await isServiceAccountFromTereo(A)).toBe(true);
+    sdk.getUser.mockResolvedValueOnce(user(A));
+    expect(await isServiceAccountFromTereo(A)).toBe(false);
+  });
+
+  it("is false for a user tereo has not got, or an id that is no UUID", async () => {
+    sdk.getUser.mockRejectedValue(
+      new RequestError("AS_0404", "not found", { httpStatus: 404 })
+    );
+    expect(await isServiceAccountFromTereo(MISSING)).toBe(false);
+    expect(await isServiceAccountFromTereo("nope")).toBe(false);
+    expect(sdk.getUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("any other failure is tereo_unreachable", async () => {
+    sdk.getUser.mockRejectedValue(
+      new RequestError("AS_0001", "down", { httpStatus: 503 })
+    );
+    await expect(isServiceAccountFromTereo(A)).rejects.toBeInstanceOf(
+      TereoUnreachableError
+    );
+  });
+
+  it("is refused inside a transaction", async () => {
+    await runInTransactionScope(async () => {
+      await expect(isServiceAccountFromTereo(A)).rejects.toThrow(
         /withAudit transaction/
       );
     });

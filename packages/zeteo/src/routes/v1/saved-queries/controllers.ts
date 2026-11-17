@@ -19,6 +19,10 @@ export const listSavedQueries = async (req: Request, res: Response) => {
     q: query.q,
     sourceId: query.source_id,
     ownerId: query.owner_id,
+    sharedWith:
+      query.shared_with_type && query.shared_with_id
+        ? { type: query.shared_with_type, id: query.shared_with_id }
+        : undefined,
     cursor:
       query.cursor === undefined
         ? undefined
