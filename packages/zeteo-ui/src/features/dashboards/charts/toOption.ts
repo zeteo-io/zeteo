@@ -1,12 +1,12 @@
 import type { ChartSettings, RunResult } from "../api/types";
+import { LIGHT_PALETTE, type ChartTheme } from "./theme";
 import type { EChartsOption } from "echarts";
-import type { ChartTheme } from "./theme";
 
 /**
  * A chart shows at most this many series or slices, one per palette colour.
  * Past it the largest MAX_SERIES - 1 keep their own and the rest fold into "Other".
  */
-export const MAX_SERIES = 8;
+export const MAX_SERIES = LIGHT_PALETTE.length;
 const OTHER = "Other";
 
 /** A number with `decimals` places (fixed when set), grouped for reading. */

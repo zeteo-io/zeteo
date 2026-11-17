@@ -394,35 +394,37 @@ describe("toOption", () => {
       series: "who",
     };
 
-    it("gives series 1-8 the palette's colours in order, none twice", () => {
-      const o = opt(toOption(bars, split(8), theme));
+    it("gives series 1-9 the palette's colours in order, none twice", () => {
+      const o = opt(toOption(bars, split(9), theme));
       const colours = o.series.map((s: any) => s.color);
       expect(colours).toEqual(LIGHT_PALETTE);
-      expect(new Set(colours).size).toBe(8);
+      expect(new Set(colours).size).toBe(9);
       expect(o.series.map((s: any) => s.name)).toEqual(
-        Array.from({ length: 8 }, (_, i) => `s${i}`)
+        Array.from({ length: 9 }, (_, i) => `s${i}`)
       );
     });
 
     it("takes the dark colours from a dark theme", () => {
       const o = opt(
-        toOption(bars, split(8), { ...theme, palette: DARK_PALETTE })
+        toOption(bars, split(9), { ...theme, palette: DARK_PALETTE })
       );
       expect(o.series.map((s: any) => s.color)).toEqual(DARK_PALETTE);
     });
 
-    it("has eight distinct colours per theme", () => {
-      expect(new Set(LIGHT_PALETTE).size).toBe(8);
-      expect(new Set(DARK_PALETTE).size).toBe(8);
+    it("uses ECharts' default palettes, nine distinct colours per theme", () => {
+      expect(LIGHT_PALETTE[0]).toBe("#5470c6");
+      expect(DARK_PALETTE[0]).toBe("#4992ff");
+      expect(new Set(LIGHT_PALETTE).size).toBe(9);
+      expect(new Set(DARK_PALETTE).size).toBe(9);
     });
   });
 
-  it("keeps the seven largest of eleven series and sums the rest into a grey Other, per x", () => {
-    // Totals: s0..s10 = 1..11 per month, two months; s0..s3 fold.
+  it("keeps the eight largest of eleven series and sums the rest into a grey Other, per x", () => {
+    // Totals: s0..s10 = 1..11 per month, two months; s0..s2 fold.
     const rows: unknown[][] = [];
     for (const month of ["jan", "feb"])
       for (let i = 0; i < 11; i++) rows.push([month, `s${i}`, i + 1]);
-    // s0 has no feb row: Other is 2+3+4 in feb.
+    // s0 has no feb row: Other is 2+3 in feb.
     rows.splice(11, 1);
     const r = result(
       [
@@ -439,7 +441,7 @@ describe("toOption", () => {
         theme
       )
     );
-    expect(MAX_SERIES).toBe(8);
+    expect(MAX_SERIES).toBe(9);
     expect(o.series.map((s: any) => s.name)).toEqual([
       "s10",
       "s9",
@@ -448,19 +450,20 @@ describe("toOption", () => {
       "s6",
       "s5",
       "s4",
+      "s3",
       "Other",
     ]);
-    expect(o.series.slice(0, 7).map((s: any) => s.color)).toEqual(
-      LIGHT_PALETTE.slice(0, 7)
+    expect(o.series.slice(0, 8).map((s: any) => s.color)).toEqual(
+      LIGHT_PALETTE.slice(0, 8)
     );
-    expect(o.series[7].color).toBe(theme.textSecondary);
-    expect(o.series[7].data).toEqual([
-      ["jan", 1 + 2 + 3 + 4],
-      ["feb", 2 + 3 + 4],
+    expect(o.series[8].color).toBe(theme.textSecondary);
+    expect(o.series[8].data).toEqual([
+      ["jan", 1 + 2 + 3],
+      ["feb", 2 + 3],
     ]);
   });
 
-  it("folds a pie of ten slices into the seven largest and Other", () => {
+  it("folds a pie of ten slices into the eight largest and Other", () => {
     const rows = Array.from({ length: 10 }, (_, i) => [`s${i}`, i + 1]);
     const r = result(
       [
@@ -481,12 +484,13 @@ describe("toOption", () => {
       "s5",
       "s4",
       "s3",
+      "s2",
       "Other",
     ]);
-    expect(data[7].value).toBe(1 + 2 + 3);
-    expect(data[7].itemStyle.color).toBe(theme.textSecondary);
-    expect(data.slice(0, 7).map((d: any) => d.itemStyle.color)).toEqual(
-      LIGHT_PALETTE.slice(0, 7)
+    expect(data[8].value).toBe(1 + 2);
+    expect(data[8].itemStyle.color).toBe(theme.textSecondary);
+    expect(data.slice(0, 8).map((d: any) => d.itemStyle.color)).toEqual(
+      LIGHT_PALETTE.slice(0, 8)
     );
   });
 

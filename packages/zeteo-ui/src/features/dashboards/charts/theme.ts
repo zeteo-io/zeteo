@@ -10,31 +10,31 @@ export interface ChartTheme {
   background: string;
 }
 
-// Series colours, in order: a validated categorical palette, colour-blind safe
-// on adjacent pairs, checked against Zeteo's surfaces (light #fafafa, dark
-// #15181f). Light slots 3-5 are below 3:1 contrast, which charts accept as
-// they have a legend and tooltips. A chart never repeats a colour: past eight
-// series it keeps the seven largest and folds the rest into a grey "Other"
-// (see toOption.ts), so the palette is never cycled.
+// Series colours, in order: ECharts' own default palettes (its light default,
+// and its built-in "dark" theme's for dark mode). A chart never repeats a
+// colour: past these nine series it keeps the eight largest and folds the rest
+// into a grey "Other" (see toOption.ts), so the palette is never cycled.
 export const LIGHT_PALETTE = [
-  "#2a78d6",
-  "#eb6834",
-  "#1baf7a",
-  "#eda100",
-  "#e87ba4",
-  "#008300",
-  "#6250d6",
-  "#e34948",
+  "#5470c6",
+  "#91cc75",
+  "#fac858",
+  "#ee6666",
+  "#73c0de",
+  "#3ba272",
+  "#fc8452",
+  "#9a60b4",
+  "#ea7ccc",
 ];
 export const DARK_PALETTE = [
-  "#3987e5",
-  "#d95926",
-  "#199e70",
-  "#c98500",
-  "#d55181",
-  "#0ca30c",
-  "#9085e9",
-  "#e66767",
+  "#4992ff",
+  "#7cffb2",
+  "#fddd60",
+  "#ff6e76",
+  "#58d9f9",
+  "#05c091",
+  "#ff8a45",
+  "#8d48e3",
+  "#dd79ff",
 ];
 
 /** Whether the page is dark: an explicit data-theme wins, else the system preference. */
