@@ -177,6 +177,7 @@
 
 .z-db-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem;
 }
 
@@ -199,10 +200,10 @@
   margin: 0;
 }
 
+/* The note, then the actions under it. */
 .z-db-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  justify-items: start;
   gap: 0.5rem;
 }
 
