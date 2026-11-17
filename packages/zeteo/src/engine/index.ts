@@ -1,7 +1,9 @@
 import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
+import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
+import { stampSavedQueryRun } from "../saved-queries/stamps.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
 import { loadUserLimits } from "../limits/resolve.js";
@@ -34,6 +36,7 @@ import {
   recordRun,
   type RunRecord,
   UNRECORDABLE_QUERY,
+  WITHHELD_QUERY,
 } from "./record.js";
 
 export interface RunQueryInput {
@@ -45,6 +48,18 @@ export interface RunQueryInput {
   signal?: AbortSignal;
   /** The caller's concurrency limits; read for the caller as the run starts when absent. */
   userLimits?: UserLimits;
+  /**
+   * The saved query `body` is the JSON of (its paging overridden), when it is
+   * one: it is planned as `planSaved` plans, so any refusal is
+   * `saved_query_not_accessible`, and the run is recorded against it.
+   */
+  savedQuery?: SavedRun;
+}
+
+/** A saved query being run: its id, and the source it is planned against. */
+export interface SavedRun {
+  id: string;
+  sourceId: string;
 }
 
 export interface RunQueryResult {
@@ -245,6 +260,47 @@ export const planFor = (
 };
 
 /**
+ * Steps 2 and 3 for the run of a saved query: what the caller is granted, and
+ * the stored JSON planned against the saved query's own source as they may
+ * see it. Any refusal is `SavedQueryNotAccessibleError`.
+ */
+export const loadAndPlanSaved = async (
+  caller: Caller,
+  saved: SavedRun,
+  body: unknown,
+  progress: Progress
+): Promise<{
+  access: CallerAccess;
+  catalog: VisibleCatalog;
+  adapter: SourceAdapter;
+  plan: QueryPlan;
+}> => {
+  const access = await loadAccess(caller);
+  const toPlan: SavedQueryToPlan = {
+    sourceId: saved.sourceId,
+    query: body as SavedQueryToPlan["query"],
+  };
+  return { access, ...(await planSaved(access, toPlan, progress)) };
+};
+
+/**
+ * What a run is recorded with: the body, and the saved query it came from.
+ * A saved query whose run never got past the access decision keeps its JSON
+ * out of the record, so the caller's own runs cannot show what was withheld.
+ */
+export const recordedQueryOf = (
+  body: unknown,
+  savedQuery: SavedRun | undefined,
+  progress: Progress
+): Pick<RunRecord, "query" | "savedQueryId"> =>
+  savedQuery
+    ? {
+        query: progress.sourceId === null ? WITHHELD_QUERY : body,
+        savedQueryId: savedQuery.id,
+      }
+    : { query: body };
+
+/**
  * Records the run; when the row cannot be stored, records it again with a
  * placeholder for the query, so the run and its audit entry exist either
  * way. Throws only when both attempts fail.
@@ -265,13 +321,17 @@ export const recordRunOrPlaceholder = async (
 
 /** Steps 2 to 6. */
 const execute = async (
-  { caller, entryPoint, body, signal, userLimits }: RunQueryInput,
+  { caller, entryPoint, body, signal, userLimits, savedQuery }: RunQueryInput,
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
-  const { access, catalog } = await loadCatalogFor(caller, slug, progress);
+  const { access, catalog, adapter, plan } = savedQuery
+    ? await loadAndPlanSaved(caller, savedQuery, body, progress)
+    : await loadCatalogFor(caller, slug, progress).then((loaded) => ({
+        ...loaded,
+        ...planFor(body, loaded.access, loaded.catalog, progress),
+      }));
   const sourceId = catalog.source.id;
-  const { adapter, plan } = planFor(body, access, catalog, progress);
   const ownLimits = userLimits ?? (await loadUserLimits(access));
 
   const limits = runLimits(entryPoint, plan.limit, catalog.source);
@@ -333,7 +393,7 @@ export const runQuery = async (
       caller: input.caller,
       sourceId: progress.sourceId,
       entryPoint: input.entryPoint,
-      query: input.body,
+      ...recordedQueryOf(input.body, input.savedQuery, progress),
       durationMs: Math.round(performance.now() - started),
       ...outcome,
     });
@@ -374,6 +434,10 @@ export const runQuery = async (
       "a query run could not be recorded, even without its query; its rows are withheld"
     );
     throw err;
+  }
+  if (input.savedQuery) {
+    // Not waited for: a stamp that fails is logged, and the run stands.
+    void stampSavedQueryRun(input.savedQuery.id, input.caller.userId);
   }
   return {
     columns: result.columns,

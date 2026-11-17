@@ -1,7 +1,9 @@
 import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
 import { requirePermission } from "../../../../middleware/auth.js";
+import exportRouter from "./export/index.js";
 import express, { Router } from "express";
 import copyRouter from "./copy/index.js";
+import runRouter from "./run/index.js";
 import {
   deleteSavedQuery,
   getSavedQuery,
@@ -13,6 +15,8 @@ const savedQueryRouter = Router({ mergeParams: true });
 const json256k = express.json({ limit: "256kb" });
 
 savedQueryRouter.use("/copy", copyRouter);
+savedQueryRouter.use("/export", exportRouter);
+savedQueryRouter.use("/run", runRouter);
 
 savedQueryRouter.get("/", requirePermission(DATA_READ), getSavedQuery);
 savedQueryRouter.patch(

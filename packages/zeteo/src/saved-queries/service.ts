@@ -391,3 +391,36 @@ export const copySavedQuery = async (
   });
   return presentOne(caller, access, row);
 };
+
+/** What a run or export of a saved query may change: its paging only. */
+export interface SavedQueryPaging {
+  limit?: number;
+  offset?: number;
+}
+
+/** A saved query ready for `runQuery` or `runExport`: its body and what the engine needs of it. */
+export interface SavedQueryToRun {
+  body: Record<string, unknown>;
+  savedQuery: { id: string; sourceId: string };
+}
+
+/**
+ * The saved query, found as `findForViewer` finds it, as the engine runs it:
+ * its stored JSON with `limit` and `offset` replaced by any given. Whether
+ * the caller may run it is decided by the engine, as it plans.
+ */
+export const savedQueryToRun = async (
+  caller: Caller,
+  id: string,
+  paging: SavedQueryPaging
+): Promise<SavedQueryToRun> => {
+  const row = await findForViewer(caller, id);
+  return {
+    body: {
+      ...(row.query as Record<string, unknown>),
+      ...(paging.limit !== undefined && { limit: paging.limit }),
+      ...(paging.offset !== undefined && { offset: paging.offset }),
+    },
+    savedQuery: { id: row.id, sourceId: row.sourceId },
+  };
+};
