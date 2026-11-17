@@ -86,10 +86,11 @@ and changes write audit entries to tereo's outbox.
   NDJSON stream's last line, or a CSV stream's trailers, say whether it ended complete or capped.
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).
-- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves an AI signed in through tereo
-  these tools: `list_sources`, `list_tables` and `describe_table` to discover what it may
+- **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves these tools to an AI signed in through
+  tereo: `list_sources`, `list_tables` and `describe_table` to discover what it may
   query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
-  5,000 or 1 MB), and tools to list, run, save, change and delete saved queries, with instructions that teach the model the language. A user sees them only with
+  5,000 or 1 MB), and tools to list, run, save, change and delete saved queries, with
+  instructions that teach the model the language. A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
 Not there yet: row filters on grants.

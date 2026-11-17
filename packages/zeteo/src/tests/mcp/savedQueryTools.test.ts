@@ -1,11 +1,15 @@
 // @module-tag int
 // @module-tag platform
-import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
 import { tokenFor } from "../support/tokens.js";
 import { ENGINES } from "../support/engines.js";
 import { randomUUID } from "crypto";
+import {
+  DATA_READ,
+  MCP_USE,
+  SAVED_QUERIES_WRITE,
+} from "../../definitions/tereoDeclaration.js";
 import {
   ordersQuery,
   savedQueryOf,
@@ -127,11 +131,41 @@ describe("MCP saved query tools", () => {
     expect(got.json.you_last_ran_at).toEqual(expect.any(String));
   });
 
+  it("does not let a zeteo.saved_queries.write holder delete another user's saved query", async () => {
+    const created = await callTool(session.client, "create_saved_query", {
+      name: uniqueName("keep"),
+      query: ordersQuery(source),
+    });
+    const admin = await connectMcp(
+      mcpToken([MCP_USE, DATA_READ, SAVED_QUERIES_WRITE], randomUUID())
+    );
+    try {
+      const refused = await callTool(admin.client, "delete_saved_query", {
+        id: created.json.id,
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.json.error).toBe("not_found");
+      const missing = await callTool(admin.client, "delete_saved_query", {
+        id: randomUUID(),
+      });
+      expect(missing.json.error).toBe("not_found");
+      expect(missing.json.error_description).toBe(
+        refused.json.error_description
+      );
+    } finally {
+      await admin.close();
+    }
+    const still = await callTool(session.client, "get_saved_query", {
+      id: created.json.id,
+    });
+    expect(still.isError).toBe(false);
+  });
+
   it("scope shared lists only what others shared", async () => {
     const listed = await callTool(session.client, "list_saved_queries", {
       scope: "shared",
     });
-    expect(listed.json).toEqual({ saved_queries: [] });
+    expect(listed.json).toEqual({ saved_queries: [], truncated: false });
   });
 
   it("refuses a token without zeteo.data.read like the other tools, and annotates the tools", async () => {

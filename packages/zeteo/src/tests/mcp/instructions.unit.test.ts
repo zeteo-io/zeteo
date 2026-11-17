@@ -20,6 +20,13 @@ describe("MCP_INSTRUCTIONS", () => {
     );
   });
 
+  it("teaches saved queries with the verbatim no-access notice", () => {
+    expect(MCP_INSTRUCTIONS).toContain("create_saved_query");
+    expect(MCP_INSTRUCTIONS).toContain(
+      "You need expanded permissions to run this saved query. Ask an admin to extend your access."
+    );
+  });
+
   it("names the tools in the order they are used", () => {
     const at = ["list_sources", "list_tables", "describe_table", "query"].map(
       (tool) => MCP_INSTRUCTIONS.indexOf(`\`${tool}\``)

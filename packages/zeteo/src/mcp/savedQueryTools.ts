@@ -1,13 +1,17 @@
-import { SavedQueryDescriptionSchema } from "../routes/v1/saved-queries/schemas.js";
-import { SavedQueryNameSchema } from "../routes/v1/saved-queries/schemas.js";
 import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import type { SavedQueryView } from "../views/savedQuery.js";
+import { NotFoundError } from "../utils/errors.js";
 import { runQuery } from "../engine/index.js";
 import type { TereoMcp } from "@tereo-io/mcp";
 import { requireDataRead } from "./caller.js";
+import { db } from "../utils/db/index.js";
 import { inToolCall } from "./errors.js";
 import { z } from "zod";
+import {
+  SavedQueryDescriptionSchema,
+  SavedQueryNameSchema,
+} from "../routes/v1/saved-queries/schemas.js";
 import {
   createSavedQuery,
   deleteSavedQuery,
@@ -16,6 +20,9 @@ import {
   savedQueryToRun,
   updateSavedQuery,
 } from "../saved-queries/service.js";
+
+/** The most one list returns; `truncated` says when it stopped there. */
+const LIST_LIMIT = 100;
 
 const Id = z.string().min(1).max(64).describe("The saved query's id");
 
@@ -31,7 +38,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     name: "list_saved_queries",
     title: "List saved queries",
     description:
-      'List the saved queries you own ("mine", the default) or others shared with you ("shared"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }] }. A saved query with accessible false cannot be run by you and carries no query or source.',
+      'List the saved queries you own ("mine", the default) or others shared with you ("shared"). Returns { saved_queries: [{ id, name, description, owner, accessible, source?, query?, last_run_at, you_last_ran_at }], truncated }; truncated is true when only the first 100 are shown. A saved query with accessible false cannot be run by you and carries no query or source.',
     permission: MCP_USE,
     readOnly: true,
     input: z.strictObject({
@@ -42,9 +49,12 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
         const caller = requireDataRead(ctx.auth);
         const page = await listSavedQueries(caller, {
           scope: input.scope ?? "mine",
-          limit: 100,
+          limit: LIST_LIMIT,
         });
-        return { saved_queries: page.data.map(forModel) };
+        return {
+          saved_queries: page.data.map(forModel),
+          truncated: page.nextCursor !== null,
+        };
       }),
   });
 
@@ -73,8 +83,8 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
     input: z.strictObject({
       id: Id,
-      limit: z.int().optional(),
-      offset: z.int().optional(),
+      limit: z.int().min(1).optional(),
+      offset: z.int().min(0).optional(),
     }),
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {
@@ -155,6 +165,12 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {
         const caller = requireDataRead(ctx.auth);
+        // Own saved queries only over MCP: the service also lets a holder of
+        // zeteo.saved_queries.write delete another's, which a model must not.
+        const row = await db.savedQueries.findById(input.id);
+        if (!row || row.ownerId !== caller.userId) {
+          throw new NotFoundError("Saved query not found");
+        }
         await deleteSavedQuery(caller, input.id);
         return { deleted: true };
       }),
