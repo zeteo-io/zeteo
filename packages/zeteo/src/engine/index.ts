@@ -1,4 +1,3 @@
-import { QueryFailedError, ValidationError } from "../utils/errors.js";
 import { fingerprintOf, refusalFingerprintOf } from "./fingerprint.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
@@ -30,6 +29,11 @@ import type {
   QueryWarning,
   SourceAdapter,
 } from "../adapters/types.js";
+import {
+  QueryFailedError,
+  SavedQueryNotAccessibleError,
+  ValidationError,
+} from "../utils/errors.js";
 import {
   acquireRunLeases,
   LEASE_GRACE_MS,
@@ -598,4 +602,49 @@ const runDashboardQuery = async (
   // Not waited for: a stamp that fails is logged, and the run stands.
   void stampSavedQueryRun(savedQuery.id, caller.userId);
   return { ...result, run_id: runId };
+};
+
+/**
+ * A dashboard panel refused before it ran: the viewer's decision found they
+ * cannot run its saved query, so nothing is planned or run again. Recorded as
+ * `runDashboardQuery` records a refusal: at most once per viewer, saved query
+ * and window, with its query withheld and no source. Never throws; a record
+ * that fails is logged and leaves the window open for the next run.
+ */
+export const recordDashboardRefusal = async (
+  caller: Caller,
+  savedQueryId: string,
+  dashboard: Pick<DashboardRun, "dashboardId">
+): Promise<void> => {
+  const fingerprint = refusalFingerprintOf(savedQueryId);
+  if (
+    !(await claim(
+      caller.userId,
+      fingerprint,
+      env.DASHBOARD_RECORD_WINDOW_MINUTES
+    ))
+  ) {
+    return;
+  }
+  try {
+    await recordRunOrPlaceholder({
+      caller,
+      sourceId: null,
+      entryPoint: "dashboard",
+      query: WITHHELD_QUERY,
+      savedQueryId,
+      dashboardId: dashboard.dashboardId,
+      cached: false,
+      durationMs: 0,
+      ...failureOf(new SavedQueryNotAccessibleError()),
+      rowCount: null,
+      truncated: false,
+    });
+  } catch (err) {
+    logger.error(
+      { err, saved_query_id: savedQueryId },
+      "a refused dashboard panel could not be recorded"
+    );
+    await release(caller.userId, fingerprint);
+  }
 };

@@ -5,6 +5,7 @@ import sharesRouter from "./shares/index.js";
 import panelsRouter from "./panels/index.js";
 import express, { Router } from "express";
 import copyRouter from "./copy/index.js";
+import runRouter from "./run/index.js";
 import {
   deleteDashboard,
   getDashboard,
@@ -17,6 +18,7 @@ const json256k = express.json({ limit: "256kb" });
 
 dashboardRouter.use("/copy", copyRouter);
 dashboardRouter.use("/panels", panelsRouter);
+dashboardRouter.use("/run", runRouter);
 dashboardRouter.use("/shares", sharesRouter);
 dashboardRouter.use("/transfer", transferRouter);
 
