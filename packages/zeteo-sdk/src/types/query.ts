@@ -71,15 +71,35 @@ export type JoinItem = Path | { relation: Path; type?: "inner" | "left" };
 
 export type FilterValue = string | number | boolean | null;
 
+/**
+ * A moment relative to now, for a date or timestamp column:
+ * `{ relative: { unit: "day", offset: -30 } }` is 30 days before now, and with
+ * `startOf` it is cut back to the start of the unit (`{ unit: "month",
+ * offset: 0, startOf: true }` is the start of this month). Resolved in UTC
+ * against the minute the run starts; a week starts on Monday. A saved query
+ * keeps it relative.
+ */
+export interface RelativeDate {
+  relative: {
+    unit: "minute" | "hour" | "day" | "week" | "month" | "quarter" | "year";
+    /** Whole units from now, -1000 to 1000; negative is the past. */
+    offset: number;
+    startOf?: boolean;
+  };
+}
+
+/** What a comparison takes: a value, or a moment relative to now. */
+export type ComparedValue = FilterValue | RelativeDate;
+
 export interface FilterOperators {
-  eq?: FilterValue;
-  ne?: FilterValue;
-  gt?: FilterValue;
-  gte?: FilterValue;
-  lt?: FilterValue;
-  lte?: FilterValue;
+  eq?: ComparedValue;
+  ne?: ComparedValue;
+  gt?: ComparedValue;
+  gte?: ComparedValue;
+  lt?: ComparedValue;
+  lte?: ComparedValue;
   /** Two values, inclusive. */
-  between?: [FilterValue, FilterValue];
+  between?: [ComparedValue, ComparedValue];
   /** 1 to 1,000 values. */
   in?: FilterValue[];
   notIn?: FilterValue[];

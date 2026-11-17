@@ -116,3 +116,29 @@ SavedQueryNotAccessibleResponse:
     application/json:
       schema:
         $ref: '#/Error'
+
+InvalidPanelResponse:
+  description: |
+    Bad request - `invalid_request`, with `issues`, or `invalid_panel`: a panel whose settings do
+    not fit the saved query, the saved panel or the chart, or a panel change that is not allowed.
+    `problems` names each setting at fault and why, never a column or anything of the catalogue.
+  content:
+    application/json:
+      schema:
+        $ref: '#/InvalidPanelError'
+
+InvalidPanelError:
+  description: The body of `400 invalid_panel`
+  allOf:
+    - $ref: '#/Error'
+    - type: object
+      properties:
+        problems:
+          type: array
+          description: Each setting at fault; absent when the message says all there is to say (a linked panel's own settings, a panel not linked)
+          items:
+            type: object
+            required: [setting, problem]
+            properties:
+              setting: { type: string, description: 'The setting at fault: a chart key with the index for a list (`y.1`), or `saved_query`, `saved_panel`' }
+              problem: { type: string, description: '`missing_column`, `wrong_type`, `needs_order`, or for a saved query or panel that cannot be used, its state such as `not_available`' }

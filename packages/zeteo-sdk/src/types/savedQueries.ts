@@ -17,6 +17,8 @@ export interface SavedQuery {
   updated_at: string;
   /** When it was shared with the viewer; present only when it was. */
   shared_at?: string;
+  /** Whether its owner offers it to dashboards, in the organization they are signed in to. */
+  available_for_dashboards: boolean;
   /** The last run by anyone. */
   last_run_at: string | null;
   /** The viewer's own last run. */
@@ -25,11 +27,17 @@ export interface SavedQuery {
   query?: Query;
   /** Present only when the viewer may see the share list. */
   share_count?: number;
+  /** On a single read, for its owner and `zeteo.saved_queries.read`: what is built on it. */
+  used_by?: { dashboards: number; saved_panels: number };
 }
 
 export interface ListSavedQueriesOptions extends ListOptions {
-  /** `mine` (the default), `shared` with the caller, or `all` (`zeteo.saved_queries.read`). */
-  scope?: "mine" | "shared" | "all";
+  /**
+   * `mine` (the default), `shared` with the caller, `available` (offered to
+   * dashboards in the caller's organization, not the caller's own), or `all`
+   * (`zeteo.saved_queries.read`).
+   */
+  scope?: "mine" | "shared" | "available" | "all";
   /** 1 to 100 characters of the name, case-insensitively. */
   q?: string;
   /** `scope: "all"` only; also needs `zeteo.sources.read`. */
@@ -55,6 +63,16 @@ export interface UpdateSavedQueryRequest {
   name?: string;
   description?: string;
   query?: Query;
+  /** Offers it to dashboards, or withdraws it. */
+  available_for_dashboards?: boolean;
+}
+
+/** A dashboard or saved panel built on a saved query. */
+export interface SavedQueryUse {
+  type: "dashboard" | "saved_panel";
+  id: string;
+  name: string;
+  owner: { id: string; name: string | null };
 }
 
 export interface CopySavedQueryRequest {

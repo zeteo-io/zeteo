@@ -6,7 +6,10 @@
       The caller's own runs, newest first, from any entry point. A run of a saved query carries
       `saved_query` while the caller owns it or it is shared with them. A saved query run that was
       refused (`saved_query_not_accessible`) shows with its query withheld (`{ "withheld": true }`)
-      and `source_id: null`. The response is not cached.
+      and `source_id: null`. So is a run of a saved query the caller cannot open (it is not theirs,
+      not shared with them, and they hold no `zeteo.saved_queries.read`), such as a panel of someone
+      else's dashboard run as the caller: the run is theirs, the query is not. A run from a
+      dashboard has entry point `dashboard`. The response is not cached.
 
       **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
     operationId: listMyRuns

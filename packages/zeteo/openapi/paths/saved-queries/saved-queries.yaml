@@ -4,8 +4,10 @@
     summary: List saved queries
     description: |
       Newest first. `scope=mine` (the default) lists the caller's own, `scope=shared` those shared
-      with them or one of their groups, and `scope=all` every saved query (a holder of
-      `zeteo.saved_queries.read`; `403 forbidden` otherwise). `source_id`, `owner_id`,
+      with them or one of their groups, `scope=available` those offered to dashboards
+      (`available_for_dashboards`) in the organization the caller is signed in to, other than the caller's
+      own, and `scope=all` every saved query (a holder of `zeteo.saved_queries.read`; `403 forbidden`
+      otherwise). `source_id`, `owner_id`,
       `shared_with_type` and `shared_with_id` apply to `scope=all` only (`400 invalid_request`
       otherwise); `source_id` also needs `zeteo.sources.read`; `shared_with_type` and
       `shared_with_id` go together. `q` matches names, case-insensitively.
@@ -19,7 +21,7 @@
       - name: scope
         in: query
         required: false
-        schema: { type: string, enum: [mine, shared, all], default: mine }
+        schema: { type: string, enum: [mine, shared, all, available], default: mine }
       - name: q
         in: query
         required: false

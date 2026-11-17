@@ -1,0 +1,66 @@
+/v1/dashboards/{dashboardId}/run:
+  post:
+    tags: [Dashboards]
+    summary: Run a dashboard
+    description: |
+      Runs the dashboard's panels as the caller and streams a line of NDJSON per panel as soon as it is
+      ready, then `{ "done": true }`. Every panel is decided first: one that is not `ok` is answered at
+      once with its `state` and `message` and never run (a `not_accessible` one is recorded as a
+      refused run of its saved query). The `ok` panels run as entry point `dashboard`, against one
+      moment (`now`, to the minute) for the dashboard's time range and any relative dates in the
+      saved queries. Panels whose queries are the same (saved query, time column and range) run once
+      and each gets its line; results may be served from a cache of `DASHBOARD_CACHE_TTL_SECONDS`
+      (default 60), told by `cached_at`. At most the lower of the caller's query concurrency and
+      `DASHBOARD_PARALLELISM` (default 4) panels run at a time. A run that fails at run time is a
+      line with `error` (and a refusal is the same `not_accessible` line); it never ends the stream.
+
+      The body is optional: `panels` runs only those panels, and `time_range` replaces the dashboard's
+      own for this run (null for none). The stream is gzipped when `Accept-Encoding` accepts gzip.
+      Everything before the first line is a plain error (`404 not_found` for a dashboard the caller
+      may not see, `400 invalid_request`); once the status line is sent no error body can follow, and
+      a failure cuts the connection without the stream's last chunk. A stream with no `done` line did
+      not end.
+
+      A line never carries a panel's chart or its saved query.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: runDashboard
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/dashboards/schemas.yaml#/RunDashboardRequest'
+    responses:
+      '200':
+        description: The stream
+        headers:
+          Cache-Control:
+            description: '`no-store`'
+            schema: { type: string }
+          Vary:
+            description: '`Accept-Encoding`'
+            schema: { type: string }
+          Content-Encoding:
+            description: '`gzip` when the request accepts gzip; absent otherwise'
+            schema: { type: string, enum: [gzip] }
+        content:
+          application/x-ndjson:
+            schema:
+              type: string
+              description: |
+                Lines of JSON, each ending in `\n`: one `PanelLine` per panel, in the order the panels
+                are ready (not the dashboard's order), then `{ "done": true }`.
+            example: |
+              {"panel_id":"0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5a","state":"ok","result":{"columns":[{"name":"revenue","type":"number"}],"rows":[["1200.50"]],"truncated":false}}
+              {"panel_id":"0193f1c2-7a4e-7c3d-9b1a-2f6e8d0c4b5b","state":"not_accessible","message":"You need expanded permissions to run this saved query. Ask an admin to extend your access."}
+              {"done":true}
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

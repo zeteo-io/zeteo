@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 45 operations as the description", () => {
+  it("lists the same 71 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(45);
-    expect(Object.keys(found)).toHaveLength(45);
+    expect(blocks).toBe(71);
+    expect(Object.keys(found)).toHaveLength(71);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -113,6 +113,67 @@ describe("operations against the API description", () => {
       [
         "savedQueries.transfer",
         (c) => c.savedQueries.transfer(ID, { user_id: ID2 }),
+      ],
+      ["savedQueries.dashboards", (c) => c.savedQueries.dashboards(ID)],
+      ["savedPanels.list", (c) => c.savedPanels.list()],
+      [
+        "savedPanels.create",
+        (c) =>
+          c.savedPanels.create({
+            name: "n",
+            saved_query_id: ID,
+            chart: { type: "table", version: 1 },
+          }),
+      ],
+      ["savedPanels.get", (c) => c.savedPanels.get(ID)],
+      ["savedPanels.update", (c) => c.savedPanels.update(ID, { name: "n" })],
+      ["savedPanels.delete", (c) => c.savedPanels.delete(ID)],
+      ["savedPanels.copy", (c) => c.savedPanels.copy(ID, { name: "n" })],
+      ["savedPanels.listShares", (c) => c.savedPanels.listShares(ID)],
+      [
+        "savedPanels.replaceShares",
+        (c) => c.savedPanels.replaceShares(ID, [{ type: "user", id: ID2 }]),
+      ],
+      [
+        "savedPanels.transfer",
+        (c) => c.savedPanels.transfer(ID, { user_id: ID2 }),
+      ],
+      ["savedPanels.preview", (c) => c.savedPanels.preview(ID)],
+      ["dashboards.list", (c) => c.dashboards.list()],
+      ["dashboards.create", (c) => c.dashboards.create({ name: "n" })],
+      ["dashboards.get", (c) => c.dashboards.get(ID)],
+      ["dashboards.update", (c) => c.dashboards.update(ID, { name: "n" })],
+      ["dashboards.delete", (c) => c.dashboards.delete(ID)],
+      ["dashboards.copy", (c) => c.dashboards.copy(ID, { name: "n" })],
+      ["dashboards.listShares", (c) => c.dashboards.listShares(ID)],
+      [
+        "dashboards.replaceShares",
+        (c) => c.dashboards.replaceShares(ID, [{ type: "user", id: ID2 }]),
+      ],
+      [
+        "dashboards.transfer",
+        (c) => c.dashboards.transfer(ID, { user_id: ID2 }),
+      ],
+      [
+        "dashboards.addPanel",
+        (c) =>
+          c.dashboards.addPanel(ID, { kind: "linked", saved_panel_id: ID2 }),
+      ],
+      [
+        "dashboards.updatePanel",
+        (c) => c.dashboards.updatePanel(ID, ID2, { title: "t" }),
+      ],
+      ["dashboards.removePanel", (c) => c.dashboards.removePanel(ID, ID2)],
+      ["dashboards.detachPanel", (c) => c.dashboards.detachPanel(ID, ID2)],
+      [
+        "dashboards.savePanel",
+        (c) => c.dashboards.savePanel(ID, ID2, { name: "n" }),
+      ],
+      [
+        "dashboards.run",
+        async (c) => {
+          for await (const line of c.dashboards.run(ID)) void line;
+        },
       ],
       [
         "principals.search",
@@ -221,6 +282,9 @@ describe("operations against the API description", () => {
               `${JSON.stringify({ status: "complete", rows: 0 })}\n`,
             ],
           };
+        }
+        if (req.path.endsWith("/run")) {
+          return { chunks: ['{"done":true}\n'] };
         }
         return undefined;
       });

@@ -5,6 +5,8 @@ export interface ZeteoErrorInit {
   issues?: { path: string; message: string }[];
   retryAfter?: number;
   findings?: unknown[];
+  /** `invalid_panel`: each setting at fault and why. */
+  problems?: { setting: string; problem: string }[];
   cause?: Error;
 }
 
@@ -15,6 +17,7 @@ export class ZeteoError extends Error {
   issues?: { path: string; message: string }[];
   retryAfter?: number;
   findings?: unknown[];
+  problems?: { setting: string; problem: string }[];
 
   constructor(message: string, init: ZeteoErrorInit) {
     super(message, init.cause ? { cause: init.cause } : undefined);
@@ -25,6 +28,7 @@ export class ZeteoError extends Error {
     this.issues = init.issues;
     this.retryAfter = init.retryAfter;
     this.findings = init.findings;
+    this.problems = init.problems;
   }
 }
 

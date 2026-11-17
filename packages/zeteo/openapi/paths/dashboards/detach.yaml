@@ -1,0 +1,35 @@
+/v1/dashboards/{dashboardId}/panels/{panelId}/detach:
+  post:
+    tags: [Dashboards]
+    summary: Detach a linked panel
+    description: |
+      Turns a linked panel of the caller's own dashboard into an own panel with the saved panel's saved
+      query, chart and time column, keeping its id and place, and its title (the saved panel's name
+      when it had none). A panel that is not linked, or whose saved panel the caller cannot run as it
+      is, is `400 invalid_panel`: there is nothing sound to copy. A `zeteo.dashboard.updated` audit
+      entry is written.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: detachDashboardPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/DashboardIdParam'
+      - $ref: '../../components/parameters.yaml#/PanelIdParam'
+    responses:
+      '200':
+        description: The panel, now an own panel
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/dashboards/schemas.yaml#/Panel'
+      '400': { $ref: '../../components/responses.yaml#/InvalidPanelResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `conflict`, the panel changed while detaching; load it again and retry
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

@@ -40,4 +40,30 @@ describe("query types", () => {
     const bad: CalcExpr = { frobnicate: ["a"] };
     expect([calc, sum, bad]).toHaveLength(3);
   });
+
+  it("take a relative date wherever a comparison takes a value", () => {
+    const query: Query = {
+      source: "s",
+      from: "orders",
+      select: ["id"],
+      where: {
+        created_at: { gte: { relative: { unit: "day", offset: -30 } } },
+        shipped_at: {
+          between: [
+            { relative: { unit: "month", offset: 0, startOf: true } },
+            "2026-12-31",
+          ],
+        },
+      },
+    };
+    expect(query.where).toBeDefined();
+    const bad: Query = {
+      source: "s",
+      from: "t",
+      select: ["id"],
+      // @ts-expect-error a relative date has a unit and an offset
+      where: { at: { lt: { relative: { unit: "fortnight", offset: 1 } } } },
+    };
+    expect(bad).toBeDefined();
+  });
 });

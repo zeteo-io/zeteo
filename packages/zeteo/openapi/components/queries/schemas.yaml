@@ -19,6 +19,27 @@ Scalar:
     decimal string (`"9007199254740993"`, so 64-bit values lose nothing); booleans true or false;
     dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`.
 
+RelativeDate:
+  type: object
+  additionalProperties: false
+  required: [relative]
+  description: |
+    A moment relative to now, as a comparison value of a date or timestamp column:
+    `{ "relative": { "unit": "day", "offset": -30 } }` is 30 days before now, and with `startOf`
+    `{ "relative": { "unit": "month", "offset": 0, "startOf": true } }` is the start of this month.
+    Resolved in UTC against the minute the run starts, as the same moment for the whole run (a
+    dashboard's panels share one). A week starts on Monday. Never stored as a date: a saved query
+    keeps it relative.
+  properties:
+    relative:
+      type: object
+      additionalProperties: false
+      required: [unit, offset]
+      properties:
+        unit: { type: string, enum: [minute, hour, day, week, month, quarter, year] }
+        offset: { type: integer, minimum: -1000, maximum: 1000, description: Whole units from now; negative is the past }
+        startOf: { type: boolean, description: Cut back to the start of the unit after the offset is applied }
+
 SelectItem:
   description: |
     A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
@@ -139,8 +160,9 @@ Filter:
   description: |
     One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
     `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
-    `eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `between` (two values, inclusive), `in` and `notIn`
-    (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
+    `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
+    takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
+    "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
     `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
     a column with one of those names cannot be filtered on directly. In `having`, the keys are
     the names of aggregate select items.
@@ -285,8 +307,11 @@ Run:
     id: { type: string, format: uuid }
     user_id: { type: string, format: uuid }
     source_id: { type: [string, 'null'], format: uuid, description: Null when the query named no source the caller could see }
-    entry_point: { type: string, enum: [api, mcp, export], description: '`POST /v1/query`, the MCP `query` tool, or `POST /v1/export`' }
-    query: { description: The query as it was sent }
+    entry_point: { type: string, enum: [api, mcp, export, dashboard], description: '`POST /v1/query` (and the saved query and saved panel runs), the MCP `query` tool, `POST /v1/export`, or a panel of `POST /v1/dashboards/{dashboardId}/run`' }
+    query:
+      description: |
+        The query as it was sent. In `GET /v1/me/runs`, `{ "withheld": true }` instead for a run of a
+        saved query the caller cannot open (and for a refused saved query run).
     duration_ms: { type: integer }
     row_count: { type: [integer, 'null'], description: 'Rows returned; null unless the run succeeded. For an export that started, the rows sent to the client (null while `running`)' }
     outcome: { $ref: '#/RunOutcome' }

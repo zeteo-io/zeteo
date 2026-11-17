@@ -1,0 +1,66 @@
+/v1/saved-panels/{savedPanelId}/preview:
+  post:
+    tags: [Dashboards]
+    summary: Preview a saved panel
+    description: |
+      Runs the saved panel's saved query as the caller, as `POST /v1/query` runs one, with its `time_range`
+      applied to the saved panel's time column when it has one (none runs it unfiltered), and `limit`
+      at most 5000. The run is recorded against the saved query. Decided as a panel is: a saved panel
+      the caller cannot run is `403 saved_query_not_accessible`, whatever the cause, and one whose
+      owners broke it is `400 invalid_panel`. The errors of the query itself (`429`, `502`, `504`
+      and the rest of `POST /v1/query`) are as there.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: previewSavedPanel
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SavedPanelIdParam'
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/saved-panels/schemas.yaml#/PreviewSavedPanelRequest'
+    responses:
+      '200':
+        description: The rows
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryResult'
+      '400': { $ref: '../../components/responses.yaml#/InvalidPanelResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `source_archived`, the source was archived while the query ran
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The stored query cannot be run - the codes of `POST /v1/query`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '429':
+        description: Too many queries - `too_many_queries` or `source_busy`; retry after `Retry-After`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `query_failed` or `source_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '504':
+        description: Gateway timeout - `query_timeout`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

@@ -77,6 +77,23 @@ info:
     `zeteo.data.read`. `zeteo.saved_queries.read` lets an administrator see every saved query and its
     shares, and `zeteo.saved_queries.write` change shares, transfer and delete them.
 
+    ## Dashboards
+
+    A dashboard (`/v1/dashboards`) is a grid of panels over saved queries, with an optional time
+    range, auto-refresh and theme. It is shared with users and groups, copied and handed to another
+    owner as a saved query is. A panel is `own` (a saved query, a chart and an optional time column)
+    or `linked` to a saved panel (`/v1/saved-panels`: a chart on a saved query, owned and shared on
+    its own, so one change reaches every dashboard that links it). A saved query is offered to
+    dashboards by its owner (`available_for_dashboards`); `GET /v1/saved-queries?scope=available`
+    lists what a caller may build on. Sharing a dashboard never widens anyone's access: every panel
+    is decided for its viewer against their own grants, and one they cannot run says only that
+    (`state: not_accessible`), never why and never what it reads. `POST
+    /v1/dashboards/{dashboardId}/run` streams the panels' results as NDJSON, a line per panel as it
+    is ready. `GET /v1/dashboards`, `GET /v1/saved-panels` and everything on them need
+    `zeteo.data.read`; `zeteo.dashboards.read` lets an administrator see every dashboard and saved
+    panel, their shares and what uses a saved query, and `zeteo.dashboards.write` change shares,
+    transfer and delete them.
+
     ## Pagination
 
     Lists take `limit` (default 50, at most 100) and an opaque `cursor`, and answer
@@ -107,6 +124,8 @@ tags:
     description: Running and exporting queries over granted tables and columns, and the record of every run
   - name: Saved queries
     description: Queries saved by name, shared with users and groups, and run by whoever may
+  - name: Dashboards
+    description: Dashboards of panels over saved queries, saved panels that dashboards link, and running a dashboard
   - name: Platform
     description: Health and the signed-in caller
 x-tagGroups:
@@ -115,7 +134,7 @@ x-tagGroups:
   - name: Access
     tags: [Grants]
   - name: Querying
-    tags: [Queries, Saved queries]
+    tags: [Queries, Saved queries, Dashboards]
   - name: Platform
     tags: [Platform]
 paths:
@@ -179,6 +198,40 @@ paths:
     $ref: './paths/saved-queries/shares.yaml#/~1v1~1saved-queries~1{savedQueryId}~1shares'
   /v1/saved-queries/{savedQueryId}/transfer:
     $ref: './paths/saved-queries/transfer.yaml#/~1v1~1saved-queries~1{savedQueryId}~1transfer'
+  /v1/saved-queries/{savedQueryId}/dashboards:
+    $ref: './paths/saved-queries/dashboards.yaml#/~1v1~1saved-queries~1{savedQueryId}~1dashboards'
+  /v1/dashboards:
+    $ref: './paths/dashboards/dashboards.yaml#/~1v1~1dashboards'
+  /v1/dashboards/{dashboardId}:
+    $ref: './paths/dashboards/dashboard.yaml#/~1v1~1dashboards~1{dashboardId}'
+  /v1/dashboards/{dashboardId}/copy:
+    $ref: './paths/dashboards/copy.yaml#/~1v1~1dashboards~1{dashboardId}~1copy'
+  /v1/dashboards/{dashboardId}/run:
+    $ref: './paths/dashboards/run.yaml#/~1v1~1dashboards~1{dashboardId}~1run'
+  /v1/dashboards/{dashboardId}/shares:
+    $ref: './paths/dashboards/shares.yaml#/~1v1~1dashboards~1{dashboardId}~1shares'
+  /v1/dashboards/{dashboardId}/transfer:
+    $ref: './paths/dashboards/transfer.yaml#/~1v1~1dashboards~1{dashboardId}~1transfer'
+  /v1/dashboards/{dashboardId}/panels:
+    $ref: './paths/dashboards/panels.yaml#/~1v1~1dashboards~1{dashboardId}~1panels'
+  /v1/dashboards/{dashboardId}/panels/{panelId}:
+    $ref: './paths/dashboards/panel.yaml#/~1v1~1dashboards~1{dashboardId}~1panels~1{panelId}'
+  /v1/dashboards/{dashboardId}/panels/{panelId}/detach:
+    $ref: './paths/dashboards/detach.yaml#/~1v1~1dashboards~1{dashboardId}~1panels~1{panelId}~1detach'
+  /v1/dashboards/{dashboardId}/panels/{panelId}/save:
+    $ref: './paths/dashboards/save.yaml#/~1v1~1dashboards~1{dashboardId}~1panels~1{panelId}~1save'
+  /v1/saved-panels:
+    $ref: './paths/saved-panels/saved-panels.yaml#/~1v1~1saved-panels'
+  /v1/saved-panels/{savedPanelId}:
+    $ref: './paths/saved-panels/saved-panel.yaml#/~1v1~1saved-panels~1{savedPanelId}'
+  /v1/saved-panels/{savedPanelId}/copy:
+    $ref: './paths/saved-panels/copy.yaml#/~1v1~1saved-panels~1{savedPanelId}~1copy'
+  /v1/saved-panels/{savedPanelId}/preview:
+    $ref: './paths/saved-panels/preview.yaml#/~1v1~1saved-panels~1{savedPanelId}~1preview'
+  /v1/saved-panels/{savedPanelId}/shares:
+    $ref: './paths/saved-panels/shares.yaml#/~1v1~1saved-panels~1{savedPanelId}~1shares'
+  /v1/saved-panels/{savedPanelId}/transfer:
+    $ref: './paths/saved-panels/transfer.yaml#/~1v1~1saved-panels~1{savedPanelId}~1transfer'
 components:
   securitySchemes:
     BearerAuth:
@@ -198,6 +251,12 @@ components:
       $ref: './components/parameters.yaml#/PrincipalLimitIdParam'
     SavedQueryIdParam:
       $ref: './components/parameters.yaml#/SavedQueryIdParam'
+    DashboardIdParam:
+      $ref: './components/parameters.yaml#/DashboardIdParam'
+    PanelIdParam:
+      $ref: './components/parameters.yaml#/PanelIdParam'
+    SavedPanelIdParam:
+      $ref: './components/parameters.yaml#/SavedPanelIdParam'
   responses:
     BadRequestResponse:
       $ref: './components/responses.yaml#/BadRequestResponse'
@@ -219,6 +278,8 @@ components:
       $ref: './components/responses.yaml#/NoContentResponse'
     SavedQueryNotAccessibleResponse:
       $ref: './components/responses.yaml#/SavedQueryNotAccessibleResponse'
+    InvalidPanelResponse:
+      $ref: './components/responses.yaml#/InvalidPanelResponse'
   schemas:
     Error:
       $ref: './components/responses.yaml#/Error'
@@ -344,3 +405,83 @@ components:
       $ref: './components/saved-queries/schemas.yaml#/TransferSavedQueryRequest'
     TransferSavedQueryResponse:
       $ref: './components/saved-queries/schemas.yaml#/TransferSavedQueryResponse'
+    InvalidPanelError:
+      $ref: './components/responses.yaml#/InvalidPanelError'
+    TimeRangeKey:
+      $ref: './components/dashboards/schemas.yaml#/TimeRangeKey'
+    DashboardTheme:
+      $ref: './components/dashboards/schemas.yaml#/DashboardTheme'
+    PanelKind:
+      $ref: './components/dashboards/schemas.yaml#/PanelKind'
+    PanelState:
+      $ref: './components/dashboards/schemas.yaml#/PanelState'
+    ChartProblem:
+      $ref: './components/dashboards/schemas.yaml#/ChartProblem'
+    StatChart:
+      $ref: './components/dashboards/schemas.yaml#/StatChart'
+    LineChart:
+      $ref: './components/dashboards/schemas.yaml#/LineChart'
+    AreaChart:
+      $ref: './components/dashboards/schemas.yaml#/AreaChart'
+    BarChart:
+      $ref: './components/dashboards/schemas.yaml#/BarChart'
+    PieChart:
+      $ref: './components/dashboards/schemas.yaml#/PieChart'
+    TableChart:
+      $ref: './components/dashboards/schemas.yaml#/TableChart'
+    ChartSettings:
+      $ref: './components/dashboards/schemas.yaml#/ChartSettings'
+    Panel:
+      $ref: './components/dashboards/schemas.yaml#/Panel'
+    DashboardSummary:
+      $ref: './components/dashboards/schemas.yaml#/DashboardSummary'
+    Dashboard:
+      $ref: './components/dashboards/schemas.yaml#/Dashboard'
+    ListDashboardsResponse:
+      $ref: './components/dashboards/schemas.yaml#/ListDashboardsResponse'
+    OwnPanelInput:
+      $ref: './components/dashboards/schemas.yaml#/OwnPanelInput'
+    LinkedPanelInput:
+      $ref: './components/dashboards/schemas.yaml#/LinkedPanelInput'
+    PanelInput:
+      $ref: './components/dashboards/schemas.yaml#/PanelInput'
+    ExistingPanelInput:
+      $ref: './components/dashboards/schemas.yaml#/ExistingPanelInput'
+    ReplacementPanel:
+      $ref: './components/dashboards/schemas.yaml#/ReplacementPanel'
+    CreateDashboardRequest:
+      $ref: './components/dashboards/schemas.yaml#/CreateDashboardRequest'
+    UpdateDashboardRequest:
+      $ref: './components/dashboards/schemas.yaml#/UpdateDashboardRequest'
+    UpdatePanelRequest:
+      $ref: './components/dashboards/schemas.yaml#/UpdatePanelRequest'
+    CopyDashboardRequest:
+      $ref: './components/dashboards/schemas.yaml#/CopyDashboardRequest'
+    TransferOwnerRequest:
+      $ref: './components/dashboards/schemas.yaml#/TransferOwnerRequest'
+    RunDashboardRequest:
+      $ref: './components/dashboards/schemas.yaml#/RunDashboardRequest'
+    PanelLine:
+      $ref: './components/dashboards/schemas.yaml#/PanelLine'
+    DoneLine:
+      $ref: './components/dashboards/schemas.yaml#/DoneLine'
+    SavedPanel:
+      $ref: './components/saved-panels/schemas.yaml#/SavedPanel'
+    ListSavedPanelsResponse:
+      $ref: './components/saved-panels/schemas.yaml#/ListSavedPanelsResponse'
+    CreateSavedPanelRequest:
+      $ref: './components/saved-panels/schemas.yaml#/CreateSavedPanelRequest'
+    UpdateSavedPanelRequest:
+      $ref: './components/saved-panels/schemas.yaml#/UpdateSavedPanelRequest'
+    CopySavedPanelRequest:
+      $ref: './components/saved-panels/schemas.yaml#/CopySavedPanelRequest'
+    SaveAsSavedPanelRequest:
+      $ref: './components/saved-panels/schemas.yaml#/SaveAsSavedPanelRequest'
+    PreviewSavedPanelRequest:
+      $ref: './components/saved-panels/schemas.yaml#/PreviewSavedPanelRequest'
+    SavedQueryUse:
+      $ref: './components/saved-queries/schemas.yaml#/SavedQueryUse'
+    ListSavedQueryUsesResponse:
+      $ref: './components/saved-queries/schemas.yaml#/ListSavedQueryUsesResponse'
+    RelativeDate:
+      $ref: './components/queries/schemas.yaml#/RelativeDate'

@@ -10,6 +10,7 @@ import type {
   SavedQuery,
   SavedQueryPaging,
   SavedQueryShares,
+  SavedQueryUse,
   SharePrincipal,
   TransferSavedQueryRequest,
   TransferSavedQueryResponse,
@@ -90,6 +91,14 @@ export const savedQueriesCalls = (ctx: CallContext) => {
         options?: { format?: "ndjson" | "csv"; signal?: AbortSignal }
       ): Promise<ExportStream> => exports.stream({ id, paging }, options),
     },
+    /**
+     * The dashboards and saved panels built on it (`zeteo.dashboards.read`).
+     */
+    dashboards: (id: string): Promise<{ data: SavedQueryUse[] }> =>
+      send(ctx, {
+        op: "listSavedQueryDashboards",
+        params: { savedQueryId: id },
+      }),
     listShares: (id: string): Promise<SavedQueryShares> =>
       send(ctx, { op: "listSavedQueryShares", params: { savedQueryId: id } }),
     // Never repeated: a second PUT would find the users already added and lose the warnings.
