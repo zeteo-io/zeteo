@@ -195,3 +195,40 @@ export const transfer = async (
   }
   return updated;
 };
+
+/** Those of `ids` that exist, in one read. */
+export const findByIds = (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<SavedPanel[]> =>
+  ids.length === 0
+    ? Promise.resolve([])
+    : tx.savedPanel.findMany({ where: { id: { in: [...ids] } } });
+
+/** Those of `ids` shared with the user or with one of `groupIds`, in one read. */
+export const sharedWithAmong = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const shares = await tx.savedPanelShare.findMany({
+    where: {
+      savedPanelId: { in: [...ids] },
+      OR: [
+        { principalType: "user", principalId: userId },
+        ...(groupIds.length > 0
+          ? [
+              {
+                principalType: "group" as const,
+                principalId: { in: [...groupIds] },
+              },
+            ]
+          : []),
+      ],
+    },
+    select: { savedPanelId: true },
+  });
+  return new Set(shares.map((s) => s.savedPanelId));
+};

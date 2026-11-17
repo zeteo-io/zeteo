@@ -403,3 +403,12 @@ export const listAvailable = async (
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
+
+/** Those of `ids` that exist, in one read. */
+export const findByIds = (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<SavedQuery[]> =>
+  ids.length === 0
+    ? Promise.resolve([])
+    : tx.savedQuery.findMany({ where: { id: { in: [...ids] } } });
