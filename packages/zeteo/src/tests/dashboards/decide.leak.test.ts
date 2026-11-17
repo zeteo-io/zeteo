@@ -139,4 +139,70 @@ describe("panel decisions: seven causes of no access look the same", () => {
         "You need expanded permissions to run this saved query. Ask an admin to extend your access.",
     });
   });
+
+  it("keeps only the id and name of the saved query and saved panel of a panel that is not ok", async () => {
+    const owner = sources.owner;
+    const query = await db.savedQueries.create({
+      ownerId: owner.id,
+      sourceId: sources.source.id,
+      name: "refs query",
+      description: "private",
+      query: causeQueryOn(sources.source),
+    });
+    const none = newQueryUser();
+    users.push(none.id);
+    const panel = await db.savedPanels.create({
+      ownerId: owner.id,
+      name: "refs panel",
+      description: "",
+      savedQueryId: query.id,
+      chart: CHART,
+      timeColumn: null,
+    });
+    const dash = await dashboardWith(owner.id, [
+      { kind: "own", savedQueryId: query.id, chart: CHART },
+      { kind: "linked", savedPanelId: panel.id },
+    ]);
+    const decisions = await decidePanels(viewer(none.id), dash, null);
+    for (const p of dash.panels) {
+      const decision = decisions.get(p.id)!;
+      expect(decision.state).toBe("not_accessible");
+      expect(decision.savedQuery).toEqual({ id: query.id, name: "refs query" });
+    }
+    const linked = decisions.get(
+      dash.panels.find((p) => p.kind === "linked")!.id
+    )!;
+    expect(linked.savedPanel).toEqual({ id: panel.id, name: "refs panel" });
+  });
+
+  it("names a not available panel's saved query only when the dashboard's owner owns it", async () => {
+    const third = sources.owner;
+    const dashOwner = newQueryUser();
+    users.push(dashOwner.id);
+    const theirs = await db.savedQueries.create({
+      ownerId: third.id,
+      sourceId: sources.source.id,
+      name: "third party query",
+      description: "",
+      query: causeQueryOn(sources.source),
+    });
+    const dash = await dashboardWith(dashOwner.id, [
+      { kind: "own", savedQueryId: theirs.id, chart: CHART },
+    ]);
+    const decisions = await decidePanels(viewer(dashOwner.id), dash, null);
+    const decision = decisions.get(dash.panels[0]!.id)!;
+    expect(decision.state).toBe("not_available");
+    expect(decision.savedQuery).toBeUndefined();
+    const view = panelView(dash.panels[0]!, decision);
+    expect(view.title).toBe("Untitled panel");
+    expect(JSON.stringify(view)).not.toContain("third party query");
+    // With a title of its own, the panel shows that.
+    const titled = await dashboardWith(dashOwner.id, [
+      { kind: "own", savedQueryId: theirs.id, chart: CHART, title: "Mine" },
+    ]);
+    const again = (await decidePanels(viewer(dashOwner.id), titled, null)).get(
+      titled.panels[0]!.id
+    )!;
+    expect(panelView(titled.panels[0]!, again).title).toBe("Mine");
+  });
 });

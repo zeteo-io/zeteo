@@ -1,7 +1,7 @@
+import { diffPrincipals } from "../../sharing/principals.js";
 import { prisma, type Prisma } from "./prisma.js";
 import type { Principal } from "./grants.js";
 import type {
-  PrincipalType,
   SavedPanel,
   SavedPanelShare,
 } from "../../../prisma/generated/client/index.js";
@@ -113,8 +113,6 @@ export const listUsingSavedQuery = async (
 ): Promise<SavedPanel[]> =>
   tx.savedPanel.findMany({ where: { savedQueryId }, orderBy: { id: "desc" } });
 
-const key = (p: Principal) => `${p.type}:${p.id}`;
-
 /** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */
 export const replaceShares = async (
   tx: Db,
@@ -125,15 +123,10 @@ export const replaceShares = async (
   const existing = await tx.savedPanelShare.findMany({
     where: { savedPanelId },
   });
-  const wanted = new Map(principals.map((p) => [key(p), p]));
-  const have = new Map<string, Principal>(
-    existing.map((s) => {
-      const p = { type: s.principalType as PrincipalType, id: s.principalId };
-      return [key(p), p];
-    })
+  const { added, removed } = diffPrincipals(
+    existing.map((s) => ({ type: s.principalType, id: s.principalId })),
+    principals
   );
-  const added = [...wanted].filter(([k]) => !have.has(k)).map(([, p]) => p);
-  const removed = [...have].filter(([k]) => !wanted.has(k)).map(([, p]) => p);
   if (removed.length > 0) {
     await tx.savedPanelShare.deleteMany({
       where: {

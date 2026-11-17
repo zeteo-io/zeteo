@@ -1,10 +1,10 @@
 import { Prisma as PrismaRuntime } from "../../../prisma/generated/client/index.js";
+import { diffPrincipals } from "../../sharing/principals.js";
 import { prisma, type Prisma } from "./prisma.js";
 import type { Principal } from "./grants.js";
 import type {
   DashboardTheme,
   PanelKind,
-  PrincipalType,
   Dashboard,
   DashboardPanel,
   DashboardShare,
@@ -226,8 +226,6 @@ export const listUsingSavedQuery = async (
     orderBy: { id: "desc" },
   });
 
-const key = (p: Principal) => `${p.type}:${p.id}`;
-
 /** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */
 export const replaceShares = async (
   tx: Db,
@@ -236,15 +234,10 @@ export const replaceShares = async (
   createdBy: string
 ): Promise<{ added: Principal[]; removed: Principal[] }> => {
   const existing = await tx.dashboardShare.findMany({ where: { dashboardId } });
-  const wanted = new Map(principals.map((p) => [key(p), p]));
-  const have = new Map<string, Principal>(
-    existing.map((s) => {
-      const p = { type: s.principalType as PrincipalType, id: s.principalId };
-      return [key(p), p];
-    })
+  const { added, removed } = diffPrincipals(
+    existing.map((s) => ({ type: s.principalType, id: s.principalId })),
+    principals
   );
-  const added = [...wanted].filter(([k]) => !have.has(k)).map(([, p]) => p);
-  const removed = [...have].filter(([k]) => !wanted.has(k)).map(([, p]) => p);
   if (removed.length > 0) {
     await tx.dashboardShare.deleteMany({
       where: {
@@ -312,4 +305,69 @@ export const transfer = async (
     });
   }
   return updated;
+};
+
+/** The share that reaches the user directly, or through one of `groupIds`. */
+const reaching = (
+  userId: string,
+  groupIds: readonly string[]
+): Prisma.DashboardShareWhereInput => ({
+  OR: [
+    { principalType: "user", principalId: userId },
+    ...(groupIds.length > 0
+      ? [
+          {
+            principalType: "group" as const,
+            principalId: { in: [...groupIds] },
+          },
+        ]
+      : []),
+  ],
+});
+
+/** Whether the dashboard is shared with the user, or with one of `groupIds`. */
+export const isSharedWith = async (
+  id: string,
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<boolean> =>
+  (await tx.dashboardShare.count({
+    where: { dashboardId: id, ...reaching(userId, groupIds) },
+  })) > 0;
+
+/** When each of `ids` was first shared with the user (or a group of theirs), by id; one not shared with them is not in the map. */
+export const sharedAtFor = async (
+  ids: readonly string[],
+  userId: string,
+  groupIds: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, Date>> => {
+  const shared = new Map<string, Date>();
+  if (ids.length === 0) return shared;
+  const shares = await tx.dashboardShare.findMany({
+    where: { dashboardId: { in: [...ids] }, ...reaching(userId, groupIds) },
+    select: { dashboardId: true, createdAt: true },
+    orderBy: { createdAt: "asc" },
+  });
+  for (const s of shares) {
+    if (!shared.has(s.dashboardId)) shared.set(s.dashboardId, s.createdAt);
+  }
+  return shared;
+};
+
+/** How many shares each dashboard has, by id; one with none is 0. */
+export const countShares = async (
+  ids: readonly string[],
+  tx: Db = prisma
+): Promise<Map<string, number>> => {
+  const counts = new Map(ids.map((id) => [id, 0]));
+  if (ids.length === 0) return counts;
+  const grouped = await tx.dashboardShare.groupBy({
+    by: ["dashboardId"],
+    where: { dashboardId: { in: [...ids] } },
+    _count: { _all: true },
+  });
+  for (const g of grouped) counts.set(g.dashboardId, g._count._all);
+  return counts;
 };

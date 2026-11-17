@@ -46,20 +46,63 @@ export const PANEL_MESSAGES = {
   needs_update: "This panel needs updating by its owner.",
 } as const;
 
-export interface PanelDecision {
-  state: PanelState;
-  message?: string;
-  /** The saved query the panel resolves to, when it still exists. */
-  savedQuery?: SavedQuery;
-  /** A linked panel's saved panel, when it still exists. */
+/** What a panel that is not `ok` keeps of its saved query or saved panel: no more than this. */
+export interface NamedRef {
+  id: string;
+  name: string;
+}
+
+/** A panel the viewer can run: it carries what the dashboard run needs. */
+export interface OkDecision {
+  state: "ok";
+  message?: undefined;
+  problems?: undefined;
+  /** The saved query the panel resolves to. */
+  savedQuery: SavedQuery;
+  /** A linked panel's saved panel. */
   savedPanel?: SavedPanel;
-  /** `ok` only. */
-  chart?: ChartSettings;
-  /** `ok` only, when the panel has one. */
+  chart: ChartSettings;
+  /** When the panel has a time column. */
   timeColumn?: string;
+}
+
+/**
+ * Every other state. The saved query and saved panel are named by id and
+ * name alone, never as the rows with their query JSON, and a `not_available`
+ * panel names one only when the dashboard's owner owns it.
+ */
+export interface RefusedDecision {
+  state: Exclude<PanelState, "ok">;
+  message: string;
+  savedQuery?: NamedRef;
+  savedPanel?: NamedRef;
+  chart?: undefined;
+  timeColumn?: undefined;
   /** `needs_update` only, and only for the panel's editor. */
   problems?: ChartProblem[];
 }
+
+export type PanelDecision = OkDecision | RefusedDecision;
+
+const refOf = (row: { id: string; name: string }): NamedRef => ({
+  id: row.id,
+  name: row.name,
+});
+
+/** The refs of `rows` to keep: all of them, or only those `ownerId` owns. */
+const refsOf = (
+  rows: { savedQuery?: SavedQuery; savedPanel?: SavedPanel },
+  ownedBy?: string
+) => ({
+  ...(rows.savedQuery &&
+    (ownedBy === undefined || rows.savedQuery.ownerId === ownedBy) && {
+      savedQuery: refOf(rows.savedQuery),
+    }),
+  ...(rows.savedPanel &&
+    (ownedBy === undefined || rows.savedPanel.ownerId === ownedBy) && {
+      savedPanel: refOf(rows.savedPanel),
+    }),
+});
 
 /**
  * The range the time column is checked with when none is chosen: the column
@@ -116,10 +159,7 @@ const queryOrder = (query: unknown): { orderBy?: unknown } =>
  */
 const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
   const { savedQuery } = r;
-  const found = {
-    savedQuery,
-    ...(r.savedPanel && { savedPanel: r.savedPanel }),
-  };
+  const found = refsOf({ savedQuery, savedPanel: r.savedPanel });
   const catalog = ctx.catalogs.get(savedQuery.sourceId)!;
   const isEditor = ctx.caller.userId === ctx.editorId;
   const query =
@@ -169,8 +209,9 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
     };
   }
   return {
-    ...found,
     state: "ok",
+    savedQuery,
+    ...(r.savedPanel && { savedPanel: r.savedPanel }),
     chart: chart.data,
     ...(r.timeColumn !== null && { timeColumn: r.timeColumn }),
   };
@@ -294,7 +335,7 @@ export const decidePanels = async (
           : savedQueries.get(savedPanel.savedQueryId);
       if (!savedQuery) {
         return {
-          savedPanel,
+          ...refsOf({ savedPanel }),
           state: "saved_query_deleted",
           message: PANEL_MESSAGES.saved_query_deleted,
         };
@@ -304,8 +345,7 @@ export const decidePanels = async (
         !sharedWithOwner.has(savedPanel.id)
       ) {
         return {
-          savedPanel,
-          savedQuery,
+          ...refsOf({ savedPanel, savedQuery }, dashboard.ownerId),
           state: "not_available",
           message: PANEL_MESSAGES.not_shared,
         };
@@ -314,8 +354,7 @@ export const decidePanels = async (
         reaches({ savedQuery, panelOwnerId, viewerOrganizationId });
       if (!reach(savedPanel.ownerId) || !reach(dashboard.ownerId)) {
         return {
-          savedPanel,
-          savedQuery,
+          ...refsOf({ savedPanel, savedQuery }, dashboard.ownerId),
           state: "not_available",
           message: PANEL_MESSAGES.not_available,
         };
@@ -345,7 +384,7 @@ export const decidePanels = async (
       })
     ) {
       return {
-        savedQuery,
+        ...refsOf({ savedQuery }, dashboard.ownerId),
         state: "not_available",
         message: PANEL_MESSAGES.not_available,
       };
@@ -377,7 +416,7 @@ export const decideSavedPanel = async (
       : await db.savedQueries.findById(savedPanel.savedQueryId);
   if (!savedQuery) {
     return {
-      savedPanel,
+      ...refsOf({ savedPanel }),
       state: "saved_query_deleted",
       message: PANEL_MESSAGES.saved_query_deleted,
     };
@@ -391,8 +430,7 @@ export const decideSavedPanel = async (
     })
   ) {
     return {
-      savedPanel,
-      savedQuery,
+      ...refsOf({ savedPanel, savedQuery }, savedPanel.ownerId),
       state: "not_available",
       message: PANEL_MESSAGES.not_available,
     };
@@ -405,5 +443,47 @@ export const decideSavedPanel = async (
       chart: savedPanel.chart,
       timeColumn: savedPanel.timeColumn,
     }
+  );
+};
+
+/**
+ * A panel `caller` is about to put on a dashboard of their own, decided as
+ * `decidePanels` decides it, with the caller as the panel's owner and editor:
+ * `not_available` when the reach rule fails, `needs_update` (with the
+ * problems) when the chart or time column does not fit, `not_accessible` when
+ * they cannot run the saved query. `timeRange` is the dashboard's.
+ */
+export const decideNewPanel = async (
+  caller: Caller,
+  access: CallerAccess,
+  panel: {
+    savedQuery: SavedQuery;
+    chart: unknown;
+    timeColumn: string | null;
+    timeRange: TimeRangeKey | null;
+  }
+): Promise<PanelDecision> => {
+  const { savedQuery } = panel;
+  if (
+    !reaches({
+      savedQuery,
+      panelOwnerId: caller.userId,
+      viewerOrganizationId: caller.organizationId,
+    })
+  ) {
+    return {
+      state: "not_available",
+      message: PANEL_MESSAGES.not_available,
+    };
+  }
+  return decideRun(
+    {
+      caller,
+      access,
+      catalogs: await loadCatalogs(access, [savedQuery]),
+      timeRange: panel.timeRange,
+      editorId: caller.userId,
+    },
+    { savedQuery, chart: panel.chart, timeColumn: panel.timeColumn }
   );
 };

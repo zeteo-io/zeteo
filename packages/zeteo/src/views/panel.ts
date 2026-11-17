@@ -5,6 +5,9 @@ import type {
   PanelKind,
 } from "../../prisma/generated/client/index.js";
 
+/** What a `not_available` panel with nothing of its own to call it by is titled: a saved query of someone else is not named. */
+export const UNTITLED = "Untitled panel";
+
 export interface PanelView {
   id: string;
   kind: PanelKind;
@@ -12,7 +15,7 @@ export interface PanelView {
   y: number;
   w: number;
   h: number;
-  /** The panel's own title, else its saved panel's or saved query's name; null when none is left. */
+  /** The panel's own title, else its saved panel's or saved query's name (not a third party's, for a `not_available` panel); null when none is left. */
   title: string | null;
   state: PanelState;
   message?: string;
@@ -43,7 +46,7 @@ export const panelView = (
     panel.title ??
     decision.savedPanel?.name ??
     decision.savedQuery?.name ??
-    null,
+    (decision.state === "not_available" ? UNTITLED : null),
   state: decision.state,
   ...(decision.message !== undefined && { message: decision.message }),
   ...(decision.state === "ok" && {

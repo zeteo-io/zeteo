@@ -70,6 +70,21 @@ export class BadRequestError extends AppError {
   }
 }
 
+/**
+ * A dashboard panel whose settings do not fit the caller's own saved query,
+ * saved panel or chart: `problems` name each setting at fault and why (never
+ * a column or anything of the catalogue).
+ */
+export class InvalidPanelError extends AppError {
+  constructor(
+    message: string,
+    problems: Array<{ setting: string; problem: string }>
+  ) {
+    super(400, "invalid_panel", message, { details: { problems } });
+    this.name = "InvalidPanelError";
+  }
+}
+
 export class UnauthorizedError extends AppError {
   constructor(
     message = "Unauthorized",
