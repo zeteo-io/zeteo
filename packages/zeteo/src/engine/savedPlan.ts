@@ -1,6 +1,5 @@
 import { AppError, SavedQueryNotAccessibleError } from "../utils/errors.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
-import type { QueryPlan, SourceAdapter } from "../adapters/types.js";
 import { planFor, type Progress } from "./plan.js";
 import type { Access } from "../grants/access.js";
 import { logger } from "../utils/logger.js";
@@ -8,6 +7,11 @@ import {
   loadSourceVisibleCatalog,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
+import type {
+  PlanContext,
+  QueryPlan,
+  SourceAdapter,
+} from "../adapters/types.js";
 
 /** What planning a saved query needs of it: its source and its stored JSON. */
 export type SavedQueryToPlan = Pick<SavedQuery, "sourceId" | "query">;
@@ -33,14 +37,18 @@ export const planSavedAgainst = (
   access: Access,
   saved: SavedQueryToPlan,
   catalog: VisibleCatalog,
-  progress: Progress
+  progress: Progress,
+  ctx?: PlanContext
 ): PlannedSavedQuery => {
   let planned: { adapter: SourceAdapter; plan: QueryPlan };
   try {
-    planned = planFor(saved.query, access, catalog, {
-      sourceId: null,
-      unrecorded: false,
-    });
+    planned = planFor(
+      saved.query,
+      access,
+      catalog,
+      { sourceId: null, unrecorded: false },
+      ctx
+    );
   } catch (err) {
     // A planner or language refusal is the expected kind; anything else is a
     // fault worth seeing in the log, though the caller still gets only this.
@@ -66,8 +74,9 @@ export const planSavedAgainst = (
 export const planSaved = async (
   access: Access,
   saved: SavedQueryToPlan,
-  progress: Progress
+  progress: Progress,
+  ctx?: PlanContext
 ): Promise<PlannedSavedQuery> => {
   const catalog = await loadSourceVisibleCatalog(saved.sourceId, access);
-  return planSavedAgainst(access, saved, catalog, progress);
+  return planSavedAgainst(access, saved, catalog, progress, ctx);
 };
