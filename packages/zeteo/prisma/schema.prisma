@@ -115,9 +115,10 @@ model Source {
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamp(3)
   archivedAt           DateTime?    @map("archived_at") @db.Timestamp(3)
 
-  tables    SourceTable[]
-  relations Relation[]
-  runs      QueryRun[]
+  tables       SourceTable[]
+  relations    Relation[]
+  runs         QueryRun[]
+  savedQueries SavedQuery[]
 
   @@map("sources")
   @@schema("zeteo")
@@ -156,7 +157,7 @@ model SourceColumn {
   description  String?
   missingSince DateTime?  @map("missing_since") @db.Timestamp(3)
 
-  table  SourceTable    @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  table  SourceTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
   grants GrantColumn[]
 
   @@unique([tableId, name])
@@ -284,22 +285,78 @@ model PrincipalLimit {
 // Every query that passed the shape check. source_id is null when the source
 // did not resolve.
 model QueryRun {
-  id         String     @id @default(uuid(7)) @db.Uuid
-  userId     String     @map("user_id") @db.Uuid
-  sourceId   String?    @map("source_id") @db.Uuid
-  entryPoint EntryPoint @map("entry_point")
-  query      Json
-  durationMs Int        @map("duration_ms")
-  rowCount   Int?       @map("row_count")
-  outcome    RunOutcome
-  errorCode  String?    @map("error_code")
-  truncated  Boolean    @default(false)
-  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamp(3)
+  id           String     @id @default(uuid(7)) @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  sourceId     String?    @map("source_id") @db.Uuid
+  entryPoint   EntryPoint @map("entry_point")
+  query        Json
+  durationMs   Int        @map("duration_ms")
+  rowCount     Int?       @map("row_count")
+  outcome      RunOutcome
+  errorCode    String?    @map("error_code")
+  truncated    Boolean    @default(false)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamp(3)
+  savedQueryId String?    @map("saved_query_id") @db.Uuid
 
-  source Source? @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  source     Source?     @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  savedQuery SavedQuery? @relation(fields: [savedQueryId], references: [id], onDelete: SetNull)
 
   @@index([userId, id])
   @@index([sourceId, id])
+  @@index([savedQueryId])
   @@map("query_runs")
+  @@schema("zeteo")
+}
+
+// ===========================================================================
+// Saved queries
+// ===========================================================================
+
+model SavedQuery {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  ownerId     String    @map("owner_id") @db.Uuid
+  sourceId    String    @map("source_id") @db.Uuid
+  name        String
+  description String    @default("")
+  query       Json
+  lastRunAt   DateTime? @map("last_run_at") @db.Timestamp(3)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  source   Source              @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  shares   SavedQueryShare[]
+  userRuns SavedQueryUserRun[]
+  runs     QueryRun[]
+
+  @@index([ownerId])
+  @@index([sourceId])
+  @@map("saved_queries")
+  @@schema("zeteo")
+}
+
+model SavedQueryShare {
+  savedQueryId  String        @map("saved_query_id") @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+
+  savedQuery SavedQuery @relation(fields: [savedQueryId], references: [id], onDelete: Cascade)
+
+  @@id([savedQueryId, principalType, principalId])
+  @@index([principalType, principalId])
+  @@map("saved_query_shares")
+  @@schema("zeteo")
+}
+
+model SavedQueryUserRun {
+  savedQueryId String   @map("saved_query_id") @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  lastRunAt    DateTime @map("last_run_at") @db.Timestamp(3)
+
+  savedQuery SavedQuery @relation(fields: [savedQueryId], references: [id], onDelete: Cascade)
+
+  @@id([savedQueryId, userId])
+  @@map("saved_query_user_runs")
   @@schema("zeteo")
 }

@@ -38,6 +38,12 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.principalLimitCreated]: "CREATE",
   [AUDIT_EVENTS.principalLimitUpdated]: "UPDATE",
   [AUDIT_EVENTS.principalLimitRemoved]: "DELETE",
+  [AUDIT_EVENTS.savedQueryCreated]: "CREATE",
+  [AUDIT_EVENTS.savedQueryUpdated]: "UPDATE",
+  [AUDIT_EVENTS.savedQueryDeleted]: "DELETE",
+  [AUDIT_EVENTS.savedQueryShared]: "UPDATE",
+  [AUDIT_EVENTS.savedQueryTransferred]: "UPDATE",
+  [AUDIT_EVENTS.savedQueryCopied]: "CREATE",
   [AUDIT_EVENTS.queryRun]: "CREATE",
   [AUDIT_EVENTS.exportStarted]: "CREATE",
   // Ends the run its start created; an export refused before it started

@@ -37,6 +37,12 @@ export const RUNS_READ = "zeteo.runs.read";
  */
 export const MCP_USE = "zeteo.mcp.use";
 
+/** Lists and reads every saved query, whoever owns it or shares it. */
+export const SAVED_QUERIES_READ = "zeteo.saved_queries.read";
+
+/** Changes, shares, transfers and deletes any saved query. */
+export const SAVED_QUERIES_WRITE = "zeteo.saved_queries.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -52,6 +58,12 @@ export const AUDIT_EVENTS = {
   principalLimitCreated: "zeteo.principal_limit.created",
   principalLimitUpdated: "zeteo.principal_limit.updated",
   principalLimitRemoved: "zeteo.principal_limit.removed",
+  savedQueryCreated: "zeteo.saved_query.created",
+  savedQueryUpdated: "zeteo.saved_query.updated",
+  savedQueryDeleted: "zeteo.saved_query.deleted",
+  savedQueryShared: "zeteo.saved_query.shared",
+  savedQueryTransferred: "zeteo.saved_query.transferred",
+  savedQueryCopied: "zeteo.saved_query.copied",
   queryRun: "zeteo.query.run",
   exportStarted: "zeteo.export.started",
   exportRun: "zeteo.export.run",
@@ -77,6 +89,13 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
     "A user's or group's concurrency limits were changed",
   [AUDIT_EVENTS.principalLimitRemoved]:
     "A user's or group's own concurrency limits were removed",
+  [AUDIT_EVENTS.savedQueryCreated]: "A saved query was created",
+  [AUDIT_EVENTS.savedQueryUpdated]: "A saved query was changed",
+  [AUDIT_EVENTS.savedQueryDeleted]: "A saved query was deleted",
+  [AUDIT_EVENTS.savedQueryShared]: "A saved query's shares were changed",
+  [AUDIT_EVENTS.savedQueryTransferred]:
+    "A saved query was transferred to another owner",
+  [AUDIT_EVENTS.savedQueryCopied]: "A saved query was copied",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
   [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
   [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
@@ -96,6 +115,12 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.principalLimitCreated]: GRANTS_READ,
   [AUDIT_EVENTS.principalLimitUpdated]: GRANTS_READ,
   [AUDIT_EVENTS.principalLimitRemoved]: GRANTS_READ,
+  [AUDIT_EVENTS.savedQueryCreated]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.savedQueryUpdated]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.savedQueryDeleted]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.savedQueryShared]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.savedQueryTransferred]: SAVED_QUERIES_READ,
+  [AUDIT_EVENTS.savedQueryCopied]: SAVED_QUERIES_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
   [AUDIT_EVENTS.exportStarted]: RUNS_READ,
   [AUDIT_EVENTS.exportRun]: RUNS_READ,
@@ -172,13 +197,28 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         description: "Use zeteo through an AI connected over MCP",
         orgAssignable: false,
       },
+      {
+        name: SAVED_QUERIES_READ,
+        displayName: "Read saved queries",
+        description:
+          "List and read every user's saved queries and who they are shared with; also lets the holder look up users' names and email addresses",
+        orgAssignable: false,
+      },
+      {
+        name: SAVED_QUERIES_WRITE,
+        displayName: "Manage saved queries",
+        description:
+          "Change, share, transfer and delete any user's saved queries; also grants Read saved queries",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
         // Core's role names allow no ".", so the slug and the name join with "_".
         name: "zeteo_admin",
         displayName: "Zeteo administrator",
-        description: "Manages sources, grants and the record of query runs",
+        description:
+          "Manages sources, grants, saved queries and the record of query runs",
         permissions: [
           SOURCES_READ,
           SOURCES_WRITE,
@@ -188,6 +228,8 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           DATA_EXPORT,
           RUNS_READ,
           MCP_USE,
+          SAVED_QUERIES_READ,
+          SAVED_QUERIES_WRITE,
         ],
       },
       {
