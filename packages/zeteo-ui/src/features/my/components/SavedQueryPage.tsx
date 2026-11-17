@@ -111,6 +111,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
     <div className="z-header-actions">
       {isOwner && (
         <Button
+          size="sm"
           variant="secondary"
           fullWidth={false}
           onClick={() => setDialog("edit")}
@@ -120,6 +121,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
       )}
       {!isOwner && sq.accessible && (
         <Button
+          size="sm"
           variant="secondary"
           fullWidth={false}
           onClick={() => setDialog("copy")}
@@ -130,6 +132,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
       {canManage && (
         <>
           <Button
+            size="sm"
             variant="secondary"
             fullWidth={false}
             onClick={() => setDialog("share")}
@@ -137,6 +140,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
             Share
           </Button>
           <Button
+            size="sm"
             variant="secondary"
             fullWidth={false}
             onClick={() => setDialog("transfer")}
@@ -145,6 +149,7 @@ const SavedQueryView = ({ savedQueryId }: { savedQueryId: string }) => {
           </Button>
           <ConfirmButton
             label="Delete"
+            size="sm"
             danger
             confirmTitle="Delete saved query"
             confirmText={`Delete "${sq.name}"? It stops being shared and cannot be recovered.`}
