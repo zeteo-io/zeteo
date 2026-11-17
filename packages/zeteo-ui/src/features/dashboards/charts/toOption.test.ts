@@ -1,10 +1,11 @@
+import type { ChartSettings, RunResult } from "../api/types";
+import { DARK_PALETTE, LIGHT_PALETTE } from "./theme";
 import { MAX_SERIES, toOption } from "./toOption";
 import { describe, expect, it } from "vitest";
-import type { RunResult } from "../api/types";
 import type { ChartTheme } from "./theme";
 
 const theme: ChartTheme = {
-  palette: ["#a", "#b", "#c"],
+  palette: LIGHT_PALETTE,
   text: "#000",
   textSecondary: "#555",
   border: "#ddd",
@@ -167,7 +168,8 @@ describe("toOption", () => {
     );
     expect(o.yAxis.type).toBe("category");
     expect(o.xAxis.type).toBe("value");
-    expect(o.series[0].data[0]).toEqual([10, "jan"]);
+    expect(o.yAxis.data).toEqual(["jan", "feb"]);
+    expect(o.series[0].data).toEqual([30, 70]);
     // The first row is at the top.
     expect(o.yAxis.inverse).toBe(true);
   });
@@ -271,35 +273,6 @@ describe("toOption", () => {
     ]);
   });
 
-  it("orders the folded Other series by x on a time axis", () => {
-    const rows: unknown[][] = [];
-    for (let i = 0; i < 20; i++) rows.push(["2026-01-01", `s${i}`, 1]);
-    rows.push(["2026-01-03", "s20", 5]);
-    rows.push(["2026-01-01", "s21", 7]);
-    rows.push(["2026-01-02", "s22", 6]);
-    const r = result(
-      [
-        ["day", "date"],
-        ["region", "text"],
-        ["n", "number"],
-      ],
-      rows
-    );
-    const o = opt(
-      toOption(
-        { version: 1, type: "line", x: "day", y: ["n"], series: "region" },
-        r,
-        theme
-      )
-    );
-    expect(o.series[20].name).toBe("Other");
-    expect(o.series[20].data).toEqual([
-      ["2026-01-01", 7],
-      ["2026-01-02", 6],
-      ["2026-01-03", 5],
-    ]);
-  });
-
   it("keeps a category x in the rows' order", () => {
     const r = result(
       [
@@ -318,37 +291,6 @@ describe("toOption", () => {
       ["mar", 3],
       ["jan", 1],
     ]);
-  });
-
-  it("folds series beyond the twentieth into Other, summing them", () => {
-    const rows: unknown[][] = [];
-    for (let i = 0; i < 23; i++) rows.push(["jan", `s${i}`, 1]);
-    const r = result(
-      [
-        ["month", "text"],
-        ["region", "text"],
-        ["revenue", "number"],
-      ],
-      rows
-    );
-    const o = opt(
-      toOption(
-        {
-          version: 1,
-          type: "bar",
-          x: "month",
-          y: ["revenue"],
-          series: "region",
-        },
-        r,
-        theme
-      )
-    );
-    expect(MAX_SERIES).toBe(20);
-    expect(o.series).toHaveLength(21);
-    const other = o.series[20];
-    expect(other.name).toBe("Other");
-    expect(other.data).toEqual([["jan", 3]]);
   });
 
   it("formats numbers in the tooltip and the axis with decimals", () => {
@@ -414,8 +356,8 @@ describe("toOption", () => {
     );
     expect(pie.series[0].type).toBe("pie");
     expect(pie.series[0].data).toEqual([
-      { name: "eu", value: 10 },
-      { name: "us", value: 20 },
+      { name: "eu", value: 10, itemStyle: { color: LIGHT_PALETTE[0] } },
+      { name: "us", value: 20, itemStyle: { color: LIGHT_PALETTE[1] } },
     ]);
     expect(pie.series[0].radius).toBe("70%");
     const donut = opt(
@@ -434,8 +376,92 @@ describe("toOption", () => {
     expect(donut.series[0].radius).toEqual(["45%", "70%"]);
   });
 
-  it("folds pie slices beyond the twentieth into Other", () => {
-    const rows = Array.from({ length: 22 }, (_, i) => [`s${i}`, 1]);
+  describe("colours", () => {
+    const split = (n: number) =>
+      result(
+        [
+          ["month", "text"],
+          ["who", "text"],
+          ["v", "number"],
+        ],
+        Array.from({ length: n }, (_, i) => ["jan", `s${i}`, i + 1])
+      );
+    const bars: ChartSettings = {
+      version: 1,
+      type: "bar",
+      x: "month",
+      y: ["v"],
+      series: "who",
+    };
+
+    it("gives series 1-8 the palette's colours in order, none twice", () => {
+      const o = opt(toOption(bars, split(8), theme));
+      const colours = o.series.map((s: any) => s.color);
+      expect(colours).toEqual(LIGHT_PALETTE);
+      expect(new Set(colours).size).toBe(8);
+      expect(o.series.map((s: any) => s.name)).toEqual(
+        Array.from({ length: 8 }, (_, i) => `s${i}`)
+      );
+    });
+
+    it("takes the dark colours from a dark theme", () => {
+      const o = opt(
+        toOption(bars, split(8), { ...theme, palette: DARK_PALETTE })
+      );
+      expect(o.series.map((s: any) => s.color)).toEqual(DARK_PALETTE);
+    });
+
+    it("has eight distinct colours per theme", () => {
+      expect(new Set(LIGHT_PALETTE).size).toBe(8);
+      expect(new Set(DARK_PALETTE).size).toBe(8);
+    });
+  });
+
+  it("keeps the seven largest of eleven series and sums the rest into a grey Other, per x", () => {
+    // Totals: s0..s10 = 1..11 per month, two months; s0..s3 fold.
+    const rows: unknown[][] = [];
+    for (const month of ["jan", "feb"])
+      for (let i = 0; i < 11; i++) rows.push([month, `s${i}`, i + 1]);
+    // s0 has no feb row: Other is 2+3+4 in feb.
+    rows.splice(11, 1);
+    const r = result(
+      [
+        ["month", "text"],
+        ["who", "text"],
+        ["v", "number"],
+      ],
+      rows
+    );
+    const o = opt(
+      toOption(
+        { version: 1, type: "line", x: "month", y: ["v"], series: "who" },
+        r,
+        theme
+      )
+    );
+    expect(MAX_SERIES).toBe(8);
+    expect(o.series.map((s: any) => s.name)).toEqual([
+      "s10",
+      "s9",
+      "s8",
+      "s7",
+      "s6",
+      "s5",
+      "s4",
+      "Other",
+    ]);
+    expect(o.series.slice(0, 7).map((s: any) => s.color)).toEqual(
+      LIGHT_PALETTE.slice(0, 7)
+    );
+    expect(o.series[7].color).toBe(theme.textSecondary);
+    expect(o.series[7].data).toEqual([
+      ["jan", 1 + 2 + 3 + 4],
+      ["feb", 2 + 3 + 4],
+    ]);
+  });
+
+  it("folds a pie of ten slices into the seven largest and Other", () => {
+    const rows = Array.from({ length: 10 }, (_, i) => [`s${i}`, i + 1]);
     const r = result(
       [
         ["l", "text"],
@@ -446,8 +472,155 @@ describe("toOption", () => {
     const o = opt(
       toOption({ version: 1, type: "pie", label: "l", value: "v" }, r, theme)
     );
-    expect(o.series[0].data).toHaveLength(21);
-    expect(o.series[0].data[20]).toEqual({ name: "Other", value: 2 });
+    const data = o.series[0].data;
+    expect(data.map((d: any) => d.name)).toEqual([
+      "s9",
+      "s8",
+      "s7",
+      "s6",
+      "s5",
+      "s4",
+      "s3",
+      "Other",
+    ]);
+    expect(data[7].value).toBe(1 + 2 + 3);
+    expect(data[7].itemStyle.color).toBe(theme.textSecondary);
+    expect(data.slice(0, 7).map((d: any) => d.itemStyle.color)).toEqual(
+      LIGHT_PALETTE.slice(0, 7)
+    );
+  });
+
+  describe("stacking by x", () => {
+    // Weeks out of order, and pickers with weeks missing.
+    const picks = result(
+      [
+        ["week", "timestamp"],
+        ["picker", "text"],
+        ["picks", "number"],
+      ],
+      [
+        ["2026-05-18T00:00:00.000Z", "ann", 5],
+        ["2026-05-04T00:00:00.000Z", "ann", 1],
+        ["2026-05-11T00:00:00.000Z", "bob", 7],
+        ["2026-05-18T00:00:00.000Z", "cy", 2],
+        ["2026-05-04T00:00:00.000Z", "cy", 3],
+      ]
+    );
+
+    it("gives every stacked bar series a value at every x, 0 when missing, in order of x", () => {
+      const o = opt(
+        toOption(
+          {
+            version: 1,
+            type: "bar",
+            x: "week",
+            y: ["picks"],
+            series: "picker",
+            stacked: true,
+          },
+          picks,
+          theme
+        )
+      );
+      expect(o.xAxis.type).toBe("category");
+      expect(o.xAxis.data).toEqual([
+        "May 4, 2026",
+        "May 11, 2026",
+        "May 18, 2026",
+      ]);
+      expect(o.series.map((s: any) => s.data)).toEqual([
+        [1, 0, 5],
+        [0, 7, 0],
+        [3, 0, 2],
+      ]);
+      const totals = [0, 1, 2].map((i) =>
+        o.series.reduce((sum: number, s: any) => sum + s.data[i], 0)
+      );
+      expect(totals).toEqual([4, 7, 7]);
+      expect(o.series[0].itemStyle).toEqual({
+        borderColor: theme.background,
+        borderWidth: 1,
+      });
+    });
+
+    it("aligns unstacked bars with a series split, without separators", () => {
+      const o = opt(
+        toOption(
+          {
+            version: 1,
+            type: "bar",
+            x: "week",
+            y: ["picks"],
+            series: "picker",
+          },
+          picks,
+          theme
+        )
+      );
+      expect(o.series[1].data).toEqual([0, 7, 0]);
+      expect(o.series[0].stack).toBeUndefined();
+      expect(o.series[0].itemStyle).toBeUndefined();
+    });
+
+    it("gives every stacked area series a point at every x on a time axis", () => {
+      const o = opt(
+        toOption(
+          {
+            version: 1,
+            type: "area",
+            x: "week",
+            y: ["picks"],
+            series: "picker",
+            stacked: true,
+          },
+          picks,
+          theme
+        )
+      );
+      expect(o.xAxis.type).toBe("time");
+      expect(o.series[1].data).toEqual([
+        ["2026-05-04T00:00:00.000Z", 0],
+        ["2026-05-11T00:00:00.000Z", 7],
+        ["2026-05-18T00:00:00.000Z", 0],
+      ]);
+    });
+
+    it("leaves gaps in unstacked lines", () => {
+      const o = opt(
+        toOption(
+          {
+            version: 1,
+            type: "line",
+            x: "week",
+            y: ["picks"],
+            series: "picker",
+          },
+          picks,
+          theme
+        )
+      );
+      expect(o.xAxis.type).toBe("time");
+      expect(o.series[1].data).toEqual([["2026-05-11T00:00:00.000Z", 7]]);
+    });
+  });
+
+  it("draws bars over a date x on a category axis with dates as labels, in order", () => {
+    const r = result(
+      [
+        ["day", "date"],
+        ["n", "number"],
+      ],
+      [
+        ["2026-06-01", 2],
+        ["2026-05-17", 1],
+      ]
+    );
+    const o = opt(
+      toOption({ version: 1, type: "bar", x: "day", y: ["n"] }, r, theme)
+    );
+    expect(o.xAxis.type).toBe("category");
+    expect(o.xAxis.data).toEqual(["May 17, 2026", "Jun 1, 2026"]);
+    expect(o.series[0].data).toEqual([1, 2]);
   });
 
   it("throws for a column the result lacks", () => {

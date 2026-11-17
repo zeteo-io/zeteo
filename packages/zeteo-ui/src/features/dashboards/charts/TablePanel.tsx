@@ -3,9 +3,26 @@ import { formatNumber } from "./toOption";
 import { Table } from "@kosmeo-ui/react";
 import "./styles.css";
 
-function cell(value: unknown, type: string, decimals?: number): string {
+const pad = (n: number) => String(n).padStart(2, "0");
+
+/** A timestamp as "YYYY-MM-DD HH:MM" in the viewer's zone; as given when it does not parse. */
+function localTimestamp(value: unknown): string {
+  const d =
+    typeof value === "string" || typeof value === "number"
+      ? new Date(value)
+      : null;
+  if (!d || Number.isNaN(d.getTime())) return String(value);
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+/** A cell's text by its column type; null is empty. */
+export function cell(value: unknown, type: string, decimals?: number): string {
   if (value === null || value === undefined) return "";
   if (type === "number") return formatNumber(value, decimals);
+  if (type === "timestamp") return localTimestamp(value);
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
 }

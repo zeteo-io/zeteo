@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChartSettings, RunResult } from "../api/types";
 import { act, render, screen } from "@testing-library/react";
+import { DARK_PALETTE, LIGHT_PALETTE } from "./theme";
 import { Chart } from "./Chart";
 
 const instance = vi.hoisted(() => ({
@@ -129,7 +130,9 @@ describe("Chart theme", () => {
     const last = instance.setOption.mock.calls.at(-1)![0];
     expect(instance.setOption.mock.calls.length).toBeGreaterThan(1);
     expect(last.textStyle.color).not.toBe(first.textStyle.color);
-    expect(last.color).toHaveLength(10);
+    expect(first.color).toEqual(LIGHT_PALETTE);
+    expect(last.color).toEqual(DARK_PALETTE);
+    expect(last.series[0].color).toBe(DARK_PALETTE[0]);
     document.documentElement.removeAttribute("data-theme");
   });
 });

@@ -2,8 +2,11 @@ import type { ChartSettings, RunResult } from "../api/types";
 import type { EChartsOption } from "echarts";
 import type { ChartTheme } from "./theme";
 
-/** A chart shows at most this many series or slices; the rest are folded into "Other". */
-export const MAX_SERIES = 20;
+/**
+ * A chart shows at most this many series or slices, one per palette colour.
+ * Past it the largest MAX_SERIES - 1 keep their own and the rest fold into "Other".
+ */
+export const MAX_SERIES = 8;
 const OTHER = "Other";
 
 /** A number with `decimals` places (fixed when set), grouped for reading. */
@@ -51,6 +54,16 @@ const xPosition = (v: unknown, axis: XAxisType): number | null => {
   return Number.isNaN(t) ? null : t;
 };
 
+/** The identity of an x value: equal instants or numbers are one x, whatever their spelling. */
+const xKeyOf = (v: unknown, axis: XAxisType): string => {
+  const at = axis === "category" ? null : xPosition(v, axis);
+  return at === null ? `s:${String(v ?? "(none)")}` : `n:${at}`;
+};
+
+/** Nulls last; otherwise ascending. */
+const byPosition = (a: number | null, b: number | null) =>
+  a === null ? (b === null ? 0 : 1) : b === null ? -1 : a - b;
+
 /**
  * The points in order of x on a time or value axis, where a line joins them
  * in the order given; a category axis keeps the rows' order. Stable.
@@ -59,22 +72,49 @@ const inOrder = (points: Point[], axis: XAxisType): Point[] => {
   if (axis === "category") return points;
   return points
     .map((p) => ({ p, at: xPosition(p[0], axis) }))
-    .sort((a, b) =>
-      a.at === null ? (b.at === null ? 0 : 1) : b.at === null ? -1 : a.at - b.at
-    )
+    .sort((a, b) => byPosition(a.at, b.at))
     .map(({ p }) => p);
 };
 
+const UTC_DAY = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+});
+const UTC_MINUTE = new Intl.DateTimeFormat("en-US", {
+  timeZone: "UTC",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+
+/** A date or timestamp as a category label: "May 17, 2026", with the time (UTC) when not midnight. */
+export function formatDateLabel(at: number): string {
+  return at % 86_400_000 === 0 ? UTC_DAY.format(at) : UTC_MINUTE.format(at);
+}
+
+interface BuiltSeries {
+  name: string;
+  /** Whether this is the folded "Other" series. */
+  other: boolean;
+  points: Point[];
+}
+
 /**
- * One series per (series value, y column); the 21st onward folded into one
- * "Other". Each series' points in order of x on a time or value axis.
+ * One series per (series value, y column), in order of first appearance.
+ * Past MAX_SERIES, the MAX_SERIES - 1 largest by total keep their own, largest
+ * first, and the rest are summed per x into one "Other", last.
  */
 function buildSeries(
   chart: Extract<ChartSettings, { x: string }>,
-  result: RunResult
-): { name: string; points: Point[] }[] {
+  result: RunResult,
+  axis: XAxisType
+): BuiltSeries[] {
   const xi = indexOfColumn(result, chart.x);
-  const axis = xAxisTypeOf(result.columns[xi].type);
   const yis = chart.y.map((y) => indexOfColumn(result, y));
   const si = chart.series ? indexOfColumn(result, chart.series) : -1;
 
@@ -93,33 +133,80 @@ function buildSeries(
 
   const name = (key: string, y: string) =>
     si < 0 ? y : chart.y.length > 1 ? `${key} · ${y}` : key;
-  const out: { name: string; points: Point[] }[] = [];
-  keys.slice(0, MAX_SERIES).forEach((key) => {
+  const all: BuiltSeries[] = [];
+  for (const key of keys)
     chart.y.forEach((y, j) => {
-      out.push({
+      all.push({
         name: name(key, y),
-        points: inOrder(
-          groups.get(key)!.map((r) => [r[xi], toNumber(r[yis[j]])]),
-          axis
-        ),
+        other: false,
+        points: groups.get(key)!.map((r) => [r[xi], toNumber(r[yis[j]])]),
       });
     });
-  });
 
-  const folded = keys.slice(MAX_SERIES);
-  if (folded.length > 0) {
-    chart.y.forEach((y, j) => {
-      const sums = new Map<unknown, number>();
-      for (const key of folded)
-        for (const r of groups.get(key)!)
-          sums.set(r[xi], (sums.get(r[xi]) ?? 0) + (toNumber(r[yis[j]]) ?? 0));
-      out.push({
-        name: chart.y.length > 1 ? `${OTHER} · ${y}` : OTHER,
-        points: inOrder([...sums.entries()] as Point[], axis),
-      });
-    });
+  let out = all;
+  if (all.length > MAX_SERIES) {
+    const total = (s: BuiltSeries) =>
+      s.points.reduce((sum, [, y]) => sum + (y ?? 0), 0);
+    const ranked = all
+      .map((s) => ({ s, total: total(s) }))
+      .sort((a, b) => b.total - a.total)
+      .map(({ s }) => s);
+    const sums = new Map<string, Point>();
+    for (const s of ranked.slice(MAX_SERIES - 1))
+      for (const [x, y] of s.points) {
+        const k = xKeyOf(x, axis);
+        const at = sums.get(k);
+        if (at) at[1] = (at[1] ?? 0) + (y ?? 0);
+        else sums.set(k, [x, y ?? 0]);
+      }
+    out = [
+      ...ranked.slice(0, MAX_SERIES - 1),
+      { name: OTHER, other: true, points: [...sums.values()] },
+    ];
   }
-  return out;
+  return out.map((s) => ({ ...s, points: inOrder(s.points, axis) }));
+}
+
+/**
+ * Every series given a value at every x of the union of their x values, so
+ * stacks and grouped bars line up by x (ECharts stacks by index). Missing is
+ * 0. The union is in order of x on a time or value axis, else of first
+ * appearance.
+ */
+function alignSeries(
+  series: BuiltSeries[],
+  axis: XAxisType
+): {
+  xs: { key: string; raw: unknown; at: number | null }[];
+  values: number[][];
+} {
+  const union = new Map<
+    string,
+    { key: string; raw: unknown; at: number | null; seen: number }
+  >();
+  for (const s of series)
+    for (const [x] of s.points) {
+      const key = xKeyOf(x, axis);
+      if (!union.has(key))
+        union.set(key, {
+          key,
+          raw: x,
+          at: axis === "category" ? null : xPosition(x, axis),
+          seen: union.size,
+        });
+    }
+  const xs = [...union.values()].sort((a, b) =>
+    axis === "category"
+      ? a.seen - b.seen
+      : byPosition(a.at, b.at) || a.seen - b.seen
+  );
+  const index = new Map(xs.map((x, i) => [x.key, i]));
+  const values = series.map((s) => {
+    const row = xs.map(() => 0);
+    for (const [x, y] of s.points) row[index.get(xKeyOf(x, axis))!] += y ?? 0;
+    return row;
+  });
+  return { xs, values };
 }
 
 /** The ECharts option for a line, area, bar or pie chart over a result. Pure. */
@@ -149,17 +236,31 @@ export function toOption(
   if (chart.type === "pie") {
     const li = indexOfColumn(result, chart.label);
     const vi = indexOfColumn(result, chart.value);
-    const slices = result.rows.map((r) => ({
-      name: String(r[li] ?? "(none)"),
-      value: toNumber(r[vi]) ?? 0,
-    }));
+    let slices: { name: string; value: number; other?: true }[] =
+      result.rows.map((r) => ({
+        name: String(r[li] ?? "(none)"),
+        value: toNumber(r[vi]) ?? 0,
+      }));
     if (slices.length > MAX_SERIES) {
-      const rest = slices.splice(MAX_SERIES);
-      slices.push({
-        name: OTHER,
-        value: rest.reduce((sum, s) => sum + s.value, 0),
-      });
+      const ranked = [...slices].sort((a, b) => b.value - a.value);
+      const rest = ranked.slice(MAX_SERIES - 1);
+      slices = [
+        ...ranked.slice(0, MAX_SERIES - 1),
+        {
+          name: OTHER,
+          value: rest.reduce((sum, s) => sum + s.value, 0),
+          other: true,
+        },
+      ];
     }
+    let slot = 0;
+    const data = slices.map(({ name, value, other }) => ({
+      name,
+      value,
+      itemStyle: {
+        color: other ? theme.textSecondary : theme.palette[slot++],
+      },
+    }));
     return {
       ...base,
       legend: {
@@ -173,7 +274,7 @@ export function toOption(
           type: "pie",
           radius: chart.donut ? ["45%", "70%"] : "70%",
           center: ["50%", "45%"],
-          data: slices,
+          data,
           label: { color: theme.text },
         },
       ],
@@ -181,26 +282,50 @@ export function toOption(
   }
 
   const xi = indexOfColumn(result, chart.x);
-  const catAxisType = xAxisTypeOf(result.columns[xi].type);
-  const horizontal = chart.type === "bar" && chart.horizontal === true;
+  const axis = xAxisTypeOf(result.columns[xi].type);
+  const bar = chart.type === "bar";
+  const horizontal = bar && chart.horizontal === true;
   const stack =
-    (chart.type === "area" || chart.type === "bar") && chart.stacked
-      ? "total"
-      : undefined;
+    (chart.type === "area" || bar) && chart.stacked ? "total" : undefined;
 
-  const series = buildSeries(chart, result).map((s) => ({
+  const built = buildSeries(chart, result, axis);
+  let slot = 0;
+  const colourOf = (s: BuiltSeries) =>
+    s.other ? theme.textSecondary : theme.palette[slot++];
+  const styled = built.map((s) => ({ s, color: colourOf(s) }));
+
+  // Bars always sit on a category axis, aligned by x; so do stacked areas
+  // (on their own axis), so every stack is summed at the right x.
+  const aligned = bar || stack !== undefined;
+  const { xs, values } = aligned
+    ? alignSeries(built, axis)
+    : { xs: [], values: [] };
+
+  const series = styled.map(({ s, color }, i) => ({
     name: s.name,
-    type: chart.type === "bar" ? ("bar" as const) : ("line" as const),
+    type: bar ? ("bar" as const) : ("line" as const),
+    color,
     ...(chart.type === "area" ? { areaStyle: {} } : {}),
     ...(stack ? { stack } : {}),
-    ...(chart.type === "bar" ? {} : { showSymbol: false }),
-    data: horizontal
-      ? s.points.map(([x, y]) => [y, x])
-      : s.points.map(([x, y]) => [x, y]),
+    ...(bar
+      ? stack
+        ? { itemStyle: { borderColor: theme.background, borderWidth: 1 } }
+        : {}
+      : { showSymbol: false }),
+    data: bar
+      ? values[i]
+      : aligned
+        ? xs.map((x, j) => [x.raw, values[i][j]])
+        : s.points.map(([x, y]) => [x, y]),
   }));
 
+  const label = (x: { raw: unknown; at: number | null }) =>
+    axis === "time" && x.at !== null
+      ? formatDateLabel(x.at)
+      : String(x.raw ?? "(none)");
   const categoryAxis = {
-    type: catAxisType,
+    type: bar ? "category" : axis,
+    ...(bar && { data: xs.map(label) }),
     axisLabel: textStyle,
     axisLine: { lineStyle: { color: theme.border } },
     // ECharts draws a y category axis from the bottom; rows read top-down.

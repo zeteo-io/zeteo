@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 /** The colours a chart is drawn with. */
 export interface ChartTheme {
-  /** Ten categorical colours, in the order series take them. */
+  /** Eight categorical colours, in the order series take them; never repeated. */
   palette: string[];
   text: string;
   textSecondary: string;
@@ -10,21 +10,32 @@ export interface ChartTheme {
   background: string;
 }
 
-// Series colours, in order. Colours 1-6 come from kosmeo's variables, read at
-// theme time so dark mode gets kosmeo's dark values: primary, success,
-// warning, danger, link, secondary. Colours 7-10 (kosmeo defines no more
-// accents) are fixed hues, one set per theme. The fallbacks are for where the
-// variable is missing (a test).
-const KOSMEO_COLOURS: [string, string, string][] = [
-  ["--k-primary-color-background", "#3d52db", "#4a5fb5"],
-  ["--k-success-color", "#198754", "#1f7a4e"],
-  ["--k-warning-color", "#ffc107", "#d99e00"],
-  ["--k-danger-color", "#dc3545", "#c94250"],
-  ["--k-text-color-link", "#0062cc", "#6e9fff"],
-  ["--k-secondary-color", "#6b6b6b", "#646a75"],
+// Series colours, in order: a validated categorical palette, colour-blind safe
+// on adjacent pairs, checked against Zeteo's surfaces (light #fafafa, dark
+// #15181f). Light slots 3-5 are below 3:1 contrast, which charts accept as
+// they have a legend and tooltips. A chart never repeats a colour: past eight
+// series it keeps the seven largest and folds the rest into a grey "Other"
+// (see toOption.ts), so the palette is never cycled.
+export const LIGHT_PALETTE = [
+  "#2a78d6",
+  "#eb6834",
+  "#1baf7a",
+  "#eda100",
+  "#e87ba4",
+  "#008300",
+  "#6250d6",
+  "#e34948",
 ];
-const LIGHT_EXTRA = ["#9c36b5", "#0c8599", "#e03177", "#74a30a"];
-const DARK_EXTRA = ["#c77ddb", "#3bc0d4", "#f06595", "#a9d34a"];
+export const DARK_PALETTE = [
+  "#3987e5",
+  "#d95926",
+  "#199e70",
+  "#c98500",
+  "#d55181",
+  "#0ca30c",
+  "#9085e9",
+  "#e66767",
+];
 
 /** Whether the page is dark: an explicit data-theme wins, else the system preference. */
 function isDark(): boolean {
@@ -33,19 +44,14 @@ function isDark(): boolean {
   return window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
 }
 
-/** Reads kosmeo's CSS variables for the current theme. */
+/** The palette for the current theme, and kosmeo's CSS variables for text, borders and the background. */
 export function chartTheme(): ChartTheme {
   const style = getComputedStyle(document.documentElement);
   const dark = isDark();
   const read = (name: string, fallback: string) =>
     style.getPropertyValue(name).trim() || fallback;
   return {
-    palette: [
-      ...KOSMEO_COLOURS.map(([name, light, dk]) =>
-        read(name, dark ? dk : light)
-      ),
-      ...(dark ? DARK_EXTRA : LIGHT_EXTRA),
-    ],
+    palette: dark ? DARK_PALETTE : LIGHT_PALETTE,
     text: read("--k-text-color", dark ? "#e8e8e8" : "#1a1a1a"),
     textSecondary: read(
       "--k-text-color-secondary",
