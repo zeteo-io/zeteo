@@ -156,6 +156,10 @@ const EnvFields = z
     // Postgres connections per process.
     // Days a query or export run is kept in `query_runs`; 0 keeps them all.
     QUERY_RUNS_RETENTION_DAYS: int(0, 3650, 90),
+    DASHBOARD_CACHE_TTL_SECONDS: int(5, 3600, 60),
+    DASHBOARD_RECORD_WINDOW_MINUTES: int(1, 1440, 60),
+    DASHBOARD_MIN_REFRESH_SECONDS: int(10, 86400, 60),
+    DASHBOARD_PARALLELISM: int(1, 20, 4),
     DB_POOL_MAX: int(1, 1000, 10),
     DB_POOL_MIN: int(0, 1000, 0),
     // How long a query waits for a free connection before it fails.

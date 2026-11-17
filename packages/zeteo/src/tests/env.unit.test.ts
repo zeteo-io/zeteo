@@ -33,6 +33,25 @@ describe("env schema", () => {
   });
 
   it.each([
+    ["DASHBOARD_CACHE_TTL_SECONDS", 60, 5, 3600],
+    ["DASHBOARD_RECORD_WINDOW_MINUTES", 60, 1, 1440],
+    ["DASHBOARD_MIN_REFRESH_SECONDS", 60, 10, 86400],
+    ["DASHBOARD_PARALLELISM", 4, 1, 20],
+  ] as const)(
+    "defaults %s to %s and takes %s to %s only",
+    (name, fallback, min, max) => {
+      expect(parseEnv(base)[name]).toBe(fallback);
+      expect(parseEnv({ ...base, [name]: String(min) })[name]).toBe(min);
+      expect(() => parseEnv({ ...base, [name]: String(min - 1) })).toThrow(
+        name
+      );
+      expect(() => parseEnv({ ...base, [name]: String(max + 1) })).toThrow(
+        name
+      );
+    }
+  );
+
+  it.each([
     ["USER_QUERY_CONCURRENCY", 5, 100],
     ["USER_EXPORT_CONCURRENCY", 1, 10],
   ] as const)(

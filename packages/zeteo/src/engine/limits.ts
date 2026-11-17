@@ -11,7 +11,7 @@ export const LIMIT_PROFILES = {
 } as const;
 
 /** Where a run came from: a query over the API or MCP, or an export. */
-export type EntryPoint = "api" | "mcp" | "export";
+export type EntryPoint = "api" | "mcp" | "export" | "dashboard";
 
 /** The entry points that run a query and return its rows at once. */
 export type QueryEntryPoint = keyof typeof LIMIT_PROFILES;

@@ -9,16 +9,26 @@ export const listPage = async (options: {
   userId?: string;
   sourceId?: string;
   savedQueryId?: string;
+  dashboardId?: string;
   outcome?: RunOutcome;
   cursor?: string;
   limit: number;
 }): Promise<{ rows: QueryRun[]; hasMore: boolean }> => {
-  const { userId, sourceId, savedQueryId, outcome, cursor, limit } = options;
+  const {
+    userId,
+    sourceId,
+    savedQueryId,
+    dashboardId,
+    outcome,
+    cursor,
+    limit,
+  } = options;
   const rows = await prisma.queryRun.findMany({
     where: {
       ...(userId && { userId }),
       ...(sourceId && { sourceId }),
       ...(savedQueryId && { savedQueryId }),
+      ...(dashboardId && { dashboardId }),
       ...(outcome && { outcome }),
       ...(cursor && { id: { lt: cursor } }),
     },

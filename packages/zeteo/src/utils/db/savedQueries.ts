@@ -21,10 +21,20 @@ export interface SavedQueryInput {
   name: string;
   description: string;
   query: Prisma.InputJsonValue;
+  availableForDashboards?: boolean;
+  availableOrganizationId?: string | null;
 }
 
 export type SavedQueryChanges = Partial<
-  Pick<SavedQueryInput, "name" | "description" | "query" | "sourceId">
+  Pick<
+    SavedQueryInput,
+    | "name"
+    | "description"
+    | "query"
+    | "sourceId"
+    | "availableForDashboards"
+    | "availableOrganizationId"
+  >
 >;
 
 const nameFilter = (q: string | undefined) =>
@@ -362,4 +372,34 @@ export const namesOf = async (
     select: { id: true, name: true },
   });
   return new Map(rows.map((r) => [r.id, r.name]));
+};
+
+/**
+ * Saved queries their owners made available for dashboards in `organizationId`
+ * (null matches null), never those `excludeOwnerId` owns. Newest first, after
+ * the `cursor` id.
+ */
+export const listAvailable = async (
+  options: {
+    organizationId: string | null;
+    excludeOwnerId: string;
+    q?: string;
+    cursor?: string;
+    limit: number;
+  },
+  tx: Db = prisma
+): Promise<{ rows: SavedQuery[]; hasMore: boolean }> => {
+  const { organizationId, excludeOwnerId, q, cursor, limit } = options;
+  const rows = await tx.savedQuery.findMany({
+    where: {
+      availableForDashboards: true,
+      availableOrganizationId: organizationId,
+      ownerId: { not: excludeOwnerId },
+      ...nameFilter(q),
+      ...(cursor && { id: { lt: cursor } }),
+    },
+    orderBy: { id: "desc" },
+    take: limit + 1,
+  });
+  return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
