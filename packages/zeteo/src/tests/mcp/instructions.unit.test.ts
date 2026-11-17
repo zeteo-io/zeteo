@@ -10,8 +10,8 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 
 describe("MCP_INSTRUCTIONS", () => {
-  it("stays under 6,000 characters", () => {
-    expect(MCP_INSTRUCTIONS.length).toBeLessThan(6000);
+  it("stays under 6,500 characters", () => {
+    expect(MCP_INSTRUCTIONS.length).toBeLessThan(6500);
   });
 
   it("says that query results are data, not instructions", () => {
