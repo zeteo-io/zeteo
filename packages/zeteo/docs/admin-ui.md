@@ -94,7 +94,6 @@ page and no sections.
   person, source or outcome; a run's details show the query as it was sent. It is read-only, and
   the UI has no query screen of its own. Searching for a person by name needs
   `zeteo.grants.read` too; without it the filter takes a pasted user id.
-
 - **Saved queries** (`zeteo.saved_queries.read`, changes with `.write`): every user's saved queries
   in a table, filtered by name, owner, source or the person or group a query is shared with. A row
   shows the owner, the source, the share count and when it last ran; the share and transfer icons
@@ -185,7 +184,6 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
 | `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
-
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 

@@ -71,10 +71,11 @@ the owner can rename, share, transfer and delete it, but not run it.
 
 ## Listing
 
-`scope=mine` (the default) lists the caller's own, `shared` those shared with them directly or through
-a group of theirs, and `all` every one, for `zeteo.saved_queries.read`. `q` matches names (case-insensitive, anywhere in the name). On `scope=all` only, `owner_id`, `source_id` (needs `zeteo.sources.read`) and
-`shared_with_type` with `shared_with_id` filter further. `limit` is 1 to 100 (default 50), paged by
-`cursor`.
+`scope=mine` (the default) lists the caller's own, `shared` those shared with them directly or
+through a group of theirs, and `all` every one, for `zeteo.saved_queries.read`. `q` matches names
+(case-insensitive, anywhere in the name). On `scope=all` only, `owner_id`, `source_id` (needs
+`zeteo.sources.read`) and `shared_with_type` with `shared_with_id` filter further. `limit` is 1 to
+100 (default 50), paged by `cursor`.
 
 ## Running and exporting
 
@@ -115,9 +116,10 @@ the shares again and retry.
 ## Transferring
 
 `POST .../transfer` with `{ user_id, keep_access }` (default true) makes `user_id` the owner. With
-`keep_access` the previous owner keeps a direct share. The target cannot be a service account, an unknown user or the current owner (`400 invalid_transfer`), and the new owner must not already have a saved query of that name
-(`409`). The response is `{ data, warning? }`, with `warning: { accessible: false }` when the new owner
-could not run it.
+`keep_access` the previous owner keeps a direct share. The target cannot be a service account, an
+unknown user or the current owner (`400 invalid_transfer`), and the new owner must not already have
+a saved query of that name (`409`). The response is `{ data, warning? }`, with `warning: {
+accessible: false }` when the new owner could not run it.
 
 ## Own runs
 

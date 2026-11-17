@@ -15,15 +15,16 @@ sources admin API (`/v1/sources`: register, list, change, archive and test a Pos
 source, with encrypted settings, a network allowlist, a login check and per-source connection
 pools), the catalogue of each source (a refresh reads tables, columns and foreign keys;
 descriptions; discovered and declared relations), grants of tables and columns to users and groups
-(`/v1/grants`), per-user and per-group concurrency limits (`/v1/principal-limits`), querying
-(`GET /v1/catalog`, `POST /v1/query`, `GET /v1/runs`) and the streaming export (`POST /v1/export`,
-NDJSON or CSV), saved queries (`/v1/saved-queries`: a user keeps a query under a name and creates,
-changes, deletes, runs, exports, copies, shares it with users and groups, or transfers it; a
-recipient runs it with their own grants only, and one who lacks them is told to ask an admin and
-never sees its query or source; `GET /v1/me/runs` lists a caller's own runs), and an MCP endpoint
-(`/mcp`, on when `MCP_ALLOWED_CLIENTS` is set) with three discovery tools (`list_sources`,
-`list_tables`, `describe_table`), the `query` tool, which runs `POST /v1/query`'s engine under MCP's
-limits, tools for saved queries, and server instructions that teach a model the language. There is no row filter yet. Do not describe or rely on one as existing.
+(`/v1/grants`), per-user and per-group concurrency limits (`/v1/principal-limits`), querying (`GET
+/v1/catalog`, `POST /v1/query`, `GET /v1/runs`) and the streaming export (`POST /v1/export`, NDJSON
+or CSV), saved queries (`/v1/saved-queries`: a user keeps a query under a name and creates, changes,
+deletes, runs, exports, copies, shares it with users and groups, or transfers it; a recipient runs
+it with their own grants only, and one who lacks them is told to ask an admin and never sees its
+query or source; `GET /v1/me/runs` lists a caller's own runs), and an MCP endpoint (`/mcp`, on when
+`MCP_ALLOWED_CLIENTS` is set) with three discovery tools (`list_sources`, `list_tables`,
+`describe_table`), the `query` tool, which runs `POST /v1/query`'s engine under MCP's limits, tools
+for saved queries, and server instructions that teach a model the language. There is no row filter
+yet. Do not describe or rely on one as existing.
 
 Read [README.md](README.md) first. The design and the plans are in `docs/superpowers/` (kept out of
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the
@@ -36,11 +37,12 @@ Nothing in `zeteo` depends on it.
 The admin UI is `packages/zeteo-ui` (Vite + React on `@kosmeo-ui/react`, dev server on port 4200,
 forwarding `/v1` and `/ui-config.json` to zeteo). It belongs to the release group `core`, so its
 version is zeteo's. Its `check` also runs `scripts/check-routes.mjs`, which keeps routes and
-`public/` files clear of the paths zeteo reserves. Its screens are the admin sections (sources, grants, limits, runs, and Saved queries for
-`zeteo.saved_queries.read`) and My Zeteo at `/my` for everyone who may query: their saved queries,
-those shared with them, their recent runs and what they can query. Its build ships in zeteo's image (the Dockerfile's
-`ui` stage) and zeteo serves it at `/` when `UI_CLIENT_ID` is set. Server side, screens and local
-development: `packages/zeteo/docs/admin-ui.md`. Its browser test is `e2e/browser/` (Playwright).
+`public/` files clear of the paths zeteo reserves. Its screens are the admin sections (sources,
+grants, limits, runs, and Saved queries for `zeteo.saved_queries.read`) and My Zeteo at `/my` for
+everyone who may query: their saved queries, those shared with them, their recent runs and what they
+can query. Its build ships in zeteo's image (the Dockerfile's `ui` stage) and zeteo serves it at `/`
+when `UI_CLIENT_ID` is set. Server side, screens and local development:
+`packages/zeteo/docs/admin-ui.md`. Its browser test is `e2e/browser/` (Playwright).
 
 ## Layout of `packages/zeteo`
 
@@ -50,11 +52,9 @@ One ordinary package:
 |------|-------|
 | `src/index.ts` / `app.ts` | Entry point (`createAppServer`, start and graceful stop, whose first steps are `drainRequests`: running exports stopped, then HTTP drained) and the Express app (`createApp`, which mounts the MCP router, behind Host and Origin checks, when MCP is on) |
 | `src/env.ts` | The one env schema. `src/preload.ts` must be the first import of every entry point |
-| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.data.export`, `zeteo.runs.read`, `zeteo.mcp.use`,
-`zeteo.saved_queries.read|write`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin`, `zeteo_user` and `zeteo_mcp_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
+| `src/definitions/tereoDeclaration.ts` | What zeteo declares to tereo: slug, permissions (`zeteo.sources.read|write`, `zeteo.grants.read|write`, `zeteo.data.read`, `zeteo.data.export`, `zeteo.runs.read`, `zeteo.mcp.use`, `zeteo.saved_queries.read|write`; none organization-assignable, as nothing here is organization-scoped), the `zeteo_admin`, `zeteo_user` and `zeteo_mcp_user` roles, audit event names and descriptions. `npm run tereo:provisioning` (in `packages/zeteo`) writes `tereo-provisioning.json` from it; commit both together |
 | `src/middleware/auth.ts` | `authenticate` (tereo verifies the token, sets `req.caller`), `callerFromAuth`, `callerOf`, `requirePermission` (hierarchical, `utils/permissions.ts`) |
-| `src/mcp/` | The MCP server on `@tereo-io/mcp`: `index.ts` (`createMcpRouter`, null when `MCP_ALLOWED_CLIENTS` is empty), `paths.ts` (`MCP_PATH` and the discovery paths, imported by `app.ts` without the tools), `tools.ts` (the discovery tools) `queryTool.ts` (`query`: `runQuery` with entry point `mcp`) and `savedQueryTools.ts` (list, get, run,
-create, update and delete saved queries; update and delete are the caller's own only), each gated on `zeteo.mcp.use` and requiring `zeteo.data.read`, built from the caller's visible catalogue only; `instructions.ts` (`MCP_INSTRUCTIONS`, sent at initialize; its worked examples are run by the tests), `caller.ts`, `errors.ts` (`asToolError`: zeteo's error body as a tool error, 5xx logged at error; `inToolCall`: a call's work run as zeteo's request `ctx.requestId`), `redis.ts` (the rate limiter's Redis, every call bounded) |
+| `src/mcp/` | The MCP server on `@tereo-io/mcp`: `index.ts` (`createMcpRouter`, null when `MCP_ALLOWED_CLIENTS` is empty), `paths.ts` (`MCP_PATH` and the discovery paths, imported by `app.ts` without the tools), `tools.ts` (the discovery tools), `queryTool.ts` (`query`: `runQuery` with entry point `mcp`) and `savedQueryTools.ts` (list, get, run, create, update and delete saved queries; update and delete are the caller's own only), each gated on `zeteo.mcp.use` and requiring `zeteo.data.read`, built from the caller's visible catalogue only; `instructions.ts` (`MCP_INSTRUCTIONS`, sent at initialize; its worked examples are run by the tests), `caller.ts`, `errors.ts` (`asToolError`: zeteo's error body as a tool error, 5xx logged at error; `inToolCall`: a call's work run as zeteo's request `ctx.requestId`), `redis.ts` (the rate limiter's Redis, every call bounded) |
 | `src/sources/network.ts` | The one decision whether zeteo may connect to a host: `SOURCE_ALLOWED_HOSTS` rules (`parseAllowedHosts`, parsed at start by `env.ts`) and `resolveAllowed`, which resolves once and returns the address to dial. Link-local, metadata (including Azure's, Alibaba's and Oracle's outside link-local), unspecified and multicast addresses are refused whatever the rules say |
 | `src/adapters/` | `SourceAdapter` (settings schema, redaction, connect, login check, schema read, query language, `prepare`, and `openQuery`, a pull-based row stream) per source type, `postgres/` and `azure-sql/`; `adapterFor`; `rowSize.ts` (`approxRowBytes`, a cheap row width that sizes export batches and the Azure SQL read-ahead). `sql/` is the SQL query language shared by both: `language.ts` (the JSON Schema and parsing), `plan.ts` (the planner over a visible catalogue), `compile.ts` and `dialect.ts` with `dialects/` (the Postgres and SQL Server SQL), `values.ts` (wire forms) |
 | `src/sources/` | `service.ts` (create, update, archive, test: the checks, sealing and audit), `pools.ts` (`withSourceConnection`: one pool per source per process, checked against the source's row on every call, retired on a settings change, archive, `source_unreachable` or idle; `stopSourcePools` at shutdown), `connect.ts` (reads settings, `connectChecked`), `network.ts` |
