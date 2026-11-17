@@ -1,7 +1,7 @@
 import { Alert, Button, Centered, Spinner } from "@kosmeo-ui/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRunDashboard } from "../api/useRunDashboard";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { useEffect, useMemo, useState } from "react";
 import { useDashboard } from "../api/useDashboard";
 import type { DashboardTheme } from "../api/types";
 import { useUuidParam } from "@/lib/useUuidParam";
@@ -77,6 +77,19 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
   const refreshSeconds = dashboard?.refresh_seconds ?? null;
   useDisplayTheme(dashboard?.theme);
 
+  // Once a 401 is seen the screen stays signed out until the person signs in.
+  const [signedOut, setSignedOut] = useState(false);
+  const unauthorized = error?.status === 401 || runner.error?.status === 401;
+  useEffect(() => {
+    if (unauthorized) setSignedOut(true);
+  }, [unauthorized]);
+
+  // A tick never cuts a run still going: a slow run finishes first.
+  const running = useRef(false);
+  useEffect(() => {
+    running.current = runner.running;
+  }, [runner.running]);
+
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
@@ -88,12 +101,14 @@ const Display = ({ dashboardId }: { dashboardId: string }) => {
   }, [loaded, run]);
 
   useEffect(() => {
-    if (!loaded || refreshSeconds === null) return;
-    const timer = setInterval(() => void run(), refreshSeconds * 1000);
+    if (!loaded || refreshSeconds === null || signedOut) return;
+    const timer = setInterval(() => {
+      if (!running.current) void run();
+    }, refreshSeconds * 1000);
     return () => clearInterval(timer);
-  }, [loaded, refreshSeconds, run]);
+  }, [loaded, refreshSeconds, signedOut, run]);
 
-  if (error?.status === 401 || runner.error?.status === 401) {
+  if (signedOut || unauthorized) {
     return <DisplaySignedOut />;
   }
   if (isLoading) {

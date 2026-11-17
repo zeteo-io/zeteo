@@ -1,4 +1,3 @@
-import { DASHBOARD_ID, makeDashboard, okLine, streamOf } from "../testFixtures";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
@@ -6,6 +5,13 @@ import { Route, Routes } from "react-router-dom";
 import type { Dashboard } from "../api/types";
 import { DisplayPage } from "./DisplayPage";
 import { AxiosError } from "axios";
+import {
+  controlledStream,
+  DASHBOARD_ID,
+  makeDashboard,
+  okLine,
+  streamOf,
+} from "../testFixtures";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -109,6 +115,36 @@ describe("DisplayPage", () => {
       screen.getByText("Signed out — sign in again on this screen")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("stays signed out after a 401 and sends no further runs", async () => {
+    renderDisplay();
+    await screen.findByTestId("chart");
+    post.mockRejectedValue(unauthorized());
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(post).toHaveBeenCalledTimes(2);
+    await act(async () => vi.advanceTimersByTimeAsync(180_000));
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(
+      screen.getByText("Signed out — sign in again on this screen")
+    ).toBeInTheDocument();
+  });
+
+  it("skips a tick while a run is still going, without aborting it", async () => {
+    const slow = controlledStream();
+    post.mockReset().mockResolvedValue({ data: slow.stream });
+    renderDisplay();
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    await act(async () => vi.advanceTimersByTimeAsync(180_000));
+    expect(post).toHaveBeenCalledTimes(1);
+    const signal = post.mock.calls[0][2].signal as AbortSignal;
+    expect(signal.aborted).toBe(false);
+    await act(async () => {
+      slow.push(`${JSON.stringify(okLine(current.panels[0].id))}\n`);
+      slow.push(`${JSON.stringify({ done: true })}\n`);
+      slow.close();
+    });
+    expect(await screen.findByTestId("chart")).toBeInTheDocument();
   });
 
   it("shows the signed-out screen when the dashboard itself answers 401", async () => {
