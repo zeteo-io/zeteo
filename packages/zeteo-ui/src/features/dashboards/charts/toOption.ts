@@ -22,6 +22,19 @@ export function formatNumber(value: unknown, decimals?: number): string {
   );
 }
 
+/**
+ * A value axis label: from 10,000 up, compact (5M, 250K), so a long number
+ * neither crowds the axis nor runs past the chart's edge; the tooltip keeps
+ * the exact value.
+ */
+export function formatAxisNumber(value: number, decimals?: number): string {
+  if (Math.abs(value) < 10_000) return formatNumber(value, decimals);
+  return new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 function indexOfColumn(result: RunResult, name: string): number {
   const i = result.columns.findIndex((c) => c.name === name);
   if (i < 0) throw new Error(`The result has no column "${name}".`);
@@ -333,7 +346,10 @@ export function toOption(
   } as const;
   const valueAxis = {
     type: "value",
-    axisLabel: { ...textStyle, formatter: (v: number) => fmt(v) },
+    axisLabel: {
+      ...textStyle,
+      formatter: (v: number) => formatAxisNumber(v, chart.decimals),
+    },
     splitLine: { lineStyle: { color: theme.border } },
   } as const;
 

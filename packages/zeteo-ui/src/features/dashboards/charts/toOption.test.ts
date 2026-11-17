@@ -1,6 +1,6 @@
 import type { ChartSettings, RunResult } from "../api/types";
 import { DARK_PALETTE, LIGHT_PALETTE } from "./theme";
-import { MAX_SERIES, toOption } from "./toOption";
+import { formatAxisNumber, MAX_SERIES, toOption } from "./toOption";
 import { describe, expect, it } from "vitest";
 import type { ChartTheme } from "./theme";
 
@@ -635,5 +635,24 @@ describe("toOption", () => {
         theme
       )
     ).toThrow(/nope/);
+  });
+});
+
+describe("formatAxisNumber", () => {
+  const compact = (n: number) =>
+    new Intl.NumberFormat(undefined, {
+      notation: "compact",
+      maximumFractionDigits: 1,
+    }).format(n);
+
+  it("shortens values from 10,000 up, so the last label fits the chart", () => {
+    expect(formatAxisNumber(5_000_000)).toBe(compact(5_000_000));
+    expect(formatAxisNumber(250_000, 2)).toBe(compact(250_000));
+    expect(formatAxisNumber(-12_500)).toBe(compact(-12_500));
+  });
+
+  it("keeps smaller values as they are, with their decimals", () => {
+    expect(formatAxisNumber(9_999)).toBe((9_999).toLocaleString());
+    expect(formatAxisNumber(2, 1)).toBe("2.0");
   });
 });
