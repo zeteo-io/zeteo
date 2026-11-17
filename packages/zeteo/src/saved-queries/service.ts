@@ -804,3 +804,44 @@ export const transferSavedQuery = async (
     ...(!accessible && { warning: { accessible: false as const } }),
   };
 };
+
+export type SavedQueryUse = {
+  type: "dashboard" | "saved_panel";
+  id: string;
+  name: string;
+  owner: { id: string; name: string | null };
+};
+
+/**
+ * The dashboards and saved panels built on the saved query, for an admin who
+ * may read dashboards (the route checks the permission). Not to be called
+ * inside a transaction: it asks tereo for the owners' names.
+ */
+export const listUses = async (id: string): Promise<SavedQueryUse[]> => {
+  if (!(await db.savedQueries.findById(id))) throw notFound();
+  const [dashboards, panels] = await Promise.all([
+    db.dashboards.listUsingSavedQuery(id),
+    db.savedPanels.listUsingSavedQuery(id),
+  ]);
+  const names = await ownerNames([
+    ...new Set([...dashboards, ...panels].map((r) => r.ownerId)),
+  ]);
+  const owner = (ownerId: string) => ({
+    id: ownerId,
+    name: names.get(ownerId) ?? null,
+  });
+  return [
+    ...dashboards.map((d) => ({
+      type: "dashboard" as const,
+      id: d.id,
+      name: d.name,
+      owner: owner(d.ownerId),
+    })),
+    ...panels.map((p) => ({
+      type: "saved_panel" as const,
+      id: p.id,
+      name: p.name,
+      owner: owner(p.ownerId),
+    })),
+  ];
+};

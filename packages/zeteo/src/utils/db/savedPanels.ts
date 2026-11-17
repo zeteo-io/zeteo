@@ -106,6 +106,13 @@ export const countUsingSavedQuery = async (
   tx: Db = prisma
 ): Promise<number> => tx.savedPanel.count({ where: { savedQueryId } });
 
+/** The saved panels built on the saved query (for an admin). */
+export const listUsingSavedQuery = async (
+  savedQueryId: string,
+  tx: Db = prisma
+): Promise<SavedPanel[]> =>
+  tx.savedPanel.findMany({ where: { savedQueryId }, orderBy: { id: "desc" } });
+
 const key = (p: Principal) => `${p.type}:${p.id}`;
 
 /** Makes the shares exactly `principals`; resolves who was added and who removed. Shares already there keep their `createdBy` and `createdAt`. */
