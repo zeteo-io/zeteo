@@ -86,12 +86,16 @@ describe("export", () => {
     });
 
     it("throws ExportInterruptedError when the connection is cut, and done rejects with it", async () => {
+      let cut!: () => void;
+      const cutWhen = new Promise<void>((go) => (cut = go));
       t.stub.respond(() => ({
         headers: runHeader,
         chunks: [head, "[1]\n"],
         cutAfterChunks: true,
+        cutWhen,
       }));
       const result = await exportCalls(t.ctx()).rows(query);
+      cut();
       const seen: unknown[] = [];
       const error = await caught(
         (async () => {
@@ -365,12 +369,17 @@ describe("export", () => {
     it("throws when a gzipped stream is cut", async () => {
       const body = gzipSync(head + manyRows(2000));
       const third = Math.floor(body.length / 3);
+      // Cut once the head is read: a cut before it fails rows() itself.
+      let cut!: () => void;
+      const cutWhen = new Promise<void>((go) => (cut = go));
       t.stub.respond(() => ({
         headers: { ...runHeader, "content-encoding": "gzip" },
         chunks: [body.subarray(0, third), body.subarray(third, 2 * third)],
         cutAfterChunks: true,
+        cutWhen,
       }));
       const result = await exportCalls(t.ctx()).rows(query);
+      cut();
       const error = await caught(readAll(result.rows));
       expect(error).toBeInstanceOf(ExportInterruptedError);
       expect(error).toMatchObject({
