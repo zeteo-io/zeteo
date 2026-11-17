@@ -172,22 +172,23 @@ export const AdminList = <T extends AdminRow>({
             columns={[
               {
                 title: "Name",
-                cellElement: (row) => (
-                  <span className="z-sq-name">
-                    {href ? (
-                      <TableCellLink as={Link} to={href(row)}>
-                        {row.name}
-                      </TableCellLink>
-                    ) : (
-                      row.name
-                    )}
-                    {row.description && (
-                      <span className="z-muted" title={row.description}>
-                        {row.description}
-                      </span>
-                    )}
-                  </span>
-                ),
+                cellElement: (row) =>
+                  href ? (
+                    <TableCellLink as={Link} to={href(row)}>
+                      {row.name}
+                    </TableCellLink>
+                  ) : (
+                    row.name
+                  ),
+              },
+              {
+                title: "Description",
+                cellElement: (row) =>
+                  row.description ? (
+                    <span className="z-sq-desc" title={row.description}>
+                      {row.description}
+                    </span>
+                  ) : null,
               },
               {
                 title: "Owner",

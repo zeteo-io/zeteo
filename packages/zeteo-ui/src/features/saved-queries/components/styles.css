@@ -64,24 +64,25 @@
   min-width: 0;
 }
 
-.z-sq-name {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-  min-width: 0;
-  max-width: 40rem;
-}
-
-.z-sq-name > span:first-child {
+/* Name, then the description, which takes the room the other columns leave
+   and is cut to one line; the other columns keep to their content. */
+.z-sq-list td:first-child {
   white-space: nowrap;
   font-weight: 500;
 }
 
-.z-sq-name .z-muted {
+.z-sq-list td:nth-child(2) {
+  width: 100%;
+  max-width: 0;
+}
+
+.z-sq-desc {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: var(--k-text-size-sm);
+  color: var(--k-text-color-muted, inherit);
 }
 
 .z-sq-list td:nth-child(n + 2) {
