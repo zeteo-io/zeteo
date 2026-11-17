@@ -49,15 +49,17 @@ panel that is not `ok` carries a `state` and a `message`, and none of its chart,
 | State | Message | When |
 |-------|---------|------|
 | `ok` | none | the viewer can run it |
-| `not_accessible` | the saved query's own "You need expanded permissions to run this saved query. Ask an admin to extend your access." | the viewer's grants do not cover it, or the owner's saved query is not reachable for the viewer's organization; no cause is told apart |
+| `not_accessible` | the saved query's own "You need expanded permissions to run this saved query. Ask an admin to extend your access." | the viewer's grants do not cover it; no cause is told apart |
 | `saved_query_deleted` | "This panel's saved query was deleted." | |
 | `saved_panel_deleted` | "This panel's saved panel was deleted." | |
-| `not_available` | "This saved query is no longer available for dashboards." | the toggle was turned off |
+| `not_available` | "This saved query is no longer available for dashboards." | the reach rule fails: the toggle was turned off, or the saved query is not available in the viewer's organization |
 | `needs_update` | "This panel needs updating by its owner." | the chart no longer fits the query's columns |
 
 A saved panel no longer shared with the dashboard's owner reads "This saved panel is no longer
 shared with this dashboard's owner." The owner of the dashboard is told more of their own
-settings (a `problems` list naming the chart setting at fault) than a viewer is.
+settings (a `problems` list naming the chart setting at fault) than a viewer is. Whoever copies a
+dashboard becomes the editor of the copy: when only the time filter fails to plan for them (the
+saved query alone plans), they see `needs_update` with the problem naming `time_column`.
 
 ## Chart format
 
@@ -80,8 +82,9 @@ first free cell on the grid.
 
 ## Time range
 
-A dashboard has a default time range and a viewer may pick another for the run. An own panel with a
-`time_column` has it filtered: the range is ANDed onto the saved query's `where` as
+A dashboard has a default time range and a viewer may pick another for the run. A panel with a
+time column has it filtered: an own panel's `time_column`, or for a linked panel the saved panel's
+(a saved panel keeps its own). The range is ANDed onto the saved query's `where` as
 `<column> >= start` and `<column> < end`. A panel without one is not filtered. The ranges are
 `last_15_minutes`, `last_hour`, `last_6_hours`, `last_24_hours`, `last_7_days`, `last_30_days`,
 `last_90_days`, `last_6_months`, `last_year`, `last_2_years`, `today`, `this_week`, `this_month`,
@@ -114,6 +117,9 @@ them gets its line. At most the lower of the viewer's query concurrency and
 `DASHBOARD_PARALLELISM` run at a time. A run is the `dashboard` entry point of the engine
 ([querying.md](querying.md#the-run-log)).
 
+A saved panel's preview (`POST /v1/saved-panels/{id}/preview`) runs under the API profile (a
+10 MB byte cap, its rows clamped to 5,000), not the dashboard profile.
+
 ### Lease waiting
 
 A dashboard run waits for a slot where a query would be refused: while the viewer's own limit (their
@@ -140,10 +146,12 @@ must be part of the plan**, or this stops being true; there is no row filter yet
 
 The run log ([querying.md](querying.md#the-run-log)) records a dashboard run at most once per
 viewer per query per `DASHBOARD_RECORD_WINDOW_MINUTES` (default 60), however often the dashboard
-refreshes: the first run of a query (by fingerprint) opens a fixed window, which later runs do not
+refreshes: the first run of a query opens a fixed window, which later runs do not
 extend, and only that run is recorded and stamps the saved query's `last_run_at`. Failures have
 their own window so a failure never hides a success, and a refused panel is recorded the same way
-with its query withheld. Every other path (API, MCP, export) records every run. A run that cannot
+with its query withheld. A query's identity here is not the cache's fingerprint: it is a hash of
+the source, the saved query, the body as the panel sends it (relative dates and the time range
+unresolved) and the row cap, so a `last_24_hours` panel stays one query as `now` moves. Every other path (API, MCP, export) records every run. A run that cannot
 be recorded closes its window again and the rows are withheld, as for any query.
 
 ## Display mode
@@ -151,8 +159,12 @@ be recorded closes its window again and the rows are withheld, as for any query.
 `/dashboards/<id>/display` in the admin UI shows one dashboard alone, without the top bar, in the
 dashboard's theme, refreshing itself every `refresh_seconds` (never faster than
 `DASHBOARD_MIN_REFRESH_SECONDS`) and keeping a panel's last result with "Stale since" when a run
-fails. It does not redirect to Tereo on a lost session: it shows "Signed out - sign in again on
-this screen" and a **Sign in** button, so an unattended wall screen never loops through sign-in.
+fails. Each refresh also reloads the dashboard, and so does a run whose panel has another state
+than the dashboard as loaded, so the owner's changes appear on the screen. A load that fails is
+retried with back-off (1 second, doubling up to a minute) unless it was a 401 or a 404. It does
+not redirect to Tereo on a lost session: it shows
+"Signed out — sign in again on this screen" and a **Sign in** button, so an unattended wall
+screen never loops through sign-in.
 
 **A dedicated display user.** A screen shows what its user may see, so give it a user of its own:
 create a user in Tereo with the role `zeteo_user`, grant it only the tables the dashboards need

@@ -586,7 +586,9 @@ recorded in the same table, with their own audit entries ([export.md](export.md#
   either way, the failure is logged and the query's own error is answered.
 
 A dashboard panel's run has the entry point `dashboard` and the saved query's id. It is recorded at
-most once per viewer per query in `DASHBOARD_RECORD_WINDOW_MINUTES` (default 60), and its row keeps whether
+most once per viewer per query in `DASHBOARD_RECORD_WINDOW_MINUTES` (default 60), a query being the
+saved query's body as the panel sends it, relative dates unresolved, so a moving `now` does not
+make it a new one; its row keeps whether
 the result was served from the dashboard cache; every other entry point records every run
 ([dashboards.md](dashboards.md#the-recording-window)).
 

@@ -120,8 +120,8 @@ page and no sections.
   [dashboards.md](dashboards.md#panel-states-and-their-copy) and nothing of the query. A saved query's
   **Available for dashboards** switch is in My Zeteo.
 - **Display mode** (`/dashboards/<id>/display`): the dashboard alone, with no top bar, in its
-  theme, refreshing itself; on a lost session it says "Signed out - sign in again on this screen"
-  instead of redirecting ([dashboards.md](dashboards.md#display-mode)).
+  theme, refreshing itself and reloading the dashboard as it does; on a lost session it says
+  "Signed out — sign in again on this screen" instead of redirecting ([dashboards.md](dashboards.md#display-mode)).
 - **Dashboards (all)** and **Saved panels (all)** (`/admin/dashboards`, `/admin/saved-panels`,
   `zeteo.dashboards.read`; share, transfer and delete need `.write`): every user's dashboards and
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
