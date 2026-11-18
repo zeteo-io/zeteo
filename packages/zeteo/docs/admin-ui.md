@@ -246,9 +246,10 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 | `GET /v1/me/principals/all` | `zeteo.data.read` | `{ data: Principal[], truncated }` as `GET /v1/principals/all`, over the people and groups `GET /v1/me/principals` searches; the "Who" filter of an upload source's owner |
 
-**Connections** (`/connections`, in the Admin menu, `zeteo.sources.write`) is where an admin pastes
-the Google service-account JSON key (`GET`/`PUT /v1/connections/google`): only the account's email
-is shown after it is saved. A Google Sheets source's page shows its sync interval, when it last
+**Connections** (`/connections`, in the Admin menu, `zeteo.sources.read`) shows the Google service
+account's email (`GET /v1/connections/google`); **Set key**, which needs `zeteo.sources.write`, is
+where an admin pastes the service-account JSON key (`PUT /v1/connections/google`). Only the
+account's email is shown after it is saved. A Google Sheets source's page shows its sync interval, when it last
 loaded, **Sync now** for its owner and admins, and **Stale** after 24 hours of failed syncs; its
 owner and `zeteo.sources.read` see the last error.
 

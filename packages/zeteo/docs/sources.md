@@ -19,7 +19,8 @@ through these same routes, and a few apply to it alone ([uploads.md](uploads.md)
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
 | `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings, truncated? }` |
 | `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md); on a Sheets source, its owner may sync | |
-| `GET`/`PUT /v1/connections/google` | `zeteo.sources.write` (`GET` also `zeteo.uploads.write`) | the Google service account's email |
+| `GET /v1/connections/google` | `zeteo.sources.read` or `zeteo.uploads.write` | the Google service account's email |
+| `PUT /v1/connections/google` | `zeteo.sources.write` | saves the service-account key, checked with Google first |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
 validated. The owner of an upload source (holding `zeteo.uploads.write` and `zeteo.data.read`)

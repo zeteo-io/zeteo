@@ -306,14 +306,17 @@ A sync is a refresh of the source. A Sheets source loads on its interval, by the
 job, which checks every five minutes (the interval is measured from the last attempt; nothing syncs
 while uploads are off). **Sync now** is `POST /v1/sources/:sourceId/refresh` (the owner, or
 `zeteo.sources.write`), at most once a minute: sooner is `429 sync_too_soon` with `Retry-After`.
-A busy `503 upload_source_busy` does not use the window. The answer is a `SyncSummary`.
+A busy `503 upload_source_busy` does not use the window and is not recorded as a failed sync. The
+answer is a `SyncSummary`. An admin may change the interval (`sync_interval_minutes`) in the same
+`PATCH` as the source's limits; on any other type of source it is `422 not_synced`.
 
 - Columns match by header text (`original_name`), then by name, so a column renamed in Zeteo keeps
   syncing. New header columns are added (an `all_columns` grant covers them, a grant on named columns
   does not); a column gone from the header gets `missing_since`.
 - Tabs match by sheet id, so renaming or reordering tabs is fine. A deleted tab's table goes missing;
-  restoring the tab revives it with its id and grants. Adding a tab that already backs a table
-  of the source is `tab_already_added`.
+  restoring the tab revives it with its id and grants. A table the owner removed stays removed:
+  a sync never revives it, and its tab can be added again (under a new name) as a new table. Adding
+  a tab that already backs a table of the source is `tab_already_added`.
 - A value that no longer casts to its column's type fails the sync (`cast_failed`); the owner retypes
   the column, for instance to text, and syncs again. A tab emptied of rows fails it too
   (`empty_file`). The upload limits (rows, columns, quota) apply, and the limit errors fail a sync
@@ -324,6 +327,14 @@ A busy `503 upload_source_busy` does not use the window. The answer is a `SyncSu
   transfer, delete) work as for a file.
 
 Readers see `last_loaded_at` per table in the catalogue and over MCP, never a sync error.
+
+Google is read in requests of about 200,000 cells (100 to 5,000 rows, fewer for a wider tab). The
+Google client (dianemo) stops itself on SIGTERM, SIGINT or SIGHUP, before Zeteo has drained its
+requests; the next Google call during the drain starts it again, and Zeteo's shutdown stops it last.
+A stored key that can no longer be opened (the master key changed) reads as `google_not_configured`:
+an admin saves the key again. The key check registers a short-lived client
+(`validate-<epoch ms>-<uuid>`); a starting replica removes those left behind more than five minutes
+old.
 
 Error codes: `invalid_sheet_link`, `sheet_in_use`, `sheet_not_accessible`, `google_not_configured`,
 `google_key_rejected`, `google_unavailable`, `google_sign_in_failed`, `staging_kind_mismatch`,

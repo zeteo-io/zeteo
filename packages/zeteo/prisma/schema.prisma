@@ -124,8 +124,9 @@ model Source {
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamp(3)
   archivedAt           DateTime?    @map("archived_at") @db.Timestamp(3)
-  // A Google Sheets source: the spreadsheet's id, how often it is synced (null
-  // for manual only), and the last sync attempt and its error, if it failed.
+  // A Google Sheets source: the spreadsheet's id, how often it is synced (15 to
+  // 1440 minutes; null for every other type), and the last sync attempt and
+  // its error, if it failed.
   vendorFileId         String?      @map("vendor_file_id")
   syncIntervalMinutes  Int?         @map("sync_interval_minutes")
   lastSyncAttemptAt    DateTime?    @map("last_sync_attempt_at") @db.Timestamp(3)
