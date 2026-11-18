@@ -83,6 +83,12 @@
         "displayName": "Manage dashboards",
         "description": "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.file_sources.write",
+        "displayName": "Manage file sources",
+        "description": "Create file sources from uploaded files, and manage and grant the ones the holder owns",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
@@ -102,7 +108,8 @@
           "zeteo.saved_queries.read",
           "zeteo.saved_queries.write",
           "zeteo.dashboards.read",
-          "zeteo.dashboards.write"
+          "zeteo.dashboards.write",
+          "zeteo.file_sources.write"
         ]
       },
       {
@@ -248,6 +255,31 @@
         "eventType": "zeteo.dashboard.copied",
         "description": "A dashboard was copied",
         "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.file_source.created",
+        "description": "A file source was created from an upload",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.file_source.updated",
+        "description": "A file source was changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.file_source.reuploaded",
+        "description": "A file source's tables were replaced by a new upload",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.file_source.transferred",
+        "description": "A file source was transferred to another owner",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.file_source.deleted",
+        "description": "A file source was deleted",
+        "readPermission": "zeteo.sources.read"
       },
       {
         "eventType": "zeteo.saved_panel.created",

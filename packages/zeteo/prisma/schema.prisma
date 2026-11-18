@@ -48,6 +48,7 @@ model CoreOutbox {
 enum SourceType {
   postgres
   azure_sql @map("azure-sql")
+  upload
 
   @@map("source_type")
   @@schema("zeteo")
@@ -90,8 +91,9 @@ enum RelationOrigin {
   @@schema("zeteo")
 }
 
-// A registered database. Archived, never deleted. CHECK constraints in the
-// migrations: slug format, timeout_ms, row_cap, max_joins, export_row_cap,
+// A registered database, or a file source (type upload, owned by one user).
+// Archived, never deleted. CHECK constraints in the migrations: owner_id is set
+// exactly when type is upload; slug format, timeout_ms, row_cap, max_joins, export_row_cap,
 // query_concurrency and export_concurrency ranges.
 model Source {
   id                   String       @id @default(uuid(7)) @db.Uuid
@@ -110,6 +112,7 @@ model Source {
   writableLoginAllowed Boolean      @default(false) @map("writable_login_allowed")
   status               SourceStatus @default(active)
   lastRefreshedAt      DateTime?    @map("last_refreshed_at") @db.Timestamp(3)
+  ownerId              String?      @map("owner_id") @db.Uuid
   createdBy            String       @map("created_by") @db.Uuid
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamp(3)
@@ -120,6 +123,7 @@ model Source {
   runs         QueryRun[]
   savedQueries SavedQuery[]
 
+  @@index([ownerId])
   @@map("sources")
   @@schema("zeteo")
 }
@@ -133,6 +137,7 @@ model SourceTable {
   description  String?
   lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
   missingSince DateTime? @map("missing_since") @db.Timestamp(3)
+  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamp(3)
 
   source        Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   columns       SourceColumn[]
@@ -155,6 +160,7 @@ model SourceColumn {
   position     Int
   isPrimaryKey Boolean    @map("is_primary_key")
   description  String?
+  originalName String?    @map("original_name")
   missingSince DateTime?  @map("missing_since") @db.Timestamp(3)
 
   table  SourceTable   @relation(fields: [tableId], references: [id], onDelete: Cascade)
@@ -238,6 +244,7 @@ model Grant {
   tableId       String        @map("table_id") @db.Uuid
   allColumns    Boolean       @map("all_columns")
   rowFilter     Json?         @map("row_filter")
+  ownerGrant    Boolean       @default(false) @map("owner_grant")
   createdBy     String        @map("created_by") @db.Uuid
   createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp(3)
@@ -248,6 +255,24 @@ model Grant {
   @@unique([principalType, principalId, tableId])
   @@index([tableId])
   @@map("grants")
+  @@schema("zeteo")
+}
+
+// An upload waiting to become a file source (or to replace one's tables): the
+// preview shown to its owner and the names of the staging tables holding its
+// rows. Expires one hour after creation.
+model FileStaging {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  ownerId   String   @map("owner_id") @db.Uuid
+  kind      String
+  preview   Json
+  tables    Json
+  expiresAt DateTime @map("expires_at") @db.Timestamp(3)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  @@index([expiresAt])
+  @@index([ownerId])
+  @@map("file_stagings")
   @@schema("zeteo")
 }
 

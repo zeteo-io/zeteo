@@ -22,6 +22,7 @@ const row = (overrides: Partial<Source>): Source => ({
   writableLoginAllowed: false,
   status: "active",
   lastRefreshedAt: null,
+  ownerId: null,
   createdBy: "0198f7a2-0000-7000-8000-000000000002",
   createdAt: new Date("2026-11-12T00:00:00.000Z"),
   updatedAt: new Date("2026-11-12T00:00:00.000Z"),

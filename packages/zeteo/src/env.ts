@@ -160,6 +160,13 @@ const EnvFields = z
     DASHBOARD_RECORD_WINDOW_MINUTES: int(1, 1440, 60),
     DASHBOARD_MIN_REFRESH_SECONDS: int(10, 86400, 60),
     DASHBOARD_PARALLELISM: int(1, 20, 4),
+    // File Sources: the read-only role's URL (unset, File Sources are off) and
+    // the limits on an upload and on what one owner stores.
+    FILE_SOURCES_READER_URL: z.string().url().optional(),
+    FILE_SOURCE_MAX_BYTES: int(1, Number.MAX_SAFE_INTEGER, 52_428_800),
+    FILE_SOURCE_MAX_ROWS: int(1, Number.MAX_SAFE_INTEGER, 1_000_000),
+    FILE_SOURCE_MAX_COLUMNS: int(1, Number.MAX_SAFE_INTEGER, 500),
+    FILE_SOURCE_QUOTA_BYTES: int(1, Number.MAX_SAFE_INTEGER, 1_073_741_824),
     DB_POOL_MAX: int(1, 1000, 10),
     DB_POOL_MIN: int(0, 1000, 0),
     // How long a query waits for a free connection before it fails.

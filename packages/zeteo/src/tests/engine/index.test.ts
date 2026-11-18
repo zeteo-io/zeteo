@@ -42,7 +42,7 @@ import {
 } from "../support/queries.js";
 
 const FIXTURES: Record<
-  SourceType,
+  Exclude<SourceType, "upload">,
   { settings: () => unknown; target: typeof fixtureTarget }
 > = {
   postgres: { settings: () => fixtureSettings("ro"), target: fixtureTarget },
@@ -52,7 +52,7 @@ const FIXTURES: Record<
   },
 };
 
-const MAX_PARAMETERS: Record<SourceType, number> = {
+const MAX_PARAMETERS: Record<Exclude<SourceType, "upload">, number> = {
   postgres: postgresDialect.maxParameters,
   "azure-sql": mssqlDialect.maxParameters,
 };
@@ -106,7 +106,7 @@ describeEachEngine(
     };
 
     const connectSingle = async () => {
-      const fixture = FIXTURES[engine.type];
+      const fixture = FIXTURES[engine.type as Exclude<SourceType, "upload">];
       const conn = await adapter.connect(
         fixture.settings(),
         await fixture.target(),
@@ -161,7 +161,8 @@ describeEachEngine(
         held.push((await acquireLease(`user:${user.id}`, perUser, 60_000))!);
       }
       try {
-        const values = MAX_PARAMETERS[engine.type] + 1;
+        const values =
+          MAX_PARAMETERS[engine.type as Exclude<SourceType, "upload">] + 1;
         const lists = Array.from(
           { length: Math.ceil(values / 1000) },
           (_, j) => ({

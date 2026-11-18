@@ -441,3 +441,35 @@ describe("admin UI settings", () => {
     ).toBe("https://core.example.com");
   });
 });
+
+describe("file source settings", () => {
+  it("leaves the reader URL unset and defaults the four limits", () => {
+    const env = parseEnv(base);
+    expect(env.FILE_SOURCES_READER_URL).toBeUndefined();
+    expect(env.FILE_SOURCE_MAX_BYTES).toBe(52428800);
+    expect(env.FILE_SOURCE_MAX_ROWS).toBe(1000000);
+    expect(env.FILE_SOURCE_MAX_COLUMNS).toBe(500);
+    expect(env.FILE_SOURCE_QUOTA_BYTES).toBe(1073741824);
+  });
+
+  it("takes a reader URL and rejects a value that is not one", () => {
+    expect(
+      parseEnv({ ...base, FILE_SOURCES_READER_URL: "postgresql://r@x/y" })
+        .FILE_SOURCES_READER_URL
+    ).toBe("postgresql://r@x/y");
+    expect(() =>
+      parseEnv({ ...base, FILE_SOURCES_READER_URL: "not a url" })
+    ).toThrow(/FILE_SOURCES_READER_URL/);
+  });
+
+  it.each([
+    "FILE_SOURCE_MAX_BYTES",
+    "FILE_SOURCE_MAX_ROWS",
+    "FILE_SOURCE_MAX_COLUMNS",
+    "FILE_SOURCE_QUOTA_BYTES",
+  ])("rejects a non-positive %s", (name) => {
+    expect(() => parseEnv({ ...base, [name]: "0" })).toThrow(new RegExp(name));
+    expect(() => parseEnv({ ...base, [name]: "-5" })).toThrow(new RegExp(name));
+    expect(parseEnv({ ...base, [name]: "7" })).toMatchObject({ [name]: 7 });
+  });
+});

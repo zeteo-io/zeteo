@@ -49,6 +49,12 @@ export const DASHBOARDS_READ = "zeteo.dashboards.read";
 /** Changes, shares, transfers and deletes any dashboard or saved panel. */
 export const DASHBOARDS_WRITE = "zeteo.dashboards.write";
 
+/**
+ * Creates file sources, and manages and grants those the holder owns. Every
+ * file-source route also requires `zeteo.data.read`.
+ */
+export const FILE_SOURCES_WRITE = "zeteo.file_sources.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -76,6 +82,11 @@ export const AUDIT_EVENTS = {
   dashboardShared: "zeteo.dashboard.shared",
   dashboardTransferred: "zeteo.dashboard.transferred",
   dashboardCopied: "zeteo.dashboard.copied",
+  fileSourceCreated: "zeteo.file_source.created",
+  fileSourceUpdated: "zeteo.file_source.updated",
+  fileSourceReuploaded: "zeteo.file_source.reuploaded",
+  fileSourceTransferred: "zeteo.file_source.transferred",
+  fileSourceDeleted: "zeteo.file_source.deleted",
   savedPanelCreated: "zeteo.saved_panel.created",
   savedPanelUpdated: "zeteo.saved_panel.updated",
   savedPanelDeleted: "zeteo.saved_panel.deleted",
@@ -121,6 +132,13 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.dashboardTransferred]:
     "A dashboard was transferred to another owner",
   [AUDIT_EVENTS.dashboardCopied]: "A dashboard was copied",
+  [AUDIT_EVENTS.fileSourceCreated]: "A file source was created from an upload",
+  [AUDIT_EVENTS.fileSourceUpdated]: "A file source was changed",
+  [AUDIT_EVENTS.fileSourceReuploaded]:
+    "A file source's tables were replaced by a new upload",
+  [AUDIT_EVENTS.fileSourceTransferred]:
+    "A file source was transferred to another owner",
+  [AUDIT_EVENTS.fileSourceDeleted]: "A file source was deleted",
   [AUDIT_EVENTS.savedPanelCreated]: "A saved panel was created",
   [AUDIT_EVENTS.savedPanelUpdated]: "A saved panel was changed",
   [AUDIT_EVENTS.savedPanelDeleted]: "A saved panel was deleted",
@@ -159,6 +177,11 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.dashboardShared]: DASHBOARDS_READ,
   [AUDIT_EVENTS.dashboardTransferred]: DASHBOARDS_READ,
   [AUDIT_EVENTS.dashboardCopied]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.fileSourceCreated]: SOURCES_READ,
+  [AUDIT_EVENTS.fileSourceUpdated]: SOURCES_READ,
+  [AUDIT_EVENTS.fileSourceReuploaded]: SOURCES_READ,
+  [AUDIT_EVENTS.fileSourceTransferred]: SOURCES_READ,
+  [AUDIT_EVENTS.fileSourceDeleted]: SOURCES_READ,
   [AUDIT_EVENTS.savedPanelCreated]: DASHBOARDS_READ,
   [AUDIT_EVENTS.savedPanelUpdated]: DASHBOARDS_READ,
   [AUDIT_EVENTS.savedPanelDeleted]: DASHBOARDS_READ,
@@ -269,6 +292,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
         orgAssignable: false,
       },
+      {
+        name: FILE_SOURCES_WRITE,
+        displayName: "Manage file sources",
+        description:
+          "Create file sources from uploaded files, and manage and grant the ones the holder owns",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
@@ -290,6 +320,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           SAVED_QUERIES_WRITE,
           DASHBOARDS_READ,
           DASHBOARDS_WRITE,
+          FILE_SOURCES_WRITE,
         ],
       },
       {
