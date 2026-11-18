@@ -1,17 +1,15 @@
 import { FileTooLargeError } from "../utils/errors.js";
 import { FileParseError } from "./parse/types.js";
 import { createInflateRaw } from "node:zlib";
+import JSZip from "jszip";
 
 /** An entry whose inflated size is over this is checked for its compression ratio; small entries compress wildly without harm. */
 const RATIO_FLOOR_BYTES = 1024 * 1024;
 /** More than this many inflated bytes per compressed byte is a bomb, not a workbook. */
 export const MAX_RATIO = 100;
 
-const EOCD = 0x06054b50;
-const ZIP64_LOCATOR = 0x07064b50;
-const ZIP64_EOCD = 0x06064b50;
-const CENTRAL = 0x02014b50;
-const LOCAL = 0x04034b50;
+const STORED = "\x00\x00";
+const DEFLATE = "\x08\x00";
 
 const malformed = () =>
   new FileParseError(
@@ -19,163 +17,113 @@ const malformed = () =>
     "The file is not a readable xlsx workbook."
   );
 
-const big = (n: bigint): number => {
-  if (n > BigInt(Number.MAX_SAFE_INTEGER)) throw malformed();
-  return Number(n);
-};
-
-/**
- * Reads a ZIP's central directory (no inflating) and refuses, with
- * `FileTooLargeError`, an archive whose declared uncompressed sizes add up to
- * more than `maxUncompressed` or any of whose larger entries inflates more
- * than 100 to 1: a zip bomb passes the upload's byte limit, which counts
- * compressed bytes. It then inflates every entry into a counter (output
- * discarded) and refuses at once an entry that inflates past its declared size
- * or a total past the limit, so an archive that understates its sizes cannot
- * reach the workbook reader. A damaged archive or an unknown compression
- * method is `malformed_xlsx`.
- */
-export const checkZipBounds = async (
-  zip: Buffer,
-  maxUncompressed: number
-): Promise<void> => {
-  const entries = readEntries(zip, maxUncompressed);
-  let total = 0;
-  for (const entry of entries) {
-    total += await inflatedSize(zip, entry, maxUncompressed - total);
-    if (total > maxUncompressed) throw new FileTooLargeError(maxUncompressed);
-  }
-};
-
-interface Entry {
-  method: number;
-  compressed: number;
+/** What the guard reads from JSZip's own parse of an entry. */
+export interface ZipEntryData {
+  name: string;
+  method: "stored" | "deflate";
+  compressed: Uint8Array;
   uncompressed: number;
-  localOffset: number;
 }
 
-/** The central directory's entries, after the checks on their declared sizes. */
-const readEntries = (zip: Buffer, maxUncompressed: number): Entry[] => {
-  let eocd = -1;
-  for (
-    let i = zip.length - 22;
-    i >= Math.max(0, zip.length - 22 - 0xffff);
-    i--
-  ) {
-    if (zip.readUInt32LE(i) === EOCD) {
-      eocd = i;
-      break;
-    }
+/**
+ * The compressed data of every file entry, exactly as JSZip parsed it: ExcelJS
+ * (`xlsx.load`) calls `JSZip.loadAsync(buffer)` with no options on the same
+ * bytes, so these are the entries, and the bytes, that the workbook reader
+ * would inflate. Directory entries are skipped, as ExcelJS skips them. JSZip
+ * internals that are not as expected fail closed (`malformed_xlsx`).
+ */
+export const zipEntries = async (zip: Buffer): Promise<ZipEntryData[]> => {
+  let loaded: JSZip;
+  try {
+    loaded = await JSZip.loadAsync(zip);
+  } catch {
+    throw malformed();
   }
-  if (eocd < 0) throw malformed();
-
-  let count = zip.readUInt16LE(eocd + 10);
-  let offset = zip.readUInt32LE(eocd + 16);
-  let end = offset + zip.readUInt32LE(eocd + 12);
-  if (count === 0xffff || offset === 0xffffffff) {
-    const loc = eocd - 20;
-    if (loc < 0 || zip.readUInt32LE(loc) !== ZIP64_LOCATOR) throw malformed();
-    const at = big(zip.readBigUInt64LE(loc + 8));
-    if (at + 56 > zip.length || zip.readUInt32LE(at) !== ZIP64_EOCD) {
+  const entries: ZipEntryData[] = [];
+  for (const file of Object.values(loaded.files)) {
+    if (file.dir) continue;
+    const data = (file as unknown as { _data?: unknown })._data as
+      | {
+          compression?: { magic?: unknown };
+          compressedContent?: unknown;
+          uncompressedSize?: unknown;
+        }
+      | null
+      | undefined;
+    const magic = data?.compression?.magic;
+    const compressed = data?.compressedContent;
+    const uncompressed = data?.uncompressedSize;
+    if (
+      (magic !== STORED && magic !== DEFLATE) ||
+      !(compressed instanceof Uint8Array) ||
+      typeof uncompressed !== "number" ||
+      !Number.isSafeInteger(uncompressed) ||
+      uncompressed < 0
+    ) {
       throw malformed();
     }
-    count = big(zip.readBigUInt64LE(at + 32));
-    offset = big(zip.readBigUInt64LE(at + 48));
-    end = offset + big(zip.readBigUInt64LE(at + 40));
-  }
-  if (end > zip.length) throw malformed();
-
-  const entries: Entry[] = [];
-  let total = 0;
-  let pos = offset;
-  while (pos < end) {
-    if (pos + 46 > end || zip.readUInt32LE(pos) !== CENTRAL) throw malformed();
-    let compressed = zip.readUInt32LE(pos + 20);
-    let uncompressed = zip.readUInt32LE(pos + 24);
-    let localOffset = zip.readUInt32LE(pos + 42);
-    const method = zip.readUInt16LE(pos + 10);
-    const nameLength = zip.readUInt16LE(pos + 28);
-    const extraLength = zip.readUInt16LE(pos + 30);
-    const commentLength = zip.readUInt16LE(pos + 32);
-    const next = pos + 46 + nameLength + extraLength + commentLength;
-    if (next > end) throw malformed();
-    if (
-      uncompressed === 0xffffffff ||
-      compressed === 0xffffffff ||
-      localOffset === 0xffffffff
-    ) {
-      // Zip64: the real sizes are in the extra field (id 1), in this order.
-      let x = pos + 46 + nameLength;
-      const extraEnd = x + extraLength;
-      while (x + 4 <= extraEnd) {
-        const id = zip.readUInt16LE(x);
-        const size = zip.readUInt16LE(x + 2);
-        if (id === 1) {
-          let at = x + 4;
-          if (uncompressed === 0xffffffff) {
-            if (at + 8 > extraEnd) throw malformed();
-            uncompressed = big(zip.readBigUInt64LE(at));
-            at += 8;
-          }
-          if (compressed === 0xffffffff) {
-            if (at + 8 > extraEnd) throw malformed();
-            compressed = big(zip.readBigUInt64LE(at));
-            at += 8;
-          }
-          if (localOffset === 0xffffffff) {
-            if (at + 8 > extraEnd) throw malformed();
-            localOffset = big(zip.readBigUInt64LE(at));
-          }
-          break;
-        }
-        x += 4 + size;
-      }
-    }
-    total += uncompressed;
-    if (total > maxUncompressed) throw new FileTooLargeError(maxUncompressed);
-    if (
-      uncompressed > RATIO_FLOOR_BYTES &&
-      uncompressed > MAX_RATIO * Math.max(compressed, 1)
-    ) {
-      throw new FileTooLargeError(maxUncompressed);
-    }
-    entries.push({ method, compressed, uncompressed, localOffset });
-    pos = next;
-  }
-  // The directory must be exactly what the end record says: JSZip keeps
-  // reading central headers past a wrong count, so a mismatch hides entries.
-  if (
-    pos !== end ||
-    entries.length !== count ||
-    (end + 4 <= zip.length && zip.readUInt32LE(end) === CENTRAL)
-  ) {
-    throw malformed();
+    entries.push({
+      name: file.name,
+      method: magic === STORED ? "stored" : "deflate",
+      compressed,
+      uncompressed,
+    });
   }
   return entries;
 };
 
 /**
- * What an entry really inflates to, counted while discarding the output, so
- * memory stays flat. Fails with `FileTooLargeError` as soon as the count
- * passes the entry's declared size or `room`; a stored entry's size is its
- * compressed size, which must match the declared one.
+ * Refuses, with `FileTooLargeError`, a workbook whose entries would inflate to
+ * more than `maxUncompressed` in all: a zip bomb passes the upload's byte
+ * limit, which counts compressed bytes. The entries are the ones JSZip itself
+ * finds (`zipEntries`), so no crafted directory can show this check one set of
+ * entries and the reader another. Declared sizes are checked first (their sum,
+ * and no entry over 1 MiB inflating more than 100 to 1); then every entry is
+ * inflated into a counter, output discarded so memory stays flat, and refused
+ * as soon as it passes its declared size (which JSZip's reader would only
+ * notice after holding it all) or the total passes the limit. A damaged
+ * archive or a compression other than stored or deflate is `malformed_xlsx`.
+ */
+export const checkZipBounds = async (
+  zip: Buffer,
+  maxUncompressed: number
+): Promise<void> => {
+  const entries = await zipEntries(zip);
+  let declared = 0;
+  for (const entry of entries) {
+    declared += entry.uncompressed;
+    if (declared > maxUncompressed) {
+      throw new FileTooLargeError(maxUncompressed);
+    }
+    if (
+      entry.uncompressed > RATIO_FLOOR_BYTES &&
+      entry.uncompressed > MAX_RATIO * Math.max(entry.compressed.length, 1)
+    ) {
+      throw new FileTooLargeError(maxUncompressed);
+    }
+  }
+  let total = 0;
+  for (const entry of entries) {
+    total += await inflatedSize(entry, maxUncompressed - total);
+    if (total > maxUncompressed) throw new FileTooLargeError(maxUncompressed);
+  }
+};
+
+/**
+ * What an entry really inflates to, counted while discarding the output.
+ * Fails with `FileTooLargeError` as soon as the count passes the entry's
+ * declared size or `room`; a stored entry's size is its compressed length,
+ * which must match the declared one.
  */
 const inflatedSize = async (
-  zip: Buffer,
-  entry: Entry,
+  entry: ZipEntryData,
   room: number
 ): Promise<number> => {
-  const at = entry.localOffset;
-  if (at + 30 > zip.length || zip.readUInt32LE(at) !== LOCAL) throw malformed();
-  const start = at + 30 + zip.readUInt16LE(at + 26) + zip.readUInt16LE(at + 28);
-  if (start + entry.compressed > zip.length) throw malformed();
-  const data = zip.subarray(start, start + entry.compressed);
-  const limit = Math.min(entry.uncompressed, room);
-  if (entry.method === 0) {
-    if (entry.compressed !== entry.uncompressed) throw malformed();
-    return entry.compressed;
+  if (entry.method === "stored") {
+    if (entry.compressed.length !== entry.uncompressed) throw malformed();
+    return entry.uncompressed;
   }
-  if (entry.method !== 8) throw malformed();
+  const limit = Math.min(entry.uncompressed, room);
   return new Promise<number>((resolve, reject) => {
     const inflate = createInflateRaw();
     let size = 0;
@@ -194,6 +142,6 @@ const inflatedSize = async (
     });
     inflate.on("end", () => finish(null));
     inflate.on("error", () => finish(malformed()));
-    inflate.end(data);
+    inflate.end(entry.compressed);
   });
 };

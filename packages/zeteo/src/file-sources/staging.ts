@@ -32,8 +32,8 @@ import {
  * Nothing holds the whole file: a CSV streams through the parser into the
  * staging table in batches; only an xlsx is buffered (the workbook reader
  * needs it all): its compressed bytes are counted against `FILE_SOURCE_MAX_BYTES`
- * as they arrive, and it is checked before reading (`checkZipBounds`: declared and actual
- * inflated size within twice the limit, no entry over 100:1).
+ * as they arrive, and it is checked before reading (`checkZipBounds`, on the entries JSZip
+ * itself finds: declared and actual inflated size within twice the limit, no entry over 100:1).
  * A table's types come from per-column state kept while its rows go by.
  */
 
@@ -374,7 +374,7 @@ export const stageUpload = async ({
         for await (const chunk of bytes) parts.push(chunk as Buffer);
         const workbook = Buffer.concat(parts);
         await checkZipBounds(workbook, 2 * maxBytes);
-        const sheets = await parseXlsx(Readable.from(workbook), limits);
+        const sheets = await parseXlsx(workbook, limits);
         for (const sheet of sheets) {
           const result = await stageTable(
             sheet.rows,

@@ -1,6 +1,5 @@
 import type { ParseLimits, ParsedSheet, Row } from "./types.js";
 import { FileParseError } from "./types.js";
-import type { Readable } from "node:stream";
 import ExcelJS from "exceljs";
 
 function isoOf(date: Date): string {
@@ -87,15 +86,17 @@ function readRange(
  * Reads an xlsx workbook: each sheet, and each named table in addition (listed straight after its
  * sheet). Values are text (dates ISO 8601, formulas their cached value, a merged cell its top-left
  * value); trailing empty rows and columns are trimmed. The whole workbook is read into memory; the
- * caller bounds its compressed size and checks its ZIP directory first (`checkZipBounds`).
+ * caller bounds its compressed size and checks these same bytes first (`checkZipBounds`, which
+ * parses them with the same `JSZip.loadAsync` call that `xlsx.load` makes).
  */
 export async function parseXlsx(
-  stream: Readable,
+  workbookBytes: Buffer,
   limits: ParseLimits
 ): Promise<ParsedSheet[]> {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.read(stream);
+    // ExcelJS types its own `Buffer` (an ArrayBuffer); at runtime it takes a Node Buffer.
+    await workbook.xlsx.load(workbookBytes as unknown as ExcelJS.Buffer);
   } catch (err) {
     throw new FileParseError(
       "malformed_xlsx",
