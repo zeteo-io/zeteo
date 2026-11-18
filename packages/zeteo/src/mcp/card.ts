@@ -1,4 +1,5 @@
 import type { TereoMcp } from "@tereo-io/mcp";
+import { logger } from "../utils/logger.js";
 import { readFileSync } from "fs";
 
 /** The preview card of a panel or saved panel (MCP Apps). */
@@ -24,25 +25,45 @@ const withMode = (html: string, mode: keyof Cards): string =>
 
 /**
  * The built card (`zeteo-ui`'s `dist-mcp/card.html`) as the two pages zeteo
- * serves, each naming its mode in `<head>`; null when the file does not
- * exist. Any other read failure, or a file with no `<head>`, throws.
+ * serves, each naming its mode in `<head>`. Null, with a warning, when the
+ * file does not exist, or when a page would pass `maxBytes` (the server's
+ * `maxResultBytes`, past which every read of it would fail). Any other read
+ * failure, or a file with no `<head>`, throws.
  */
-export const loadCard = (path: string): Cards | null => {
+export const loadCard = (path: string, maxBytes: number): Cards | null => {
   let html: string;
   try {
     html = readFileSync(path, "utf8");
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      logger.warn(
+        { path },
+        "MCP preview cards are off: MCP_CARD_PATH names no file"
+      );
+      return null;
+    }
     throw err;
   }
   if (!HEAD.test(html)) {
     throw new Error(`The MCP card at ${path} has no <head>`);
   }
-  return {
+  const cards = {
     panel: withMode(html, "panel"),
     dashboard: withMode(html, "dashboard"),
   };
+  const bytes = Math.max(
+    Buffer.byteLength(cards.panel, "utf8"),
+    Buffer.byteLength(cards.dashboard, "utf8")
+  );
+  if (bytes > maxBytes) {
+    logger.warn(
+      { path, bytes, max_bytes: maxBytes },
+      "MCP preview cards are off: the card at MCP_CARD_PATH is larger than a resource may be"
+    );
+    return null;
+  }
+  return cards;
 };
 
 /**

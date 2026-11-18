@@ -80,6 +80,62 @@ describe("per-caller MCP instructions", () => {
   });
 });
 
+describe("per-caller MCP instructions for two users on one server", () => {
+  const first = randomUUID();
+  const second = randomUUID();
+  const sourceIds: string[] = [];
+  let firstSource: Awaited<ReturnType<typeof seedQuerySource>>;
+  let secondSource: Awaited<ReturnType<typeof seedQuerySource>>;
+
+  beforeAll(async () => {
+    firstSource = await seedQuerySource(
+      postgres,
+      { description: "The first user's ledger" },
+      "mcp-instr-first"
+    );
+    secondSource = await seedQuerySource(
+      postgres,
+      { description: "The second user's ledger" },
+      "mcp-instr-second"
+    );
+    sourceIds.push(firstSource.id, secondSource.id);
+    await grantTo(
+      { type: "user", id: first },
+      firstSource.tables.orders!,
+      "all"
+    );
+    await grantTo(
+      { type: "user", id: second },
+      secondSource.tables.orders!,
+      "all"
+    );
+  });
+  afterAll(async () => {
+    await redis.del(
+      `zeteo:mcp:instructions:${first}`,
+      `zeteo:mcp:instructions:${second}`
+    );
+    await removeSources(sourceIds);
+  });
+
+  it("give each user only their own sources, the second connecting after the first is cached", async () => {
+    const firstText = await instructionsOf(
+      mcpToken([MCP_USE, DATA_READ], first)
+    );
+    expect(firstText).toContain(`\`${firstSource.slug}\``);
+    expect(firstText).not.toContain(secondSource.slug);
+    expect(await redis.get(`zeteo:mcp:instructions:${first}`)).toBe(firstText);
+
+    const secondText = await instructionsOf(
+      mcpToken([MCP_USE, DATA_READ], second)
+    );
+    expect(secondText).toContain(`\`${secondSource.slug}\``);
+    expect(secondText).toContain("The second user's ledger");
+    expect(secondText).not.toContain(firstSource.slug);
+    expect(secondText).not.toContain("The first user's ledger");
+  });
+});
+
 describe("per-caller MCP instructions when Redis fails", () => {
   let stubCore: Awaited<ReturnType<typeof startStubCore>>;
   let stopTereo: () => Promise<void>;

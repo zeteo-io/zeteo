@@ -57,15 +57,8 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   });
   // Read once: the cards, their links on the tools and the tools they call
   // all exist, or none does.
-  const cards = loadCard(env.MCP_CARD_PATH);
-  if (cards) {
-    defineCardResources(mcp, cards);
-  } else {
-    logger.warn(
-      { path: env.MCP_CARD_PATH },
-      "MCP preview cards are off: MCP_CARD_PATH names no file"
-    );
-  }
+  const cards = loadCard(env.MCP_CARD_PATH, MAX_RESULT_BYTES);
+  if (cards) defineCardResources(mcp, cards);
   defineDiscoveryTools(mcp);
   defineQueryTool(mcp);
   defineGuideTool(mcp);

@@ -210,4 +210,11 @@ describe.skipIf(!existsSync(built))("the built card", () => {
     expect(html).not.toMatch(/@import\s/i);
     expect(html).toMatch(/<script\b[^>]*>/i);
   });
+
+  it("fits in an MCP resource", () => {
+    // zeteo serves the card under its MCP server's maxResultBytes (2 MB), with
+    // a <meta> added; past it zeteo serves no card at all.
+    const bytes = readFileSync(built).byteLength;
+    expect(bytes).toBeLessThanOrEqual(2 * 1024 * 1024 - 1024);
+  });
 });
