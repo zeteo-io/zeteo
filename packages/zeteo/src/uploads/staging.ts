@@ -275,9 +275,9 @@ export const stageTable = async (
   let batch: Row[] = [];
   // A Sheets tab arrives as wide as its grid: the columns that hold a value.
   let used = 0;
-  // Types over every row, and over the rows below the first.
+  // Types over every row, and over the rows below each possible header row (0, 1 or 2).
   let all: TypeInferrer[] = [];
-  let below: TypeInferrer[] = [];
+  let after: TypeInferrer[][] = [];
 
   const flush = async () => {
     if (batch.length === 0) return;
@@ -292,7 +292,9 @@ export const stageTable = async (
       stagingTable = await createStagingTable(width);
       created.push(stagingTable);
       all = Array.from({ length: width }, () => new TypeInferrer());
-      below = Array.from({ length: width }, () => new TypeInferrer());
+      after = Array.from({ length: 3 }, () =>
+        Array.from({ length: width }, () => new TypeInferrer())
+      );
     }
     const padded =
       row.length === width
@@ -312,7 +314,9 @@ export const stageTable = async (
     }
     for (let c = 0; c < width; c++) {
       all[c]!.add(padded[c]);
-      if (total > 0) below[c]!.add(padded[c]);
+      for (let k = 0; k < after.length; k++) {
+        if (total > k) after[k]![c]!.add(padded[c]);
+      }
     }
     if (head.length < HEAD_ROWS) head.push(padded);
     batch.push(padded);
@@ -350,7 +354,7 @@ export const stageTable = async (
         if (samples.length === SAMPLES_PER_COLUMN) break;
       }
     }
-    const type = (headerRow === null ? all : below)[index]!.type;
+    const type = (headerRow === null ? all : after[headerRow]!)[index]!.type;
     return {
       index,
       name,
