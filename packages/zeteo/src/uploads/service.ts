@@ -252,6 +252,7 @@ const checkDistinctNames = (planned: PlannedTable[]) => {
 export interface CreateUploadSourceInput {
   staging_id: string;
   name: string;
+  description?: string;
   slug?: string;
   tables: TableCorrection[];
 }
@@ -297,6 +298,9 @@ export const createUploadSource = async (
                 id,
                 slug,
                 name: input.name,
+                ...(input.description !== undefined && {
+                  description: input.description,
+                }),
                 type: "upload",
                 ownerId: caller.userId,
                 sealedSettings: {},
@@ -360,21 +364,41 @@ const discardQuietly = async (stagingId: string) => {
   });
 };
 
-export const renameUploadSource = async (
+/** What an upload source's owner may change about it. */
+export interface UploadSourceDetails {
+  name?: string;
+  description?: string;
+}
+
+/** Renames an upload source or changes its description, for its owner or an admin. */
+export const changeUploadSource = async (
   caller: Caller,
   id: string,
-  name: string
+  change: UploadSourceDetails
 ): Promise<SourceView> => {
   await findChangeable(caller, id);
   await withAudit(async (tx, audit) => {
     const row = await lockChangeable(tx, caller, id);
-    await tx.source.update({ where: { id }, data: { name } });
+    await tx.source.update({
+      where: { id },
+      data: {
+        ...(change.name !== undefined && { name: change.name }),
+        ...(change.description !== undefined && {
+          description: change.description,
+        }),
+      },
+    });
     audit({
       action: AUDIT_EVENTS.sourceUpdated,
       resourceType: "source",
       resourceId: id,
       actorId: caller.userId,
-      metadata: { slug: row.slug, type: "upload", changed: ["name"], name },
+      metadata: {
+        slug: row.slug,
+        type: "upload",
+        changed: Object.keys(change),
+        ...(change.name !== undefined && { name: change.name }),
+      },
     });
   });
   return viewOf(id);

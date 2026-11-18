@@ -44,6 +44,8 @@ export interface Source {
   id: string;
   slug: string;
   name: string;
+  /** What the source holds; empty when none was given. */
+  description: string;
   type: SourceType;
   /** An upload source's owner; null for a database source. */
   owner_id: string | null;
@@ -78,6 +80,8 @@ interface CreateSourceFields {
   /** Matches `^[a-z][a-z0-9-]{1,62}$`. */
   slug: string;
   name: string;
+  /** What the source holds, at most 500 characters; trimmed. */
+  description?: string;
   /** 1 to 20 schema names. */
   schemas: string[];
   allow_writable_login?: boolean;
@@ -102,9 +106,14 @@ export type CreateSourceRequest = CreateSourceFields &
     | { type: "azure-sql"; settings: AzureSqlSettings }
   );
 
-/** At least one field; `settings` replaces the whole settings object. */
+/**
+ * At least one field; `settings` replaces the whole settings object. An upload
+ * source's owner may change only `name` and `description`.
+ */
 export interface UpdateSourceRequest {
   name?: string;
+  /** At most 500 characters; trimmed; empty clears it. */
+  description?: string;
   settings?: PostgresSettings | AzureSqlSettings;
   schemas?: string[];
   /** Accepted only together with `settings`. */

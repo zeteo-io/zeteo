@@ -48,6 +48,7 @@ export interface VisibleCatalog {
     id: string;
     slug: string;
     name: string;
+    description: string;
     type: SourceType;
     timeoutMs: number;
     rowCap: number;
@@ -140,6 +141,7 @@ export const buildVisibleCatalog = (
       id: source.id,
       slug: source.slug,
       name: source.name,
+      description: source.description,
       type: typeOf(source),
       timeoutMs: source.timeoutMs,
       rowCap: source.rowCap,

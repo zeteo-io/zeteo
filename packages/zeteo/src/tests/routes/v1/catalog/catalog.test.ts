@@ -37,7 +37,9 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     fetchJson("GET", `${BASE_URL}/v1/catalog${search}`, token);
 
   beforeAll(async () => {
-    source = await seedQuerySource(engine);
+    source = await seedQuerySource(engine, {
+      description: "Orders placed in the shop",
+    });
     other = await seedQuerySource(engine, {}, "catalog-other");
     await grantTo(wide.principal, source.tables.orders!, [
       "id",
@@ -68,6 +70,8 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     const [entry] = res.body.sources;
     expect(entry).toMatchObject({
       slug: source.slug,
+      name: "Sales",
+      description: "Orders placed in the shop",
       type: engine.type,
       limits: {
         default_rows: 1000,
@@ -119,6 +123,11 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     expect(orders.relations).toEqual([]);
   });
 
+  it("gives a source with no description an empty one", async () => {
+    const res = await catalog(wide.token, `?source=${other.slug}`);
+    expect(res.body.sources[0].description).toBe("");
+  });
+
   it("lists every source the caller has a grant on, ordered by slug, when no source is named", async () => {
     const res = await catalog(wide.token);
     const slugs = res.body.sources.map((s: { slug: string }) => s.slug);
@@ -165,6 +174,7 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       expect(text).not.toContain(hidden);
     }
     expect(Object.keys(res.body.sources[0]).sort()).toEqual([
+      "description",
       "kind",
       "language",
       "limits",

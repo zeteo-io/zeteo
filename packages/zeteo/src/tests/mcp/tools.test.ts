@@ -26,7 +26,11 @@ describe("MCP discovery tools", () => {
   const userId = randomUUID();
 
   beforeAll(async () => {
-    source = await seedQuerySource(postgres, { row_cap: 2000 }, "mcp-tools");
+    source = await seedQuerySource(
+      postgres,
+      { row_cap: 2000, description: "Sales orders and customers" },
+      "mcp-tools"
+    );
     const principal = { type: "user" as const, id: userId };
     await grantTo(principal, source.tables.orders!, [
       "id",
@@ -49,6 +53,7 @@ describe("MCP discovery tools", () => {
     expect(listed).toEqual({
       slug: source.slug,
       name: "Sales",
+      description: "Sales orders and customers",
       type: "postgres",
       kind: "database",
       language: expect.any(String),
@@ -61,6 +66,22 @@ describe("MCP discovery tools", () => {
         max_joins: 4,
       },
     });
+  });
+
+  it("list_sources gives a source with no description an empty one", async () => {
+    await prisma.source.update({
+      where: { id: source.id },
+      data: { description: "" },
+    });
+    try {
+      const call = await callTool(session.client, "list_sources");
+      expect(call.json.sources[0].description).toBe("");
+    } finally {
+      await prisma.source.update({
+        where: { id: source.id },
+        data: { description: "Sales orders and customers" },
+      });
+    }
   });
 
   it("list_tables and describe_table show the as-of time of a table that has one", async () => {

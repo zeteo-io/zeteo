@@ -78,6 +78,7 @@ Source:
     - id
     - slug
     - name
+    - description
     - type
     - settings
     - schemas
@@ -101,6 +102,7 @@ Source:
     id: { type: string, format: uuid }
     slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$' }
     name: { type: string, minLength: 1, maxLength: 255 }
+    description: { type: string, maxLength: 500, description: What the source holds; empty when none was given }
     type: { $ref: '#/SourceType' }
     settings:
       type: [object, 'null']
@@ -172,6 +174,7 @@ CreateSourceRequest:
       pattern: '^[a-z][a-z0-9-]{1,62}$'
       description: Unique, lower case letters, digits and hyphens, starting with a letter
     name: { type: string, minLength: 1, maxLength: 255 }
+    description: { type: string, maxLength: 500, description: 'What the source holds, for the people and the AI that query it; trimmed' }
     type:
       type: string
       enum: [postgres, azure-sql]
@@ -208,6 +211,7 @@ UpdateSourceRequest:
   minProperties: 1
   properties:
     name: { type: string, minLength: 1, maxLength: 255 }
+    description: { type: string, maxLength: 500, description: 'Trimmed; an empty one clears it' }
     settings:
       description: The source type's settings, PostgresSettings or AzureSqlSettings
       anyOf:

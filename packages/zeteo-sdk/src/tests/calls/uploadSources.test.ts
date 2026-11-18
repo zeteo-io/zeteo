@@ -9,6 +9,7 @@ const source: Source = {
   id: ID,
   slug: "people",
   name: "People",
+  description: "",
   type: "upload",
   owner_id: USER,
   settings: null,

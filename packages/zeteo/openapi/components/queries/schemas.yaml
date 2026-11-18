@@ -377,10 +377,11 @@ DiscoveredTable:
 
 DiscoveredSource:
   type: object
-  required: [slug, name, type, kind, language, limits, tables]
+  required: [slug, name, description, type, kind, language, limits, tables]
   properties:
     slug: { type: string, description: What a query's `source` names }
     name: { type: string }
+    description: { type: string, description: What the source holds; empty when none was given }
     type: { $ref: '../sources/schemas.yaml#/SourceType' }
     kind: { type: string, enum: [database, upload], description: '`upload` for an upload source, whose tables carry `last_synced_at`' }
     language:

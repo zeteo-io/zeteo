@@ -55,7 +55,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "list_sources",
     title: "List sources",
     description:
-      "List the data sources you can query: each one's slug, name, database type, kind (database or upload), query language, how many tables you can see, and its row and time limits.",
+      "List the data sources you can query: each one's slug, name, description of what it holds (empty when it has none), database type, kind (database or upload), query language, how many tables you can see, and its row and time limits.",
     permission: MCP_USE,
     readOnly: true,
     handler: handled(async (_input: undefined, access) => {
@@ -69,6 +69,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
         sources: views.map((view) => ({
           slug: view.slug,
           name: view.name,
+          description: view.description,
           type: view.type,
           kind: view.kind,
           language: view.language.id,

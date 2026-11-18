@@ -37,12 +37,13 @@
       `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
       the new settings without `password` and `ca`.
 
-      On an upload source only `name` and the limit fields apply (`409 not_a_database_source`
-      for `settings` or `schemas`). Its owner (holding `zeteo.uploads.write` and
-      `zeteo.data.read`) may rename it, which writes `zeteo.source.updated` (as does an
-      admin's rename alone); its limits need `zeteo.sources.write`.
+      On an upload source only `name`, `description` and the limit fields apply
+      (`409 not_a_database_source` for `settings` or `schemas`). Its owner (holding
+      `zeteo.uploads.write` and `zeteo.data.read`) may rename it or change its description,
+      which writes `zeteo.source.updated` (as does an admin's change of those alone); its limits
+      need `zeteo.sources.write`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` alone; anyone else gets the same 403.
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` and `description` alone; anyone else gets the same 403.
 
       **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
       `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.

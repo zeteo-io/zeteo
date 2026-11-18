@@ -99,6 +99,8 @@ model Source {
   id                   String       @id @default(uuid(7)) @db.Uuid
   slug                 String       @unique
   name                 String
+  // What the source holds, for the people and the AI that query it.
+  description          String       @default("")
   type                 SourceType
   sealedSettings       Json         @map("sealed_settings")
   schemas              String[]

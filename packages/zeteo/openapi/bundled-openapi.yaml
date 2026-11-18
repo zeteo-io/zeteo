@@ -379,12 +379,13 @@ paths:
         `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
         the new settings without `password` and `ca`.
 
-        On an upload source only `name` and the limit fields apply (`409 not_a_database_source`
-        for `settings` or `schemas`). Its owner (holding `zeteo.uploads.write` and
-        `zeteo.data.read`) may rename it, which writes `zeteo.source.updated` (as does an
-        admin's rename alone); its limits need `zeteo.sources.write`.
+        On an upload source only `name`, `description` and the limit fields apply
+        (`409 not_a_database_source` for `settings` or `schemas`). Its owner (holding
+        `zeteo.uploads.write` and `zeteo.data.read`) may rename it or change its description,
+        which writes `zeteo.source.updated` (as does an admin's change of those alone); its limits
+        need `zeteo.sources.write`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` alone; anyone else gets the same 403.
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` and `description` alone; anyone else gets the same 403.
 
         **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
         `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
@@ -4932,6 +4933,7 @@ components:
         - id
         - slug
         - name
+        - description
         - type
         - settings
         - schemas
@@ -4962,6 +4964,10 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        description:
+          type: string
+          maxLength: 500
+          description: What the source holds; empty when none was given
         type:
           $ref: '#/components/schemas/SourceType'
         settings:
@@ -5086,6 +5092,10 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        description:
+          type: string
+          maxLength: 500
+          description: What the source holds, for the people and the AI that query it; trimmed
         type:
           type: string
           enum:
@@ -5159,6 +5169,10 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        description:
+          type: string
+          maxLength: 500
+          description: Trimmed; an empty one clears it
         settings:
           description: The source type's settings, PostgresSettings or AzureSqlSettings
           anyOf:
@@ -6332,6 +6346,7 @@ components:
       required:
         - slug
         - name
+        - description
         - type
         - kind
         - language
@@ -6343,6 +6358,9 @@ components:
           description: What a query's `source` names
         name:
           type: string
+        description:
+          type: string
+          description: What the source holds; empty when none was given
         type:
           $ref: '#/components/schemas/SourceType'
         kind:
@@ -6570,6 +6588,10 @@ components:
           type: string
           minLength: 1
           maxLength: 255
+        description:
+          type: string
+          maxLength: 500
+          description: What the source holds, for the people and the AI that query it; trimmed
         slug:
           type: string
           pattern: ^[a-z][a-z0-9-]{1,62}$

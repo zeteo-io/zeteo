@@ -66,6 +66,62 @@ describe("source name", () => {
   });
 });
 
+describe("source description", () => {
+  const body = {
+    slug: "sales",
+    type: "postgres",
+    name: "Sales",
+    settings: {},
+    schemas: ["public"],
+  };
+  const upload = {
+    type: "upload",
+    staging_id: "0198f7a2-0000-7000-8000-000000000001",
+    name: "Orders",
+    tables: [{ key: "csv" }],
+  };
+
+  it("accepts 500 characters on a create, an upload source's create and an update", () => {
+    const description = "a".repeat(500);
+    expect(CreateSourceSchema.safeParse({ ...body, description }).success).toBe(
+      true
+    );
+    expect(
+      CreateUploadSourceSchema.safeParse({ ...upload, description }).success
+    ).toBe(true);
+    expect(UpdateSourceSchema.safeParse({ description }).success).toBe(true);
+  });
+
+  it.each([
+    ["501 characters", "a".repeat(501)],
+    ["a NUL character", "Sa\u0000les"],
+  ])("refuses %s", (_, description) => {
+    expect(CreateSourceSchema.safeParse({ ...body, description }).success).toBe(
+      false
+    );
+    expect(
+      CreateUploadSourceSchema.safeParse({ ...upload, description }).success
+    ).toBe(false);
+    expect(UpdateSourceSchema.safeParse({ description }).success).toBe(false);
+  });
+
+  it("trims it, and leaves it out when the body omits it", () => {
+    expect(
+      CreateSourceSchema.parse({ ...body, description: "  x  " }).description
+    ).toBe("x");
+    expect(UpdateSourceSchema.parse({ description: "  x  " })).toEqual({
+      description: "x",
+    });
+    expect(CreateSourceSchema.parse(body)).not.toHaveProperty("description");
+  });
+
+  it("accepts an empty one, which clears it", () => {
+    expect(UpdateSourceSchema.parse({ description: "" })).toEqual({
+      description: "",
+    });
+  });
+});
+
 describe("max_joins", () => {
   const body = {
     slug: "sales",

@@ -31,9 +31,9 @@ few routes there apply to upload sources only. Only the staging of a file has ro
 |-------|-----|--------|
 | `POST /v1/uploads` (multipart, field `file`, one file) | `zeteo.uploads.write` | `201 { staging_id, expires_at, tables }`: the preview |
 | `DELETE /v1/uploads/:uploadId` | whoever staged it | `204`; the staging's tables are dropped and its place under the cap freed. Anyone else's, an expired or an unknown id is `404 staging_not_found` |
-| `POST /v1/sources` `{ type: "upload", staging_id, name, slug?, tables: [{ key, name?, header_row?, columns? }] }` | `zeteo.uploads.write` | `201`, the source |
+| `POST /v1/sources` `{ type: "upload", staging_id, name, description?, slug?, tables: [{ key, name?, header_row?, columns? }] }` | `zeteo.uploads.write` | `201`, the source |
 | `GET /v1/sources?owner_id=me` (also `type=upload`) | the owner, or `zeteo.sources.read` | the caller's own sources |
-| `GET`, `PATCH` (`name`), `DELETE /v1/sources/:id` | the owner, or `zeteo.sources.read` / `.write` | the source; `DELETE` drops its data |
+| `GET`, `PATCH` (`name`, `description`), `DELETE /v1/sources/:id` | the owner, or `zeteo.sources.read` / `.write` | the source; `DELETE` drops its data |
 | `POST /v1/sources/:id/transfer` `{ user_id, keep_access? }` | the owner, or `zeteo.sources.write` | transfer ownership |
 | `POST /v1/sources/:id/tables` `{ staging_id, tables }` | the owner, or `zeteo.sources.write` | `201`; add tables from a staging |
 | `PUT /v1/sources/:id/tables/:tableId` `{ staging_id, key, header_row?, columns? }`, `DELETE` | the owner, or `zeteo.sources.write` | re-upload a table from a staging; remove a table |

@@ -34,6 +34,8 @@ export const sourceView = (row: Source, extras: SourceViewExtras) => ({
   id: row.id,
   slug: row.slug,
   name: row.name,
+  /** Empty when none was given. */
+  description: row.description,
   type: typeOf(row),
   settings: settingsView(row),
   schemas: row.schemas,

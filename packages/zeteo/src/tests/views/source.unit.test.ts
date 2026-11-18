@@ -9,6 +9,7 @@ const row = (overrides: Partial<Source>): Source => ({
   id: "0198f7a2-0000-7000-8000-000000000001",
   slug: "sales",
   name: "Sales",
+  description: "",
   type: "postgres",
   sealedSettings: {},
   schemas: ["public"],

@@ -270,6 +270,7 @@ export interface UploadSourceBody {
   id: string;
   slug: string;
   name: string;
+  description: string;
   type: string;
   owner_id: string;
   archived_at: string | null;
