@@ -53,6 +53,33 @@ describe("checkZipBounds", () => {
     });
   });
 
+  it("refuses an end record that understates the entries", async () => {
+    const zip = await zipOf({
+      "a.xml": text(1000),
+      "b.bin": Buffer.alloc(900_000),
+    });
+    const eocd = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    // Entry count 1 instead of 2 (this disk and total).
+    const counted = Buffer.from(zip);
+    counted.writeUInt16LE(1, eocd + 8);
+    counted.writeUInt16LE(1, eocd + 10);
+    await expect(checkZipBounds(counted, 1e9)).rejects.toMatchObject({
+      code: "malformed_xlsx",
+    });
+    // Directory size cut to the first header: a second one follows it.
+    const cut = Buffer.from(zip);
+    const first = cut.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    const dir = cut.readUInt32LE(eocd + 16);
+    const firstLength = 46 + 5;
+    cut.writeUInt32LE(firstLength, eocd + 12);
+    cut.writeUInt16LE(1, eocd + 8);
+    cut.writeUInt16LE(1, eocd + 10);
+    expect(first).toBeGreaterThan(dir);
+    await expect(checkZipBounds(cut, 1e9)).rejects.toMatchObject({
+      code: "malformed_xlsx",
+    });
+  });
+
   it("refuses an unknown compression method", async () => {
     const zip = await zipOf({ "a.xml": text(1000) });
     const central = zip.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));

@@ -14,6 +14,7 @@ import {
   FILE_SOURCES_WRITE,
 } from "../../../../../definitions/tereoDeclaration.js";
 import {
+  discardStaging,
   getStaging,
   STAGING_TTL_MS,
 } from "../../../../../file-sources/staging.js";
@@ -364,6 +365,20 @@ describe("POST /v1/file-sources/uploads", () => {
     expect(await prisma.fileStaging.count()).toBe(rowsBefore);
   });
 
+  it("refuses an xlsx whose directory understates an entry's size", async () => {
+    const zip = new JSZip();
+    zip.file("xl/bomb.bin", Buffer.alloc(8 * 1024 * 1024));
+    const bomb = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+    });
+    const central = bomb.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    bomb.writeUInt32LE(1000, central + 24);
+    const res = await upload(ownerToken, bomb, "liar.xlsx");
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("file_too_large");
+  });
+
   it("refuses a zip bomb as file_too_large", async () => {
     const zip = new JSZip();
     zip.file("xl/bomb.bin", Buffer.alloc(8 * 1024 * 1024));
@@ -375,6 +390,16 @@ describe("POST /v1/file-sources/uploads", () => {
     const res = await upload(ownerToken, bomb, "bomb.xlsx");
     expect(res.status).toBe(413);
     expect(res.body.error).toBe("file_too_large");
+  });
+});
+
+describe("discardStaging", () => {
+  it("is safe to run twice, also at once", async () => {
+    const res = await upload(ownerToken, "a,b\n1,2\n");
+    const id = res.body.staging_id as string;
+    await Promise.all([discardStaging(id), discardStaging(id)]);
+    await discardStaging(id);
+    expect(await prisma.fileStaging.findUnique({ where: { id } })).toBeNull();
   });
 });
 

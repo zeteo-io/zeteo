@@ -88,7 +88,7 @@ const readEntries = (zip: Buffer, maxUncompressed: number): Entry[] => {
   const entries: Entry[] = [];
   let total = 0;
   let pos = offset;
-  for (let n = 0; n < count; n++) {
+  while (pos < end) {
     if (pos + 46 > end || zip.readUInt32LE(pos) !== CENTRAL) throw malformed();
     let compressed = zip.readUInt32LE(pos + 20);
     let uncompressed = zip.readUInt32LE(pos + 24);
@@ -141,6 +141,15 @@ const readEntries = (zip: Buffer, maxUncompressed: number): Entry[] => {
     }
     entries.push({ method, compressed, uncompressed, localOffset });
     pos = next;
+  }
+  // The directory must be exactly what the end record says: JSZip keeps
+  // reading central headers past a wrong count, so a mismatch hides entries.
+  if (
+    pos !== end ||
+    entries.length !== count ||
+    (end + 4 <= zip.length && zip.readUInt32LE(end) === CENTRAL)
+  ) {
+    throw malformed();
   }
   return entries;
 };
