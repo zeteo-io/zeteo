@@ -7,6 +7,9 @@ export type CardKind = "panel" | "dashboard";
 export type ToolOutcome =
   { ok: true; value: Record<string, unknown> } | { ok: false; error: string };
 
+/** What the card says when the host cancels the tool call it was opened for. */
+export const CANCELLED = "The call was cancelled.";
+
 /** A tool call that failed; its message is what the viewer is shown. */
 export class CardToolError extends Error {}
 
@@ -111,15 +114,22 @@ export const connectHost = async (kind: CardKind): Promise<CardHost> => {
   const themes = channel<CardTheme>(false);
   let theme: CardTheme = "light";
 
-  app.ontoolinput = (params) => inputs.emit(params.arguments ?? {});
-  app.ontoolresult = (params) => results.emit(readToolResult(params));
-  app.onhostcontextchanged = (params) => {
+  app.addEventListener("toolinput", (params) =>
+    inputs.emit(params.arguments ?? {})
+  );
+  app.addEventListener("toolresult", (params) =>
+    results.emit(readToolResult(params))
+  );
+  app.addEventListener("toolcancelled", () =>
+    results.emit({ ok: false, error: CANCELLED })
+  );
+  app.addEventListener("hostcontextchanged", (params) => {
     const next = themeOf(params.theme);
     if (next && next !== theme) {
       theme = next;
       themes.emit(next);
     }
-  };
+  });
 
   await app.connect(new PostMessageTransport(window.parent, window.parent));
   theme = themeOf(app.getHostContext()?.theme) ?? theme;

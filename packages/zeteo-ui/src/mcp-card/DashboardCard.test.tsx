@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ChartSettings } from "@/features/dashboards/api/types";
+import { CANNOT_PREVIEW, DashboardCard } from "./DashboardCard";
 import { stubResizeObserver } from "@/test/echartsMock";
 import userEvent from "@testing-library/user-event";
-import { DashboardCard } from "./DashboardCard";
 import { fakeCardHost } from "@/test/cardHost";
 import { CardToolError } from "./host";
 
@@ -201,6 +201,28 @@ describe("DashboardCard", () => {
     expect(
       screen.queryByRole("button", { name: "Open in Zeteo" })
     ).not.toBeInTheDocument();
+  });
+
+  it("offers no way to open a url that is not a web address", async () => {
+    const fake = fakeCardHost("dashboard", {
+      card_dashboard: cardDashboard(layout({ url: "javascript:alert(1)" })),
+    });
+    render(<DashboardCard host={fake.host} input={{ id: "d1" }} result={{}} />);
+    await screen.findByText("Sales");
+    expect(
+      screen.queryByRole("button", { name: "Open in Zeteo" })
+    ).not.toBeInTheDocument();
+  });
+
+  it("says a panel in a state it does not know can't be previewed", async () => {
+    const fake = fakeCardHost("dashboard", {
+      card_dashboard: cardDashboard(
+        layout({ panels: [{ ...okPanel("m"), state: "something_new" }] })
+      ),
+    });
+    render(<DashboardCard host={fake.host} input={{ id: "d1" }} result={{}} />);
+    expect(await screen.findByText(CANNOT_PREVIEW)).toBeInTheDocument();
+    expect(fake.callsTo("card_dashboard")).toHaveLength(1);
   });
 
   it("shows the layout's error description", async () => {

@@ -88,8 +88,26 @@ const useWidth = () => {
   return width;
 };
 
-const stateMessage = (state: PanelState, message?: string) =>
-  state === "ok" ? undefined : (message ?? PANEL_COPY[state]);
+/** What a panel the card cannot draw says: one of a state it does not know has a fallback. */
+export const CANNOT_PREVIEW = "This panel can't be previewed.";
+
+const stateMessage = (state: string, message?: string) =>
+  state === "ok"
+    ? undefined
+    : (message ??
+      PANEL_COPY[state as keyof typeof PANEL_COPY] ??
+      CANNOT_PREVIEW);
+
+/** Only a web address is offered as a link out of the card. */
+const isWebUrl = (url: string | null): url is string => {
+  if (!url) return false;
+  try {
+    const { protocol } = new URL(url);
+    return protocol === "https:" || protocol === "http:";
+  } catch {
+    return false;
+  }
+};
 
 const PanelBody = ({ panel, run }: { panel: LayoutPanel; run?: Run }) => {
   const fromLayout = stateMessage(panel.state, panel.message);
@@ -226,12 +244,12 @@ export const DashboardCard = ({
           <h2 className="zc-title">{layout.name}</h2>
           {range && <span className="zc-muted">{range}</span>}
         </div>
-        {layout.url && (
+        {isWebUrl(layout.url) && (
           <Button
             size="sm"
             variant="secondary"
             fullWidth={false}
-            onClick={() => host.openLink(layout.url!)}
+            onClick={() => host.openLink(layout.url as string)}
           >
             Open in Zeteo
           </Button>

@@ -29,14 +29,18 @@ const PREVIEW_KEYS = [
 
 /**
  * What to ask `card_panel_rows` for: a saved panel named by the input's id
- * (get or update a saved panel), else the saved query and chart in the input
- * (preview or create), else a saved panel named by the result's id.
+ * (get or update a saved panel), else the saved panel a create made (an input
+ * with a `name` and a result with an `id`), else the saved query and chart in
+ * the input (preview), else a saved panel named by the result's id.
  */
 export const panelRowsArgs = (
   input: Record<string, unknown>,
   result: Record<string, unknown>
 ): Record<string, unknown> | null => {
   if (typeof input.id === "string") return { saved_panel_id: input.id };
+  // create_saved_panel: the saved panel it made, under its name.
+  if (typeof input.name === "string" && typeof result.id === "string")
+    return { saved_panel_id: result.id };
   if (typeof input.saved_query_id === "string" && input.chart) {
     const args: Record<string, unknown> = {};
     for (const key of PREVIEW_KEYS)

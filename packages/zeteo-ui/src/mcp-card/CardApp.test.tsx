@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import type { ChartSettings } from "@/features/dashboards/api/types";
+import { CANCELLED, readKind, readToolResult } from "./host";
 import { stubResizeObserver } from "@/test/echartsMock";
 import { existsSync, readFileSync } from "node:fs";
-import { readKind, readToolResult } from "./host";
 import { fakeCardHost } from "@/test/cardHost";
 import { fileURLToPath } from "node:url";
 import { CardApp } from "./CardApp";
@@ -86,6 +86,13 @@ describe("CardApp", () => {
     });
     expect(await screen.findByText("Dashboard not found.")).toBeInTheDocument();
     expect(fake.host.callTool).not.toHaveBeenCalled();
+  });
+
+  it("says when the call was cancelled", async () => {
+    const fake = fakeCardHost("panel");
+    render(<CardApp host={fake.host} />);
+    act(() => fake.sendResult({ ok: false, error: CANCELLED }));
+    expect(await screen.findByText(CANCELLED)).toBeInTheDocument();
   });
 
   it("draws the dashboard card for a dashboard tool", async () => {

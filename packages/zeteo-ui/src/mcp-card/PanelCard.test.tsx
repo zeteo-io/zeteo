@@ -103,6 +103,19 @@ describe("PanelCard", () => {
     expect(fake.callsTo("card_panel_rows")).toEqual([{ saved_panel_id: "p2" }]);
   });
 
+  it("reads the saved panel a create made, under its name", async () => {
+    const fake = fakeCardHost("panel", { card_panel_rows: () => rows() });
+    render(
+      <PanelCard
+        host={fake.host}
+        input={{ name: "Revenue", saved_query_id: "q1", chart: line }}
+        result={{ id: "p9", name: "Revenue" }}
+      />
+    );
+    await screen.findByText("Revenue by month");
+    expect(fake.callsTo("card_panel_rows")).toEqual([{ saved_panel_id: "p9" }]);
+  });
+
   it("lists the chart's problems", async () => {
     const fake = fakeCardHost("panel", {
       card_panel_rows: () =>
