@@ -369,6 +369,18 @@ export class EmptyFileError extends AppError {
   }
 }
 
+/** A Google Sheets link or id that names no spreadsheet Zeteo can read from. */
+export class InvalidSheetLinkError extends AppError {
+  constructor() {
+    super(
+      422,
+      "invalid_sheet_link",
+      "Paste the link from the sheet's address bar or its Share dialog."
+    );
+    this.name = "InvalidSheetLinkError";
+  }
+}
+
 /** A staging that does not exist, has expired or is another user's: one answer for all. */
 export class StagingNotFoundError extends AppError {
   constructor() {

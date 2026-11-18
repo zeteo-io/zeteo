@@ -1,0 +1,97 @@
+// @module-tag unit
+// @module-tag platform
+
+import { cellText, type SheetCell } from "../../google/cells.js";
+import { describe, expect, it } from "vitest";
+
+const num = (numberValue: number, type?: string): SheetCell => ({
+  effectiveValue: { numberValue },
+  ...(type ? { effectiveFormat: { numberFormat: { type } } } : {}),
+});
+
+describe("cellText", () => {
+  it("DATE serial 45292 is 2024-01-01", () => {
+    expect(cellText(num(45292, "DATE"), "America/Chicago")).toBe("2024-01-01");
+  });
+
+  it("DATE_TIME serial 45292.75 in America/Chicago is 2024-01-02T00:00:00.000Z", () => {
+    expect(cellText(num(45292.75, "DATE_TIME"), "America/Chicago")).toBe(
+      "2024-01-02T00:00:00.000Z"
+    );
+  });
+
+  it("DATE_TIME across a DST change uses that day's offset", () => {
+    // 2024-07-01 18:00 wall time: CDT is UTC-5.
+    expect(cellText(num(45474.75, "DATE_TIME"), "America/Chicago")).toBe(
+      "2024-07-01T23:00:00.000Z"
+    );
+    // 2024-03-10 03:30 wall time, just after the spring-forward: CDT.
+    expect(
+      cellText(num(45361 + 3.5 / 24, "DATE_TIME"), "America/Chicago")
+    ).toBe("2024-03-10T08:30:00.000Z");
+  });
+
+  it("DATE_TIME at midnight UTC keeps the full instant form", () => {
+    expect(cellText(num(45292, "DATE_TIME"), "UTC")).toBe(
+      "2024-01-01T00:00:00.000Z"
+    );
+  });
+
+  it("DATE_TIME east of UTC", () => {
+    expect(cellText(num(45292.5, "DATE_TIME"), "Asia/Kolkata")).toBe(
+      "2024-01-01T06:30:00.000Z"
+    );
+  });
+
+  it("an unknown time zone is refused for a DATE_TIME only", () => {
+    expect(() => cellText(num(45292.5, "DATE_TIME"), "Mars/Base")).toThrow(
+      RangeError
+    );
+    expect(cellText(num(45292, "DATE"), "Mars/Base")).toBe("2024-01-01");
+  });
+
+  it("TIME stays a number", () => {
+    expect(cellText(num(0.75, "TIME"), "UTC")).toBe("0.75");
+  });
+
+  it("a percent stays a number", () => {
+    expect(cellText(num(0.25, "PERCENT"), "UTC")).toBe("0.25");
+    expect(cellText(num(42), "UTC")).toBe("42");
+  });
+
+  it("boolean", () => {
+    expect(cellText({ effectiveValue: { boolValue: true } }, "UTC")).toBe(
+      "true"
+    );
+    expect(cellText({ effectiveValue: { boolValue: false } }, "UTC")).toBe(
+      "false"
+    );
+  });
+
+  it("strings are kept as is", () => {
+    expect(cellText({ effectiveValue: { stringValue: " a b " } }, "UTC")).toBe(
+      " a b "
+    );
+  });
+
+  it("error and empty are null", () => {
+    expect(
+      cellText({ effectiveValue: { errorValue: { type: "DIV_ZERO" } } }, "UTC")
+    ).toBeNull();
+    expect(cellText({ effectiveValue: { stringValue: "" } }, "UTC")).toBeNull();
+    expect(cellText({}, "UTC")).toBeNull();
+    expect(cellText(undefined, "UTC")).toBeNull();
+  });
+
+  it("a formula's effectiveValue is used", () => {
+    expect(
+      cellText(
+        {
+          effectiveValue: { numberValue: 6 },
+          formattedValue: "=1+5",
+        } as SheetCell,
+        "UTC"
+      )
+    ).toBe("6");
+  });
+});
