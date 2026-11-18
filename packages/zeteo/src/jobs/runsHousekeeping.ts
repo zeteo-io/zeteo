@@ -1,3 +1,4 @@
+import { deleteExpiredStagings } from "../file-sources/staging.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import { recordInterruptedExport } from "../engine/record.js";
 import { EXPORT_TIMEOUT_MS } from "../engine/limits.js";
@@ -79,7 +80,7 @@ export const deleteOldRuns = async (
   }
 };
 
-/** One tick: both steps, under the lock. A Redis failure skips the tick. */
+/** One tick: its steps (exports, old runs, expired file stagings), under the lock. A Redis failure skips the tick. */
 export const runHousekeeping = async (
   now: Date = new Date(),
   shouldStop: () => boolean = () => false
@@ -100,6 +101,10 @@ export const runHousekeeping = async (
     if (shouldStop()) return;
     const deleted = await deleteOldRuns(env.QUERY_RUNS_RETENTION_DAYS, now);
     if (deleted > 0) logger.info({ deleted }, "deleted old query runs");
+    if (shouldStop()) return;
+    const stagings = await deleteExpiredStagings(now);
+    if (stagings > 0)
+      logger.info({ stagings }, "deleted expired file stagings");
   } catch (err) {
     logger.error({ err }, "runs housekeeping failed");
   } finally {

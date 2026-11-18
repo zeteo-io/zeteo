@@ -2,6 +2,7 @@
 // @module-tag platform
 // @module-tag job
 import type { RunOutcome } from "../../../prisma/generated/client/index.js";
+import { deleteExpiredStagings } from "../../file-sources/staging.js";
 import { sourceSettings, uniqueSlug } from "../support/sources.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { auditRows, removeSources } from "../support/sources.js";
@@ -18,6 +19,10 @@ import {
   runHousekeeping,
   startRunsHousekeepingJob,
 } from "../../jobs/runsHousekeeping.js";
+import {
+  createStagingTable,
+  STAGING_SCHEMA,
+} from "../../file-sources/storage.js";
 import {
   recordExportEnd,
   recordInterruptedExport,
@@ -95,6 +100,59 @@ describe("runs housekeeping", () => {
   afterAll(async () => {
     await removeSources([sourceId]);
     await stopTereo();
+  });
+
+  describe("expired file stagings", () => {
+    const stagingRow = async (expiresAt: Date) => {
+      const table = await createStagingTable(2);
+      const row = await prisma.fileStaging.create({
+        data: {
+          ownerId: randomUUID(),
+          kind: "csv",
+          preview: [],
+          tables: [
+            { key: "csv", stagingTable: table, rowCount: 0, columnCount: 2 },
+          ],
+          expiresAt,
+        },
+      });
+      return { id: row.id, table };
+    };
+    const tableExists = async (name: string) =>
+      (
+        await prisma.$queryRawUnsafe<unknown[]>(
+          `SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = $2`,
+          STAGING_SCHEMA,
+          name
+        )
+      ).length === 1;
+
+    it("deletes a staging past expires_at and drops its table, and keeps a live one", async () => {
+      const expired = await stagingRow(new Date(NOW.getTime() - MINUTE));
+      const live = await stagingRow(new Date(NOW.getTime() + MINUTE));
+      expect(await deleteExpiredStagings(NOW)).toBe(1);
+      expect(
+        await prisma.fileStaging.findUnique({ where: { id: expired.id } })
+      ).toBeNull();
+      expect(await tableExists(expired.table)).toBe(false);
+      expect(
+        await prisma.fileStaging.findUnique({ where: { id: live.id } })
+      ).not.toBeNull();
+      expect(await tableExists(live.table)).toBe(true);
+      await prisma.fileStaging.delete({ where: { id: live.id } });
+      await prisma.$executeRawUnsafe(
+        `DROP TABLE "${STAGING_SCHEMA}"."${live.table}"`
+      );
+    });
+
+    it("runs in the housekeeping tick", async () => {
+      const expired = await stagingRow(new Date(NOW.getTime() - MINUTE));
+      await runHousekeeping(NOW);
+      expect(
+        await prisma.fileStaging.findUnique({ where: { id: expired.id } })
+      ).toBeNull();
+      expect(await tableExists(expired.table)).toBe(false);
+    });
   });
 
   describe("closeInterruptedExports", () => {

@@ -1,0 +1,422 @@
+import { FileParseError, type ParseLimits, type Row } from "./parse/types.js";
+import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
+import type { FileColumnType } from "./types.js";
+import { normalizeName } from "./parse/names.js";
+import { prisma } from "../utils/db/prisma.js";
+import { parseXlsx } from "./parse/xlsx.js";
+import { logger } from "../utils/logger.js";
+import { parseCsv } from "./parse/csv.js";
+import { Readable } from "node:stream";
+import env from "../env.js";
+import {
+  EmptyFileError,
+  FileTooLargeError,
+  FileUnreadableError,
+  StagingNotFoundError,
+  UnsupportedFileTypeError,
+} from "../utils/errors.js";
+import {
+  appendStagingRows,
+  createStagingTable,
+  dropStagingTable,
+} from "./storage.js";
+
+/**
+ * Staging: an upload parsed once, its raw cells (header row included) kept as
+ * text in staging tables, and a preview for its owner to confirm or change.
+ * Nothing here reaches a file source; Task 6's confirm loads a staging.
+ *
+ * Nothing holds the whole file: a CSV streams through the parser into the
+ * staging table in batches; only an xlsx is buffered (the workbook reader
+ * needs it all), bounded by `FILE_SOURCE_MAX_BYTES`, counted as it arrives.
+ * A table's types come from per-column state kept while its rows go by.
+ */
+
+/** A staging lives one hour. */
+export const STAGING_TTL_MS = 60 * 60_000;
+/** Rows per insert. */
+const BATCH_ROWS = 2000;
+/** Rows the header check looks at, and the preview's samples come from. */
+const HEAD_ROWS = 1000;
+/** Sample values kept per column. */
+export const SAMPLES_PER_COLUMN = 10;
+/** Bytes read to tell the file's type. */
+const SNIFF_BYTES = 8 * 1024;
+const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
+/** Starts of common binary formats; a file beginning so is not text. */
+const BINARY_MAGICS = [
+  Buffer.from("%PDF"),
+  Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+  Buffer.from("GIF8"),
+  Buffer.from([0xff, 0xd8, 0xff]),
+  Buffer.from([0x1f, 0x8b]),
+  Buffer.from([0xd0, 0xcf, 0x11, 0xe0]),
+  Buffer.from("Rar!"),
+  Buffer.from([0x37, 0x7a, 0xbc, 0xaf]),
+];
+
+export interface PreviewColumn {
+  index: number;
+  name: string;
+  original_name: string;
+  type: FileColumnType;
+  samples: string[];
+}
+
+export interface PreviewTable {
+  /** Names the table within the staging: `csv`, `sheet:<name>` or `table:<name>`. */
+  key: string;
+  name: string;
+  kind: "csv" | "sheet" | "table";
+  /** The 0-based row holding the header, null when the first row looks like data. */
+  header_row: number | null;
+  /** Data rows, the header not counted. */
+  row_count: number;
+  columns: PreviewColumn[];
+  warnings: string[];
+}
+
+/** What a staging table holds, kept in `FileStaging.tables`; its rows include the header. */
+export interface StagedTable {
+  key: string;
+  stagingTable: string;
+  /** Rows in the staging table, the header row included. */
+  rowCount: number;
+  columnCount: number;
+}
+
+export interface StagingResult {
+  stagingId: string;
+  expiresAt: Date;
+  tables: PreviewTable[];
+}
+
+/** The staging row of `id` for its owner; expired, someone else's and missing all answer `StagingNotFoundError`. */
+export const getStaging = async (
+  id: string,
+  callerId: string,
+  now: Date = new Date()
+) => {
+  const row = await prisma.fileStaging.findFirst({
+    where: { id, ownerId: callerId, expiresAt: { gt: now } },
+  });
+  if (!row) throw new StagingNotFoundError();
+  return {
+    ...row,
+    preview: row.preview as unknown as PreviewTable[],
+    tables: row.tables as unknown as StagedTable[],
+  };
+};
+
+/**
+ * Deletes stagings past `expires_at` and drops their tables. Returns how many
+ * it deleted.
+ */
+export const deleteExpiredStagings = async (
+  now: Date = new Date()
+): Promise<number> => {
+  let deleted = 0;
+  for (;;) {
+    const rows = await prisma.fileStaging.findMany({
+      where: { expiresAt: { lte: now } },
+      take: 100,
+      orderBy: { expiresAt: "asc" },
+    });
+    if (rows.length === 0) return deleted;
+    for (const row of rows) {
+      for (const table of row.tables as unknown as StagedTable[]) {
+        await dropStagingTable(table.stagingTable);
+      }
+      await prisma.fileStaging.deleteMany({ where: { id: row.id } });
+      deleted += 1;
+    }
+  }
+};
+
+const startsWith = (head: Buffer, magic: Buffer) =>
+  head.length >= magic.length && head.subarray(0, magic.length).equals(magic);
+
+const hasUtf16Bom = (head: Buffer) =>
+  (head[0] === 0xff && head[1] === 0xfe) ||
+  (head[0] === 0xfe && head[1] === 0xff);
+
+type FileType = "xlsx" | "csv";
+
+/**
+ * The file's type from its content, never its name: a ZIP is an xlsx (the
+ * reader says if it is not one); a known binary format, or any NUL byte
+ * outside a UTF-16 file, is refused as `unsupported_file_type`; everything
+ * else is CSV text, whose encoding the CSV reader judges (an undecodable text
+ * file is `unsupported_encoding`, not a wrong type).
+ */
+export const sniffFileType = (head: Buffer): FileType => {
+  if (startsWith(head, ZIP_MAGIC)) return "xlsx";
+  if (BINARY_MAGICS.some((m) => startsWith(head, m))) {
+    throw new UnsupportedFileTypeError();
+  }
+  if (!hasUtf16Bom(head) && head.includes(0)) {
+    throw new UnsupportedFileTypeError();
+  }
+  return "csv";
+};
+
+/**
+ * The upload's bytes as a stream that fails with `FileTooLargeError` once
+ * more than `maxBytes` have gone by; `head` is what was already read.
+ */
+const counted = (
+  head: Buffer[],
+  rest: AsyncIterator<Buffer | string>,
+  maxBytes: number
+): Readable => {
+  let total = 0;
+  const check = (chunk: Buffer) => {
+    total += chunk.length;
+    if (total > maxBytes) throw new FileTooLargeError(maxBytes);
+    return chunk;
+  };
+  return Readable.from(
+    (async function* () {
+      for (const chunk of head) yield check(chunk);
+      for (;;) {
+        const next = await rest.next();
+        if (next.done) return;
+        yield check(
+          Buffer.isBuffer(next.value) ? next.value : Buffer.from(next.value)
+        );
+      }
+    })(),
+    { objectMode: false }
+  );
+};
+
+/** Reads chunks until `SNIFF_BYTES` or the end. */
+const peek = async (iterator: AsyncIterator<Buffer | string>) => {
+  const chunks: Buffer[] = [];
+  let bytes = 0;
+  while (bytes < SNIFF_BYTES) {
+    const next = await iterator.next();
+    if (next.done) break;
+    const chunk = Buffer.isBuffer(next.value)
+      ? next.value
+      : Buffer.from(next.value);
+    chunks.push(chunk);
+    bytes += chunk.length;
+  }
+  return { chunks, head: Buffer.concat(chunks) };
+};
+
+const toUnreadable = (err: unknown): unknown =>
+  err instanceof FileParseError
+    ? new FileUnreadableError(err.code, err.message, err.row)
+    : err;
+
+/**
+ * A table's rows into a new staging table (all of them, the header row
+ * included) while keeping what the preview needs. Returns null for a table
+ * with no rows or no columns.
+ */
+const stageTable = async (
+  rows: AsyncIterable<Row> | Row[],
+  meta: { key: string; fallbackName: string; kind: PreviewTable["kind"] },
+  takenTableNames: Set<string>,
+  created: string[]
+): Promise<{ preview: PreviewTable; staged: StagedTable } | null> => {
+  const head: Row[] = [];
+  let stagingTable: string | null = null;
+  let width = 0;
+  let total = 0;
+  let batch: Row[] = [];
+  // Types over every row, and over the rows below the first.
+  let all: TypeInferrer[] = [];
+  let below: TypeInferrer[] = [];
+
+  const flush = async () => {
+    if (batch.length === 0) return;
+    await appendStagingRows(stagingTable!, batch);
+    batch = [];
+  };
+
+  for await (const row of rows) {
+    if (stagingTable === null) {
+      width = row.length;
+      if (width === 0) continue;
+      stagingTable = await createStagingTable(width);
+      created.push(stagingTable);
+      all = Array.from({ length: width }, () => new TypeInferrer());
+      below = Array.from({ length: width }, () => new TypeInferrer());
+    }
+    const padded =
+      row.length === width
+        ? row
+        : [
+            ...row.slice(0, width),
+            ...Array(Math.max(0, width - row.length)).fill(null),
+          ];
+    for (let c = 0; c < width; c++) {
+      all[c]!.add(padded[c]);
+      if (total > 0) below[c]!.add(padded[c]);
+    }
+    if (head.length < HEAD_ROWS) head.push(padded);
+    batch.push(padded);
+    total += 1;
+    if (batch.length >= BATCH_ROWS) await flush();
+  }
+  if (stagingTable === null || total === 0) return null;
+  await flush();
+
+  const headerRow = detectHeaderRow(head);
+  const warnings: string[] = [];
+  if (headerRow === null) {
+    warnings.push("The first row looks like data, so the file has no header.");
+  }
+  const dataFrom = headerRow === null ? 0 : headerRow + 1;
+  const taken = new Set<string>();
+  const columns: PreviewColumn[] = Array.from({ length: width }, (_, index) => {
+    const raw = headerRow === null ? "" : (head[headerRow]![index] ?? "");
+    const name = normalizeName(raw, taken, index);
+    const samples: string[] = [];
+    for (const row of head.slice(dataFrom)) {
+      const value = row[index];
+      if (value !== null && value !== undefined && value !== "") {
+        samples.push(value);
+        if (samples.length === SAMPLES_PER_COLUMN) break;
+      }
+    }
+    const type = (headerRow === null ? all : below)[index]!.type;
+    return {
+      index,
+      name,
+      original_name: headerRow === null ? name : raw,
+      type,
+      samples,
+    };
+  });
+  for (const column of columns) {
+    if (column.samples.length === 0 && total > dataFrom) {
+      warnings.push(`Column "${column.name}" has no values in its first rows.`);
+    }
+  }
+
+  const name = normalizeName(meta.fallbackName, takenTableNames, 0);
+  return {
+    preview: {
+      key: meta.key,
+      name,
+      kind: meta.kind,
+      header_row: headerRow,
+      row_count: total - dataFrom,
+      columns,
+      warnings,
+    },
+    staged: {
+      key: meta.key,
+      stagingTable,
+      rowCount: total,
+      columnCount: width,
+    },
+  };
+};
+
+const stem = (filename: string) =>
+  filename.replace(/^.*[\\/]/, "").replace(/\.[^.]*$/, "") || "data";
+
+/**
+ * Stages an uploaded file for `ownerId`: reads it as a stream (CSV) or
+ * buffered within the byte limit (xlsx), stages every table's raw rows,
+ * and records a `FileStaging` row with the preview. On any failure the staging
+ * tables made so far are dropped and no row is kept.
+ */
+export const stageUpload = async ({
+  ownerId,
+  filename,
+  stream,
+  now = new Date(),
+}: {
+  ownerId: string;
+  filename: string;
+  stream: Readable;
+  now?: Date;
+}): Promise<StagingResult> => {
+  const maxBytes = env.FILE_SOURCE_MAX_BYTES;
+  const limits: ParseLimits = {
+    maxRows: env.FILE_SOURCE_MAX_ROWS,
+    maxColumns: env.FILE_SOURCE_MAX_COLUMNS,
+  };
+  const created: string[] = [];
+  const iterator = stream[Symbol.asyncIterator]() as AsyncIterator<
+    Buffer | string
+  >;
+  try {
+    const { chunks, head } = await peek(iterator);
+    if (head.length === 0) throw new EmptyFileError();
+    const type = sniffFileType(head);
+    const bytes = counted(chunks, iterator, maxBytes);
+
+    const tables: { preview: PreviewTable; staged: StagedTable }[] = [];
+    const taken = new Set<string>();
+    try {
+      if (type === "csv") {
+        const result = await stageTable(
+          parseCsv(bytes, limits),
+          { key: "csv", fallbackName: stem(filename), kind: "csv" },
+          taken,
+          created
+        );
+        if (result) tables.push(result);
+      } else {
+        const parts: Buffer[] = [];
+        for await (const chunk of bytes) parts.push(chunk as Buffer);
+        const sheets = await parseXlsx(
+          Readable.from(Buffer.concat(parts)),
+          limits
+        );
+        for (const sheet of sheets) {
+          const result = await stageTable(
+            sheet.rows,
+            {
+              key: `${sheet.kind}:${sheet.name}`,
+              fallbackName: sheet.name,
+              kind: sheet.kind,
+            },
+            taken,
+            created
+          );
+          if (result) tables.push(result);
+        }
+      }
+    } catch (err) {
+      throw toUnreadable(err);
+    }
+    if (tables.length === 0) throw new EmptyFileError();
+
+    const preview = tables.map((t) => t.preview);
+    const row = await prisma.fileStaging.create({
+      data: {
+        ownerId,
+        kind: type === "csv" ? "csv" : "xlsx",
+        preview: preview as unknown as object,
+        tables: tables.map((t) => t.staged) as unknown as object,
+        expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
+      },
+    });
+    return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
+  } catch (err) {
+    // Read the rest of the upload and discard it, so the request can finish
+    // and be answered; a stream being iterated does not flow on `resume()`.
+    try {
+      while (!(await iterator.next()).done);
+    } catch {
+      // The stream is broken: nothing more to read.
+    }
+    for (const table of created) {
+      await dropStagingTable(table).catch((dropErr: unknown) => {
+        logger.error(
+          { err: dropErr, table },
+          "dropping a staging table failed"
+        );
+      });
+    }
+    throw err;
+  }
+};

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectHeaderRow,
   inferType,
+  TypeInferrer,
 } from "../../../file-sources/parse/infer.js";
 
 describe("inferType", () => {
@@ -109,5 +110,23 @@ describe("detectHeaderRow", () => {
 
   it("is null for no rows", () => {
     expect(detectHeaderRow([])).toBeNull();
+  });
+});
+
+describe("TypeInferrer", () => {
+  it("agrees with inferType when fed one value at a time", () => {
+    const cases: (string | null)[][] = [
+      ["1", "2.5", null, "-3"],
+      ["2024-01-01", "2024-01-02T10:00:00Z"],
+      ["true", "False"],
+      ["1", "x"],
+      ["007", "1"],
+      [],
+    ];
+    for (const values of cases) {
+      const inferrer = new TypeInferrer();
+      for (const v of values) inferrer.add(v);
+      expect(inferrer.type).toBe(inferType(values));
+    }
   });
 });

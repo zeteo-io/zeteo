@@ -244,6 +244,62 @@ export class FileSourceManagedElsewhereError extends AppError {
   }
 }
 
+/** File Sources are off: `FILE_SOURCES_READER_URL` is not set. */
+export class FileSourcesNotConfiguredError extends AppError {
+  constructor() {
+    super(404, "file_sources_not_configured", "File Sources are not enabled");
+    this.name = "FileSourcesNotConfiguredError";
+  }
+}
+
+/** An upload over `FILE_SOURCE_MAX_BYTES`. */
+export class FileTooLargeError extends AppError {
+  constructor(maxBytes: number) {
+    super(413, "file_too_large", `The file is larger than ${maxBytes} bytes`, {
+      details: { max_bytes: maxBytes },
+    });
+    this.name = "FileTooLargeError";
+  }
+}
+
+/** An upload that is neither a CSV nor an xlsx workbook, judged by its content. */
+export class UnsupportedFileTypeError extends AppError {
+  constructor() {
+    super(
+      415,
+      "unsupported_file_type",
+      "Only CSV and xlsx files can be uploaded"
+    );
+    this.name = "UnsupportedFileTypeError";
+  }
+}
+
+/** A file that cannot be read: `code` is the parser's (`unsupported_encoding`, `row_too_long`...), `row` the 1-based row at fault. */
+export class FileUnreadableError extends AppError {
+  constructor(code: string, message: string, row?: number) {
+    super(422, code, message, {
+      details: row === undefined ? undefined : { row },
+    });
+    this.name = "FileUnreadableError";
+  }
+}
+
+/** An upload that holds no table with a column. */
+export class EmptyFileError extends AppError {
+  constructor() {
+    super(422, "empty_file", "The file has no data");
+    this.name = "EmptyFileError";
+  }
+}
+
+/** A staging that does not exist, has expired or is another user's: one answer for all. */
+export class StagingNotFoundError extends AppError {
+  constructor() {
+    super(404, "staging_not_found", "Upload not found or expired");
+    this.name = "StagingNotFoundError";
+  }
+}
+
 /** A declared relation the catalogue cannot hold; the message says which check failed. */
 export class InvalidRelationError extends AppError {
   constructor(message: string) {

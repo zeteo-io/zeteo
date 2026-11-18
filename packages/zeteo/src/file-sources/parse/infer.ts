@@ -36,24 +36,39 @@ function kindOf(raw: string): FileColumnType {
 }
 
 /**
- * The narrowest type every non-empty value fits; text otherwise. Dates mixed with timestamps are
- * timestamps. No values at all is text.
+ * Infers a column's type one value at a time, so a file need not be held in memory. `type` is the
+ * narrowest type every non-empty value added so far fits; text otherwise. Dates mixed with
+ * timestamps are timestamps. No values at all is text.
  */
-export function inferType(values: (string | null)[]): FileColumnType {
-  let found: FileColumnType | null = null;
-  for (const raw of values) {
-    if (raw === null || raw.trim() === "") continue;
+export class TypeInferrer {
+  private found: FileColumnType | null = null;
+  private isText = false;
+
+  add(raw: string | null | undefined): void {
+    if (this.isText || raw === null || raw === undefined || raw.trim() === "") {
+      return;
+    }
     const kind = kindOf(raw);
-    if (kind === "text") return "text";
-    if (found === null || found === kind) found = kind;
+    if (kind === "text") this.isText = true;
+    else if (this.found === null || this.found === kind) this.found = kind;
     else if (
-      (found === "date" && kind === "timestamp") ||
-      (found === "timestamp" && kind === "date")
+      (this.found === "date" && kind === "timestamp") ||
+      (this.found === "timestamp" && kind === "date")
     ) {
-      found = "timestamp";
-    } else return "text";
+      this.found = "timestamp";
+    } else this.isText = true;
   }
-  return found ?? "text";
+
+  get type(): FileColumnType {
+    return this.isText ? "text" : (this.found ?? "text");
+  }
+}
+
+/** The narrowest type every non-empty value fits; text otherwise (see `TypeInferrer`). */
+export function inferType(values: (string | null)[]): FileColumnType {
+  const inferrer = new TypeInferrer();
+  for (const raw of values) inferrer.add(raw);
+  return inferrer.type;
 }
 
 /**
