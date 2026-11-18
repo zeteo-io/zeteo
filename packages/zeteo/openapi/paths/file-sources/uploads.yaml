@@ -1,0 +1,60 @@
+/v1/file-sources/uploads:
+  post:
+    tags: [File sources]
+    summary: Upload a CSV or xlsx file to staging
+    description: |
+      Sends one file as `multipart/form-data` in the field `file`. Zeteo parses it once into a
+      staging area and returns a preview (tables, header row, inferred column types and samples) to
+      confirm or correct when creating a file source or loading a table. A staging expires one hour
+      after creation and belongs to the uploader. Nothing is stored in a source until a staging is
+      used. A CSV is UTF-8 (with or without BOM) or UTF-16 LE/BE with a BOM; the delimiter is
+      detected among `,` `;` tab and `|`. A refused upload is answered at once and the connection is
+      closed.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+    operationId: uploadFile
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file: { type: string, format: binary }
+    responses:
+      '201':
+        description: The staged upload and its preview
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/UploadResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413':
+        description: Payload too large - `file_too_large` (over `FILE_SOURCE_MAX_BYTES`); nothing is left behind
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '415':
+        description: Unsupported - `unsupported_file_type` (only CSV and xlsx)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `too_many_tables`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

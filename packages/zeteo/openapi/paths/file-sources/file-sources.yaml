@@ -1,0 +1,93 @@
+/v1/file-sources:
+  get:
+    tags: [File sources]
+    summary: List file sources
+    description: |
+      `scope=mine` (the default) lists the caller's own file sources; `scope=all` lists everyone's
+      and needs `zeteo.sources.read` (`403 forbidden` without). Archived (deleted) file sources
+      are left out.
+
+      **Required permissions:** `zeteo.data.read`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+    operationId: listFileSources
+    parameters:
+      - name: scope
+        in: query
+        required: false
+        schema: { type: string, enum: [mine, all], default: mine }
+    responses:
+      '200':
+        description: The file sources
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/ListFileSourcesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [File sources]
+    summary: Create a file source from a staged upload
+    description: |
+      Loads the chosen staged tables into a new file source owned by the caller, who gets an
+      owner grant (an ordinary `all_columns` user grant flagged `owner_grant`) on each table.
+      Column types are the inferred ones unless corrected; forcing a type the values do not fit
+      is `422 cast_failed`. An `zeteo.file_source.created` audit entry is written (never any cell
+      data).
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+    operationId: createFileSource
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/file-sources/schemas.yaml#/CreateFileSourceRequest'
+    responses:
+      '201':
+        description: The new file source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/FileSource'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `file_sources_not_configured`, or `staging_not_found` (expired, missing or someone else's)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `quota_exceeded` (the owner would store more than `FILE_SOURCE_QUOTA_BYTES`; checked under a per-owner lock) or `name_taken`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413':
+        description: Payload too large - `file_too_large`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `cast_failed`, or `invalid_request` with `issues`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503':
+        description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

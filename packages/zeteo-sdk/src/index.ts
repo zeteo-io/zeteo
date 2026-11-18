@@ -80,6 +80,23 @@ export type {
   ListTablesOptions,
 } from "./types/sources.js";
 export type {
+  FileColumnType,
+  StagedColumn,
+  StagedTable,
+  UploadResponse,
+  ColumnCorrection,
+  TableCorrection,
+  CreateFileSourceRequest,
+  AddTablesRequest,
+  ReuploadTableRequest,
+  UpdateFileColumnRequest,
+  TransferFileSourceRequest,
+  FileSourceColumn,
+  FileSourceTable,
+  FileSource,
+  ListFileSourcesOptions,
+} from "./types/fileSources.js";
+export type {
   PrincipalStatus,
   Grant,
   CreateGrantRequest,

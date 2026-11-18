@@ -1,0 +1,54 @@
+/v1/file-sources/{sourceId}/tables:
+  parameters:
+    - $ref: '../../components/parameters.yaml#/SourceIdParam'
+  post:
+    tags: [File sources]
+    summary: Add tables from a staged upload
+    description: |
+      Loads more staged tables into the file source, each with an owner grant. A table name the
+      source already has is `409 name_taken`.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+    operationId: addFileSourceTables
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/file-sources/schemas.yaml#/AddTablesRequest'
+    responses:
+      '201':
+        description: The file source with its new tables
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/FileSource'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '409':
+        description: Conflict - `name_taken` or `quota_exceeded`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413':
+        description: Payload too large - `file_too_large`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `cast_failed`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503':
+        description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

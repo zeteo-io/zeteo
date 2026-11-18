@@ -1,0 +1,77 @@
+/v1/file-sources/{sourceId}/tables/{tableId}:
+  parameters:
+    - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    - $ref: '../../components/parameters.yaml#/TableIdParam'
+  put:
+    tags: [File sources]
+    summary: Re-upload a table's data
+    description: |
+      Replaces the table's data from a staged table. Columns are matched by normalized name:
+      matched columns keep their id and grants, new ones are added, absent ones get
+      `missing_since`. The swap is one transaction, so a reader sees the old data or the new,
+      never an empty or partial table. A `zeteo.file_source.reuploaded` audit entry is written.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+    operationId: reuploadFileSourceTable
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/file-sources/schemas.yaml#/ReuploadTableRequest'
+    responses:
+      '200':
+        description: The file source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/FileSource'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '409':
+        description: Conflict - `quota_exceeded`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413':
+        description: Payload too large - `file_too_large`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `cast_failed`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503':
+        description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+  delete:
+    tags: [File sources]
+    summary: Remove a table from a file source
+    description: |
+      Drops the table's data; its catalogue row stays, marked missing.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+    operationId: deleteFileSourceTable
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503':
+        description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

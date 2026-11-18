@@ -6,6 +6,11 @@
       A table with its columns (in position order) and the relations that start at it, including
       declared ones and ones a refresh marked missing.
 
+      **File-source owners:** the owner of a file source is admitted here for its own tables and
+      relations without `zeteo.sources.write`; `PATCH /v1/sources/{sourceId}` on a file source
+      accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
+      delete it through `/v1/file-sources`.
+
       **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
 
       **Errors:** `404 not_found` for an unknown table or one of another source.

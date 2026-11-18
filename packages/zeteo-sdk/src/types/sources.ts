@@ -45,7 +45,9 @@ export interface Source {
   slug: string;
   name: string;
   type: SourceType;
-  /** Redacted; null when the stored settings cannot be decrypted. */
+  /** A file source's owner; null for a database source. */
+  owner_id: string | null;
+  /** Redacted; null for a file source or when the stored settings cannot be decrypted. */
   settings: Record<string, unknown> | null;
   schemas: string[];
   timeout_ms: number;

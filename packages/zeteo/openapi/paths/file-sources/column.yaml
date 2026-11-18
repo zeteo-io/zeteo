@@ -1,0 +1,53 @@
+/v1/file-sources/{sourceId}/tables/{tableId}/columns/{columnId}:
+  parameters:
+    - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    - $ref: '../../components/parameters.yaml#/TableIdParam'
+    - name: columnId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  patch:
+    tags: [File sources]
+    summary: Retype, rename or describe a column
+    description: |
+      Changes a column's type (the data is cast; values that do not fit are `422 cast_failed`,
+      naming the column and the first rows), its name, or its description.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+    operationId: updateFileSourceColumn
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/file-sources/schemas.yaml#/UpdateFileColumnRequest'
+    responses:
+      '200':
+        description: The file source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/FileSource'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '409':
+        description: Conflict - `name_taken`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `cast_failed`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503':
+        description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

@@ -26,6 +26,8 @@ export interface VisibleTable {
   kind: SourceTable["kind"];
   description: string | null;
   missing: boolean;
+  /** When a file source's table was last loaded; null for a database source. */
+  lastSyncedAt: Date | null;
   columns: VisibleColumn[];
 }
 
@@ -93,6 +95,7 @@ export const buildVisibleCatalog = (
       kind: table.kind,
       description: table.description,
       missing: table.missingSince !== null,
+      lastSyncedAt: table.lastSyncedAt,
       columns: granted.map((c) => ({
         id: c.id,
         name: c.name,

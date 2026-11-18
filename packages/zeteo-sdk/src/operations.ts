@@ -2,6 +2,32 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export const OPERATIONS = {
   getHealth: { method: "GET", path: "/health" },
+  uploadFile: { method: "POST", path: "/v1/file-sources/uploads" },
+  listFileSources: { method: "GET", path: "/v1/file-sources" },
+  createFileSource: { method: "POST", path: "/v1/file-sources" },
+  getFileSource: { method: "GET", path: "/v1/file-sources/{sourceId}" },
+  updateFileSource: { method: "PATCH", path: "/v1/file-sources/{sourceId}" },
+  deleteFileSource: { method: "DELETE", path: "/v1/file-sources/{sourceId}" },
+  addFileSourceTables: {
+    method: "POST",
+    path: "/v1/file-sources/{sourceId}/tables",
+  },
+  reuploadFileSourceTable: {
+    method: "PUT",
+    path: "/v1/file-sources/{sourceId}/tables/{tableId}",
+  },
+  deleteFileSourceTable: {
+    method: "DELETE",
+    path: "/v1/file-sources/{sourceId}/tables/{tableId}",
+  },
+  updateFileSourceColumn: {
+    method: "PATCH",
+    path: "/v1/file-sources/{sourceId}/tables/{tableId}/columns/{columnId}",
+  },
+  transferFileSource: {
+    method: "POST",
+    path: "/v1/file-sources/{sourceId}/transfer",
+  },
   listSources: { method: "GET", path: "/v1/sources" },
   createSource: { method: "POST", path: "/v1/sources" },
   getSource: { method: "GET", path: "/v1/sources/{sourceId}" },

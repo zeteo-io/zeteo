@@ -14,7 +14,7 @@ PrincipalStatus:
 Grant:
   type: object
   description: What one user or group may query of one table
-  required: [id, principal_type, principal_id, principal_status, source, table, all_columns, columns, created_by, created_at, updated_at]
+  required: [id, principal_type, principal_id, principal_status, source, table, all_columns, columns, owner_grant, created_by, created_at, updated_at]
   properties:
     id: { type: string, format: uuid }
     principal_type: { $ref: '#/PrincipalType' }
@@ -47,6 +47,9 @@ Grant:
           id: { type: string, format: uuid }
           name: { type: string }
           missing: { type: boolean, description: The last refresh no longer found the column; the grant is kept }
+    owner_grant:
+      type: boolean
+      description: The owner's grant on a table of their file source. It is an ordinary all-columns user grant that cannot be removed or narrowed (`409 owner_grant_locked`); transfer the file source instead
     created_by: { type: string, format: uuid }
     created_at: { type: string, format: date-time }
     updated_at: { type: string, format: date-time }

@@ -3,6 +3,7 @@
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
+import { prisma } from "../../utils/db/prisma.js";
 import { ENGINES } from "../support/engines.js";
 import { randomUUID } from "crypto";
 import {
@@ -49,6 +50,7 @@ describe("MCP discovery tools", () => {
       slug: source.slug,
       name: "Sales",
       type: "postgres",
+      kind: "database",
       language: expect.any(String),
       tables: 2,
       limits: {
@@ -58,6 +60,37 @@ describe("MCP discovery tools", () => {
         timeout_ms: expect.any(Number),
         max_joins: 4,
       },
+    });
+  });
+
+  it("list_tables and describe_table show the as-of time of a table that has one", async () => {
+    const at = new Date("2026-11-17T10:00:00.000Z");
+    await prisma.sourceTable.update({
+      where: { id: source.tables.customers!.id },
+      data: { lastSyncedAt: at },
+    });
+    const listed = await callTool(session.client, "list_tables", {
+      source: source.slug,
+    });
+    expect(
+      listed.json.tables.map(
+        (t: { name: string; last_synced_at: string | null }) => [
+          t.name,
+          t.last_synced_at,
+        ]
+      )
+    ).toEqual([
+      ["customers", at.toISOString()],
+      ["orders", null],
+    ]);
+    const described = await callTool(session.client, "describe_table", {
+      source: source.slug,
+      table: "customers",
+    });
+    expect(described.json.table.last_synced_at).toBe(at.toISOString());
+    await prisma.sourceTable.update({
+      where: { id: source.tables.customers!.id },
+      data: { lastSyncedAt: null },
     });
   });
 
@@ -75,6 +108,7 @@ describe("MCP discovery tools", () => {
           kind: "table",
           description: null,
           missing: false,
+          last_synced_at: null,
           columns: 2,
         },
         {
@@ -83,6 +117,7 @@ describe("MCP discovery tools", () => {
           kind: "table",
           description: null,
           missing: false,
+          last_synced_at: null,
           columns: 3,
         },
       ],
@@ -103,6 +138,7 @@ describe("MCP discovery tools", () => {
         kind: "table",
         description: null,
         missing: false,
+        last_synced_at: null,
         columns: [
           {
             name: "id",

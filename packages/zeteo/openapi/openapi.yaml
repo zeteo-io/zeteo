@@ -116,6 +116,8 @@ security:
 tags:
   - name: Sources
     description: Databases registered with Zeteo
+  - name: File sources
+    description: Upload CSV and xlsx files into file sources their owners manage and grant
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -130,7 +132,7 @@ tags:
     description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
-    tags: [Sources, Catalogue]
+    tags: [Sources, File sources, Catalogue]
   - name: Access
     tags: [Grants]
   - name: Querying
@@ -184,6 +186,20 @@ paths:
     $ref: './paths/queries/my-runs.yaml#/~1v1~1me~1runs'
   /v1/me/principals:
     $ref: './paths/principals/my-principals.yaml#/~1v1~1me~1principals'
+  /v1/file-sources/uploads:
+    $ref: './paths/file-sources/uploads.yaml#/~1v1~1file-sources~1uploads'
+  /v1/file-sources:
+    $ref: './paths/file-sources/file-sources.yaml#/~1v1~1file-sources'
+  /v1/file-sources/{sourceId}:
+    $ref: './paths/file-sources/file-source.yaml#/~1v1~1file-sources~1{sourceId}'
+  /v1/file-sources/{sourceId}/tables:
+    $ref: './paths/file-sources/tables.yaml#/~1v1~1file-sources~1{sourceId}~1tables'
+  /v1/file-sources/{sourceId}/tables/{tableId}:
+    $ref: './paths/file-sources/table.yaml#/~1v1~1file-sources~1{sourceId}~1tables~1{tableId}'
+  /v1/file-sources/{sourceId}/tables/{tableId}/columns/{columnId}:
+    $ref: './paths/file-sources/column.yaml#/~1v1~1file-sources~1{sourceId}~1tables~1{tableId}~1columns~1{columnId}'
+  /v1/file-sources/{sourceId}/transfer:
+    $ref: './paths/file-sources/transfer.yaml#/~1v1~1file-sources~1{sourceId}~1transfer'
   /v1/saved-queries:
     $ref: './paths/saved-queries/saved-queries.yaml#/~1v1~1saved-queries'
   /v1/saved-queries/{savedQueryId}:
@@ -377,6 +393,40 @@ components:
       $ref: './components/queries/schemas.yaml#/DiscoveredSource'
     CatalogResponse:
       $ref: './components/queries/schemas.yaml#/CatalogResponse'
+    FileColumnType:
+      $ref: './components/file-sources/schemas.yaml#/FileColumnType'
+    FileColumnName:
+      $ref: './components/file-sources/schemas.yaml#/FileColumnName'
+    StagedColumn:
+      $ref: './components/file-sources/schemas.yaml#/StagedColumn'
+    StagedTable:
+      $ref: './components/file-sources/schemas.yaml#/StagedTable'
+    UploadResponse:
+      $ref: './components/file-sources/schemas.yaml#/UploadResponse'
+    ColumnCorrection:
+      $ref: './components/file-sources/schemas.yaml#/ColumnCorrection'
+    TableCorrection:
+      $ref: './components/file-sources/schemas.yaml#/TableCorrection'
+    CreateFileSourceRequest:
+      $ref: './components/file-sources/schemas.yaml#/CreateFileSourceRequest'
+    AddTablesRequest:
+      $ref: './components/file-sources/schemas.yaml#/AddTablesRequest'
+    ReuploadTableRequest:
+      $ref: './components/file-sources/schemas.yaml#/ReuploadTableRequest'
+    UpdateFileSourceRequest:
+      $ref: './components/file-sources/schemas.yaml#/UpdateFileSourceRequest'
+    UpdateFileColumnRequest:
+      $ref: './components/file-sources/schemas.yaml#/UpdateFileColumnRequest'
+    TransferFileSourceRequest:
+      $ref: './components/file-sources/schemas.yaml#/TransferFileSourceRequest'
+    FileSourceColumn:
+      $ref: './components/file-sources/schemas.yaml#/FileSourceColumn'
+    FileSourceTable:
+      $ref: './components/file-sources/schemas.yaml#/FileSourceTable'
+    FileSource:
+      $ref: './components/file-sources/schemas.yaml#/FileSource'
+    ListFileSourcesResponse:
+      $ref: './components/file-sources/schemas.yaml#/ListFileSourcesResponse'
     SavedQuery:
       $ref: './components/saved-queries/schemas.yaml#/SavedQuery'
     ListSavedQueriesResponse:

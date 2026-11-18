@@ -41,6 +41,8 @@ export const visibleCatalogView = (
     slug: source.slug,
     name: source.name,
     type: source.type,
+    kind:
+      source.type === "upload" ? ("upload" as const) : ("database" as const),
     language: {
       id: language.id,
       schema: languageSchema,
@@ -65,6 +67,7 @@ export const visibleCatalogView = (
       kind: table.kind,
       description: table.description,
       missing: table.missing,
+      last_synced_at: table.lastSyncedAt?.toISOString() ?? null,
       columns: table.columns.map((c) => ({
         name: c.name,
         type: c.type,

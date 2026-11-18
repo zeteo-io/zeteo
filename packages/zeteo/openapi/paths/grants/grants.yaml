@@ -6,6 +6,14 @@
       Lists grants in creation order, optionally only those of one principal, table or source.
       Each grant's `principal_status` is looked up once per distinct principal.
 
+      **File-source owners:** the owner of a file source is admitted here for grants on its own
+      tables (and `source_id` filters to a source they own) without `zeteo.grants.*`; for anyone
+      else's table, or a database source's, the answer is the same `403 forbidden` as ever. An
+      owner's `group` grants must be to groups that are global or of their signed-in organization
+      (`422 group_not_allowed`; saved-query shares answer `400 invalid_share` instead, a deliberate
+      difference). The owner's own grant has `owner_grant: true` and cannot be removed or narrowed
+      (`409 owner_grant_locked`).
+
       **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
     operationId: listGrants
     parameters:

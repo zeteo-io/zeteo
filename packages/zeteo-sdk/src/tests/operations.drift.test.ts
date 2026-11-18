@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 71 operations as the description", () => {
+  it("lists the same 82 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(71);
-    expect(Object.keys(found)).toHaveLength(71);
+    expect(blocks).toBe(82);
+    expect(Object.keys(found)).toHaveLength(82);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -182,6 +182,52 @@ describe("operations against the API description", () => {
       [
         "principals.lookup",
         (c) => c.principals.lookup([{ type: "user", id: ID }]),
+      ],
+      [
+        "fileSources.upload",
+        (c) => c.fileSources.upload(new Blob(["a,b\n1,2\n"]), "a.csv"),
+      ],
+      ["fileSources.list", (c) => c.fileSources.list({ scope: "all" })],
+      [
+        "fileSources.create",
+        (c) =>
+          c.fileSources.create({
+            staging_id: ID,
+            name: "People",
+            tables: [{ key: "csv" }],
+          }),
+      ],
+      ["fileSources.get", (c) => c.fileSources.get(ID)],
+      ["fileSources.rename", (c) => c.fileSources.rename(ID, "n")],
+      ["fileSources.delete", (c) => c.fileSources.delete(ID)],
+      [
+        "fileSources.transfer",
+        (c) => c.fileSources.transfer(ID, { user_id: ID2 }),
+      ],
+      [
+        "fileSources.tables.add",
+        (c) =>
+          c.fileSources.tables.add(ID, {
+            staging_id: ID2,
+            tables: [{ key: "csv" }],
+          }),
+      ],
+      [
+        "fileSources.tables.reupload",
+        (c) =>
+          c.fileSources.tables.reupload(ID, ID2, {
+            staging_id: ID,
+            key: "csv",
+          }),
+      ],
+      [
+        "fileSources.tables.delete",
+        (c) => c.fileSources.tables.delete(ID, ID2),
+      ],
+      [
+        "fileSources.tables.columns.update",
+        (c) =>
+          c.fileSources.tables.columns.update(ID, ID2, ID, { type: "text" }),
       ],
       ["sources.list", (c) => c.sources.list()],
       [
