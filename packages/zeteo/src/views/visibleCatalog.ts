@@ -40,6 +40,7 @@ export const visibleCatalogView = (
   return {
     slug: source.slug,
     name: source.name,
+    description: source.description,
     type: source.type,
     kind:
       source.type === "upload" ? ("upload" as const) : ("database" as const),

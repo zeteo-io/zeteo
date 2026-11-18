@@ -1,0 +1,12 @@
+{
+  "name": "zeteo",
+  "owner": { "name": "Zeteo" },
+  "plugins": [
+    {
+      "name": "zeteo",
+      "version": "0.1.0",
+      "description": "Query the organization's databases through zeteo over MCP: the query language, saved queries, dashboards and charts.",
+      "source": "./plugins/zeteo"
+    }
+  ]
+}

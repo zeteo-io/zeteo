@@ -51,6 +51,8 @@ export interface CreateUploadSourceRequest {
   type: "upload";
   staging_id: string;
   name: string;
+  /** What the source holds, at most 500 characters; trimmed. */
+  description?: string;
   /** Generated from the name when omitted. */
   slug?: string;
   /** 1 to 100 staged tables, with any corrections. */

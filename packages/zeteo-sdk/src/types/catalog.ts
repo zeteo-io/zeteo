@@ -41,6 +41,8 @@ export interface DiscoveredSource {
   /** What a query's `source` names. */
   slug: string;
   name: string;
+  /** What the source holds; empty when none was given. */
+  description: string;
   type: SourceType;
   /** `upload` for an upload source. */
   kind: "database" | "upload";

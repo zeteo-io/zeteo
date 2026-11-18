@@ -14,6 +14,10 @@ import { slugify } from "@/utils/slugify";
 import { MY_DATA_HREF } from "./labels";
 import "./styles.css";
 import {
+  descriptionProblem,
+  DescriptionField,
+} from "../../components/DescriptionField";
+import {
   BorderedSection,
   Button,
   FileDropZone,
@@ -102,6 +106,8 @@ const AddData = ({ mode }: { mode: Mode }) => {
   const [staging, setStaging] = useState<Staging | null>(null);
   const [edits, setEdits] = useState<Edits>({});
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [submitted, setSubmitted] = useState(false);
   const [slug, setSlug] = useState("");
   // The slug follows the name until it is edited by hand.
   const [slugEdited, setSlugEdited] = useState(false);
@@ -157,9 +163,14 @@ const AddData = ({ mode }: { mode: Mode }) => {
     !!staging &&
     editsValid(staging.tables, edits) &&
     (mode.kind !== "create" || (name.trim() !== "" && !slugProblem));
+  const descriptionError = descriptionProblem(description);
 
   const submit = () => {
     if (!staging || !ready || mutation.isPending) return;
+    if (mode.kind === "create" && descriptionError) {
+      setSubmitted(true);
+      return;
+    }
     const kept = staging.tables
       .filter((t) => edits[t.key]?.keep)
       .map((t) => correctionOf(t, edits[t.key]!));
@@ -173,6 +184,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
         {
           staging_id: staging.staging_id,
           name: name.trim(),
+          ...(description.trim() && { description: description.trim() }),
           ...(slug && { slug }),
           tables: kept,
         },
@@ -277,6 +289,14 @@ const AddData = ({ mode }: { mode: Mode }) => {
                   }}
                 />
               </FormGrid>
+              <DescriptionField
+                value={description}
+                error={submitted ? descriptionError : undefined}
+                onChange={(value) => {
+                  setDescription(value);
+                  setSubmitted(false);
+                }}
+              />
             </BorderedSection>
           )}
           <PreviewEditor

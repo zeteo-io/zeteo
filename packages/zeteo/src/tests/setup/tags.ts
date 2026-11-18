@@ -21,6 +21,7 @@ export const ASPECTS = [
   "files",
   "size",
   "rows",
+  "plugin",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

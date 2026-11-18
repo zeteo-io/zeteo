@@ -1,6 +1,5 @@
 import { validateBody, validateParams } from "../../../../utils/validateReq.js";
 import { SOURCES_WRITE } from "../../../../definitions/tereoDeclaration.js";
-import { updateSource as update } from "../../../../sources/service.js";
 import { SourceParamsSchema, UpdateSourceSchema } from "./schemas.js";
 import { refreshAfterChange } from "../../../../catalog/refresh.js";
 import { hasPermission } from "../../../../utils/permissions.js";
@@ -11,8 +10,12 @@ import { callerOf } from "../../../../middleware/auth.js";
 import { db } from "../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import {
+  UPLOAD_SOURCE_FIELDS,
+  updateSource as update,
+} from "../../../../sources/service.js";
+import {
   deleteUploadSource,
-  renameUploadSource,
+  changeUploadSource,
 } from "../../../../uploads/service.js";
 import {
   presentSource,
@@ -26,8 +29,8 @@ export const getSource = async (req: Request, res: Response) => {
 
 /**
  * An admin changes any source. An upload source's owner may only rename it
- * (as may an admin, recorded as a change of the upload source); its limits
- * are an admin's.
+ * or change its description (as may an admin, recorded as a change of the
+ * upload source); its limits are an admin's.
  */
 export const updateSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
@@ -37,10 +40,17 @@ export const updateSource = async (req: Request, res: Response) => {
   if (!row) throw new NotFoundError("Source not found");
   if (
     isUploadSource(row) &&
-    body.name !== undefined &&
-    Object.keys(body).length === 1
+    Object.keys(body).every((key) =>
+      UPLOAD_SOURCE_FIELDS.has(key as keyof typeof body)
+    )
   ) {
-    res.status(200).json(await renameUploadSource(caller, sourceId, body.name));
+    const { name, description } = body;
+    res.status(200).json(
+      await changeUploadSource(caller, sourceId, {
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+      })
+    );
     return;
   }
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {

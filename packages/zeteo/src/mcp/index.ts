@@ -5,6 +5,7 @@ import { defineDashboardTools } from "./dashboardTools.js";
 import { MCP_INSTRUCTIONS } from "./instructions.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
+import { defineGuideTool } from "./guideTool.js";
 import { getTereo } from "../utils/tereo.js";
 import { rateLimitRedis } from "./redis.js";
 import { logger } from "../utils/logger.js";
@@ -54,6 +55,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   });
   defineDiscoveryTools(mcp);
   defineQueryTool(mcp);
+  defineGuideTool(mcp);
   defineSavedQueryTools(mcp);
   defineSavedPanelTools(mcp);
   defineDashboardTools(mcp);

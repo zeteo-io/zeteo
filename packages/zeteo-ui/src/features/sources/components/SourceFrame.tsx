@@ -15,6 +15,7 @@ interface SourceFrameProps {
   /** The source's own address: `/sources/<id>`. */
   baseHref: string;
   name: string;
+  description?: string;
   slug: string;
   /** What kind of source: "PostgreSQL", "Upload"… */
   kind: string;
@@ -31,6 +32,7 @@ interface SourceFrameProps {
 export const SourceFrame = ({
   baseHref,
   name,
+  description,
   slug,
   kind,
   status,
@@ -58,6 +60,7 @@ export const SourceFrame = ({
           actions={actions}
           divider={false}
         />
+        {description && <p className="z-source-description">{description}</p>}
       </div>
       {notices}
       <nav className="z-source-tabs" aria-label="Source">

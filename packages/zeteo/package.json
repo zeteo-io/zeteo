@@ -13,6 +13,7 @@
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
     "test": "../../docker/test/run.sh",
     "tereo:provisioning": "tsx scripts/tereo-provisioning.ts",
+    "plugin:reference": "tsx scripts/plugin-reference.ts",
     "openapi:lint": "redocly lint",
     "openapi:build": "redocly lint && redocly bundle",
     "test:unit": "vitest run --project unit",

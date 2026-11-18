@@ -31,6 +31,8 @@ export interface Source {
   id: string;
   slug: string;
   name: string;
+  /** What the source holds, up to 500 characters; "" when unset. */
+  description: string;
   type: SourceType;
   /** Redacted (no `password`, no `ca`); null when the stored settings cannot be decrypted. */
   settings: Record<string, unknown> | null;
@@ -71,15 +73,17 @@ interface SourceLimits {
 export interface CreateSource extends SourceLimits {
   slug: string;
   name: string;
+  description?: string;
   type: SourceType;
   settings: SourceSettings;
   schemas: string[];
   allow_writable_login?: boolean;
 }
 
-/** An upload's owner may send only `name`; a sources admin the limits too. */
+/** An upload's owner may send only `name` and `description`; a sources admin the limits too. */
 export interface UpdateSource extends SourceLimits {
   name?: string;
+  description?: string;
   settings?: SourceSettings;
   schemas?: string[];
   /** Accepted only together with `settings`. */

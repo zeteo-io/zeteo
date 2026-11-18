@@ -8,6 +8,7 @@ export const SourceParamsSchema = z.object({ sourceId: IdSchema });
 export const UpdateSourceSchema = z
   .strictObject({
     name: SourceFieldsShape.name.optional(),
+    description: SourceFieldsShape.description.optional(),
     settings: SourceFieldsShape.settings.optional(),
     schemas: SourceFieldsShape.schemas.optional(),
     allow_writable_login: SourceFieldsShape.allow_writable_login.optional(),

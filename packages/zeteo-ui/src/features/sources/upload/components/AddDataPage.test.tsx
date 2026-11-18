@@ -1,5 +1,5 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AddDataPage, AddTablesPage, ReuploadPage } from "./AddDataPage";
-import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { optionTexts, pickOption } from "@/test/searchSelect";
 import { renderWithProviders } from "@/test/render";
@@ -209,6 +209,49 @@ describe("AddDataPage", () => {
       },
     ]);
     expect(await screen.findByText("Source page")).toBeInTheDocument();
+  });
+
+  it("sends a typed description with the new source", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.type(
+      screen.getByRole("textbox", { name: "Description" }),
+      "  Quarterly sales.  "
+    );
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][1]).toMatchObject({
+      name: "Q3 sales",
+      description: "Quarterly sales.",
+    });
+  });
+
+  it("sends no description when it is left empty", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.type(screen.getByRole("textbox", { name: "Description" }), "  ");
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][1]).not.toHaveProperty("description");
+  });
+
+  it("refuses a description over 500 characters and sends nothing", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
+      target: { value: "x".repeat(501) },
+    });
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    expect(
+      await screen.findByText(/at most 500 characters/)
+    ).toBeInTheDocument();
+    expect(post).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a column name the query language cannot take", async () => {

@@ -61,6 +61,31 @@ describe("/v1/sources", () => {
     expect(res.body.settings).not.toHaveProperty("ca");
   });
 
+  it("keeps a description given at create and changed by update", async () => {
+    const res = await create({ description: "Sales orders and customers" });
+    expect(res.status).toBe(201);
+    expect(res.body.description).toBe("Sales orders and customers");
+    const read = await get(`/${res.body.id}`);
+    expect(read.body.description).toBe("Sales orders and customers");
+
+    const patched = await fetchJson(
+      "PATCH",
+      `${app.url}/v1/sources/${res.body.id}`,
+      writeToken(),
+      { description: "" }
+    );
+    expect(patched.status).toBe(200);
+    expect(patched.body.description).toBe("");
+    const updates = (await auditRows(res.body.id)).filter(
+      (r) => r.payload.metadata.event === "zeteo.source.updated"
+    );
+    expect(updates).toHaveLength(1);
+    expect(updates[0].payload.metadata.changed).toEqual(["description"]);
+
+    const without = await create();
+    expect(without.body.description).toBe("");
+  });
+
   it("stores the settings sealed, with no plaintext password", async () => {
     const res = await create();
     const row = await prisma.source.findUniqueOrThrow({

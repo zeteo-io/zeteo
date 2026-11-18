@@ -1,8 +1,8 @@
 // @module-tag int
 // @module-tag platform
+import { auditRows, removeSources } from "../../../../support/sources.js";
 import { postQuery, removeRunsOf } from "../../../../support/queries.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { removeSources } from "../../../../support/sources.js";
 import { registerSource } from "../../../../support/grants.js";
 import { startV1Routes } from "../../../../support/v1App.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
@@ -26,6 +26,7 @@ import {
   schemaExists,
   seedUploadSource,
   sourcesCall,
+  stageFile,
 } from "../../../../support/uploads.js";
 
 const ownerId = randomUUID();
@@ -187,6 +188,48 @@ describe("/v1/sources/:sourceId (upload)", () => {
     expect(byAdmin.body.name).toBe("By admin");
     const bad = await call("PATCH", `/${source.id}`, owner, { slug: "x" });
     expect(bad.status).toBe(400);
+  });
+
+  it("keeps a description given at create, changed by the owner or an admin", async () => {
+    const staged = await stageFile(ownerId, CSV);
+    const created = await call("POST", "", owner, {
+      type: "upload",
+      staging_id: staged.stagingId,
+      name: "Described",
+      description: "Orders exported from the shop",
+      tables: [{ key: "csv", name: "data" }],
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.description).toBe("Orders exported from the shop");
+    const read = await call("GET", `/${created.body.id}`, owner);
+    expect(read.body.description).toBe("Orders exported from the shop");
+
+    const byOwner = await call("PATCH", `/${created.body.id}`, owner, {
+      name: "Shop orders",
+      description: "  Orders from the shop  ",
+    });
+    expect(byOwner.status).toBe(200);
+    expect(byOwner.body).toMatchObject({
+      name: "Shop orders",
+      description: "Orders from the shop",
+    });
+    const byAdmin = await call("PATCH", `/${created.body.id}`, admin, {
+      description: "",
+      row_cap: 5,
+    });
+    expect(byAdmin.status).toBe(200);
+    expect(byAdmin.body).toMatchObject({ description: "", row_cap: 5 });
+
+    const updates = (await auditRows(created.body.id)).filter(
+      (r) => r.payload.metadata.event === "zeteo.source.updated"
+    );
+    expect(updates.map((r) => r.payload.metadata.changed)).toEqual([
+      ["name", "description"],
+      ["description", "row_cap"],
+    ]);
+
+    const without = await make();
+    expect(without.description).toBe("");
   });
 
   it("PATCH refuses the owner its limits, which are an admin's", async () => {

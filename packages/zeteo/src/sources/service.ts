@@ -30,6 +30,7 @@ import {
 /** The fields a caller may set on a source, as the API names them. */
 export interface SourceFields {
   name: string;
+  description: string;
   settings: unknown;
   schemas: string[];
   allow_writable_login: boolean;
@@ -53,7 +54,7 @@ export type CreateSourceInput = Pick<
 
 export type UpdateSourceInput = Partial<SourceFields>;
 
-/** The per-source limits: the only fields a change of an upload source may set here. */
+/** The per-source limits. */
 const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
   "timeout_ms",
   "row_cap",
@@ -64,9 +65,19 @@ const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
   "export_concurrency",
 ]);
 
+/**
+ * What an upload source's owner may change, as may an admin; an upload source
+ * takes these and the limits, never settings or schemas.
+ */
+export const UPLOAD_SOURCE_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
+  "name",
+  "description",
+]);
+
 /** Columns for the optional fields a caller gave. */
 const optionalColumns = (input: Partial<SourceFields>) => ({
   ...(input.name !== undefined && { name: input.name }),
+  ...(input.description !== undefined && { description: input.description }),
   ...(input.schemas !== undefined && { schemas: input.schemas }),
   ...(input.timeout_ms !== undefined && { timeoutMs: input.timeout_ms }),
   ...(input.row_cap !== undefined && { rowCap: input.row_cap }),
@@ -219,12 +230,14 @@ export const updateSource = async (
 ): Promise<Source> => {
   const row = await db.sources.findById(id);
   if (!row) throw new NotFoundError("Source not found");
-  // An upload source's name and limits are an admin's, as a database
-  // source's; its settings and schemas are managed through its uploads.
+  // An upload source's name, description and limits are an admin's, as a
+  // database source's; its settings and schemas are managed through its uploads.
   if (
     isUploadSource(row) &&
     Object.keys(input).some(
-      (key) => key !== "name" && !LIMIT_FIELDS.has(key as keyof SourceFields)
+      (key) =>
+        !UPLOAD_SOURCE_FIELDS.has(key as keyof SourceFields) &&
+        !LIMIT_FIELDS.has(key as keyof SourceFields)
     )
   ) {
     throw new NotADatabaseSourceError();

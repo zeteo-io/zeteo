@@ -6,6 +6,7 @@ export const makeSource = (over: Partial<Source> = {}): Source => ({
   id: SOURCE_ID,
   slug: "orders",
   name: "Orders DB",
+  description: "",
   type: "postgres",
   settings: {
     host: "db.example.test",

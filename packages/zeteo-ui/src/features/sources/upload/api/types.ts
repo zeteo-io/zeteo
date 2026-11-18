@@ -55,6 +55,7 @@ export interface CreateUploadSource {
   type: "upload";
   staging_id: string;
   name: string;
+  description?: string;
   slug?: string;
   tables: TableCorrection[];
 }

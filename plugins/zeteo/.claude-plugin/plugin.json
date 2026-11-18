@@ -1,0 +1,14 @@
+{
+  "name": "zeteo",
+  "version": "0.1.0",
+  "description": "Query the organization's databases through zeteo over MCP: the query language, saved queries, dashboards and charts.",
+  "license": "Apache-2.0",
+  "userConfig": {
+    "mcp_url": {
+      "type": "string",
+      "required": true,
+      "title": "Zeteo MCP URL",
+      "description": "The address of your zeteo's MCP endpoint, https://<your zeteo>/mcp"
+    }
+  }
+}

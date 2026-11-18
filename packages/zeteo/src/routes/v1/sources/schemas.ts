@@ -29,6 +29,8 @@ const SchemaNameSchema = z
 /** The fields a create sets and an update may change, other than `slug` and `type`. */
 export const SourceFieldsShape = {
   name: noNul(z.string().trim().min(1).max(255)),
+  /** What the source holds, for the people and the AI that query it; empty clears it. */
+  description: noNul(z.string().trim().max(500)),
   // The adapter of the source's type validates the contents.
   settings: z.record(z.string(), z.unknown()),
   schemas: z
@@ -57,6 +59,7 @@ export const CreateSourceSchema = z.strictObject({
   slug: SlugSchema,
   type: z.enum(["postgres", "azure-sql"]),
   name: SourceFieldsShape.name,
+  description: SourceFieldsShape.description.optional(),
   settings: SourceFieldsShape.settings,
   schemas: SourceFieldsShape.schemas,
   allow_writable_login: SourceFieldsShape.allow_writable_login.optional(),
@@ -118,6 +121,7 @@ export const CreateUploadSourceSchema = z.strictObject({
   type: z.literal("upload"),
   staging_id: IdSchema,
   name: SourceFieldsShape.name,
+  description: SourceFieldsShape.description.optional(),
   slug: SlugSchema.optional(),
   tables: TablesSchema,
 });

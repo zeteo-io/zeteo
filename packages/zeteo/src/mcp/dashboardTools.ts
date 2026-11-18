@@ -3,6 +3,7 @@ import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import type { DashboardView } from "../views/dashboard.js";
 import { chartSchema } from "../dashboards/chart.js";
 import { NotFoundError } from "../utils/errors.js";
+import { CHART_SUMMARY } from "./reference.js";
 import type { TereoMcp } from "@tereo-io/mcp";
 import { requireDataRead } from "./caller.js";
 import { db } from "../utils/db/index.js";
@@ -163,8 +164,7 @@ export const defineDashboardTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "add_panel",
     title: "Add a panel",
-    description:
-      "Add a panel to a dashboard you own: a saved query shown as a chart. Check the chart with preview_panel first. Leave x, y, w and h out to place it in the first free cell at its chart's default size. Returns the panel; what is wrong with the chart or time_column is told as problems.",
+    description: `Add a panel to a dashboard you own: a saved query shown as a chart. Requires dashboard_id, saved_query_id and chart. ${CHART_SUMMARY} time_column, a date or timestamp column path, makes the panel follow the dashboard's time range. Check the chart with preview_panel first. Leave x, y, w and h out to place it in the first free cell at its chart's default size. Returns the panel; what is wrong with the chart or time_column is told as problems. Call query_guide for chart and placement rules.`,
     permission: MCP_USE,
     readOnly: false,
     destructive: false,

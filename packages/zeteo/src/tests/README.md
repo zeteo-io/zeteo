@@ -53,6 +53,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `files`       | upload sources: the same behaviour over an uploaded source              |
   | `size`        | a source's size, measured by a catalogue refresh                      |
   | `rows`        | a table's estimated rows, measured by a catalogue refresh             |
+  | `plugin`      | the Claude Code plugin's files generated from a module                |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

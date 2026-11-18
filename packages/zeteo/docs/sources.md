@@ -11,7 +11,7 @@ through these same routes, and a few apply to it alone ([uploads.md](uploads.md)
 | `POST /v1/sources` | `zeteo.sources.write` (`type: "upload"`: `zeteo.uploads.write`) | `201`, the source |
 | `GET /v1/sources` (`?include_archived=true`, `type`, `owner_id`, `limit`, `cursor`) | `zeteo.sources.read`; with `owner_id=me`, also an owner holding `zeteo.uploads.write` | `{ data, next_cursor }` |
 | `GET /v1/sources/:sourceId` | `zeteo.sources.read`, or the owner of the upload source | the source |
-| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write`; the owner of an upload source for `name` alone | the source |
+| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write`; the owner of an upload source for `name` and `description` alone | the source |
 | `DELETE /v1/sources/:sourceId` | an upload source only: `zeteo.sources.write`, or its owner | `204` ([uploads.md](uploads.md)) |
 | `POST /v1/sources/:sourceId/transfer` | an upload source only: `zeteo.sources.write`, or its owner | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
@@ -27,11 +27,14 @@ and column routes) are `409 not_an_upload_source` on a database source.
 
 ## The source
 
-`{ id, slug, name, type, settings, schemas, timeout_ms, row_cap, max_joins, export_enabled,
+`{ id, slug, name, description, type, settings, schemas, timeout_ms, row_cap, max_joins, export_enabled,
 export_row_cap, query_concurrency, export_concurrency, writable_login_allowed, status, last_refreshed_at,
 owner_id, size_bytes, size_measured_at, share_count, created_at, archived_at }`.
 
 - `slug`: `^[a-z][a-z0-9-]{1,62}$`, unique, fixed after create. `type` is fixed too.
+- `description`: what the source holds, for the people and the AI that query it; optional on a
+  create (of any type) and an update, trimmed, at most 500 characters, `""` when none was given or
+  cleared. `GET /v1/catalog` and MCP `list_sources` show it to everyone who may query the source.
 - `schemas`: 1 to 20 database schema names Zeteo exposes.
 - `size_bytes` and `size_measured_at`: the bytes on disk of the tables in `schemas`, measured by the
   last catalogue refresh ([catalog.md](catalog.md#refresh)), never when the source is read. Postgres
