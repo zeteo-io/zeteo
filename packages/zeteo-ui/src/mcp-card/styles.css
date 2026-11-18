@@ -1,0 +1,128 @@
+/* The preview card, drawn inside a chat by an MCP Apps host. Its height is
+   its content's (reported to the host), so nothing here sizes by the frame. */
+html,
+body,
+#root {
+  height: auto;
+}
+
+body {
+  background: var(--k-background-color);
+  color: var(--k-text-color);
+}
+
+.zc-root {
+  padding: 12px;
+}
+
+.zc-loading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.zc-message {
+  margin: auto;
+  padding: 12px;
+  max-width: 28rem;
+  text-align: center;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.zc-note {
+  margin: 0.25rem 0 0;
+  font-size: var(--k-text-size-sm);
+  color: var(--k-text-color-secondary);
+}
+
+.zc-muted {
+  font-size: var(--k-text-size-sm);
+  color: var(--k-text-color-secondary);
+}
+
+.zc-title {
+  margin: 0;
+  font-size: var(--k-text-size-lg, 1.125rem);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 12px;
+}
+
+.zc-head-text {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+/* The panel card: the chart at a fixed height under its title. */
+.zc-panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.zc-panel-card .zc-panel-chart {
+  height: 320px;
+}
+
+.zc-problems {
+  margin: 0;
+  padding-left: 1.25rem;
+  font-size: var(--k-text-size-sm);
+  color: var(--k-danger-color);
+}
+
+/* The dashboard card: the app's 12-column grid (columns and rows set inline),
+   or one panel per row when narrow. */
+.zc-grid {
+  display: grid;
+}
+
+.zc-grid[data-layout="stack"] {
+  display: flex;
+  flex-direction: column;
+}
+
+.zc-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid var(--k-border-color);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.zc-panel-title {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--k-border-color);
+  font-size: var(--k-text-size-md, 1rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.zc-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.75rem;
+}
+
+.zc-panel-body .zc-panel-chart {
+  flex: 1;
+  min-height: 0;
+}

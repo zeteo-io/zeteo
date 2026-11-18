@@ -9,7 +9,7 @@ import type { SavedPanel } from "../api/types";
 import { usePreview } from "../api/usePreview";
 import { usedByWarning } from "@/utils/usedBy";
 import { CHART_TYPES } from "./ChartFields";
-import { PANEL_COPY } from "./PanelFrame";
+import { PANEL_COPY } from "../panelCopy";
 import { Chart } from "../charts/Chart";
 import { useState } from "react";
 import "./styles.css";
