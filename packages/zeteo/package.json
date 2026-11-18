@@ -31,7 +31,7 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
-    "@tereo-io/mcp": "^0.1.1",
+    "@tereo-io/mcp": "^0.2.0",
     "@tereo-io/sdk": "^0.5.3",
     "busboy": "1.6.0",
     "cors": "^2.8.6",

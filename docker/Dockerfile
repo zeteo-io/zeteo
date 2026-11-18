@@ -47,6 +47,8 @@ RUN --mount=type=cache,target=/root/.npm,sharing=shared \
     npm ci --workspace=packages/zeteo-ui
 
 COPY packages/zeteo-ui/index.html packages/zeteo-ui/tsconfig.json packages/zeteo-ui/vite.config.ts ./packages/zeteo-ui/
+# The MCP preview card, built by the same `build` to dist-mcp/card.html.
+COPY packages/zeteo-ui/mcp-card.html packages/zeteo-ui/vite.mcp-card.config.ts ./packages/zeteo-ui/
 COPY packages/zeteo-ui/public ./packages/zeteo-ui/public/
 COPY packages/zeteo-ui/src ./packages/zeteo-ui/src/
 
@@ -79,6 +81,8 @@ COPY --from=build /app/packages/zeteo/dist ./packages/zeteo/dist
 # Served at / when UI_CLIENT_ID is set (UI_DIST_PATH's default). Root-owned
 # and world-readable: the service only reads it.
 COPY --from=ui --chmod=a+rX /app/packages/zeteo-ui/dist ./packages/zeteo-ui/dist
+# The MCP preview card (MCP_CARD_PATH's default), read once at start.
+COPY --from=ui --chmod=a+rX /app/packages/zeteo-ui/dist-mcp ./packages/zeteo-ui/dist-mcp
 
 COPY docker/migrate.sh ./packages/zeteo/
 

@@ -2,6 +2,12 @@ import GridLayout, { useContainerWidth, type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import type { Panel } from "../api/types";
 import type { ReactNode } from "react";
+import {
+  GRID_COLUMNS,
+  GRID_GAP,
+  GRID_ROW_HEIGHT,
+  MAX_PANEL_HEIGHT,
+} from "../grid";
 
 export interface Place {
   x: number;
@@ -9,11 +15,6 @@ export interface Place {
   w: number;
   h: number;
 }
-
-/** The grid's columns, as the server lays panels out. */
-export const GRID_COLUMNS = 12;
-/** The tallest a panel may be, in rows, as the server allows. */
-export const MAX_PANEL_HEIGHT = 24;
 
 interface DashboardGridProps {
   panels: Panel[];
@@ -48,7 +49,11 @@ export const DashboardGrid = ({
       <GridLayout
         width={width}
         layout={layout}
-        gridConfig={{ cols: GRID_COLUMNS, rowHeight: 80, margin: [12, 12] }}
+        gridConfig={{
+          cols: GRID_COLUMNS,
+          rowHeight: GRID_ROW_HEIGHT,
+          margin: [GRID_GAP, GRID_GAP],
+        }}
         dragConfig={{
           enabled: editing,
           handle: ".z-panel-head",

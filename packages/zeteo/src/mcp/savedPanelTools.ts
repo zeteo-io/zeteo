@@ -4,6 +4,7 @@ import { chartProblems, chartSchema } from "../dashboards/chart.js";
 import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import { withTimeFilter } from "../dashboards/timeRange.js";
+import { PANEL_CARD_URI, withCardNote } from "./card.js";
 import { QUERY_TOOL_TIMEOUT_MS } from "./queryTool.js";
 import { LIMIT_PROFILES } from "../engine/limits.js";
 import { NotFoundError } from "../utils/errors.js";
@@ -42,7 +43,7 @@ const forModel = <T extends { owner: { id: string; name: string | null } }>(
 };
 
 /** The tools for saved panels, and `preview_panel`, which checks a chart against a saved query's result. */
-export const defineSavedPanelTools = (mcp: TereoMcp): void => {
+export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
   mcp.define({
     name: "list_saved_panels",
     title: "List saved panels",
@@ -67,9 +68,13 @@ export const defineSavedPanelTools = (mcp: TereoMcp): void => {
 
   mcp.define({
     name: "get_saved_panel",
+    ...(cards && { ui: { resourceUri: PANEL_CARD_URI } }),
     title: "Get a saved panel",
-    description:
-      "Read one saved panel by id: its name, description, owner and, when you can run it, its chart, time_column and saved_query_id.",
+    description: withCardNote(
+      cards,
+      "panel",
+      "Read one saved panel by id: its name, description, owner and, when you can run it, its chart, time_column and saved_query_id."
+    ),
     permission: MCP_USE,
     readOnly: true,
     input: z.strictObject({ id: Id("The saved panel's id") }),
@@ -82,9 +87,13 @@ export const defineSavedPanelTools = (mcp: TereoMcp): void => {
 
   mcp.define({
     name: "create_saved_panel",
+    ...(cards && { ui: { resourceUri: PANEL_CARD_URI } }),
     title: "Save a panel",
-    description:
-      "Save a chart over a saved query under a name, to reuse on dashboards with link_saved_panel. Call it only when the user asks. The chart and time_column are checked as add_panel checks them.",
+    description: withCardNote(
+      cards,
+      "panel",
+      "Save a chart over a saved query under a name, to reuse on dashboards with link_saved_panel. Call it only when the user asks. The chart and time_column are checked as add_panel checks them."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -112,9 +121,13 @@ export const defineSavedPanelTools = (mcp: TereoMcp): void => {
 
   mcp.define({
     name: "update_saved_panel",
+    ...(cards && { ui: { resourceUri: PANEL_CARD_URI } }),
     title: "Change a saved panel",
-    description:
-      "Change the name, description, saved query, chart or time column of a saved panel you own. Only what you give changes, and every dashboard that links it shows the change.",
+    description: withCardNote(
+      cards,
+      "panel",
+      "Change the name, description, saved query, chart or time column of a saved panel you own. Only what you give changes, and every dashboard that links it shows the change."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -161,8 +174,13 @@ export const defineSavedPanelTools = (mcp: TereoMcp): void => {
 
   mcp.define({
     name: "preview_panel",
+    ...(cards && { ui: { resourceUri: PANEL_CARD_URI } }),
     title: "Preview a panel",
-    description: `Run a saved query you can see and check a chart against its result, before adding the panel. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A saved query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for chart and placement rules.`,
+    description: withCardNote(
+      cards,
+      "panel",
+      `Run a saved query you can see and check a chart against its result, before adding the panel. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A saved query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for chart and placement rules.`
+    ),
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
