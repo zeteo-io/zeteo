@@ -3,6 +3,7 @@ import { defineSavedQueryTools } from "./savedQueryTools.js";
 import { defineSavedPanelTools } from "./savedPanelTools.js";
 import { callerInstructions } from "./callerInstructions.js";
 import { defineDashboardTools } from "./dashboardTools.js";
+import { defineCardResources, loadCard } from "./card.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
 import { defineGuideTool } from "./guideTool.js";
@@ -54,13 +55,24 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
     coreUrl: options.coreUrl,
     logger: logger.child({ component: "mcp" }),
   });
+  // Read once: the cards, their links on the tools and the tools they call
+  // all exist, or none does.
+  const cards = loadCard(env.MCP_CARD_PATH);
+  if (cards) {
+    defineCardResources(mcp, cards);
+  } else {
+    logger.warn(
+      { path: env.MCP_CARD_PATH },
+      "MCP preview cards are off: MCP_CARD_PATH names no file"
+    );
+  }
   defineDiscoveryTools(mcp);
   defineQueryTool(mcp);
   defineGuideTool(mcp);
   defineSavedQueryTools(mcp);
-  defineSavedPanelTools(mcp);
-  defineDashboardTools(mcp);
-  defineCardTools(mcp);
+  defineSavedPanelTools(mcp, cards !== null);
+  defineDashboardTools(mcp, cards !== null);
+  if (cards) defineCardTools(mcp);
   return mcp;
 };
 

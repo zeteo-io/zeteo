@@ -4,6 +4,7 @@ import { findDashboardForViewer, getDashboard } from "../dashboards/service.js";
 import { TimeRangeSchema } from "../routes/v1/dashboards/schemas.js";
 import { runDashboard, type PanelLine } from "../dashboards/run.js";
 import { chartProblems, chartSchema } from "../dashboards/chart.js";
+import { DASHBOARD_CARD_URI, PANEL_CARD_URI } from "./card.js";
 import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import { withTimeFilter } from "../dashboards/timeRange.js";
@@ -36,11 +37,13 @@ interface TooLargeLine {
  * The tools zeteo's preview card calls to draw a panel or a dashboard, run as
  * the viewer with their own grants: `card_panel_rows` (a panel's rows) and
  * `card_dashboard` (a dashboard's layout, or the rows of up to four of its
- * panels). Their results are for the card, not a model.
+ * panels). Their results are for the card, not a model: defined only when the
+ * card is served, and visible to the card's app alone.
  */
 export const defineCardTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "card_panel_rows",
+    ui: { resourceUri: PANEL_CARD_URI, visibility: ["app"] },
     title: "A panel's rows for the preview card",
     description: `${CARD_ONLY} Give saved_panel_id, or saved_query_id with chart (and optionally time_column with time_range). Returns { title, chart, columns, rows, truncated, problems }.`,
     permission: MCP_USE,
@@ -133,6 +136,7 @@ export const defineCardTools = (mcp: TereoMcp): void => {
 
   mcp.define({
     name: "card_dashboard",
+    ui: { resourceUri: DASHBOARD_CARD_URI, visibility: ["app"] },
     title: "A dashboard for the preview card",
     description: `${CARD_ONLY} Without panel_ids, returns the dashboard's layout { id, name, url, time_range, panels } and runs nothing. With panel_ids (1-${CARD_PANELS_PER_CALL} of its panels), runs them and returns { panels } with one line each.`,
     permission: MCP_USE,
@@ -173,6 +177,9 @@ export const defineCardTools = (mcp: TereoMcp): void => {
           throw new ValidationError(
             `Give 1 to ${CARD_PANELS_PER_CALL} panel_ids`
           );
+        }
+        if (new Set(ids).size !== ids.length) {
+          throw new ValidationError("Name each panel once");
         }
         const dashboard = await findDashboardForViewer(
           caller,

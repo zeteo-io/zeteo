@@ -2,6 +2,7 @@ node_modules
 **/node_modules
 # Images build from source; host-built output never goes in.
 **/dist
+**/dist-mcp
 **/.tsbuildinfo
 **/tsconfig.tsbuildinfo
 .git

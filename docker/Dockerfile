@@ -81,6 +81,8 @@ COPY --from=build /app/packages/zeteo/dist ./packages/zeteo/dist
 # Served at / when UI_CLIENT_ID is set (UI_DIST_PATH's default). Root-owned
 # and world-readable: the service only reads it.
 COPY --from=ui --chmod=a+rX /app/packages/zeteo-ui/dist ./packages/zeteo-ui/dist
+# The MCP preview card (MCP_CARD_PATH's default), read once at start.
+COPY --from=ui --chmod=a+rX /app/packages/zeteo-ui/dist-mcp ./packages/zeteo-ui/dist-mcp
 
 COPY docker/migrate.sh ./packages/zeteo/
 

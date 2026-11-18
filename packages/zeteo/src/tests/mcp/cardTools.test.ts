@@ -259,6 +259,15 @@ describe("MCP card tools", () => {
     expect(call.json.error).toBe("invalid_request");
   });
 
+  it("card_dashboard refuses a panel named twice with invalid_request", async () => {
+    const call = await callTool(session.client, "card_dashboard", {
+      dashboard_id: "anything",
+      panel_ids: ["a", "b", "a"],
+    });
+    expect(call.isError).toBe(true);
+    expect(call.json.error).toBe("invalid_request");
+  });
+
   it("card_dashboard answers a panel too large for one result with too_large", async () => {
     const big = await savedQuery({
       from: "wide_rows",

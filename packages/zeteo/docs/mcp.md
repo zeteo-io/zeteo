@@ -151,6 +151,30 @@ The discovery tools show names, never ids or native types, and nothing outside t
 grants. `query` runs the engine of `POST /v1/query` ([querying.md](querying.md)) with MCP's
 limits; its rows are in the same wire forms. There is no export over MCP.
 
+## Preview cards
+
+A client that supports MCP Apps can draw a panel or a dashboard inline. Zeteo serves two
+resources, `ui://zeteo/panel-card.html` and `ui://zeteo/dashboard-card.html` (mimeType
+`text/html;profile=mcp-app`, `_meta.ui.prefersBorder: true`): the same page, zeteo-ui's
+`dist-mcp/card.html`, with a `<meta name="zeteo-card">` naming its mode. A resource holds the page
+only; the card draws its rows through two tools of its own, run as the viewer with their own
+grants:
+
+| Tool | Gives |
+|------|-------|
+| `card_panel_rows` | a saved panel's, or a saved query with a chart's, `{ title, chart, columns, rows, truncated, problems }` |
+| `card_dashboard` | a dashboard's layout, or, with `panel_ids` (1-4, each once), those panels run as the dashboard runs them, one line each |
+
+Both are visible to the card's app only (`visibility: ["app"]`), need `zeteo.mcp.use` and
+`zeteo.data.read`, and say they are not for answering questions. `preview_panel`,
+`get_saved_panel`, `create_saved_panel` and `update_saved_panel` link to the panel card;
+`get_dashboard`, `update_dashboard`, `add_panel`, `update_panel`, `remove_panel`,
+`link_saved_panel` and `detach_panel` to the dashboard card. Their text results are unchanged.
+
+`MCP_CARD_PATH` names the card (default `../zeteo-ui/dist-mcp/card.html`, from `packages/zeteo`;
+the image ships it). It is read once at start: when the file is missing, zeteo logs one warning and
+serves no cards, no links and no card tools.
+
 ## The Claude Code plugin
 
 `plugins/zeteo/` (listed by the marketplace in `.claude-plugin/marketplace.json`) gives Claude Code

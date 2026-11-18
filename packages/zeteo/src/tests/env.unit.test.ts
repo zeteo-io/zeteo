@@ -380,6 +380,18 @@ describe("admin UI settings", () => {
     );
   });
 
+  it("resolves MCP_CARD_PATH from the package root: a default, an absolute path as is", () => {
+    expect(parseEnv(base).MCP_CARD_PATH).toMatch(
+      /packages\/zeteo-ui\/dist-mcp\/card\.html$/
+    );
+    expect(
+      parseEnv({ ...base, MCP_CARD_PATH: "/srv/card.html" }).MCP_CARD_PATH
+    ).toBe("/srv/card.html");
+    expect(
+      parseEnv({ ...base, MCP_CARD_PATH: "web/card.html" }).MCP_CARD_PATH
+    ).toMatch(/packages\/zeteo\/web\/card\.html$/);
+  });
+
   it("names UI_TEREO_URL when it is malformed in production", () => {
     expect(() =>
       parseEnv({ ...prod, UI_CLIENT_ID: "ui", UI_TEREO_URL: "not a url" })
