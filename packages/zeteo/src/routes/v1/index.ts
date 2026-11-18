@@ -7,6 +7,7 @@ import dashboardsRouter from "./dashboards/index.js";
 import principalsRouter from "./principals/index.js";
 import catalogRouter from "./catalog/index.js";
 import sourcesRouter from "./sources/index.js";
+import uploadsRouter from "./uploads/index.js";
 import exportRouter from "./export/index.js";
 import grantsRouter from "./grants/index.js";
 import queryRouter from "./query/index.js";
@@ -30,5 +31,6 @@ v1Router.use("/runs", runsRouter);
 v1Router.use("/saved-panels", savedPanelsRouter);
 v1Router.use("/saved-queries", savedQueriesRouter);
 v1Router.use("/sources", sourcesRouter);
+v1Router.use("/uploads", uploadsRouter);
 
 export default v1Router;

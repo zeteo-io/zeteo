@@ -1,16 +1,21 @@
-import { connectChecked, poolSizeFor, readSettings } from "./connect.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import type { SourceConnection } from "../adapters/types.js";
+import { isUploadSource, typeOf } from "./types.js";
 import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
-import { typeOf } from "./types.js";
 import {
   NotFoundError,
   ServiceUnavailableError,
   SourceArchivedError,
   SourceUnreachableError,
 } from "../utils/errors.js";
+import {
+  connectChecked,
+  connectUploadsReader,
+  poolSizeFor,
+  readSettings,
+} from "./connect.js";
 
 export const POOL_IDLE_MS = 5 * 60_000;
 /** How long closing every pool waits for the calls still running on them. */
@@ -67,6 +72,10 @@ const fingerprintOf = (row: Source): string => {
 
 const openConnection = (row: Source): Promise<SourceConnection> => {
   const adapter = adapterFor(typeOf(row));
+  // An upload source reads Zeteo's own database as the reader role, READ ONLY
+  // at read committed (never REPEATABLE READ: loads swap tables with DDL).
+  if (isUploadSource(row))
+    return connectUploadsReader(adapter, poolSizeFor(row));
   return connectChecked(
     adapter,
     readSettings(adapter, row.id, row.sealedSettings),

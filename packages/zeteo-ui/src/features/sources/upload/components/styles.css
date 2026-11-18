@@ -1,0 +1,148 @@
+/* Uploads: the upload and preview pages, a source's page and its dialogs. */
+
+/* The preview's column tables use the page's full width. */
+.z-fs-form-page {
+  width: 100%;
+}
+
+/* The name, its header and the type keep a usable width; the samples take the rest. */
+.z-fs-columns th:nth-child(1),
+.z-fs-columns td:nth-child(1),
+.z-fs-columns th:nth-child(2),
+.z-fs-columns td:nth-child(2) {
+  min-width: 22rem;
+}
+
+.z-fs-columns th:nth-child(3),
+.z-fs-columns td:nth-child(3) {
+  min-width: 11rem;
+}
+
+.z-fs-form,
+.z-fs-tables {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.z-fs-reading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 0;
+}
+
+.z-fs-problem {
+  color: var(--k-danger-color);
+}
+
+.z-fs-preview-meta,
+.z-fs-table-meta,
+.z-fs-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+  margin: 0 0 0.75rem;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+/* Each preview row's fields carry a label for screen readers; the column
+   headings already say what they are. The cell anchors the hidden label, or
+   it is placed against the page and makes the document scroll too. */
+.z-fs-columns td {
+  position: relative;
+}
+
+.z-fs-columns .k-field-shell-label-row {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.z-fs-samples {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.z-fs-samples-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.z-fs-samples-cell > .z-fs-samples {
+  flex: 1;
+  min-width: 0;
+}
+
+.z-fs-samples-cell > button {
+  flex: none;
+}
+
+/* Two lines, then an ellipsis; "Show all" lifts the limit. */
+.z-fs-samples-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.z-fs-table-names {
+  overflow-wrap: anywhere;
+}
+
+.z-fs-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+/* A faint link in an empty description cell, for those who may add one. */
+.z-fs-add-description {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--k-text-color-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.z-fs-add-description:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}
+
+.z-fs-table-description {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}
+
+/* The tabs of a preview of several tables: buttons drawn as the page tabs. */
+.z-fs-tab {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  border-top: 0;
+  border-right: 0;
+  border-left: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.z-fs-tab-note {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-fs-nowrap {
+  white-space: nowrap;
+}

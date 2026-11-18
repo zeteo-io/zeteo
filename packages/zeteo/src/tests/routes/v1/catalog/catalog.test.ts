@@ -165,6 +165,7 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       expect(text).not.toContain(hidden);
     }
     expect(Object.keys(res.body.sources[0]).sort()).toEqual([
+      "kind",
       "language",
       "limits",
       "name",
@@ -172,6 +173,16 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       "tables",
       "type",
     ]);
+  });
+
+  it("shows the kind of the source and null last_synced_at for a database table", async () => {
+    const res = await catalog(wide.token, `?source=${source.slug}`);
+    expect(res.body.sources[0].kind).toBe("database");
+    expect(
+      res.body.sources[0].tables.every(
+        (t: { last_synced_at: unknown }) => t.last_synced_at === null
+      )
+    ).toBe(true);
   });
 
   it("describes the language as a JSON Schema that names select", async () => {

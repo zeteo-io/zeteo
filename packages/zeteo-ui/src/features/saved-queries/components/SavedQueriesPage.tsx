@@ -6,12 +6,12 @@ import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { FilterChip } from "@/components/FilterChip";
+import { useEffect, useMemo, useState } from "react";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { TransferDialog } from "./TransferDialog";
 import { formatDate } from "@/utils/formatDate";
 import type { SavedQuery } from "../api/types";
-import { useEffect, useState } from "react";
 import { ShareDialog } from "./ShareDialog";
 import { useAuth } from "@tereo-io/react";
 import { Link } from "react-router-dom";
@@ -21,17 +21,19 @@ import {
   faShareNodes,
   faTrash,
   faUser,
-  faUserGroup,
 } from "@fortawesome/free-solid-svg-icons";
 import {
   PrincipalLabel,
-  PrincipalPicker,
+  parseWho,
+  useDirectory,
+  whoFilter,
+  whoId,
   type PrincipalRef,
 } from "@/features/principals";
 import {
+  Alert,
   Button,
   EmptyState,
-  Modal,
   RowActions,
   Spinner,
   Table,
@@ -71,8 +73,8 @@ export const SavedQueriesPage = () => {
   const { hasPermission } = useAuth();
   const canWrite = hasPermission("zeteo.saved_queries.write");
   const canReadSources = hasPermission("zeteo.sources.read");
-  // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only this.
-  const canSearchPeople = hasPermission("zeteo.grants.read");
+  // The directory needs zeteo.grants.read; a lookup by id needs only this.
+  const canListPeople = hasPermission("zeteo.grants.read");
   const [urlFilters, setFilters] = useUrlFilters(
     ["owner_id", "source_id", "shared_with_type", "shared_with_id"],
     filtersOf
@@ -91,8 +93,7 @@ export const SavedQueriesPage = () => {
   });
   const sources = useAllSources(canReadSources);
   const remove = useDeleteSavedQuery();
-  const [pickingPerson, setPickingPerson] = useState(false);
-  const [pickingSharedWith, setPickingSharedWith] = useState(false);
+  const directory = useDirectory("admin", canListPeople);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
@@ -112,8 +113,34 @@ export const SavedQueriesPage = () => {
     search
   );
 
+  // Owner and Shared with choose from the whole directory; without it, a
+  // choice from the address is a chip.
+  const peopleSelect = !!directory.data;
+  const selectedOwner = filters.owner_id ? whoId("user", filters.owner_id) : "";
+  const selectedShared = sharedRef ? whoId(sharedRef.type, sharedRef.id) : "";
+  const people = useMemo(
+    () =>
+      directory.data
+        ? [
+            whoFilter(directory.data.data, {
+              title: "Owner",
+              dataKey: "owner",
+              selected: selectedOwner,
+              only: ["user"],
+            }),
+            whoFilter(directory.data.data, {
+              title: "Shared with",
+              dataKey: "shared_with",
+              selected: selectedShared,
+            }),
+          ]
+        : [],
+    [directory.data, selectedOwner, selectedShared]
+  );
+
   const filterDefs: InfiniteScrollMenuFilter[] = [
     { type: "SEARCH", title: "Search", dataKey: "q" },
+    ...people,
     ...(sourceSelect
       ? [
           {
@@ -131,14 +158,27 @@ export const SavedQueriesPage = () => {
   ];
   // It reports its choices as soon as it mounts, so it waits for the options
   // that hold the current choices; otherwise it would report them gone.
-  const filtersReady = !(sourceSelect && sources.isLoading);
+  const filtersReady =
+    !(sourceSelect && sources.isLoading) && !directory.isLoading;
 
   const onFiltersChange = (params: Record<string, string>) => {
     setSearch(params["filter[q]"] ?? "");
-    if (!sourceSelect) return;
-    const source_id = params["filter[source_id]"] || undefined;
-    if (source_id !== filters.source_id) {
-      setFilters({ ...urlFilters, source_id });
+    const next = { ...urlFilters };
+    if (sourceSelect) {
+      next.source_id = params["filter[source_id]"] || undefined;
+    }
+    if (peopleSelect) {
+      next.owner_id = parseWho(params, "owner").principal_id;
+      const shared = parseWho(params, "shared_with");
+      next.shared_with_type = shared.principal_type;
+      next.shared_with_id = shared.principal_id;
+    }
+    if (
+      (Object.keys(next) as (keyof Filters)[]).some(
+        (key) => next[key] !== urlFilters[key]
+      )
+    ) {
+      setFilters(next);
     }
   };
 
@@ -149,24 +189,15 @@ export const SavedQueriesPage = () => {
       <PageHeader title="Saved queries" divider={false} />
       <div className="z-list-toolbar">
         <div className="z-list-toolbar-filters z-sq-toolbar">
-          {ownerRef ? (
+          {ownerRef && !peopleSelect && (
             <FilterChip
               clearLabel="Clear owner"
               onClear={() => setFilters({ ...urlFilters, owner_id: undefined })}
             >
               <PrincipalLabel refValue={ownerRef} />
             </FilterChip>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPickingPerson(true)}
-            >
-              <FontAwesomeIcon icon={faUser} /> Owner
-            </Button>
           )}
-          {sharedRef ? (
+          {sharedRef && !peopleSelect && (
             <FilterChip
               clearLabel="Clear shared with"
               onClear={() =>
@@ -179,15 +210,6 @@ export const SavedQueriesPage = () => {
             >
               Shared with <PrincipalLabel refValue={sharedRef} />
             </FilterChip>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPickingSharedWith(true)}
-            >
-              <FontAwesomeIcon icon={faUserGroup} /> Shared with
-            </Button>
           )}
           {filtersReady && (
             <div className="z-sq-tablefilters">
@@ -196,55 +218,17 @@ export const SavedQueriesPage = () => {
           )}
         </div>
       </div>
-      <Modal
-        show={pickingPerson}
-        title="Show the saved queries of an owner"
-        onClose={() => setPickingPerson(false)}
-      >
-        {!canSearchPeople && (
-          <p>
-            Searching by name needs the Read grants permission; paste a user id
-            instead.
-          </p>
-        )}
-        <PrincipalPicker
-          types={["user"]}
-          search={canSearchPeople}
-          value={ownerRef}
-          onChange={(p) => {
-            setFilters({ ...urlFilters, owner_id: p.id });
-            setPickingPerson(false);
-          }}
-        />
-      </Modal>
-      <Modal
-        show={pickingSharedWith}
-        title="Show the saved queries shared with a person or group"
-        onClose={() => setPickingSharedWith(false)}
-      >
-        {!canSearchPeople && (
-          <p>
-            Searching by name needs the Read grants permission; paste an id
-            instead.
-          </p>
-        )}
-        <PrincipalPicker
-          search={canSearchPeople}
-          value={sharedRef}
-          onChange={(p) => {
-            setFilters({
-              ...urlFilters,
-              shared_with_type: p.type,
-              shared_with_id: p.id,
-            });
-            setPickingSharedWith(false);
-          }}
-        />
-      </Modal>
+      {!canListPeople && (
+        <Alert variant="warning">
+          Filtering by owner or by who it is shared with needs the Read grants
+          permission.
+        </Alert>
+      )}
       <ErrorNotice error={error} />
       <ErrorNotice
         error={sources.error?.status === 403 ? null : sources.error}
       />
+      <ErrorNotice error={directory.error} />
       {isLoading ? (
         <Spinner size="lg" />
       ) : (

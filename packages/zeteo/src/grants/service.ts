@@ -1,13 +1,16 @@
+import { GRANTS_WRITE, AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import type { PrincipalType } from "../../prisma/generated/client/index.js";
 import { detailInclude, type GrantDetail } from "../utils/db/grants.js";
-import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
+import { assertOwnsInTx } from "../uploads/ownership.js";
 import { db, type Prisma } from "../utils/db/index.js";
 import { withAudit } from "../utils/transaction.js";
+import type { Caller } from "../middleware/auth.js";
 import {
   ConflictError,
   InvalidGrantError,
   NotFoundError,
+  OwnerGrantLockedError,
   SourceArchivedError,
 } from "../utils/errors.js";
 
@@ -21,6 +24,51 @@ export interface CreateGrantInput {
   tableId: string;
   columns: GrantColumns;
 }
+
+/**
+ * Who changes grants: `actorId`, and `owner` when they act as the owner of
+ * the table's upload source rather than as a holder of `zeteo.grants.write`
+ * (checked again in the transaction, against a transfer meanwhile).
+ */
+export interface GrantActor {
+  actorId: string;
+  owner?: Caller;
+}
+
+const checkOwner = async (
+  tx: Prisma.TransactionClient,
+  actor: GrantActor,
+  sourceId: string
+) => {
+  if (actor.owner) {
+    await assertOwnsInTx(tx, actor.owner, sourceId, GRANTS_WRITE);
+  }
+};
+
+/**
+ * Locks the grant's row (`FOR UPDATE`) for a change; the 404 when there is
+ * none. An owner's source is locked and checked first (`checkOwner`), in the
+ * order a transfer takes them: the source, then its grants. A grant's table,
+ * and so its source, never changes, so it is read before either lock.
+ */
+const lockGrant = async (
+  tx: Prisma.TransactionClient,
+  id: string,
+  actor: GrantActor
+): Promise<void> => {
+  if (actor.owner) {
+    const found = await tx.grant.findUnique({
+      where: { id },
+      select: { table: { select: { sourceId: true } } },
+    });
+    if (!found) throw new NotFoundError("Grant not found");
+    await checkOwner(tx, actor, found.table.sourceId);
+  }
+  const locked = await tx.$queryRaw<
+    Array<{ id: string }>
+  >`SELECT "id" FROM "zeteo"."grants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+  if (locked.length === 0) throw new NotFoundError("Grant not found");
+};
 
 const grantExists = () =>
   new ConflictError(
@@ -71,7 +119,7 @@ const detailOrThrow = (
 
 export const createGrant = async (
   input: CreateGrantInput,
-  actorId: string
+  { actorId, ...actor }: GrantActor
 ): Promise<GrantDetail> =>
   withAudit(async (tx, audit) => {
     const table = await tx.sourceTable.findUnique({
@@ -79,6 +127,7 @@ export const createGrant = async (
       include: { source: { select: { archivedAt: true } } },
     });
     if (!table) throw new NotFoundError("Table not found");
+    await checkOwner(tx, { actorId, ...actor }, table.sourceId);
     if (table.source.archivedAt) throw new SourceArchivedError();
     const columnIds = await checkedColumnIds(tx, table.id, input.columns);
 
@@ -122,21 +171,27 @@ export const createGrant = async (
     return detailOrThrow(tx, created.id);
   });
 
-/** Replaces the grant's columns: all of them, or exactly this list. */
+/**
+ * Replaces the grant's columns: all of them, or exactly this list. An owner
+ * grant may not be narrowed (`owner_grant_locked`), whoever asks.
+ */
 export const replaceGrantColumns = async (
   id: string,
   columns: GrantColumns,
-  actorId: string
+  { actorId, ...actor }: GrantActor
 ): Promise<GrantDetail> =>
   withAudit(async (tx, audit) => {
     // Concurrent replaces take turns: each deletes and recreates the columns.
-    await tx.$queryRaw`SELECT "id" FROM "zeteo"."grants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+    await lockGrant(tx, id, { actorId, ...actor });
     const grant = await tx.grant.findUnique({
       where: { id },
       include: { table: { include: { source: true } } },
     });
     if (!grant) throw new NotFoundError("Grant not found");
     if (grant.table.source.archivedAt) throw new SourceArchivedError();
+    if (grant.ownerGrant && !columns.allColumns) {
+      throw new OwnerGrantLockedError();
+    }
     const columnIds = await checkedColumnIds(tx, grant.tableId, columns);
 
     await tx.grantColumn.deleteMany({ where: { grantId: id } });
@@ -161,20 +216,22 @@ export const replaceGrantColumns = async (
     return detailOrThrow(tx, id);
   });
 
+/** Removes the grant; an owner grant may not be removed (`owner_grant_locked`), whoever asks. */
 export const removeGrant = async (
   id: string,
-  actorId: string
+  { actorId, ...actor }: GrantActor
 ): Promise<void> => {
   await withAudit(async (tx, audit) => {
+    // Locked first, so a transfer flagging it meanwhile is seen here.
+    await lockGrant(tx, id, { actorId, ...actor });
     const grant = await tx.grant.findUnique({
       where: { id },
       include: { table: { select: { sourceId: true } }, columns: true },
     });
     if (!grant) throw new NotFoundError("Grant not found");
-    // Its columns go with it (ON DELETE CASCADE). A concurrent removal may
-    // have deleted it since it was read.
-    const { count } = await tx.grant.deleteMany({ where: { id } });
-    if (count === 0) throw new NotFoundError("Grant not found");
+    if (grant.ownerGrant) throw new OwnerGrantLockedError();
+    // Its columns go with it (ON DELETE CASCADE).
+    await tx.grant.delete({ where: { id } });
     audit({
       action: AUDIT_EVENTS.grantRemoved,
       resourceType: "grant",

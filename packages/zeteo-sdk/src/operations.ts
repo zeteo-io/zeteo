@@ -6,10 +6,16 @@ export const OPERATIONS = {
   createSource: { method: "POST", path: "/v1/sources" },
   getSource: { method: "GET", path: "/v1/sources/{sourceId}" },
   updateSource: { method: "PATCH", path: "/v1/sources/{sourceId}" },
+  deleteSource: { method: "DELETE", path: "/v1/sources/{sourceId}" },
   archiveSource: { method: "POST", path: "/v1/sources/{sourceId}/archive" },
   testSource: { method: "POST", path: "/v1/sources/{sourceId}/test" },
+  transferSource: {
+    method: "POST",
+    path: "/v1/sources/{sourceId}/transfer",
+  },
   refreshSource: { method: "POST", path: "/v1/sources/{sourceId}/refresh" },
   listTables: { method: "GET", path: "/v1/sources/{sourceId}/tables" },
+  addTables: { method: "POST", path: "/v1/sources/{sourceId}/tables" },
   getTable: {
     method: "GET",
     path: "/v1/sources/{sourceId}/tables/{tableId}",
@@ -17,6 +23,18 @@ export const OPERATIONS = {
   patchTable: {
     method: "PATCH",
     path: "/v1/sources/{sourceId}/tables/{tableId}",
+  },
+  reuploadTable: {
+    method: "PUT",
+    path: "/v1/sources/{sourceId}/tables/{tableId}",
+  },
+  deleteTable: {
+    method: "DELETE",
+    path: "/v1/sources/{sourceId}/tables/{tableId}",
+  },
+  updateColumn: {
+    method: "PATCH",
+    path: "/v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}",
   },
   listRelations: { method: "GET", path: "/v1/sources/{sourceId}/relations" },
   declareRelation: {
@@ -31,6 +49,8 @@ export const OPERATIONS = {
     method: "DELETE",
     path: "/v1/sources/{sourceId}/relations/{relationId}",
   },
+  createUpload: { method: "POST", path: "/v1/uploads" },
+  deleteUpload: { method: "DELETE", path: "/v1/uploads/{uploadId}" },
   listGrants: { method: "GET", path: "/v1/grants" },
   createGrant: { method: "POST", path: "/v1/grants" },
   getGrant: { method: "GET", path: "/v1/grants/{grantId}" },
@@ -56,6 +76,7 @@ export const OPERATIONS = {
   listRuns: { method: "GET", path: "/v1/runs" },
   listMyRuns: { method: "GET", path: "/v1/me/runs" },
   searchMyPrincipals: { method: "GET", path: "/v1/me/principals" },
+  listAllMyPrincipals: { method: "GET", path: "/v1/me/principals/all" },
   listSavedQueries: { method: "GET", path: "/v1/saved-queries" },
   createSavedQuery: { method: "POST", path: "/v1/saved-queries" },
   getSavedQuery: { method: "GET", path: "/v1/saved-queries/{savedQueryId}" },
@@ -171,6 +192,7 @@ export const OPERATIONS = {
   getMe: { method: "GET", path: "/v1/me" },
   searchPrincipals: { method: "GET", path: "/v1/principals" },
   lookupPrincipals: { method: "POST", path: "/v1/principals/lookup" },
+  listAllPrincipals: { method: "GET", path: "/v1/principals/all" },
 } as const satisfies Record<string, { method: HttpMethod; path: string }>;
 
 export type OperationId = keyof typeof OPERATIONS;

@@ -1,7 +1,7 @@
 SourceType:
   type: string
-  enum: [postgres, azure-sql]
-  description: The kind of database.
+  enum: [postgres, azure-sql, upload]
+  description: The kind of source. `upload` is an upload source (an upload source), whose data Zeteo stores from uploaded files.
 
 PostgresSettings:
   type: object
@@ -73,7 +73,7 @@ LoginFinding:
 
 Source:
   type: object
-  description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+  description: A registered database or an upload source. `settings` is the redacted form; it is null for an upload source and when the stored settings cannot be decrypted.
   required:
     - id
     - slug
@@ -89,8 +89,12 @@ Source:
     - query_concurrency
     - export_concurrency
     - writable_login_allowed
+    - owner_id
     - status
     - last_refreshed_at
+    - size_bytes
+    - size_measured_at
+    - share_count
     - created_at
     - archived_at
   properties:
@@ -116,10 +120,34 @@ Source:
     writable_login_allowed:
       type: boolean
       description: True when the login check found something and an administrator allowed it
+    owner_id:
+      type: [string, 'null']
+      format: uuid
+      description: An upload source's owner; null for a database source
     status:
       type: string
       enum: [active, unreachable]
-    last_refreshed_at: { type: [string, 'null'], format: date-time }
+    last_refreshed_at:
+      type: [string, 'null']
+      format: date-time
+      description: A database source's last catalogue refresh; an upload source's last load of any of its tables (null before one).
+    size_bytes:
+      type: [integer, 'null']
+      minimum: 0
+      description: |
+        A database source: bytes on disk of the tables (and, on Postgres, materialized views) in
+        `schemas`, indexes included, measured by the last catalogue refresh, never on read; null
+        until a refresh has measured it (on Azure SQL the login needs `VIEW DATABASE STATE`); a
+        later refresh that cannot read it keeps the last measurement. An upload source: the bytes it stores now, counted against its
+        owner's quota (0 once deleted).
+    size_measured_at:
+      type: [string, 'null']
+      format: date-time
+      description: When a database source's `size_bytes` was measured; null when it is null, and always for an upload source
+    share_count:
+      type: integer
+      minimum: 0
+      description: How many people and groups its tables are granted to (distinct principals of its grants; an upload source's owner grants not counted)
     created_at: { type: string, format: date-time }
     archived_at: { type: [string, 'null'], format: date-time }
 
@@ -144,7 +172,10 @@ CreateSourceRequest:
       pattern: '^[a-z][a-z0-9-]{1,62}$'
       description: Unique, lower case letters, digits and hyphens, starting with a letter
     name: { type: string, minLength: 1, maxLength: 255 }
-    type: { $ref: '#/SourceType' }
+    type:
+      type: string
+      enum: [postgres, azure-sql]
+      description: The kind of database
     settings:
       description: The type's settings, PostgresSettings or AzureSqlSettings
       anyOf:

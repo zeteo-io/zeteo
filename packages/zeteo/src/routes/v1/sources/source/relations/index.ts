@@ -1,5 +1,6 @@
-import { requirePermission } from "../../../../../middleware/auth.js";
+import { allowOwnerOr } from "../../../../../middleware/uploadOwner.js";
 import { declareRelation, listRelations } from "./controllers.js";
+import { sourceOfParams } from "../middleware.js";
 import relationRouter from "./relation/index.js";
 import express, { Router } from "express";
 import {
@@ -13,10 +14,14 @@ const json64k = express.json({ limit: "64kb" });
 
 relationsRouter.use("/:relationId", relationRouter);
 
-relationsRouter.get("/", requirePermission(SOURCES_READ), listRelations);
+relationsRouter.get(
+  "/",
+  allowOwnerOr(SOURCES_READ, sourceOfParams),
+  listRelations
+);
 relationsRouter.post(
   "/",
-  requirePermission(SOURCES_WRITE),
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
   json64k,
   declareRelation
 );

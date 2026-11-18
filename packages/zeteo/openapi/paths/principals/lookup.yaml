@@ -5,10 +5,13 @@
     description: |
       Answers one principal per requested one, in the request's order; a repeated one is answered
       once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
-      the search limit.
+      the search limit for an admin (`zeteo.grants.read` or `zeteo.runs.read`).
 
-      **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read` (`403 forbidden` without
-      either).
+      **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read`, or
+      `zeteo.uploads.write` with `zeteo.data.read` (`403 forbidden` without). A caller let in
+      only by the latter, an upload source owner, is answered only for the principals holding a grant
+      on an upload source they own; any other id comes back as one tereo does not know (`orphaned`).
+      Their lookups count against the search limit (`429 too_many_requests`).
 
       **Errors:** `400 invalid_request` (not 1 to 100 principals, an id that is no UUID),
       `502 tereo_unreachable`.

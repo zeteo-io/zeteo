@@ -1,7 +1,10 @@
 // Field for field the OpenAPI `Source`, `CreateSourceRequest`,
 // `UpdateSourceRequest`, `TestSourceResponse` and `RefreshSummary` schemas.
 
-export type SourceType = "postgres" | "azure-sql";
+export type SourceType = "postgres" | "azure-sql" | "upload";
+
+/** The types a person registers a database source with; an `upload` source is made from a file. */
+export type DatabaseType = Exclude<SourceType, "upload">;
 
 export interface PostgresSettings {
   host: string;
@@ -39,8 +42,19 @@ export interface Source {
   query_concurrency: number;
   export_concurrency: number;
   writable_login_allowed: boolean;
+  /** An upload source's owner; null for a database source. */
+  owner_id: string | null;
   status: "active" | "unreachable";
   last_refreshed_at: string | null;
+  /**
+   * A database source: the tables of its schemas on disk, measured at the
+   * last refresh, null when it could not be read. An upload: its stored bytes.
+   */
+  size_bytes: number | null;
+  /** When a database source's size was measured; null for an upload. */
+  size_measured_at: string | null;
+  /** People and groups its tables are shared with, an upload owner's own grants not counted. */
+  share_count: number;
   created_at: string;
   archived_at: string | null;
 }
@@ -63,6 +77,7 @@ export interface CreateSource extends SourceLimits {
   allow_writable_login?: boolean;
 }
 
+/** An upload's owner may send only `name`; a sources admin the limits too. */
 export interface UpdateSource extends SourceLimits {
   name?: string;
   settings?: SourceSettings;

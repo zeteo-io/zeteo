@@ -1,30 +1,52 @@
 # Sources
 
-A source is a database an administrator registers. The admin API is under `/v1/sources` (the
-reference is `openapi/openapi.yaml`; `npm run openapi:build` bundles it). Sources are archived,
-never deleted.
+A source is a database an administrator registers, or an upload source a person makes from a
+file. The API is under `/v1/sources` (the reference is `openapi/openapi.yaml`; `npm run
+openapi:build` bundles it). Database sources are archived, never deleted. A source of type
+`upload` is an upload source, owned by the person who uploaded it; it is listed, read and changed
+through these same routes, and a few apply to it alone ([uploads.md](uploads.md)).
 
 | Route | Permission | Result |
 |-------|------------|--------|
-| `POST /v1/sources` | `zeteo.sources.write` | `201`, the source |
-| `GET /v1/sources` (`?include_archived=true`, `limit`, `cursor`) | `zeteo.sources.read` | `{ data, next_cursor }` |
-| `GET /v1/sources/:sourceId` | `zeteo.sources.read` | the source |
-| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write` | the source |
+| `POST /v1/sources` | `zeteo.sources.write` (`type: "upload"`: `zeteo.uploads.write`) | `201`, the source |
+| `GET /v1/sources` (`?include_archived=true`, `type`, `owner_id`, `limit`, `cursor`) | `zeteo.sources.read`; with `owner_id=me`, also an owner holding `zeteo.uploads.write` | `{ data, next_cursor }` |
+| `GET /v1/sources/:sourceId` | `zeteo.sources.read`, or the owner of the upload source | the source |
+| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write`; the owner of an upload source for `name` alone | the source |
+| `DELETE /v1/sources/:sourceId` | an upload source only: `zeteo.sources.write`, or its owner | `204` ([uploads.md](uploads.md)) |
+| `POST /v1/sources/:sourceId/transfer` | an upload source only: `zeteo.sources.write`, or its owner | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
 | `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings, truncated? }` |
 | `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md) | |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
-validated.
+validated. The owner of an upload source (holding `zeteo.uploads.write` and `zeteo.data.read`)
+may also read, rename, transfer and delete it here; anyone else gets the same `403`, whether the
+source exists or not. `archive`, `test`, `refresh`, and `settings` or `schemas` in a `PATCH`, are
+`409 not_a_database_source` on an upload source; `DELETE` and `transfer` (and the upload-only table
+and column routes) are `409 not_an_upload_source` on a database source.
 
 ## The source
 
 `{ id, slug, name, type, settings, schemas, timeout_ms, row_cap, max_joins, export_enabled,
 export_row_cap, query_concurrency, export_concurrency, writable_login_allowed, status, last_refreshed_at,
-created_at, archived_at }`.
+owner_id, size_bytes, size_measured_at, share_count, created_at, archived_at }`.
 
 - `slug`: `^[a-z][a-z0-9-]{1,62}$`, unique, fixed after create. `type` is fixed too.
 - `schemas`: 1 to 20 database schema names Zeteo exposes.
+- `size_bytes` and `size_measured_at`: the bytes on disk of the tables in `schemas`, measured by the
+  last catalogue refresh ([catalog.md](catalog.md#refresh)), never when the source is read. Postgres
+  sums `pg_total_relation_size` of the tables, partitions and materialized views (indexes and TOAST
+  included); Azure SQL sums the used pages of the user tables (`sys.dm_db_partition_stats`, which
+  needs `VIEW DATABASE STATE`). It counts every table in the schemas, including ones the login
+  cannot select. Both are `null` until a refresh has measured them; when a later size read
+  fails or the source will not tell, the refresh goes on and keeps the last measurement, with
+  `size_measured_at` saying when it was taken. An upload source's `size_bytes` is instead the bytes it
+  stores now (its quota's measure), and its `size_measured_at` is always `null`.
+- `owner_id`: an upload source's owner; `null` for a database source.
+- `last_refreshed_at`: a database source's last catalogue refresh; an upload source has no
+  refresh, so it reports the last load of any of its tables.
+- `share_count`: how many people and groups the source's tables are granted to (distinct
+  principals; an upload source's owner grants are not counted).
 - `settings`: the type's settings without the fields the adapter marks secret. It is `null` for a
   source whose stored settings cannot be decrypted (the master key changed); list and get still
   work, and using the source fails as a `500 server_error` with the generic body.

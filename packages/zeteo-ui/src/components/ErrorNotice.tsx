@@ -19,9 +19,10 @@ export const ErrorNotice = ({ error, fieldPaths }: ErrorNoticeProps) => {
           ? "zeteo could not be reached. Check your connection and try again."
           : error.message}
       </p>
-      {error.status === 429 && error.retryAfter !== undefined && (
-        <p>Try again in {error.retryAfter} seconds.</p>
-      )}
+      {(error.status === 429 || error.code === "upload_source_busy") &&
+        error.retryAfter !== undefined && (
+          <p>Try again in {error.retryAfter} seconds.</p>
+        )}
       {general.length > 0 && (
         <ul>
           {general.map((issue, i) => (

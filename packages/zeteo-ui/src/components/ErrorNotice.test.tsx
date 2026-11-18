@@ -43,6 +43,20 @@ describe("ErrorNotice", () => {
     expect(screen.getByText("settings.ca: Not a PEM")).toBeInTheDocument();
   });
 
+  it("says when to retry a busy upload source, as for a rate limit", () => {
+    render(
+      <ErrorNotice
+        error={{
+          status: 503,
+          code: "upload_source_busy",
+          message: "The upload source is busy; retry shortly",
+          retryAfter: 5,
+        }}
+      />
+    );
+    expect(screen.getByText("Try again in 5 seconds.")).toBeInTheDocument();
+  });
+
   it("says the server could not be reached for status null", () => {
     render(
       <ErrorNotice

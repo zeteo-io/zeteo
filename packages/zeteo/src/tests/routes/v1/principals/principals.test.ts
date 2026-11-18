@@ -10,6 +10,7 @@ import { redis } from "../../../../utils/redis.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
+  UPLOADS_WRITE,
   GRANTS_READ,
   RUNS_READ,
 } from "../../../../definitions/tereoDeclaration.js";
@@ -148,15 +149,17 @@ describe("/v1/principals", () => {
       expect(res.body.data).toEqual([seeded[0]]);
     });
 
-    it("answers 403 naming both permissions to a holder of neither", async () => {
-      const res = await lookup(
-        { principals: [{ type: "user", id: ADA }] },
-        tokenFor({ permissions: [DATA_READ] })
-      );
-      expect(res.status).toBe(403);
-      expect(res.body.error_description).toBe(
-        `Requires one of: ${GRANTS_READ}, ${RUNS_READ}`
-      );
+    it("answers 403 naming the permissions to a holder of none", async () => {
+      for (const permissions of [[DATA_READ], [UPLOADS_WRITE]]) {
+        const res = await lookup(
+          { principals: [{ type: "user", id: ADA }] },
+          tokenFor({ permissions })
+        );
+        expect(res.status).toBe(403);
+        expect(res.body.error_description).toBe(
+          `Requires one of: ${GRANTS_READ}, ${RUNS_READ}, ${UPLOADS_WRITE}`
+        );
+      }
     });
 
     it("answers 200 to a service account holding zeteo.grants.read", async () => {

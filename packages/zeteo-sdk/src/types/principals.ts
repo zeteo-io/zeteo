@@ -18,6 +18,13 @@ export interface Principal {
   status: DirectoryPrincipalStatus;
 }
 
+/** The whole directory: every user and group, by name (one without a name last). */
+export interface AllPrincipals {
+  data: Principal[];
+  /** True when there were more than 5000 users, or more than 5000 groups, and some are left out. */
+  truncated: boolean;
+}
+
 export interface SearchPrincipalsOptions {
   type: PrincipalType;
   /** 2 to 100 characters the name (or a user's email) contains. */

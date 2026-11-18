@@ -111,4 +111,49 @@ describe("DELETE /v1/grants/:id", () => {
       }
     }
   });
+
+  it("refuses a removal that waited on a change flagging the grant as an owner grant", async () => {
+    const made = await call("POST", "", {
+      principal_type: "user",
+      principal_id: randomUUID(),
+      table_id: tableId,
+      all_columns: true,
+    });
+    expect(made.status).toBe(201);
+    const id = made.body.id as string;
+
+    // A transfer's change, held open: the row locked and flagged, uncommitted.
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let flagged!: () => void;
+    const isFlagged = new Promise<void>((resolve) => (flagged = resolve));
+    const holder = prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "zeteo"."grants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+        await tx.grant.update({ where: { id }, data: { ownerGrant: true } });
+        flagged();
+        await released;
+      },
+      { timeout: 20_000 }
+    );
+    await isFlagged;
+
+    const removal = call("DELETE", `/${id}`);
+    // Until the removal waits on the held row lock.
+    for (let i = 0; i < 200; i++) {
+      const waiting = await prisma.$queryRaw<Array<{ n: number }>>`
+        SELECT 1 AS n FROM pg_stat_activity
+        WHERE datname = current_database() AND wait_event_type = 'Lock'
+          AND query ILIKE '%grants%'`;
+      if (waiting.length > 0) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    release();
+    await holder;
+
+    const res = await removal;
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("owner_grant_locked");
+    expect(await prisma.grant.findUnique({ where: { id } })).not.toBeNull();
+  });
 });

@@ -18,9 +18,10 @@ export const useUpdateTable = (sourceId: string, tableId: string) => {
         throw toApiError(err);
       }
     },
-    onSuccess: () =>
-      queryClient.invalidateQueries({
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
         queryKey: ["sources", sourceId, "tables"],
-      }),
+      });
+    },
   });
 };

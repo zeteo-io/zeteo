@@ -1,4 +1,3 @@
-import { PrincipalLabel, PrincipalPicker } from "@/features/principals";
 import { ShareDialog, TransferDialog } from "@/features/saved-queries";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ConfirmButton } from "@/components/ConfirmButton";
@@ -11,8 +10,8 @@ import { useUrlFilters } from "@/lib/useUrlFilters";
 import { formatDate } from "@/utils/formatDate";
 import type { ApiError } from "@/lib/api";
 import { useAuth } from "@tereo-io/react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useState } from "react";
 import {
   faRightLeft,
   faShareNodes,
@@ -20,14 +19,22 @@ import {
   faUser,
 } from "@fortawesome/free-solid-svg-icons";
 import {
+  PrincipalLabel,
+  parseWho,
+  useDirectory,
+  whoFilter,
+  whoId,
+} from "@/features/principals";
+import {
+  Alert,
   Button,
   EmptyState,
-  Modal,
   RowActions,
   Spinner,
   Table,
   TableCellLink,
   TableFilters,
+  type InfiniteScrollMenuFilter,
 } from "@kosmeo-ui/react";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -86,8 +93,8 @@ export const AdminList = <T extends AdminRow>({
 }: AdminListProps<T>) => {
   const { hasPermission } = useAuth();
   const canWrite = hasPermission("zeteo.dashboards.write");
-  // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only this.
-  const canSearchPeople = hasPermission("zeteo.grants.read");
+  // The directory needs zeteo.grants.read; a lookup by id needs only this.
+  const canListPeople = hasPermission("zeteo.grants.read");
   const [filters, setFilters] = useUrlFilters(["owner_id"], filtersOf);
   const [search, setSearch] = useState("");
   const { items, isLoading, error, hasMore, loadMore } = useList({
@@ -95,64 +102,68 @@ export const AdminList = <T extends AdminRow>({
     q: search || undefined,
   });
   const remove = useRemove();
-  const [picking, setPicking] = useState(false);
+  const directory = useDirectory("admin", canListPeople);
   const [dialog, setDialog] = useState<Dialog>(null);
   const ownerRef = filters.owner_id
     ? ({ type: "user", id: filters.owner_id } as const)
     : null;
   const ownerName = (row: T) => row.owner.name ?? row.owner.id;
 
+  // Owner chooses from the whole directory (users); without it, an owner from
+  // the address is a chip.
+  const ownerSelect = !!directory.data;
+  const selectedOwner = filters.owner_id ? whoId("user", filters.owner_id) : "";
+  // TableFilters starts over when its definitions change: they change only
+  // with the directory and the owner chosen.
+  const filterDefs = useMemo<InfiniteScrollMenuFilter[]>(
+    () => [
+      ...(directory.data
+        ? [
+            whoFilter(directory.data.data, {
+              title: "Owner",
+              dataKey: "owner",
+              selected: selectedOwner,
+              only: ["user"],
+            }),
+          ]
+        : []),
+      { type: "SEARCH", title: "Search", dataKey: "q" },
+    ],
+    [directory.data, selectedOwner]
+  );
+  const onFiltersChange = (params: Record<string, string>) => {
+    setSearch(params["filter[q]"] ?? "");
+    if (!ownerSelect) return;
+    const owner_id = parseWho(params, "owner").principal_id;
+    if (owner_id !== filters.owner_id) setFilters({ owner_id });
+  };
+
   return (
     <>
       <PageHeader title={title} divider={false} />
       <div className="z-list-toolbar">
         <div className="z-list-toolbar-filters z-sq-toolbar">
-          {ownerRef ? (
+          {ownerRef && !ownerSelect && (
             <FilterChip
               clearLabel="Clear owner"
               onClear={() => setFilters({ owner_id: undefined })}
             >
               <PrincipalLabel refValue={ownerRef} />
             </FilterChip>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPicking(true)}
-            >
-              <FontAwesomeIcon icon={faUser} /> Owner
-            </Button>
           )}
-          <div className="z-sq-tablefilters">
-            <TableFilters
-              filters={[{ type: "SEARCH", title: "Search", dataKey: "q" }]}
-              onChange={(params) => setSearch(params["filter[q]"] ?? "")}
-            />
-          </div>
+          {!directory.isLoading && (
+            <div className="z-sq-tablefilters">
+              <TableFilters filters={filterDefs} onChange={onFiltersChange} />
+            </div>
+          )}
         </div>
       </div>
-      <Modal
-        show={picking}
-        title={`Show the ${noun}s of an owner`}
-        onClose={() => setPicking(false)}
-      >
-        {!canSearchPeople && (
-          <p>
-            Searching by name needs the Read grants permission; paste a user id
-            instead.
-          </p>
-        )}
-        <PrincipalPicker
-          types={["user"]}
-          search={canSearchPeople}
-          value={ownerRef}
-          onChange={(p) => {
-            setFilters({ owner_id: p.id });
-            setPicking(false);
-          }}
-        />
-      </Modal>
+      {!canListPeople && (
+        <Alert variant="warning">
+          Filtering by owner needs the Read grants permission.
+        </Alert>
+      )}
+      <ErrorNotice error={directory.error} />
       <ErrorNotice error={error} />
       {isLoading ? (
         <Spinner size="lg" />

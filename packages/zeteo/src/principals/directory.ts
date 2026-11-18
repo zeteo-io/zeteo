@@ -59,9 +59,23 @@ export const GROUP_READS_IN_FLIGHT = 8;
 export const GROUP_CACHE_TTL_SECONDS = 60;
 export const groupCacheKey = (id: string) => `zeteo:directory:group:${id}`;
 
+/**
+ * How long reading the whole directory may wait on tereo: up to
+ * `MAX_DIRECTORY / 200` pages of users and `MAX_DIRECTORY / 100` of groups,
+ * one after the other.
+ */
+export const DIRECTORY_LIST_BUDGET_MS = 20_000;
+
+/** The most users, and the most groups, `listAllPrincipals` reads. */
+export const MAX_DIRECTORY = 5000;
+
+/** Tereo's largest page of users, and of groups. */
+const USERS_PAGE = 200;
+const GROUPS_PAGE = 100;
+
 class DirectoryDeadlineError extends Error {
-  constructor() {
-    super(`tereo did not answer within ${DIRECTORY_BUDGET_MS} ms`);
+  constructor(readonly budgetMs: number) {
+    super(`tereo did not answer within ${budgetMs} ms`);
     this.name = "DirectoryDeadlineError";
   }
 }
@@ -72,14 +86,15 @@ class DirectoryDeadlineError extends Error {
  * were given it and any still running beside a failed one.
  */
 const withinBudget = async <T>(
-  run: (signal: AbortSignal) => Promise<T>
+  run: (signal: AbortSignal) => Promise<T>,
+  budgetMs = DIRECTORY_BUDGET_MS
 ): Promise<T> => {
   const controller = new AbortController();
   let timer: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new DirectoryDeadlineError()),
-      DIRECTORY_BUDGET_MS
+      () => reject(new DirectoryDeadlineError(budgetMs)),
+      budgetMs
     );
   });
   const work = run(controller.signal);
@@ -102,7 +117,8 @@ const chunks = <T>(items: T[], size: number): T[][] =>
 
 const refKey = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
 
-const orphaned = (ref: PrincipalRef): Principal =>
+/** How an id the directory does not know is answered. */
+export const orphaned = (ref: PrincipalRef): Principal =>
   ref.type === "user"
     ? { type: "user", id: ref.id, name: null, email: null, status: "orphaned" }
     : { type: "group", id: ref.id, name: null, status: "orphaned" };
@@ -149,7 +165,7 @@ const unreachable = (
   const status = statusOf(err);
   const outcome =
     err instanceof DirectoryDeadlineError
-      ? `did not finish within ${DIRECTORY_BUDGET_MS} ms`
+      ? `did not finish within ${err.budgetMs} ms`
       : `failed${status === undefined ? "" : ` with HTTP ${status}`}`;
   logger.error(
     {
@@ -163,31 +179,39 @@ const unreachable = (
 
 interface PaginatedUsers {
   data: AuthServiceUser[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
 }
 
-/** One `GET /v1/admin/users` through the raw handler, as the SDK's requests do on a 401: a new service token, once. */
-const getUsers = async (
+/** One page of `GET /v1/admin/users` through the raw handler, as the SDK's requests do on a 401: a new service token, once. */
+const getUsersPage = async (
   params: Record<string, string | number>,
-  signal: AbortSignal
-): Promise<AuthServiceUser[]> => {
+  signal: AbortSignal,
+  requestName = "zeteo.directory.searchUsers"
+): Promise<PaginatedUsers> => {
   const send = () =>
     getHandler().handleRequest<PaginatedUsers>({
       clientName: CORE_CLIENT,
-      requestName: "zeteo.directory.searchUsers",
+      requestName,
       method: "GET",
       url: "/v1/admin/users",
       params,
       signal,
     });
   try {
-    return (await send()).data.data;
+    return (await send()).data;
   } catch (err) {
     if (statusOf(err) !== 401) throw err;
     logger.warn("tereo rejected the service token; retrying once");
     await purgeServiceToken();
-    return (await send()).data.data;
+    return (await send()).data;
   }
 };
+
+const getUsers = async (
+  params: Record<string, string | number>,
+  signal: AbortSignal
+): Promise<AuthServiceUser[]> => (await getUsersPage(params, signal)).data;
 
 /** Users whose name or email contains `q`: two requests, as tereo's filters are ANDed. Human users only. */
 const searchUsers = async (
@@ -256,6 +280,127 @@ export const searchFromTereo = async (
     );
   } catch (err) {
     throw unreachable(`searching ${type}s`, err, { limit });
+  }
+};
+
+/** The whole directory as `listAllPrincipals` gives it. */
+export interface DirectoryListing {
+  principals: Principal[];
+  /** True when there were more users, or more groups, than `MAX_DIRECTORY`. */
+  truncated: boolean;
+}
+
+interface CursorPage<T> {
+  data: T[];
+  hasMore?: boolean;
+  nextCursor?: string | null;
+}
+
+/** Reads a cursor-paged list from tereo until its end or `cap` items; `truncated` when more remained. */
+const readPages = async <T>(
+  next: (cursor: string | undefined) => Promise<CursorPage<T>>,
+  cap: number,
+  signal: AbortSignal
+): Promise<{ items: T[]; truncated: boolean }> => {
+  const items: T[] = [];
+  let cursor: string | undefined;
+  for (;;) {
+    if (signal.aborted) throw new Error("directory read abandoned");
+    const page = await next(cursor);
+    items.push(...page.data);
+    if (items.length > cap)
+      return { items: items.slice(0, cap), truncated: true };
+    const more = page.hasMore === true && typeof page.nextCursor === "string";
+    if (!more) return { items, truncated: false };
+    if (items.length === cap) return { items, truncated: true };
+    cursor = page.nextCursor!;
+  }
+};
+
+/** By name, case-insensitively, a principal without a name last; ties by type, then id. */
+const byName = (a: Principal, b: Principal): number => {
+  if (a.name === null || b.name === null) {
+    if (a.name !== b.name) return a.name === null ? 1 : -1;
+  } else {
+    const order = a.name.localeCompare(b.name, undefined, {
+      sensitivity: "base",
+    });
+    if (order !== 0) return order;
+  }
+  return a.type.localeCompare(b.type) || a.id.localeCompare(b.id);
+};
+
+/** Every user (human users only, with a `scope`), at most `cap`. */
+const listAllUsers = (cap: number, signal: AbortSignal, scope?: SearchScope) =>
+  readPages<AuthServiceUser>(
+    (cursor) =>
+      getUsersPage(
+        {
+          limit: Math.min(USERS_PAGE, cap),
+          ...(scope === undefined ? {} : { "filter[userType]": "human" }),
+          ...(cursor === undefined ? {} : { cursor }),
+        },
+        signal,
+        "zeteo.directory.listUsers"
+      ),
+    cap,
+    signal
+  );
+
+/** Every live group (with a `scope`, the global ones and its organization's), at most `cap`. */
+const listAllGroups = async (
+  cap: number,
+  signal: AbortSignal,
+  scope?: SearchScope
+): Promise<{ items: Principal[]; truncated: boolean }> => {
+  const limit = Math.min(GROUPS_PAGE, cap);
+  const read = (organizationId?: string) =>
+    readPages(
+      (cursor) =>
+        requests.auth.listGroups({
+          limit,
+          ...(organizationId === undefined ? {} : { organizationId }),
+          ...(cursor === undefined ? {} : { cursor }),
+        }),
+      cap,
+      signal
+    );
+  const organizations =
+    scope === undefined
+      ? [undefined]
+      : ["global", scope.organizationId].filter((o): o is string => o !== null);
+  const lists = await Promise.all(organizations.map(read));
+  const seen = new Map<string, Principal>();
+  for (const g of lists.flatMap((list) => list.items))
+    if (!seen.has(g.id)) seen.set(g.id, fromGroup(g));
+  const items = [...seen.values()];
+  return {
+    items: items.slice(0, cap),
+    truncated: items.length > cap || lists.some((list) => list.truncated),
+  };
+};
+
+/** `listAllPrincipals` against tereo itself; `cap` is per type. */
+export const listAllFromTereo = async (
+  scope?: SearchScope,
+  cap = MAX_DIRECTORY
+): Promise<DirectoryListing> => {
+  assertNoTransaction("tereo listAllPrincipals()");
+  try {
+    return await withinBudget(async (signal) => {
+      const [users, groups] = await Promise.all([
+        listAllUsers(cap, signal, scope),
+        listAllGroups(cap, signal, scope),
+      ]);
+      return {
+        principals: [...users.items.map(fromUser), ...groups.items].sort(
+          byName
+        ),
+        truncated: users.truncated || groups.truncated,
+      };
+    }, DIRECTORY_LIST_BUDGET_MS);
+  } catch (err) {
+    throw unreachable("listing users and groups", err, { cap });
   }
 };
 
@@ -476,6 +621,39 @@ const lookupSeam = async (refs: PrincipalRef[]): Promise<Principal[]> => {
   );
 };
 
+const listSeam = async (
+  scope: SearchScope | undefined,
+  cap: number
+): Promise<DirectoryListing> => {
+  const [entries, orphans] = await Promise.all([
+    seeded(),
+    readSeam(redis.smembers(TEST_ORPHANED_KEY), 0),
+  ]);
+  const gone = new Set(orphans);
+  const listed = entries.filter(
+    (p) =>
+      p.status !== "orphaned" &&
+      !gone.has(p.id) &&
+      (scope === undefined ||
+        (p.type === "user"
+          ? p.user_type !== "service_account"
+          : (p.organization_id ?? null) === null ||
+            p.organization_id === scope.organizationId))
+  );
+  const ofType = (type: PrincipalType) =>
+    listed
+      .filter((p) => p.type === type)
+      .sort((a, b) => a.id.localeCompare(b.id));
+  const users = ofType("user");
+  const groups = ofType("group");
+  return {
+    principals: [...users.slice(0, cap), ...groups.slice(0, cap)]
+      .map((p) => asPrincipal(JSON.stringify(p)))
+      .sort(byName),
+    truncated: users.length > cap || groups.length > cap,
+  };
+};
+
 /**
  * Users or groups whose name (or a user's email) contains `q`, at most
  * `limit`. A user search leaves out service accounts; a group search with a
@@ -491,6 +669,20 @@ export const searchPrincipals = (
   env.TEREO_TEST_MODE
     ? searchSeam(type, q, limit, scope)
     : searchFromTereo(type, q, limit, scope);
+
+/**
+ * Every user and every group, by name (a principal without one last), at
+ * most `cap` (`MAX_DIRECTORY`) of each, read page by page from tereo;
+ * `truncated` when there were more. Admin scope (no `scope`): every user,
+ * service accounts included, and every live group. With a `scope`: human
+ * users only, and the global groups and those of the scope's organization.
+ * Users are never cached. An unreachable tereo is a `TereoUnreachableError`.
+ */
+export const listAllPrincipals = (
+  scope?: SearchScope,
+  cap = MAX_DIRECTORY
+): Promise<DirectoryListing> =>
+  env.TEREO_TEST_MODE ? listSeam(scope, cap) : listAllFromTereo(scope, cap);
 
 /**
  * One principal per ref, in the refs' order, a repeated ref collapsed to its

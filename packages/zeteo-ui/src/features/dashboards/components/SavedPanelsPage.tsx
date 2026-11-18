@@ -1,4 +1,3 @@
-import { BorderedSection, Button, Card, Spinner } from "@kosmeo-ui/react";
 import { ShareDialog, TransferDialog } from "@/features/saved-queries";
 import { IconAction } from "@/features/my/components/IconAction";
 import { PanelEditor, type EditorValue } from "./PanelEditor";
@@ -29,18 +28,38 @@ import {
   useSavedPanels,
   useUpdateSavedPanel,
 } from "../api/useSavedPanels";
+import {
+  BorderedSection,
+  Button,
+  Card,
+  Modal,
+  Spinner,
+} from "@kosmeo-ui/react";
 
 type Dialog = "share" | "transfer" | "edit" | "edit-warning" | "copy" | null;
 
-const Preview = ({ panel }: { panel: SavedPanel }) => {
+/** A saved panel's chart, run as the viewer, in a dialog of its own. */
+const PreviewDialog = ({
+  panel,
+  onClose,
+}: {
+  panel: SavedPanel;
+  onClose: () => void;
+}) => {
   const preview = usePreview({ kind: "saved_panel", id: panel.id });
-  if (preview.isLoading) return <Spinner size="sm" />;
-  if (preview.error) return <ErrorNotice error={preview.error} />;
-  return preview.data && panel.chart ? (
-    <div className="z-db-preview">
-      <Chart chart={panel.chart} result={preview.data} />
-    </div>
-  ) : null;
+  return (
+    <Modal show size="lg" title={panel.name} onClose={onClose}>
+      {preview.isLoading ? (
+        <Spinner size="md" />
+      ) : preview.error ? (
+        <ErrorNotice error={preview.error} />
+      ) : preview.data && panel.chart ? (
+        <div className="z-db-preview-dialog">
+          <Chart chart={panel.chart} result={preview.data} />
+        </div>
+      ) : null}
+    </Modal>
+  );
 };
 
 const asInput = (value: EditorValue) =>
@@ -86,7 +105,6 @@ const SavedPanelCard = ({
               PANEL_COPY[panel.state as keyof typeof PANEL_COPY]}
           </p>
         )}
-        {previewing && ok && <Preview panel={panel} />}
         <div className="z-db-foot">
           <p className="z-note">
             {!mine && <>From {panel.owner.name ?? "someone"} · </>}
@@ -99,9 +117,8 @@ const SavedPanelCard = ({
             {ok && (
               <IconAction
                 icon={faEye}
-                label={previewing ? "Hide preview" : "Preview"}
-                expanded={previewing}
-                onClick={() => setPreviewing((v) => !v)}
+                label="Preview"
+                onClick={() => setPreviewing(true)}
               />
             )}
             {mine ? (
@@ -150,6 +167,9 @@ const SavedPanelCard = ({
           </div>
         </div>
       </div>
+      {previewing && (
+        <PreviewDialog panel={panel} onClose={() => setPreviewing(false)} />
+      )}
       {dialog === "share" && (
         <ShareDialog objectType="saved_panel" id={panel.id} onClose={close} />
       )}

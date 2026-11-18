@@ -55,7 +55,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "list_sources",
     title: "List sources",
     description:
-      "List the data sources you can query: each one's slug, name, database type, query language, how many tables you can see, and its row and time limits.",
+      "List the data sources you can query: each one's slug, name, database type, kind (database or upload), query language, how many tables you can see, and its row and time limits.",
     permission: MCP_USE,
     readOnly: true,
     handler: handled(async (_input: undefined, access) => {
@@ -70,6 +70,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
           slug: view.slug,
           name: view.name,
           type: view.type,
+          kind: view.kind,
           language: view.language.id,
           tables: view.tables.length,
           limits: {
@@ -102,6 +103,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
             kind: table.kind,
             description: table.description,
             missing: table.missing,
+            last_synced_at: table.last_synced_at,
             columns: table.columns.length,
           })),
         };
@@ -113,7 +115,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "describe_table",
     title: "Describe a table",
     description:
-      "Show one table of a source: the columns you can query, with their types and descriptions, and its relations to other tables you can see.",
+      "Show one table of a source: the columns you can query, with their types and descriptions, and its relations to other tables you can see. An upload source's table has last_synced_at: the data is as of that time.",
     permission: MCP_USE,
     readOnly: true,
     input: TableInput,

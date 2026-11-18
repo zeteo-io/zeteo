@@ -5,6 +5,10 @@ import type { SourceType } from "../adapters/types.js";
 export const typeOf = (row: Pick<Source, "type">): SourceType =>
   row.type === "azure_sql" ? "azure-sql" : row.type;
 
+/** True for an upload source: data Zeteo stores itself, loaded from uploads. */
+export const isUploadSource = (row: Pick<Source, "type">): boolean =>
+  row.type === "upload";
+
 /** The stored enum value for an API source type. */
 export const storedType = (type: SourceType): Source["type"] =>
   type === "azure-sql" ? "azure_sql" : type;

@@ -3,6 +3,7 @@ import { send, type CallContext } from "../send.js";
 import type { Me } from "../types/principals.js";
 import type { Page } from "../types/common.js";
 import type {
+  AllPrincipals,
   Principal,
   SearchPrincipalsOptions,
 } from "../types/principals.js";
@@ -17,4 +18,7 @@ export const meCalls = (ctx: CallContext) => ({
     options: SearchPrincipalsOptions
   ): Promise<{ data: Principal[] }> =>
     send(ctx, { op: "searchMyPrincipals", query: { ...options } }),
+  /** Every user and group the caller may share with. Counted as a search. */
+  allPrincipals: (): Promise<AllPrincipals> =>
+    send(ctx, { op: "listAllMyPrincipals" }),
 });

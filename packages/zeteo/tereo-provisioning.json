@@ -83,6 +83,12 @@
         "displayName": "Manage dashboards",
         "description": "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.uploads.write",
+        "displayName": "Manage upload sources",
+        "description": "Create upload sources from uploaded files, and manage and grant the ones the holder owns",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
@@ -102,7 +108,8 @@
           "zeteo.saved_queries.read",
           "zeteo.saved_queries.write",
           "zeteo.dashboards.read",
-          "zeteo.dashboards.write"
+          "zeteo.dashboards.write",
+          "zeteo.uploads.write"
         ]
       },
       {
@@ -126,12 +133,12 @@
     "eventTypes": [
       {
         "eventType": "zeteo.source.created",
-        "description": "A source was registered",
+        "description": "A source was registered, or an upload source created from an upload",
         "readPermission": "zeteo.sources.read"
       },
       {
         "eventType": "zeteo.source.updated",
-        "description": "A source's settings, limits or descriptions were changed",
+        "description": "A source's settings, limits, descriptions, name or columns were changed",
         "readPermission": "zeteo.sources.read"
       },
       {
@@ -142,6 +149,31 @@
       {
         "eventType": "zeteo.source.refreshed",
         "description": "A source's catalogue was refreshed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.deleted",
+        "description": "An upload source and its stored tables were deleted",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.transferred",
+        "description": "An upload source was transferred to another owner",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.tables_added",
+        "description": "Tables were added to an upload source from an upload",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.table_reuploaded",
+        "description": "An upload source's table was replaced by a new upload",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.source.table_removed",
+        "description": "A table was removed from an upload source",
         "readPermission": "zeteo.sources.read"
       },
       {

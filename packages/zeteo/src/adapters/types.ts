@@ -2,7 +2,7 @@ import type { VisibleCatalog, VisibleTable } from "../grants/visibleCatalog.js";
 import type { ResolvedTarget } from "../sources/network.js";
 import type { z } from "zod";
 
-export type SourceType = "postgres" | "azure-sql";
+export type SourceType = "postgres" | "azure-sql" | "upload";
 export type ColumnType =
   "text" | "number" | "boolean" | "date" | "timestamp" | "json" | "other";
 
@@ -90,10 +90,30 @@ export interface QueryResult {
   truncated: false | "rows" | "bytes";
 }
 
+/** A table's estimated rows, from the database's statistics. */
+export interface TableRowCount {
+  schemaName: string;
+  name: string;
+  rows: number;
+}
+
 export interface SourceConnection {
   /** Inspects the login across the whole connected database, not a schema list. */
   checkLogin(): Promise<LoginFinding[]>;
   readSchema(schemas: string[]): Promise<SchemaSnapshot>;
+  /**
+   * The bytes on disk of the tables and materialized views in the listed
+   * schemas (indexes and TOAST included), or null when the source will not
+   * tell. Never throws: a failure is logged without reaching any caller.
+   */
+  readSize(schemas: string[]): Promise<number | null>;
+  /**
+   * The estimated rows of the tables in the listed schemas, from the
+   * database's statistics (no table is scanned). A table the database has no
+   * estimate for, and every view, is left out. Null when the source will not
+   * tell. Never throws: a failure is logged without reaching any caller.
+   */
+  readRowCounts(schemas: string[]): Promise<TableRowCount[] | null>;
   /**
    * Starts a query prepared by this source's own adapter, read-only, ending
    * by `limits.deadlineAt` however long it waited for a connection; resolves

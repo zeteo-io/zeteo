@@ -14,7 +14,8 @@
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+      **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
+      (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
       `502 source_unreachable`.
     operationId: refreshSource
     parameters:

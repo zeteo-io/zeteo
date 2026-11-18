@@ -15,6 +15,7 @@ import {
   SAVED_QUERIES_WRITE,
   DASHBOARDS_READ,
   DASHBOARDS_WRITE,
+  UPLOADS_WRITE,
   SERVICE_SLUG,
   SOURCES_READ,
   SOURCES_WRITE,
@@ -44,7 +45,7 @@ describe("buildTereoDocument", () => {
     ]);
   });
 
-  it("declares exactly the twelve zeteo permissions", () => {
+  it("declares exactly the thirteen zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
     expect(GRANTS_READ).toBe("zeteo.grants.read");
@@ -67,6 +68,7 @@ describe("buildTereoDocument", () => {
         SAVED_QUERIES_WRITE,
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
+        UPLOADS_WRITE,
       ].sort()
     );
   });
@@ -92,7 +94,7 @@ describe("buildTereoDocument", () => {
     });
   });
 
-  it("declares zeteo_admin with all twelve permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
+  it("declares zeteo_admin with all thirteen permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
     const roles = Object.fromEntries(
       service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
     );
@@ -115,6 +117,7 @@ describe("buildTereoDocument", () => {
         SAVED_QUERIES_WRITE,
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
+        UPLOADS_WRITE,
       ].sort()
     );
     expect(roles.zeteo_user).toEqual([DATA_READ]);
@@ -268,7 +271,12 @@ describe("buildTereoDocument", () => {
       "zeteo.saved_query.updated",
       "zeteo.source.archived",
       "zeteo.source.created",
+      "zeteo.source.deleted",
       "zeteo.source.refreshed",
+      "zeteo.source.table_removed",
+      "zeteo.source.table_reuploaded",
+      "zeteo.source.tables_added",
+      "zeteo.source.transferred",
       "zeteo.source.updated",
     ]);
     expect(service.eventTypes!.map((e) => e.eventType).sort()).toEqual(
@@ -283,5 +291,45 @@ describe("tereo-provisioning.json", () => {
     expect(readJson("tereo-provisioning.json")).toEqual(
       buildTereoDocument(version)
     );
+  });
+});
+
+describe("upload sources declaration", () => {
+  it("declares zeteo.uploads.write, not organization-assignable, in zeteo_admin only", () => {
+    expect(UPLOADS_WRITE).toBe("zeteo.uploads.write");
+    const permission = service.permissions!.find(
+      (p) => p.name === UPLOADS_WRITE
+    );
+    expect(permission).toMatchObject({ orgAssignable: false });
+    const holders = service
+      .systemRoles!.filter((r) => r.permissions!.includes(UPLOADS_WRITE))
+      .map((r) => r.name);
+    expect(holders).toEqual(["zeteo_admin"]);
+  });
+
+  it("declares the upload source audit events under zeteo.source, with descriptions", () => {
+    expect(AUDIT_EVENTS.sourceDeleted).toBe("zeteo.source.deleted");
+    expect(AUDIT_EVENTS.sourceTransferred).toBe("zeteo.source.transferred");
+    expect(AUDIT_EVENTS.sourceTablesAdded).toBe("zeteo.source.tables_added");
+    expect(AUDIT_EVENTS.sourceTableReuploaded).toBe(
+      "zeteo.source.table_reuploaded"
+    );
+    expect(AUDIT_EVENTS.sourceTableRemoved).toBe("zeteo.source.table_removed");
+    for (const name of [
+      "deleted",
+      "transferred",
+      "tables_added",
+      "table_reuploaded",
+      "table_removed",
+    ]) {
+      const event = service.eventTypes!.find(
+        (e) => e.eventType === `zeteo.source.${name}`
+      );
+      expect(event?.description?.length).toBeGreaterThan(0);
+      expect(event?.readPermission).toBe(SOURCES_READ);
+    }
+    expect(
+      service.eventTypes!.some((e) => e.eventType.startsWith("zeteo.file_"))
+    ).toBe(false);
   });
 });

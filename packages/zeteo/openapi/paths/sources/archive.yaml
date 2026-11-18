@@ -8,7 +8,9 @@
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found`, `409 source_archived` (already archived).
+      **Errors:** `404 not_found`, `409 source_archived` (already archived),
+      `409 not_a_database_source` (an upload source is deleted, not archived:
+      `DELETE /v1/sources/{sourceId}`).
     operationId: archiveSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'

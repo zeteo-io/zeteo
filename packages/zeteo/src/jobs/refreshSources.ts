@@ -1,5 +1,6 @@
 import { SYSTEM_USER_ID } from "../definitions/systemUser.js";
 import { refreshSource } from "../catalog/refresh.js";
+import { isUploadSource } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
 import { db } from "../utils/db/index.js";
@@ -19,10 +20,11 @@ const lockKey = (sourceId: string) => `zeteo:refresh:${sourceId}`;
 const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call("del", KEYS[1]) end return 0`;
 
 /**
- * Refreshes each unarchived source not refreshed in the last 24 hours, one at
- * a time. A source another replica holds the lock for is skipped, and so is
- * one that, read again under the lock, another replica has refreshed or that
- * has been archived since the list was read. A failing one is logged without
+ * Refreshes each unarchived database source (never an upload source) not
+ * refreshed in the last 24 hours, one at a time. A source another replica
+ * holds the lock for is skipped, and so is one that, read again under the
+ * lock, another replica has refreshed or that has been archived since the
+ * list was read. A failing one is logged without
  * stopping the rest.
  */
 export const refreshStaleSources = async (
@@ -47,6 +49,7 @@ export const refreshStaleSources = async (
         const current = await db.sources.findById(source.id);
         const stillDue =
           current !== null &&
+          !isUploadSource(current) &&
           current.archivedAt === null &&
           (current.lastRefreshedAt === null ||
             current.lastRefreshedAt < cutoff);

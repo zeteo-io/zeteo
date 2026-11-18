@@ -1,9 +1,11 @@
 import { sourceBusy, SourceUnreachableError } from "../../utils/errors.js";
 import { type PostgresSettings, toPgConfig } from "./settings.js";
 import type { ResolvedTarget } from "../../sources/network.js";
+import { readRowCounts } from "./readRowCounts.js";
 import { logger } from "../../utils/logger.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
+import { readSize } from "./readSize.js";
 import { Pool } from "pg";
 import {
   isPoolExhausted,
@@ -18,6 +20,7 @@ import type {
   RowStream,
   SchemaSnapshot,
   SourceConnection,
+  TableRowCount,
 } from "../types.js";
 
 export class PostgresConnection implements SourceConnection {
@@ -29,6 +32,24 @@ export class PostgresConnection implements SourceConnection {
 
   readSchema(schemas: string[]): Promise<SchemaSnapshot> {
     return this.guarded((pool) => readSchema(pool, schemas));
+  }
+
+  async readSize(schemas: string[]): Promise<number | null> {
+    try {
+      return await readSize(this.pool, schemas);
+    } catch (err) {
+      logger.warn({ err }, "reading the source's size failed");
+      return null;
+    }
+  }
+
+  async readRowCounts(schemas: string[]): Promise<TableRowCount[] | null> {
+    try {
+      return await readRowCounts(this.pool, schemas);
+    } catch (err) {
+      logger.warn({ err }, "reading the source's row counts failed");
+      return null;
+    }
   }
 
   openQuery(

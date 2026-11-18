@@ -87,6 +87,9 @@ services:
       POSTGRES_USER: zeteo
       POSTGRES_PASSWORD: zeteo-e2e-only
       POSTGRES_DB: zeteo
+    volumes:
+      # The uploads reader role, on first start.
+      - ../docker/postgres/uploads-reader.sql:/docker-entrypoint-initdb.d/uploads-reader.sql:ro
     healthcheck:
       <<: *fast-healthcheck
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U zeteo -d zeteo"]
@@ -116,6 +119,9 @@ services:
       PUBLIC_URL: http://127.0.0.1:${E2E_ZETEO_PORT:?}
       DATABASE_URL: *zeteo-database-url
       REDIS_URL: redis://zeteo-redis:6379
+      # The reader role docker/postgres/uploads-reader.sql creates; the
+      # database is not published, so its public password is fine here.
+      UPLOADS_READER_URL: postgresql://zeteo_uploads_reader:zeteo-uploads-reader-local-only@zeteo-postgres:5432/zeteo
       ZETEO_MASTER_KEY: ${E2E_ZETEO_MASTER_KEY:?}
       TEREO_URL: http://tereo:4001
       TEREO_CLIENT_ID: zeteo

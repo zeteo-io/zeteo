@@ -18,6 +18,9 @@ export const ASPECTS = [
   "calc",
   "relative",
   "available",
+  "files",
+  "size",
+  "rows",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

@@ -16,12 +16,32 @@ import {
   TableCellLink,
   TableFilters,
   type InfiniteScrollMenuFilter,
+  type TableColumn,
 } from "@kosmeo-ui/react";
 
 export const TablesPage = () => {
   const sourceId = useUuidParam("sourceId");
-  return sourceId ? <TablesList sourceId={sourceId} /> : <NotFound />;
+  return sourceId ? <DatabaseTables sourceId={sourceId} /> : <NotFound />;
 };
+
+const DatabaseTables = ({ sourceId }: { sourceId: string }) => (
+  <TablesList
+    sourceId={sourceId}
+    canEdit={useCanEditCatalogue(sourceId)}
+    tableHref={(id) => `/sources/${sourceId}/tables/${id}`}
+  />
+);
+
+export interface TablesListProps {
+  sourceId: string;
+  /** Whether the caller may describe the tables. */
+  canEdit: boolean;
+  tableHref: (tableId: string) => string;
+  /** `upload`: an upload source, whose tables have no schema or views to tell apart. */
+  catalogue?: "database" | "upload";
+  /** Columns after the description, for what only this kind of source has. */
+  extraColumns?: TableColumn<Table>[];
+}
 
 /** Filter params as TableFilters reports them: `filter[name]`, `filter[schema_name]`, `filter[kind]`. */
 type FilterParams = Record<string, string>;
@@ -36,10 +56,41 @@ const matches = (table: Table, params: FilterParams): boolean => {
   return true;
 };
 
-const TablesList = ({ sourceId }: { sourceId: string }) => {
+/** The schema and kind filters, which only a database source has use for. */
+const databaseFilters = (schemaKey: string): InfiniteScrollMenuFilter[] => [
+  {
+    type: "SELECT",
+    title: "Schema",
+    dataKey: "schema_name",
+    multiSelect: true,
+    options: (schemaKey ? schemaKey.split(",") : []).map((s) => ({
+      id: s,
+      name: s,
+      selected: false,
+    })),
+  },
+  {
+    type: "SELECT",
+    title: "Kind",
+    dataKey: "kind",
+    options: [
+      { id: "table", name: "Tables", selected: false },
+      { id: "view", name: "Views", selected: false },
+    ],
+  },
+];
+
+/** A source's tables: the Tables tab of a database source, and of an upload source. */
+export const TablesList = ({
+  sourceId,
+  canEdit,
+  tableHref,
+  catalogue = "database",
+  extraColumns = [],
+}: TablesListProps) => {
+  const database = catalogue === "database";
   const [includeMissing, setIncludeMissing] = useState(false);
   const [params, setParams] = useState<FilterParams>({});
-  const canEdit = useCanEditCatalogue(sourceId);
   const { tables, isLoading, error } = useAllTables(sourceId, {
     includeMissing,
   });
@@ -52,28 +103,9 @@ const TablesList = ({ sourceId }: { sourceId: string }) => {
   const filters = useMemo<InfiniteScrollMenuFilter[]>(
     () => [
       { type: "SEARCH", title: "Name", dataKey: "name" },
-      {
-        type: "SELECT",
-        title: "Schema",
-        dataKey: "schema_name",
-        multiSelect: true,
-        options: (schemaKey ? schemaKey.split(",") : []).map((s) => ({
-          id: s,
-          name: s,
-          selected: false,
-        })),
-      },
-      {
-        type: "SELECT",
-        title: "Kind",
-        dataKey: "kind",
-        options: [
-          { id: "table", name: "Tables", selected: false },
-          { id: "view", name: "Views", selected: false },
-        ],
-      },
+      ...(database ? databaseFilters(schemaKey) : []),
     ],
-    [schemaKey]
+    [schemaKey, database]
   );
 
   const shown = tables.filter((t) => matches(t, params));
@@ -115,10 +147,7 @@ const TablesList = ({ sourceId }: { sourceId: string }) => {
                 title: "Name",
                 cellElement: (table) => (
                   <span className="z-tables-name">
-                    <TableCellLink
-                      as={Link}
-                      to={`/sources/${sourceId}/tables/${table.id}`}
-                    >
+                    <TableCellLink as={Link} to={tableHref(table.id)}>
                       {table.name}
                     </TableCellLink>
                     {table.kind === "view" && (
@@ -134,23 +163,26 @@ const TablesList = ({ sourceId }: { sourceId: string }) => {
                   </span>
                 ),
               },
-              { title: "Schema", dataKey: "schema_name" },
+              ...(database
+                ? [{ title: "Schema", dataKey: "schema_name" as const }]
+                : []),
               {
                 title: "Description",
+                // With extra columns after it, the description takes the
+                // spare width and they stay as narrow as their content.
+                ...(extraColumns.length > 0 && { width: "100%" }),
                 cellElement: (table) =>
                   table.description ? (
                     table.description
                   ) : canEdit ? (
-                    <Link
-                      className="z-muted-link"
-                      to={`/sources/${sourceId}/tables/${table.id}`}
-                    >
+                    <Link className="z-muted-link" to={tableHref(table.id)}>
                       Add description
                     </Link>
                   ) : (
                     <span className="z-muted">—</span>
                   ),
               },
+              ...extraColumns,
             ]}
             rows={shown}
           />

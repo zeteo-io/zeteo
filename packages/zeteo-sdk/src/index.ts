@@ -80,6 +80,19 @@ export type {
   ListTablesOptions,
 } from "./types/sources.js";
 export type {
+  UploadColumnType,
+  StagedColumn,
+  StagedTable,
+  UploadResponse,
+  ColumnCorrection,
+  TableCorrection,
+  CreateUploadSourceRequest,
+  AddTablesRequest,
+  ReuploadTableRequest,
+  UpdateUploadColumnRequest,
+  TransferSourceRequest,
+} from "./types/uploads.js";
+export type {
   PrincipalStatus,
   Grant,
   CreateGrantRequest,
@@ -94,6 +107,7 @@ export type {
 } from "./types/principalLimits.js";
 export type {
   Me,
+  AllPrincipals,
   Principal,
   PrincipalRef,
   DirectoryPrincipalStatus,

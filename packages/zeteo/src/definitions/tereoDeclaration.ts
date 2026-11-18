@@ -49,12 +49,23 @@ export const DASHBOARDS_READ = "zeteo.dashboards.read";
 /** Changes, shares, transfers and deletes any dashboard or saved panel. */
 export const DASHBOARDS_WRITE = "zeteo.dashboards.write";
 
+/**
+ * Creates upload sources, and manages and grants those the holder owns. Every
+ * upload route also requires `zeteo.data.read`.
+ */
+export const UPLOADS_WRITE = "zeteo.uploads.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
   sourceUpdated: "zeteo.source.updated",
   sourceArchived: "zeteo.source.archived",
   sourceRefreshed: "zeteo.source.refreshed",
+  sourceDeleted: "zeteo.source.deleted",
+  sourceTransferred: "zeteo.source.transferred",
+  sourceTablesAdded: "zeteo.source.tables_added",
+  sourceTableReuploaded: "zeteo.source.table_reuploaded",
+  sourceTableRemoved: "zeteo.source.table_removed",
   relationDeclared: "zeteo.relation.declared",
   relationRenamed: "zeteo.relation.renamed",
   relationRemoved: "zeteo.relation.removed",
@@ -90,11 +101,22 @@ export const AUDIT_EVENTS = {
 export type AuditEvent = (typeof AUDIT_EVENTS)[keyof typeof AUDIT_EVENTS];
 
 const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
-  [AUDIT_EVENTS.sourceCreated]: "A source was registered",
+  [AUDIT_EVENTS.sourceCreated]:
+    "A source was registered, or an upload source created from an upload",
   [AUDIT_EVENTS.sourceUpdated]:
-    "A source's settings, limits or descriptions were changed",
+    "A source's settings, limits, descriptions, name or columns were changed",
   [AUDIT_EVENTS.sourceArchived]: "A source was archived",
   [AUDIT_EVENTS.sourceRefreshed]: "A source's catalogue was refreshed",
+  [AUDIT_EVENTS.sourceDeleted]:
+    "An upload source and its stored tables were deleted",
+  [AUDIT_EVENTS.sourceTransferred]:
+    "An upload source was transferred to another owner",
+  [AUDIT_EVENTS.sourceTablesAdded]:
+    "Tables were added to an upload source from an upload",
+  [AUDIT_EVENTS.sourceTableReuploaded]:
+    "An upload source's table was replaced by a new upload",
+  [AUDIT_EVENTS.sourceTableRemoved]:
+    "A table was removed from an upload source",
   [AUDIT_EVENTS.relationDeclared]: "A relation was declared between two tables",
   [AUDIT_EVENTS.relationRenamed]: "A relation was renamed",
   [AUDIT_EVENTS.relationRemoved]: "A declared relation was removed",
@@ -138,6 +160,11 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.sourceUpdated]: SOURCES_READ,
   [AUDIT_EVENTS.sourceArchived]: SOURCES_READ,
   [AUDIT_EVENTS.sourceRefreshed]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceDeleted]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceTransferred]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceTablesAdded]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceTableReuploaded]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceTableRemoved]: SOURCES_READ,
   [AUDIT_EVENTS.relationDeclared]: SOURCES_READ,
   [AUDIT_EVENTS.relationRenamed]: SOURCES_READ,
   [AUDIT_EVENTS.relationRemoved]: SOURCES_READ,
@@ -269,6 +296,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           "Change, share, transfer and delete any user's dashboards and saved panels; also grants Read dashboards",
         orgAssignable: false,
       },
+      {
+        name: UPLOADS_WRITE,
+        displayName: "Manage upload sources",
+        description:
+          "Create upload sources from uploaded files, and manage and grant the ones the holder owns",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
@@ -290,6 +324,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           SAVED_QUERIES_WRITE,
           DASHBOARDS_READ,
           DASHBOARDS_WRITE,
+          UPLOADS_WRITE,
         ],
       },
       {

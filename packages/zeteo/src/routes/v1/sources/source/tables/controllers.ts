@@ -1,14 +1,21 @@
 import { encodeCursor, parseCursor } from "../../../../../utils/cursor.js";
-import { ListTablesQuerySchema, TableCursorSchema } from "./schemas.js";
+import { addTables as add } from "../../../../../uploads/service.js";
 import { NotFoundError } from "../../../../../utils/errors.js";
+import { callerOf } from "../../../../../middleware/auth.js";
 import { tableView } from "../../../../../views/catalog.js";
 import { db } from "../../../../../utils/db/index.js";
 import { SourceParamsSchema } from "../schemas.js";
 import type { Request, Response } from "express";
 import {
+  validateBody,
   validateParams,
   validateQuery,
 } from "../../../../../utils/validateReq.js";
+import {
+  AddTablesSchema,
+  ListTablesQuerySchema,
+  TableCursorSchema,
+} from "./schemas.js";
 
 export const listTables = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
@@ -33,4 +40,11 @@ export const listTables = async (req: Request, res: Response) => {
     next_cursor:
       page.hasMore && last ? encodeCursor([last.schemaName, last.name]) : null,
   });
+};
+
+/** An upload source only: adds the staging's tables. */
+export const addTables = async (req: Request, res: Response) => {
+  const { sourceId } = validateParams(SourceParamsSchema, req);
+  const body = validateBody(AddTablesSchema, req);
+  res.status(201).json(await add(callerOf(req), sourceId, body));
 };

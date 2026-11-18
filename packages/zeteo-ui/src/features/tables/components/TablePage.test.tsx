@@ -174,6 +174,18 @@ describe("TablePage", () => {
     );
   });
 
+  it("edits only descriptions of a database table, never its column names or types", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await openEditor(user);
+    expect(
+      screen.getByLabelText("Description of column note")
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Name of column/)).toBeNull();
+    expect(screen.queryByLabelText(/^Type of column/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit columns" })).toBeNull();
+  });
+
   it("sends null for an emptied table description", async () => {
     const user = userEvent.setup();
     renderPage();

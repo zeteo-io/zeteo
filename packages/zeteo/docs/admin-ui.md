@@ -4,7 +4,7 @@ The admin UI is a web page served from zeteo's own origin. Its build (`packages/
 in zeteo's image, and zeteo serves it at `/` once `UI_CLIENT_ID` names its login client in Tereo;
 without `UI_CLIENT_ID` the image runs as an API only and `/` is a JSON `404`. This document covers
 turning it on, what each screen does, local development, and what zeteo provides for it:
-`GET /v1/me`, `GET /v1/principals`, `POST /v1/principals/lookup`, the public `GET /ui-config.json`,
+`GET /v1/me`, `GET /v1/principals` (and `/all`), `POST /v1/principals/lookup`, the public `GET /ui-config.json`,
 a content security policy on every response, and the serving of the build. The server side is
 exercised end to end by `e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and
 `uiSignIn.e2e.test.ts`, and the UI itself in Chromium by `e2e/browser/admin.spec.ts`.
@@ -17,8 +17,10 @@ exercised end to end by `e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and
 | `UI_TEREO_URL` | `TEREO_URL` | The Tereo URL the browser calls. It is published to browsers at `/ui-config.json`. It must be `https` when `PUBLIC_URL` is `https` (a page served over https cannot call an http origin: browsers block mixed content); under an `http` `PUBLIC_URL` an `http` URL is accepted, in production too. It may carry no credentials, query or fragment. Set it whenever `TEREO_URL` is an internal address |
 | `UI_DIST_PATH` | `packages/zeteo-ui/dist` | The UI build to serve; a relative path resolves from `packages/zeteo`. Without an `index.html` there the UI is not served, and the start log says why |
 
-`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "..." }`, needs no sign-in and
-answers whenever `UI_CLIENT_ID` is set, build or not.
+`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "...", "uploads": true }`,
+needs no sign-in and answers whenever `UI_CLIENT_ID` is set, build or not. `uploads` is true
+when `UPLOADS_READER_URL` is set (its value is never sent); the UI shows Uploads only
+then.
 
 ## The login client in Tereo
 
@@ -78,13 +80,23 @@ someone holding its permission; a person with no zeteo admin permission at all s
 page and no sections.
 
 - **Sources** (`zeteo.sources.read`, changes with `.write`): the registered databases with their
-  status. A new source takes its connection (host, port, database, login, TLS mode and an optional
+  status, and upload sources with their owner, filtered by kind; every source links to its page,
+  `/sources/<id>`. A new source takes its connection (host, port, database, login, TLS mode and an optional
   CA certificate), its schemas and its limits. A source's page runs **Test** (does the login hold
   rights a read-only one would not), **Refresh** (reads the catalogue again and says what changed),
   edits and archives it.
-- **Tables** and **Relations**, tabs of a source: the catalogue as zeteo last read it. A table's
-  page shows its columns and relations and edits the table's and columns' descriptions; Relations
-  lists the relations read from the database and declares or removes the ones it lacks.
+- A source's page, `/sources/<id>` for a database and an upload source alike, has one header (name, slug, kind and status, with the actions of its kind) and the tabs
+  **Overview**, **Tables**, **Relations** and **Shared with**. Overview shows the querying and
+  export limits, and for a database the catalogue (schemas, last refresh, size on disk of its
+  schemas' tables as measured at that refresh, "Unknown" when it could not be read) and the
+  connection; for an upload source its owner, size, tables and when it was added. With
+  `zeteo.sources.write`, the Querying and Exports sections each have an **Edit** that opens the
+  limits dialog (time limit, row cap, concurrency, exports), for both kinds of source.
+- **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
+  columns and relations and edits the table's and columns' descriptions; Relations lists the
+  relations read from the database and declares, renames or removes the ones it lacks.
+- **Shared with** (`zeteo.grants.read`, changes with `.write`): every grant on the source's
+  tables; **Share** grants a table (all columns or chosen ones) to a person or group.
 - **Grants** (`zeteo.grants.read`, changes with `.write`): who may query which table, filtered by
   source, table or person. A grant names a user or group (searched by name or email, or pasted as
   an id) and a table, with all of its columns or a chosen few.
@@ -109,6 +121,24 @@ page and no sections.
   extend your access." and carries no query or source. Sharing searches people with
   `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
   The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
+  With `zeteo.uploads.write`, while Uploads are on, My Zeteo has a **My sources** tab: the
+  person's own upload sources (name, size, how many people and groups it is shared with, when it
+  was added; Delete). **Add data** (`/my/data/new`)
+  uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
+  keep, their names, the header row, and each column's name and type with sample values and the
+  parse warnings; a value that does not fit its type names the column and rows. Leaving Add
+  data, Add tables or Re-upload without creating discards the upload. Creating lands on the new
+  source's page. An upload source's page (`/sources/<id>`, reached by its owner from My sources and
+  by admins from Sources; its owner needs only `zeteo.uploads.write`) is the same page as a
+  database source's (above). Its Tables list adds each table's rows and last load; a table's page adds
+  **Re-upload**, remove and, per column, a dialog to rename or retype it (warning that saved
+  queries using it may stop working); its header has **Add tables**, **Transfer**, **Edit** (its
+  name, and its limits for `zeteo.sources.write`) and **Delete**; and Shared with lists the owner's own grant, marked and locked. A retype's values
+  that do not fit name data rows of the table (an upload's name rows of the file). The owner
+  manages it all; an admin's controls follow their permissions: tables, Edit, Transfer and
+  Delete with `zeteo.sources.write`, which alone may change its limits; the Shared with tab with `zeteo.grants.read`, and
+  sharing and changing grants with `zeteo.grants.write` (which may still remove grants once the
+  source is deleted, when the owner grants are no longer locked).
 
 - **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
   Its tabs list the person's own dashboards and those shared with them, and their saved panels
@@ -208,11 +238,14 @@ is added when `PUBLIC_URL` is https.
 |------|------------|---------|
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
-| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
+| `GET /v1/principals/all` | `zeteo.grants.read` | `{ data: Principal[], truncated }`: every user (service accounts included) and every live group, by name, for the admin pages' "Who" filters |
+| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.uploads.write` with `zeteo.data.read` (then only for principals granted on the caller's own upload sources, other ids answered `orphaned`, and counted against the search limit) | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
+| `GET /v1/me/principals/all` | `zeteo.data.read` | `{ data: Principal[], truncated }` as `GET /v1/principals/all`, over the people and groups `GET /v1/me/principals` searches; the "Who" filter of an upload source's owner |
 
-The saved queries the UI manages are in [saved-queries.md](saved-queries.md).
+The saved queries the UI manages are in [saved-queries.md](saved-queries.md), and Uploads in
+[uploads.md](uploads.md).
 
 A `Principal` is `{ type, id, name, email?, status }`, with `email` for users only and `status`
 `active`, `inactive` or `orphaned`.
@@ -220,6 +253,13 @@ A `Principal` is `{ type, id, name, email?, status }`, with `email` for users on
 Search limits: `q` is 2 to 100 characters, `limit` 1 to 25 (default 10), and a caller may search 60
 times a minute across all replicas (`429` after that). Search finds people only: service accounts
 are not in its results, and are found by id through `lookup`.
+
+The two `/all` calls read the whole directory from Tereo on every call, page by page (200 users
+or 100 groups a page), at most 5000 users and 5000 groups: past either, the answer has the first
+5000 and `truncated: true`. They are sorted by name, case-insensitively, a principal without a
+name last. Each counts as one search against the 60 a minute, takes no query parameters, waits
+on Tereo for at most 20 seconds, and is never cached by zeteo; the UI keeps its answer for five
+minutes.
 
 When zeteo cannot reach Tereo's directory, these calls answer `502 tereo_unreachable`. A search
 or a lookup waits on Tereo for at most five seconds in all, retries included; past that it is
@@ -230,8 +270,8 @@ Lookup reads each group from Tereo on its own, at most eight at a time, and cach
 name and status in Redis for 60 seconds (users are not cached). A group renamed or archived in
 Tereo can therefore show its old name or status for up to a minute.
 
-The SDK has the same calls: `zeteo.me.get()`, `zeteo.principals.search()` and
-`zeteo.principals.lookup()`.
+The SDK has the same calls: `zeteo.me.get()`, `zeteo.me.allPrincipals()`,
+`zeteo.principals.search()`, `zeteo.principals.all()` and `zeteo.principals.lookup()`.
 
 ## Privacy
 

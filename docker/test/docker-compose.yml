@@ -79,6 +79,11 @@ services:
       PORT: "4201"
       PUBLIC_URL: http://localhost:4201
       DATABASE_URL: postgresql://zeteo:zeteo@postgres:5432/zeteo_test
+      # The uploads reader role, on the same database; globalSetup creates
+      # it with this password (testEnv.ts's TEST_UPLOADS_READER).
+      UPLOADS_READER_URL: postgresql://zeteo_uploads_reader:zeteo-uploads-reader-test-only@postgres:5432/zeteo_test
+      # Tests stage many files per user within the hour (testEnv.ts does the same).
+      UPLOAD_MAX_STAGINGS: "1000"
       REDIS_URL: redis://redis:6379
       TEST_MSSQL_URL: mssql://sa:Zeteo-test-1@mssql:1433
       # The shared server serves MCP to this client; testEnv.ts names the same.

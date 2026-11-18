@@ -1,16 +1,21 @@
 import { SOURCES_WRITE } from "../../../../../../definitions/tereoDeclaration.js";
-import { requirePermission } from "../../../../../../middleware/auth.js";
+import { allowOwnerOr } from "../../../../../../middleware/uploadOwner.js";
 import { deleteRelation, patchRelation } from "./controllers.js";
+import { sourceOfParams } from "../../middleware.js";
 import express, { Router } from "express";
 
 const relationRouter = Router({ mergeParams: true });
 
 relationRouter.patch(
   "/",
-  requirePermission(SOURCES_WRITE),
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
   express.json({ limit: "64kb" }),
   patchRelation
 );
-relationRouter.delete("/", requirePermission(SOURCES_WRITE), deleteRelation);
+relationRouter.delete(
+  "/",
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
+  deleteRelation
+);
 
 export default relationRouter;

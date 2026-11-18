@@ -38,16 +38,6 @@
   gap: 0.5rem;
 }
 
-.z-relation-table {
-  white-space: nowrap;
-}
-
-.z-relations-list td:nth-child(5),
-.z-relations-list th:nth-child(5) {
-  width: 1%;
-  white-space: nowrap;
-}
-
 /* From and To side by side, over their column pairs. */
 .z-relation-tables {
   display: grid;
@@ -77,4 +67,29 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+
+/* Fixed proportions, so very long table names (some sources have them)
+   wrap inside their own column instead of squeezing the others: the three
+   name columns share about two thirds, On takes the rest, Returns and the
+   row actions only what they need. */
+.z-relations-list table {
+  table-layout: fixed;
+}
+
+.z-relations-list th:nth-child(1),
+.z-relations-list th:nth-child(3) {
+  width: 22%;
+}
+
+.z-relations-list th:nth-child(2) {
+  width: 18%;
+}
+
+.z-relations-list th:nth-child(5) {
+  width: 6.5rem;
+}
+
+.z-relations-list th:nth-child(6) {
+  width: 6.5rem;
 }

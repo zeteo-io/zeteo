@@ -3,11 +3,14 @@
     tags: [Sources]
     summary: List sources
     description: |
-      Lists sources in creation order (`created_at`, then `id`). Archived sources are left out
-      unless `include_archived=true`. A source whose stored settings cannot be decrypted is
-      listed with `settings: null`.
+      Lists sources in creation order (`created_at`, then `id`), database and upload sources
+      alike. Archived sources (and deleted upload sources) are left out unless
+      `include_archived=true`. A source whose stored settings cannot be decrypted is listed with
+      `settings: null`.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes. With
+      `owner_id=me`, a caller holding `zeteo.uploads.write` and `zeteo.data.read` instead,
+      who sees only their own upload sources. `403 forbidden` otherwise.
     operationId: listSources
     parameters:
       - name: include_archived
@@ -15,6 +18,20 @@
         required: false
         description: Also list archived sources
         schema: { type: boolean, default: false }
+      - name: type
+        in: query
+        required: false
+        description: Only sources of this type
+        schema: { $ref: '../../components/sources/schemas.yaml#/SourceType' }
+      - name: owner_id
+        in: query
+        required: false
+        description: Only the upload sources of this owner; `me` for the caller
+        schema:
+          type: string
+          pattern: '^(me|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$'
+        examples:
+          me: { value: me }
       - $ref: '../../components/parameters.yaml#/LimitParam'
       - $ref: '../../components/parameters.yaml#/CursorParam'
     responses:
@@ -31,28 +48,43 @@
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
   post:
     tags: [Sources]
-    summary: Register a source
+    summary: Register a database or create an upload source
     description: |
-      Registers a database. Before anything is stored, Zeteo validates `settings` against the
+      **A database** (`type` `postgres` or `azure-sql`): before anything is stored, Zeteo validates `settings` against the
       type's schema, checks the host against the deploy's network rules, connects with the login
       and inspects its rights. A login that holds rights a read-only login would not is refused
       with `422 writable_login` (the body lists the findings) unless `allow_writable_login`
       is true, in which case the source is stored with `writable_login_allowed: true` and the audit
       entry records the finding codes. Nothing is stored when any step fails. An audit entry
       `zeteo.source.created` is written with the slug, the type and the settings without
-      `password` and `ca`.
+      `password` and `ca`. Needs `zeteo.sources.write`. Errors: `409 slug_taken`,
+      `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+      **An upload source** (`type: upload`): loads the chosen tables of the caller's staging (see
+      `POST /v1/uploads`) into a new upload source owned by the caller, who gets an owner grant (an
+      ordinary `all_columns` user grant flagged `owner_grant`) on each table. Column types are the
+      inferred ones unless corrected; forcing a type the values do not fit is `422 cast_failed`
+      (naming the column and the first rows, 1-based rows of the file with its header counted).
+      The new data counts against the owner's `UPLOAD_QUOTA_BYTES` (`409 quota_exceeded`,
+      checked under a per-owner lock). Nothing is left on any failure, and the staging is used up
+      on success. A `zeteo.source.created` audit entry (metadata `type: upload`) is written (never any cell data).
+      Needs `zeteo.uploads.write` and `zeteo.data.read`. Errors: `404
+      uploads_not_configured` (`UPLOADS_READER_URL` unset), `404 staging_not_found`
+      (expired, missing or someone else's), `409 name_taken` (the slug is in use; a slug made from
+      the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
+      upload_source_busy`.
 
-      **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
-      `502 source_unreachable`.
+      **Required permissions:** `zeteo.sources.write` or `zeteo.uploads.write` to reach the
+      route, then as above for the body's `type` (`403 forbidden` without).
     operationId: createSource
     requestBody:
       required: true
       content:
         application/json:
           schema:
-            $ref: '../../components/sources/schemas.yaml#/CreateSourceRequest'
+            oneOf:
+              - $ref: '../../components/sources/schemas.yaml#/CreateSourceRequest'
+              - $ref: '../../components/uploads/schemas.yaml#/CreateUploadSourceRequest'
     responses:
       '201':
         description: The source
@@ -63,10 +95,21 @@
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
-      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '404':
+        description: Not found - `uploads_not_configured` or `staging_not_found` (an upload source)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
-        description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+        description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source
         content:
           application/json:
             schema:
@@ -78,4 +121,9 @@
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
-      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '503':
+        description: Service unavailable - `upload_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

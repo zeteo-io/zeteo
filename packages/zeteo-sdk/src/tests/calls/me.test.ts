@@ -77,3 +77,21 @@ describe("me.principals", () => {
     expect(request.query).toEqual({ type: "user", q: "ad", limit: "5" });
   });
 });
+
+describe("me.allPrincipals", () => {
+  const t = useStubbedClient();
+
+  it("sends GET /v1/me/principals/all as the person and returns data and truncated", async () => {
+    const all = {
+      data: [{ type: "group", id: "g1", name: "Ops", status: "active" }],
+      truncated: false,
+    };
+    t.stub.respond(() => ({ body: all }));
+    expect(await t.client.withToken("p-1").me.allPrincipals()).toEqual(all);
+    const [request] = t.stub.requests;
+    expect(request.method).toBe("GET");
+    expect(request.path).toBe("/v1/me/principals/all");
+    expect(request.query).toEqual({});
+    expect(request.headers.authorization).toBe("Bearer p-1");
+  });
+});

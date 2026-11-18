@@ -441,3 +441,35 @@ describe("admin UI settings", () => {
     ).toBe("https://core.example.com");
   });
 });
+
+describe("upload source settings", () => {
+  it("leaves the reader URL unset and defaults the four limits", () => {
+    const env = parseEnv(base);
+    expect(env.UPLOADS_READER_URL).toBeUndefined();
+    expect(env.UPLOAD_MAX_BYTES).toBe(52428800);
+    expect(env.UPLOAD_MAX_ROWS).toBe(1000000);
+    expect(env.UPLOAD_MAX_COLUMNS).toBe(500);
+    expect(env.UPLOAD_QUOTA_BYTES).toBe(1073741824);
+  });
+
+  it("takes a reader URL and rejects a value that is not one", () => {
+    expect(
+      parseEnv({ ...base, UPLOADS_READER_URL: "postgresql://r@x/y" })
+        .UPLOADS_READER_URL
+    ).toBe("postgresql://r@x/y");
+    expect(() =>
+      parseEnv({ ...base, UPLOADS_READER_URL: "not a url" })
+    ).toThrow(/UPLOADS_READER_URL/);
+  });
+
+  it.each([
+    "UPLOAD_MAX_BYTES",
+    "UPLOAD_MAX_ROWS",
+    "UPLOAD_MAX_COLUMNS",
+    "UPLOAD_QUOTA_BYTES",
+  ])("rejects a non-positive %s", (name) => {
+    expect(() => parseEnv({ ...base, [name]: "0" })).toThrow(new RegExp(name));
+    expect(() => parseEnv({ ...base, [name]: "-5" })).toThrow(new RegExp(name));
+    expect(parseEnv({ ...base, [name]: "7" })).toMatchObject({ [name]: 7 });
+  });
+});

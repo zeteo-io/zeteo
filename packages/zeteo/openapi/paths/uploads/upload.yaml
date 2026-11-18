@@ -1,0 +1,30 @@
+/v1/uploads/{uploadId}:
+  delete:
+    tags: [Uploads]
+    summary: Discard a staged upload
+    description: |
+      Drops the staging's tables and deletes it, which frees its place under
+      `UPLOAD_MAX_STAGINGS`. Only the user who uploaded it may; anyone else's, an expired
+      one and an unknown id are all `404 staging_not_found`.
+
+      **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 uploads_not_configured` when `UPLOADS_READER_URL` is unset.
+    operationId: deleteUpload
+    parameters:
+      - name: uploadId
+        in: path
+        required: true
+        description: The staging's id (`staging_id`). A value that is not a UUID is `400 invalid_request`.
+        schema: { type: string, format: uuid }
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `staging_not_found`, or `uploads_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

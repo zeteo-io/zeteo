@@ -1,0 +1,43 @@
+/v1/me/principals/all:
+  get:
+    tags: [Saved queries]
+    summary: List every user and group the caller may share with
+    description: |
+      Every human user, and every live group that is global or of the caller's signed-in
+      organization, by name (one without a name last): at most 5000 users and 5000 groups, with
+      `truncated` true when there were more. Read page by page from tereo on each call and never
+      cached. Counts against the caller's 60 searches a minute, as `GET /v1/me/principals` does.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request` (any query parameter), `429 too_many_requests`,
+      `502 tereo_unreachable`.
+    operationId: listAllMyPrincipals
+    responses:
+      '200':
+        description: The directory, by name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/principals/schemas.yaml#/ListAllDirectoryPrincipalsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '429':
+        description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+        headers:
+          Retry-After:
+            description: Seconds to wait before asking again
+            schema:
+              type: integer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`, tereo did not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

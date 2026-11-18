@@ -58,6 +58,12 @@
               $ref: '../../components/responses.yaml#/Error'
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `uploads_not_configured`, an upload source (`upload`) queried while Uploads are turned off (`UPLOADS_READER_URL` unset)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '409':
         description: Conflict - `source_archived`, the source was archived while the query ran
         content:
@@ -104,7 +110,9 @@
       '503':
         description: |
           Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-          pool briefly unavailable (the source busy). Retry, after `Retry-After` when given.
+          pool briefly unavailable (the source busy). Retry, after `Retry-After` when given. Or
+          `uploads_misconfigured`: an upload source while `UPLOADS_READER_URL` cannot be used
+          (the operator's to fix; the detail is logged).
         headers:
           Retry-After:
             description: Seconds to wait before retrying

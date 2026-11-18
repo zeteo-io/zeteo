@@ -30,7 +30,7 @@ const DashboardCard = ({
       ) : (
         <p className="z-note">No description.</p>
       )}
-      <p className="z-note">
+      <p className="z-note z-db-bottom">
         {shared && <>From {d.owner.name ?? "someone"} · </>}
         Updated{" "}
         <time dateTime={d.updated_at} title={formatDate(d.updated_at)}>

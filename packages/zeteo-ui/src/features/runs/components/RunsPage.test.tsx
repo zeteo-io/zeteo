@@ -1,3 +1,4 @@
+import { filterOptionChecked, toggleFilterOption } from "@/test/whoFilter";
 import { makeSource, SOURCE_ID } from "@/features/sources/testFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -37,6 +38,22 @@ const running = makeRun({
   source_id: null,
   query: null,
 });
+
+const BOT_ID = "a9999999-1c7a-4a53-9d0e-6a3b1f2c4d77";
+/** `GET /v1/principals/all`: the Person filter's choices, users only. */
+const directory = {
+  data: [
+    { type: "user", id: RUN_USER_ID, name: "Ada Lovelace", status: "active" },
+    {
+      type: "group",
+      id: "b9999999-1c7a-4a53-9d0e-6a3b1f2c4d78",
+      name: "Analysts",
+      status: "active",
+    },
+    { type: "user", id: BOT_ID, name: "Nightly export bot", status: "active" },
+  ],
+  truncated: false,
+};
 
 const Probe = () => {
   const navigate = useNavigate();
@@ -93,6 +110,7 @@ describe("RunsPage", () => {
       if (url === "/v1/sources") {
         return { data: { data: [makeSource()], next_cursor: null } };
       }
+      if (url === "/v1/principals/all") return { data: directory };
       throw new Error(`unexpected ${url}`);
     });
   });
@@ -269,38 +287,69 @@ describe("RunsPage", () => {
     );
   });
 
-  it("offers users only in the person picker", async () => {
+  it("offers users only, service accounts included, in the Person filter", async () => {
     held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Person" }));
-    expect(screen.getByLabelText("Search by name or email")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Groups" })).toBeNull();
-  });
-
-  it("hides the person search, and says why, without zeteo.grants.read", async () => {
-    const user = userEvent.setup();
-    renderWithProviders(<RunsPage />);
-    await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Person" }));
-    expect(screen.queryByLabelText("Search by name or email")).toBeNull();
+    await user.click(await screen.findByRole("button", { name: /^Person/ }));
     expect(
-      screen.getByText(
-        "Searching by name needs the Read grants permission; paste a user id instead."
-      )
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("Or paste an id")).toBeInTheDocument();
+      screen.getByRole("checkbox", { name: "Ada Lovelace" })
+    ).toBeVisible();
+    expect(
+      screen.getByRole("checkbox", { name: "Nightly export bot" })
+    ).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: /Analysts/ })).toBeNull();
+    expect(screen.queryByText(/Filtering by person needs/)).toBeNull();
   });
 
-  it("offers the person search with zeteo.grants.read, without the hint", async () => {
-    held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
-    const user = userEvent.setup();
+  it("has no Person filter, and says why, without zeteo.grants.read", async () => {
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
-    await user.click(screen.getByRole("button", { name: "Person" }));
-    expect(screen.getByLabelText("Search by name or email")).toBeVisible();
-    expect(screen.queryByText(/Searching by name needs/)).toBeNull();
+    await screen.findByRole("button", { name: /^Outcome/ });
+    expect(screen.queryByRole("button", { name: /^Person/ })).toBeNull();
+    expect(
+      screen.getByText("Filtering by person needs the Read grants permission.")
+    ).toBeInTheDocument();
+    expect(get).not.toHaveBeenCalledWith(
+      "/v1/principals/all",
+      expect.anything()
+    );
+  });
+
+  it("filters by a person chosen by name, through the API and the address", async () => {
+    held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Probe />
+        <RunsPage />
+      </>
+    );
+    await screen.findAllByText("Ada Lovelace");
+    await toggleFilterOption(user, "Nightly export bot", "Person");
+    await waitFor(() =>
+      expect(runParams().at(-1)).toMatchObject({ user_id: BOT_ID })
+    );
+    expect(screen.getByTestId("search")).toHaveTextContent(
+      `?user_id=${BOT_ID}`
+    );
+  });
+
+  it("preselects the person of the address, and clears them", async () => {
+    held.permissions = ["zeteo.runs.read", "zeteo.grants.read"];
+    const user = userEvent.setup();
+    renderWithProviders(<RunsPage />, {
+      route: `/runs?user_id=${RUN_USER_ID}`,
+    });
+    await screen.findAllByText("Ada Lovelace");
+    expect(await filterOptionChecked(user, "Ada Lovelace", "Person")).toBe(
+      true
+    );
+    await toggleFilterOption(user, "Ada Lovelace", "Person");
+    await waitFor(() =>
+      expect(runParams().at(-1)).not.toHaveProperty("user_id")
+    );
   });
 
   it("says no run matches when filters are active, and no runs recorded when none are", async () => {
@@ -353,7 +402,7 @@ describe("RunsPage", () => {
     );
   });
 
-  it("clears the person filter", async () => {
+  it("shows the person of the address as a chip without zeteo.grants.read, and clears it", async () => {
     const user = userEvent.setup();
     renderWithProviders(<RunsPage />, {
       route: `/runs?user_id=${RUN_USER_ID}`,

@@ -1,18 +1,19 @@
 import type { LoginFinding, SourceAdapter } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { isUploadSource, storedType, typeOf } from "./types.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { sealSettings } from "../utils/crypto/envelope.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { adapterFor } from "../adapters/index.js";
-import { storedType, typeOf } from "./types.js";
 import { closeSourcePool } from "./pools.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
   ConflictError,
+  NotADatabaseSourceError,
   issuesOf,
   NotFoundError,
   SourceArchivedError,
@@ -51,6 +52,17 @@ export type CreateSourceInput = Pick<
   };
 
 export type UpdateSourceInput = Partial<SourceFields>;
+
+/** The per-source limits: the only fields a change of an upload source may set here. */
+const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
+  "timeout_ms",
+  "row_cap",
+  "max_joins",
+  "export_enabled",
+  "export_row_cap",
+  "query_concurrency",
+  "export_concurrency",
+]);
 
 /** Columns for the optional fields a caller gave. */
 const optionalColumns = (input: Partial<SourceFields>) => ({
@@ -182,9 +194,16 @@ export const createSource = async (
   });
 };
 
+/** Refuses an upload source: its uploads, not these routes, manage it. */
+const refuseUploadSource = (row: Pick<Source, "type">): void => {
+  if (isUploadSource(row)) throw new NotADatabaseSourceError();
+};
+
+/** An unarchived database source. */
 const requireActive = async (id: string): Promise<Source> => {
   const row = await db.sources.findById(id);
   if (!row) throw new NotFoundError("Source not found");
+  refuseUploadSource(row);
   if (row.archivedAt) throw new SourceArchivedError();
   return row;
 };
@@ -198,7 +217,19 @@ export const updateSource = async (
   input: UpdateSourceInput,
   actorId: string
 ): Promise<Source> => {
-  const row = await requireActive(id);
+  const row = await db.sources.findById(id);
+  if (!row) throw new NotFoundError("Source not found");
+  // An upload source's name and limits are an admin's, as a database
+  // source's; its settings and schemas are managed through its uploads.
+  if (
+    isUploadSource(row) &&
+    Object.keys(input).some(
+      (key) => key !== "name" && !LIMIT_FIELDS.has(key as keyof SourceFields)
+    )
+  ) {
+    throw new NotADatabaseSourceError();
+  }
+  if (row.archivedAt) throw new SourceArchivedError();
   const type = typeOf(row);
 
   let settingsChange:
@@ -269,6 +300,8 @@ export const archiveSource = async (
   await withAudit(async (tx, audit) => {
     const row = await tx.source.findUnique({ where: { id } });
     if (!row) throw new NotFoundError("Source not found");
+    // An upload source is archived by deleting it, which also drops its data.
+    refuseUploadSource(row);
     const { count } = await tx.source.updateMany({
       where: { id, archivedAt: null },
       data: { archivedAt: new Date() },

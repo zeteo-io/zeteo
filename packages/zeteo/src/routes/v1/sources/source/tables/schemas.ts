@@ -1,4 +1,6 @@
+import { IdSchema } from "../../../../../utils/idSchema.js";
 import { noNul } from "../../../../../utils/text.js";
+import { TablesSchema } from "../../schemas.js";
 import { z } from "zod";
 
 export const ListTablesQuerySchema = z.strictObject({
@@ -15,3 +17,9 @@ export const TableCursorSchema = z.tuple([
   noNul(z.string()),
   noNul(z.string()),
 ]);
+
+/** An upload source's new tables, from the caller's staging. */
+export const AddTablesSchema = z.strictObject({
+  staging_id: IdSchema,
+  tables: TablesSchema,
+});

@@ -15,6 +15,13 @@ export const tableView = (row: SourceTable) => ({
   description: row.description,
   last_seen_at: row.lastSeenAt.toISOString(),
   missing_since: iso(row.missingSince),
+  /**
+   * An upload source's table: the rows loaded. A database source's: the
+   * database's estimate at the last refresh, null when it gave none.
+   */
+  row_count: row.rowCount === null ? null : Number(row.rowCount),
+  /** An upload source's table: when it was last loaded; null for a database source's. */
+  last_loaded_at: iso(row.lastSyncedAt),
 });
 
 export const columnView = (row: SourceColumn) => ({
@@ -26,6 +33,8 @@ export const columnView = (row: SourceColumn) => ({
   position: row.position,
   is_primary_key: row.isPrimaryKey,
   description: row.description,
+  /** An upload source's column: the file's header text; null for a database source's. */
+  original_name: row.originalName,
   missing_since: iso(row.missingSince),
 });
 

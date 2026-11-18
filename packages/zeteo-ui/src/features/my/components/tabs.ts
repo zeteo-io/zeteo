@@ -1,7 +1,10 @@
-export type MyTab = "overview" | "mine" | "shared" | "runs" | "catalog";
+export type MyTab =
+  "overview" | "sources" | "mine" | "shared" | "runs" | "catalog";
 
 export const TABS: { id: MyTab; label: string }[] = [
   { id: "overview", label: "Overview" },
+  // Uploads: shown only with `zeteo.uploads.write` while they are on.
+  { id: "sources", label: "My sources" },
   { id: "mine", label: "My saved queries" },
   { id: "shared", label: "Shared with me" },
   { id: "runs", label: "Recent runs" },

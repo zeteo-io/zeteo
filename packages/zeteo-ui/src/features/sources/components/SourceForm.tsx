@@ -7,6 +7,7 @@ import { issueFor, type ApiError } from "@/lib/api";
 import { useEffect, useRef, useState } from "react";
 import { sourceTypeName } from "./sourceLabels";
 import { useNavigate } from "react-router-dom";
+import { slugify } from "@/utils/slugify";
 import "./styles.css";
 import {
   ConnectionFields,
@@ -23,30 +24,24 @@ import {
   Form,
   FormGrid,
   Input,
+  Modal,
   Switch,
 } from "@kosmeo-ui/react";
 import type {
   CreateSource,
   Source,
   SourceSettings,
-  SourceType,
+  DatabaseType,
   UpdateSource,
 } from "../api/types";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
 
-/** A slug suggested from a name: "Larkspur Retail" → "larkspur-retail". */
-const slugify = (name: string) =>
-  name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^[^a-z]+/, "")
-    .replace(/-+$/, "")
-    .slice(0, 63);
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
-interface NumberField {
+/** A source's numeric limit as a form field: its key, label and range. */
+export interface NumberField {
   key:
     | "timeout_ms"
     | "row_cap"
@@ -59,7 +54,8 @@ interface NumberField {
   default: number;
 }
 
-const NUMBER_FIELDS: NumberField[] = [
+/** The limits a source form edits. */
+export const NUMBER_FIELDS: NumberField[] = [
   {
     key: "timeout_ms",
     label: "Time limit (ms)",
@@ -97,7 +93,7 @@ type Limits = Record<NumberField["key"], string>;
 const shownPaths = (
   creating: boolean,
   connectionOpen: boolean,
-  type: SourceType,
+  type: DatabaseType,
   tls: string
 ): string[] => [
   ...(creating ? ["slug"] : []),
@@ -126,7 +122,7 @@ const parseSchemas = (text: string): string[] =>
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
-const isTls = (type: SourceType, value: unknown): value is string =>
+const isTls = (type: DatabaseType, value: unknown): value is string =>
   typeof value === "string" && TLS_MODES[type].includes(value);
 
 const connectionOf = (source: Source): ConnectionState => {
@@ -135,17 +131,17 @@ const connectionOf = (source: Source): ConnectionState => {
     typeof v === "string" || typeof v === "number" ? String(v) : fallback;
   return {
     host: text(s.host),
-    port: text(s.port, DEFAULT_PORT[source.type]),
+    port: text(s.port, DEFAULT_PORT[source.type as DatabaseType]),
     database: text(s.database),
     user: text(s.user),
     password: "",
-    tls: isTls(source.type, s.tls) ? s.tls : "verify",
+    tls: isTls(source.type as DatabaseType, s.tls) ? s.tls : "verify",
     ca: "",
   };
 };
 
 const buildSettings = (
-  type: SourceType,
+  type: DatabaseType,
   c: ConnectionState
 ): SourceSettings => {
   const port = parseNumberField(c.port);
@@ -167,15 +163,30 @@ const buildSettings = (
 };
 
 interface SourceFormProps {
+  /** Shows the form in a dialog, which `onDone` closes on Cancel and after a save; else it is a page. */
+  dialog?: { onDone: () => void };
   /** Present when editing. */
   source?: Source;
   /** The page title, shown with the form's Cancel and submit buttons. */
   title: string;
+  /**
+   * An upload's settings: no connection or catalogue; its name, and its
+   * limits only for whoever may change them.
+   */
+  upload?: {
+    /** `zeteo.sources.write`: the limits are shown and sent. */
+    canSetLimits: boolean;
+  };
 }
 
 const FORM_ID = "z-source-form";
 
-export const SourceForm = ({ source, title }: SourceFormProps) => {
+export const SourceForm = ({
+  source,
+  title,
+  upload,
+  dialog,
+}: SourceFormProps) => {
   const navigate = useNavigate();
   const create = useCreateSource();
   const update = useUpdateSource(source?.id ?? "");
@@ -185,10 +196,13 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
   // The slug follows the name until it is edited by hand.
   const [slugEdited, setSlugEdited] = useState(false);
   const [name, setName] = useState(source?.name ?? "");
-  const [type, setType] = useState<SourceType>(source?.type ?? "postgres");
+  const [type, setType] = useState<DatabaseType>(
+    (source?.type as DatabaseType | undefined) ?? "postgres"
+  );
   const [connectionOpen, setConnectionOpen] = useState(!source);
   const [conn, setConn] = useState<ConnectionState>(
-    source ? connectionOf(source) : emptyConnection("postgres")
+    // An upload has no connection to read.
+    source && !upload ? connectionOf(source) : emptyConnection("postgres")
   );
   const [schemas, setSchemas] = useState(source?.schemas.join(", ") ?? "");
   const [limits, setLimits] = useState<Limits>(
@@ -253,7 +267,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     mutation.reset();
   };
 
-  const changeType = (next: SourceType) => {
+  const changeType = (next: DatabaseType) => {
     loginChanged();
     edited("settings.port", "settings.tls", "settings.ca");
     setConn((c) => ({
@@ -293,8 +307,10 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
       }
     }
     const list = parseSchemas(schemas);
-    if (list.length === 0) found.schemas = "Name at least one schema.";
-    else if (list.length > MAX_SCHEMAS) {
+    // An upload has no schemas to name.
+    if (!upload && list.length === 0) {
+      found.schemas = "Name at least one schema.";
+    } else if (list.length > MAX_SCHEMAS) {
       found.schemas = `Use at most ${MAX_SCHEMAS} schemas.`;
     } else if (new Set(list).size !== list.length) {
       found.schemas = "A schema is listed more than once.";
@@ -317,6 +333,18 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
   /** What PATCH would carry: only what differs from the stored source. */
   const changes = (src: Source): UpdateSource => {
     const body: UpdateSource = {};
+    if (upload) {
+      // Its owner may change only the name; a sources admin the limits too.
+      if (name.trim() !== src.name) body.name = name.trim();
+      if (!upload.canSetLimits) return body;
+      for (const field of NUMBER_FIELDS) {
+        const n = parseNumberField(limits[field.key]);
+        if (n !== undefined && n !== src[field.key]) body[field.key] = n;
+      }
+      if (exportEnabled !== src.export_enabled)
+        body.export_enabled = exportEnabled;
+      return body;
+    }
     if (name.trim() !== src.name) body.name = name.trim();
     const list = parseSchemas(schemas);
     if (!sameList(list, src.schemas)) body.schemas = list;
@@ -327,7 +355,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     if (exportEnabled !== src.export_enabled)
       body.export_enabled = exportEnabled;
     if (connectionOpen) {
-      body.settings = buildSettings(src.type, conn);
+      body.settings = buildSettings(type, conn);
       if (allowWritable) body.allow_writable_login = true;
     }
     return body;
@@ -335,6 +363,8 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
 
   const pending = source ? changes(source) : null;
   const unchanged = pending !== null && Object.keys(pending).length === 0;
+  const backHref = source ? `/sources/${source.id}` : "/sources";
+  const leave = () => (dialog ? dialog.onDone() : navigate(backHref));
 
   const submit = () => {
     const found = validate();
@@ -347,7 +377,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
       update.mutate(changes(source), {
         onSuccess: () => {
           update.reset();
-          navigate(`/sources/${source.id}`);
+          leave();
         },
         onError,
       });
@@ -383,12 +413,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     );
   }
 
-  const fieldPaths = shownPaths(
-    !source,
-    connectionOpen,
-    source?.type ?? type,
-    conn.tls
-  );
+  const fieldPaths = shownPaths(!source, connectionOpen, type, conn.tls);
   const allIssuesShown =
     serverError?.status === 400 &&
     (serverError.issues?.length ?? 0) > 0 &&
@@ -400,6 +425,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
       <Input
         key={field.key}
         label={field.label}
+        type="number"
         placeholder={source ? undefined : `${field.default} (default)`}
         value={limits[field.key]}
         error={errorFor(field.key)}
@@ -411,36 +437,33 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     );
   };
 
-  return (
-    <div className="z-source-form">
-      <PageHeader
-        title={title}
-        divider={false}
-        actions={
-          <div className="z-source-actions">
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() =>
-                navigate(source ? `/sources/${source.id}` : "/sources")
-              }
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              type="submit"
-              form={FORM_ID}
-              fullWidth={false}
-              isLoading={mutation.isPending}
-              disabled={mutation.isPending || unchanged}
-            >
-              {source ? "Save changes" : "Create source"}
-            </Button>
-          </div>
-        }
-      />
+  const cancelButton = (
+    <Button
+      key="cancel"
+      size="sm"
+      variant="secondary"
+      fullWidth={false}
+      onClick={leave}
+    >
+      Cancel
+    </Button>
+  );
+  const saveButton = (
+    <Button
+      key="save"
+      size="sm"
+      type="submit"
+      form={FORM_ID}
+      fullWidth={false}
+      isLoading={mutation.isPending}
+      disabled={mutation.isPending || unchanged}
+    >
+      {source ? "Save changes" : "Create source"}
+    </Button>
+  );
+
+  const form = (
+    <div className="z-source-form-body">
       <Form id={FORM_ID} onSubmit={submit}>
         <BorderedSection title="About" as="h2">
           <FormGrid columns={source ? 1 : 2}>
@@ -477,7 +500,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
               <div>
                 <div className="z-field-label">Database</div>
                 <div className="z-segmented" role="group" aria-label="Database">
-                  {(["postgres", "azure-sql"] as SourceType[]).map((t) => (
+                  {(["postgres", "azure-sql"] as DatabaseType[]).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -494,93 +517,101 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
           </div>
         </BorderedSection>
 
-        <BorderedSection
-          title="Connection"
-          as="h2"
-          actions={
-            source &&
-            (connectionOpen ? (
-              <Button
-                size="sm"
-                variant="secondary"
-                fullWidth={false}
-                onClick={() => keepConnection(source)}
-              >
-                Keep connection unchanged
-              </Button>
+        {!upload && (
+          <BorderedSection
+            title="Connection"
+            as="h2"
+            actions={
+              source &&
+              (connectionOpen ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  onClick={() => keepConnection(source)}
+                >
+                  Keep connection unchanged
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  fullWidth={false}
+                  onClick={() => setConnectionOpen(true)}
+                >
+                  Change connection
+                </Button>
+              ))
+            }
+          >
+            {connectionOpen ? (
+              <ConnectionFields
+                type={type}
+                value={conn}
+                onChange={changeConnection}
+                editing={!!source}
+                errorFor={errorFor}
+              />
             ) : (
-              <Button
-                size="sm"
-                variant="secondary"
-                fullWidth={false}
-                onClick={() => setConnectionOpen(true)}
-              >
-                Change connection
-              </Button>
-            ))
-          }
-        >
-          {connectionOpen ? (
-            <ConnectionFields
-              type={source?.type ?? type}
-              value={conn}
-              onChange={changeConnection}
-              editing={!!source}
-              errorFor={errorFor}
+              <p className="z-muted z-source-connection-note">
+                The connection stays as it is. Changing it needs the password
+                again.
+              </p>
+            )}
+          </BorderedSection>
+        )}
+
+        {!upload && (
+          <BorderedSection title="Catalogue" as="h2">
+            <Input
+              label="Schemas"
+              required
+              value={schemas}
+              error={errorFor("schemas")}
+              helperText="The schemas whose tables people can query. Separate with commas; at most 20."
+              onChange={(e) => {
+                setSchemas(e.target.value);
+                edited("schemas");
+              }}
             />
-          ) : (
-            <p className="z-muted z-source-connection-note">
-              The connection stays as it is. Changing it needs the password
-              again.
-            </p>
-          )}
-        </BorderedSection>
+          </BorderedSection>
+        )}
 
-        <BorderedSection title="Catalogue" as="h2">
-          <Input
-            label="Schemas"
-            required
-            value={schemas}
-            error={errorFor("schemas")}
-            helperText="The schemas whose tables people can query. Separate with commas; at most 20."
-            onChange={(e) => {
-              setSchemas(e.target.value);
-              edited("schemas");
-            }}
-          />
-        </BorderedSection>
+        {(!upload || upload.canSetLimits) && (
+          <>
+            <BorderedSection title="Querying" as="h2">
+              <FormGrid columns={3}>
+                {numberInput("timeout_ms")}
+                {numberInput("row_cap")}
+                {numberInput("query_concurrency")}
+              </FormGrid>
+            </BorderedSection>
 
-        <BorderedSection title="Querying" as="h2">
-          <FormGrid columns={3}>
-            {numberInput("timeout_ms")}
-            {numberInput("row_cap")}
-            {numberInput("query_concurrency")}
-          </FormGrid>
-        </BorderedSection>
-
-        <BorderedSection
-          title="Exports"
-          as="h2"
-          actions={
-            <Switch
-              size="sm"
-              label="Allow exports"
-              checked={exportEnabled}
-              onChange={(e) => setExportEnabled(e.target.checked)}
-            />
-          }
-        >
-          {exportEnabled ? (
-            <FormGrid columns={2}>
-              {numberInput("export_row_cap")}
-              {numberInput("export_concurrency")}
-            </FormGrid>
-          ) : (
-            <p className="z-muted z-source-connection-note">
-              People can't export from this source.
-            </p>
-          )}
-        </BorderedSection>
+            <BorderedSection
+              title="Exports"
+              as="h2"
+              actions={
+                <Switch
+                  size="sm"
+                  label="Allow exports"
+                  checked={exportEnabled}
+                  onChange={(e) => setExportEnabled(e.target.checked)}
+                />
+              }
+            >
+              {exportEnabled ? (
+                <FormGrid columns={2}>
+                  {numberInput("export_row_cap")}
+                  {numberInput("export_concurrency")}
+                </FormGrid>
+              ) : (
+                <p className="z-muted z-source-connection-note">
+                  People can't export from this source.
+                </p>
+              )}
+            </BorderedSection>
+          </>
+        )}
 
         {serverError && !allIssuesShown && (
           <ErrorNotice error={serverError} fieldPaths={fieldPaths} />
@@ -593,6 +624,37 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
           />
         )}
       </Form>
+    </div>
+  );
+
+  if (dialog) {
+    return (
+      <Modal
+        show
+        size="lg"
+        title={title}
+        onClose={leave}
+        dismissible={!mutation.isPending}
+        footerButtons={[cancelButton, saveButton]}
+      >
+        {form}
+      </Modal>
+    );
+  }
+
+  return (
+    <div className="z-source-form">
+      <PageHeader
+        title={title}
+        divider={false}
+        actions={
+          <div className="z-source-actions">
+            {cancelButton}
+            {saveButton}
+          </div>
+        }
+      />
+      {form}
     </div>
   );
 };

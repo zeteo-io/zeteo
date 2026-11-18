@@ -69,6 +69,11 @@ ALTER ROLE db_datareader ADD MEMBER zeteo_reader;
 
 The catalogue lists only the tables and views of the listed schemas the login can `SELECT` from.
 
+A source's `size_bytes` is read from `sys.dm_db_partition_stats`, which needs `VIEW DATABASE
+STATE` (`GRANT VIEW DATABASE STATE TO zeteo_reader;`). Without it the size is `null` and everything
+else works; the login check does not count the right against the login. A table's `row_count` (an
+estimate at the last refresh) comes from `sys.partitions` instead and needs no such right.
+
 ## What the login check refuses
 
 The check covers the whole connected database, not just the listed schemas. It asks the server for

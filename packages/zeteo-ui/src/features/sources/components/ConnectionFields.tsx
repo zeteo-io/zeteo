@@ -1,5 +1,5 @@
 import { FormGrid, Input, SearchSelect, TextArea } from "@kosmeo-ui/react";
-import type { SourceType } from "../api/types";
+import type { DatabaseType } from "../api/types";
 import { tlsName } from "./sourceLabels";
 
 export interface ConnectionState {
@@ -12,17 +12,17 @@ export interface ConnectionState {
   ca: string;
 }
 
-export const DEFAULT_PORT: Record<SourceType, string> = {
+export const DEFAULT_PORT: Record<DatabaseType, string> = {
   postgres: "5432",
   "azure-sql": "1433",
 };
 
-export const TLS_MODES: Record<SourceType, string[]> = {
+export const TLS_MODES: Record<DatabaseType, string[]> = {
   postgres: ["verify", "require", "off"],
   "azure-sql": ["verify", "trust-server-certificate"],
 };
 
-export const emptyConnection = (type: SourceType): ConnectionState => ({
+export const emptyConnection = (type: DatabaseType): ConnectionState => ({
   host: "",
   port: DEFAULT_PORT[type],
   database: "",
@@ -33,7 +33,7 @@ export const emptyConnection = (type: SourceType): ConnectionState => ({
 });
 
 interface ConnectionFieldsProps {
-  type: SourceType;
+  type: DatabaseType;
   value: ConnectionState;
   onChange: (patch: Partial<ConnectionState>) => void;
   /** The message for a field, by its API path (`settings.host`). */
@@ -67,6 +67,7 @@ export const ConnectionFields = ({
     />
     <Input
       label="Port"
+      type="number"
       value={value.port}
       error={errorFor("settings.port")}
       onChange={(e) => onChange({ port: e.target.value })}

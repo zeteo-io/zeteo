@@ -1,9 +1,11 @@
 import { BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
+import { UPLOADS_WRITE, MyDataPanel } from "@/features/sources";
 import type { SavedQuery } from "@/features/saved-queries";
 import { RecentSavedQueries } from "./RecentSavedQueries";
 import { isTab, TABS, tabHref, type MyTab } from "./tabs";
 import { Link, useSearchParams } from "react-router-dom";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { useUploadsEnabled } from "@/lib/useUiConfig";
 import { PageHeader } from "@/components/PageHeader";
 import { SavedQueryCard } from "./SavedQueryCard";
 import { CatalogList } from "./CatalogPanel";
@@ -74,11 +76,14 @@ const ViewAll = ({ tab, children }: { tab: MyTab; children: string }) => (
 
 export const MyPage = () => {
   const [params] = useSearchParams();
+  const { user, hasPermission } = useAuth<Me>();
+  const uploads = useUploadsEnabled() === true && hasPermission(UPLOADS_WRITE);
+  const tabs = TABS.filter((t) => t.id !== "sources" || uploads);
   const raw = params.get("tab");
-  const tab: MyTab = isTab(raw) ? raw : "overview";
+  const tab: MyTab =
+    isTab(raw) && tabs.some((t) => t.id === raw) ? raw : "overview";
   const mine = useMySavedQueries();
   const shared = useSharedSavedQueries();
-  const { user } = useAuth<Me>();
   const [creating, setCreating] = useState(false);
   const firstName = user?.name?.split(" ")[0];
 
@@ -99,7 +104,7 @@ export const MyPage = () => {
         />
       </div>
       <nav className="z-source-tabs" aria-label="My Zeteo">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link
             key={t.id}
             to={tabHref(t.id)}
@@ -143,6 +148,7 @@ export const MyPage = () => {
           empty="Nothing has been shared with you yet."
         />
       )}
+      {tab === "sources" && <MyDataPanel />}
       {tab === "runs" && (
         <div className="z-my-narrow">
           <RunsList />

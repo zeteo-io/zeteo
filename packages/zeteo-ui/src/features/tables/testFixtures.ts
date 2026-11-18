@@ -13,6 +13,8 @@ export const makeTable = (over: Partial<Table> = {}): Table => ({
   description: "Customer orders",
   last_seen_at: "2026-11-01T10:00:00.000Z",
   missing_since: null,
+  row_count: null,
+  last_loaded_at: null,
   ...over,
 });
 
@@ -26,6 +28,7 @@ export const makeColumn = (over: Partial<Column> = {}): Column => ({
   is_primary_key: true,
   description: null,
   missing_since: null,
+  original_name: null,
   ...over,
 });
 

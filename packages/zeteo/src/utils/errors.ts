@@ -229,6 +229,154 @@ export class SourceArchivedError extends AppError {
   }
 }
 
+/**
+ * An archive, test or refresh of an upload source, or a change of its
+ * settings or schemas: its data and catalogue are managed by its uploads.
+ */
+export class NotADatabaseSourceError extends AppError {
+  constructor() {
+    super(
+      409,
+      "not_a_database_source",
+      "An upload source is managed through its uploads, not here"
+    );
+    this.name = "NotADatabaseSourceError";
+  }
+}
+
+/** An upload-only change (delete, transfer, tables, columns) of a database source. */
+export class NotAnUploadSourceError extends AppError {
+  constructor() {
+    super(
+      409,
+      "not_an_upload_source",
+      "Only an upload source can be changed this way"
+    );
+    this.name = "NotAnUploadSourceError";
+  }
+}
+
+/** A load that would take the owner's stored upload source data past `UPLOAD_QUOTA_BYTES`. */
+export class QuotaExceededError extends AppError {
+  constructor(quotaBytes: number) {
+    super(
+      409,
+      "quota_exceeded",
+      `This would store more than the ${quotaBytes} bytes allowed for your upload sources`,
+      { details: { quota_bytes: quotaBytes } }
+    );
+    this.name = "QuotaExceededError";
+  }
+}
+
+const UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * A change of an upload source's data that could not start or finish in time:
+ * another load of it holds its lock, or queries reading a table kept the swap
+ * waiting past its lock timeout. Nothing changed; retry later.
+ */
+export class UploadSourceBusyError extends AppError {
+  constructor() {
+    super(
+      503,
+      "upload_source_busy",
+      "The upload source is busy; retry shortly",
+      {
+        headers: { "Retry-After": UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS },
+      }
+    );
+    this.name = "UploadSourceBusyError";
+  }
+}
+
+/** Uploads are off: `UPLOADS_READER_URL` is not set. */
+export class UploadsNotConfiguredError extends AppError {
+  constructor() {
+    super(404, "uploads_not_configured", "Uploads are not enabled");
+    this.name = "UploadsNotConfiguredError";
+  }
+}
+
+/**
+ * Uploads are on but `UPLOADS_READER_URL` cannot be used (an
+ * unsupported `sslmode`). `problem` names what is wrong for the log and for
+ * start-up, which refuses it; the answer never carries it.
+ */
+export class UploadsMisconfiguredError extends AppError {
+  constructor(public readonly problem: string) {
+    super(
+      503,
+      "uploads_misconfigured",
+      "Uploads are misconfigured; ask the operator"
+    );
+    this.name = "UploadsMisconfiguredError";
+  }
+}
+
+/**
+ * An upload over `UPLOAD_MAX_BYTES` (`max_bytes`), or an xlsx workbook
+ * whose content inflates past `max_uncompressed_bytes` (twice the limit).
+ */
+export class FileTooLargeError extends AppError {
+  constructor(maxBytes: number, maxUncompressedBytes?: number) {
+    super(
+      413,
+      "file_too_large",
+      maxUncompressedBytes === undefined
+        ? `The file is larger than ${maxBytes} bytes`
+        : `The workbook's content is larger than ${maxUncompressedBytes} bytes once uncompressed (uploads are limited to ${maxBytes} bytes, and a workbook's content to twice that)`,
+      {
+        details: {
+          max_bytes: maxBytes,
+          ...(maxUncompressedBytes !== undefined && {
+            max_uncompressed_bytes: maxUncompressedBytes,
+          }),
+        },
+      }
+    );
+    this.name = "FileTooLargeError";
+  }
+}
+
+/** An upload that is neither a CSV nor an xlsx workbook, judged by its content. */
+export class UnsupportedFileTypeError extends AppError {
+  constructor() {
+    super(
+      415,
+      "unsupported_file_type",
+      "Only CSV and xlsx files can be uploaded"
+    );
+    this.name = "UnsupportedFileTypeError";
+  }
+}
+
+/** A file that cannot be read: `code` is the parser's (`unsupported_encoding`, `row_too_long`...), `row` the 1-based row at fault. */
+export class FileUnreadableError extends AppError {
+  constructor(code: string, message: string, row?: number) {
+    super(422, code, message, {
+      details: row === undefined ? undefined : { row },
+    });
+    this.name = "FileUnreadableError";
+  }
+}
+
+/** An upload that holds no table with a column. */
+export class EmptyFileError extends AppError {
+  constructor() {
+    super(422, "empty_file", "The file has no data");
+    this.name = "EmptyFileError";
+  }
+}
+
+/** A staging that does not exist, has expired or is another user's: one answer for all. */
+export class StagingNotFoundError extends AppError {
+  constructor() {
+    super(404, "staging_not_found", "Upload not found or expired");
+    this.name = "StagingNotFoundError";
+  }
+}
+
 /** A declared relation the catalogue cannot hold; the message says which check failed. */
 export class InvalidRelationError extends AppError {
   constructor(message: string) {
@@ -242,6 +390,30 @@ export class InvalidGrantError extends AppError {
   constructor(message: string) {
     super(422, "invalid_grant", message);
     this.name = "InvalidGrantError";
+  }
+}
+
+/** A group an upload source's owner may not grant to: not global and not of their signed-in organization, or unknown. */
+export class GroupNotAllowedError extends AppError {
+  constructor() {
+    super(
+      422,
+      "group_not_allowed",
+      "Groups can only be granted to in your signed-in organization"
+    );
+    this.name = "GroupNotAllowedError";
+  }
+}
+
+/** A removal or narrowing of an upload source's owner grant: it can only move by a transfer. */
+export class OwnerGrantLockedError extends AppError {
+  constructor() {
+    super(
+      409,
+      "owner_grant_locked",
+      "The owner's grant cannot be removed or narrowed; transfer the upload source instead"
+    );
+    this.name = "OwnerGrantLockedError";
   }
 }
 

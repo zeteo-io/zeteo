@@ -1,24 +1,16 @@
-import { requirePermission } from "../../../middleware/auth.js";
+import { requireCreating, requireListing } from "./middleware.js";
 import { createSource, listSources } from "./controllers.js";
 import sourceRouter from "./source/index.js";
 import express, { Router } from "express";
-import {
-  SOURCES_READ,
-  SOURCES_WRITE,
-} from "../../../definitions/tereoDeclaration.js";
 
 const sourcesRouter = Router();
 
-const json64k = express.json({ limit: "64kb" });
+// An upload source's create carries its tables' corrections.
+const json1m = express.json({ limit: "1mb" });
 
 sourcesRouter.use("/:sourceId", sourceRouter);
 
-sourcesRouter.get("/", requirePermission(SOURCES_READ), listSources);
-sourcesRouter.post(
-  "/",
-  requirePermission(SOURCES_WRITE),
-  json64k,
-  createSource
-);
+sourcesRouter.get("/", requireListing, listSources);
+sourcesRouter.post("/", requireCreating, json1m, createSource);
 
 export default sourcesRouter;

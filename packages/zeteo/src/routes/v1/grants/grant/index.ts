@@ -1,5 +1,6 @@
 import { deleteGrant, getGrant, replaceGrant } from "./controllers.js";
-import { requirePermission } from "../../../../middleware/auth.js";
+import { allowOwnerOr } from "../../../../middleware/uploadOwner.js";
+import { sourceOfGrant } from "./middleware.js";
 import express, { Router } from "express";
 import {
   GRANTS_READ,
@@ -10,8 +11,14 @@ const grantRouter = Router({ mergeParams: true });
 
 const json64k = express.json({ limit: "64kb" });
 
-grantRouter.get("/", requirePermission(GRANTS_READ), getGrant);
-grantRouter.put("/", requirePermission(GRANTS_WRITE), json64k, replaceGrant);
-grantRouter.delete("/", requirePermission(GRANTS_WRITE), deleteGrant);
+// An upload source's owner may read, change and remove grants on its tables.
+grantRouter.get("/", allowOwnerOr(GRANTS_READ, sourceOfGrant), getGrant);
+grantRouter.put(
+  "/",
+  allowOwnerOr(GRANTS_WRITE, sourceOfGrant),
+  json64k,
+  replaceGrant
+);
+grantRouter.delete("/", allowOwnerOr(GRANTS_WRITE, sourceOfGrant), deleteGrant);
 
 export default grantRouter;

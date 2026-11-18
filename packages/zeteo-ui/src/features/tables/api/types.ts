@@ -11,6 +11,10 @@ export interface Table {
   description: string | null;
   last_seen_at: string;
   missing_since: string | null;
+  /** An upload's rows loaded; null for a database source. */
+  row_count: number | null;
+  /** When an upload's table was last loaded; null for a database source. */
+  last_loaded_at: string | null;
 }
 
 export interface Column {
@@ -23,6 +27,8 @@ export interface Column {
   is_primary_key: boolean;
   description: string | null;
   missing_since: string | null;
+  /** An upload's column: the header text in the file; null for a database source. */
+  original_name: string | null;
 }
 
 export interface TableDetail extends Table {

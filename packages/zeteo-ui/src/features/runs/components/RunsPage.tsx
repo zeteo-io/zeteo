@@ -1,16 +1,14 @@
 import { formatCount } from "@/features/sources/components/sourceLabels";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { OUTCOME_LABEL, OutcomeBadge } from "./OutcomeBadge";
-import { faUser } from "@fortawesome/free-solid-svg-icons";
 import { formatDuration } from "@/utils/formatDuration";
 import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { FilterChip } from "@/components/FilterChip";
+import { useEffect, useMemo, useState } from "react";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { formatDate } from "@/utils/formatDate";
-import { useEffect, useState } from "react";
 import { useAuth } from "@tereo-io/react";
 import { useRuns } from "../api/useRuns";
 import { Link } from "react-router-dom";
@@ -19,13 +17,15 @@ import "./styles.css";
 import {
   PrincipalCell,
   PrincipalLabel,
-  PrincipalPicker,
+  parseWho,
+  useDirectory,
+  whoFilter,
+  whoId,
 } from "@/features/principals";
 import {
   Alert,
   Button,
   EmptyState,
-  Modal,
   Spinner,
   Table,
   TableFilters,
@@ -69,12 +69,12 @@ export const RunsPage = () => {
     filtersOf
   );
   const canReadSources = hasPermission("zeteo.sources.read");
-  // GET /v1/principals needs zeteo.grants.read; a lookup by id needs only runs.
-  const canSearchPeople = hasPermission("zeteo.grants.read");
+  // The directory needs zeteo.grants.read; a lookup by id needs only runs.
+  const canListPeople = hasPermission("zeteo.grants.read");
   const anyFilter = !!(filters.user_id || filters.source_id || filters.outcome);
   const { items, isLoading, error, hasMore, loadMore } = useRuns(filters);
   const sources = useAllSources(canReadSources);
-  const [pickingPerson, setPickingPerson] = useState(false);
+  const directory = useDirectory("admin", canListPeople);
   const [open, setOpen] = useState<Run | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
@@ -91,6 +91,24 @@ export const RunsPage = () => {
     : null;
 
   const sourceSelect = canReadSources && !sourcesRefused;
+  // Runs are a user's, service accounts' included: the Who filter offers users only.
+  const personSelect = !!directory.data;
+  // A person from the address that the filter cannot show is a chip.
+  const personChip = userRef && !personSelect ? userRef : null;
+  const selectedWho = filters.user_id ? whoId("user", filters.user_id) : "";
+  const who = useMemo(
+    () =>
+      directory.data
+        ? [
+            whoFilter(directory.data.data, {
+              title: "Person",
+              selected: selectedWho,
+              only: ["user"],
+            }),
+          ]
+        : [],
+    [directory.data, selectedWho]
+  );
   // A source from the address that the filter cannot show is a chip.
   const sourceChip =
     filters.source_id && !sourceSelect ? filters.source_id : null;
@@ -98,6 +116,7 @@ export const RunsPage = () => {
   // The current choices go into the definitions, so TableFilters, which
   // starts over whenever they change, starts over where it already was.
   const filterDefs: InfiniteScrollMenuFilter[] = [
+    ...who,
     {
       type: "SELECT",
       title: "Outcome",
@@ -125,7 +144,8 @@ export const RunsPage = () => {
   ];
   // It reports its choices as soon as it mounts, so it waits for the options
   // that hold the current choices; otherwise it would report them gone.
-  const filtersReady = !(sourceSelect && sources.isLoading);
+  const filtersReady =
+    !(sourceSelect && sources.isLoading) && !directory.isLoading;
 
   const onFiltersChange = (params: Record<string, string>) => {
     const outcome = (params["filter[outcome]"] || undefined) as
@@ -133,32 +153,30 @@ export const RunsPage = () => {
     const source_id = sourceSelect
       ? params["filter[source_id]"] || undefined
       : filters.source_id;
-    if (outcome !== filters.outcome || source_id !== filters.source_id) {
-      setFilters({ ...filters, outcome, source_id });
+    const user_id = personSelect
+      ? parseWho(params).principal_id
+      : filters.user_id;
+    if (
+      outcome !== filters.outcome ||
+      source_id !== filters.source_id ||
+      user_id !== filters.user_id
+    ) {
+      setFilters({ user_id, outcome, source_id });
     }
   };
 
   return (
     <>
       <PageHeader title="Runs" divider={false} />
-      <div className="z-list-toolbar">
+      <div className="z-list-toolbar z-list-toolbar-top">
         <div className="z-list-toolbar-filters z-runs-toolbar">
-          {userRef ? (
+          {personChip && (
             <FilterChip
               clearLabel="Clear person"
               onClear={() => setFilters({ ...filters, user_id: undefined })}
             >
-              <PrincipalLabel refValue={userRef} />
+              <PrincipalLabel refValue={personChip} />
             </FilterChip>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPickingPerson(true)}
-            >
-              <FontAwesomeIcon icon={faUser} /> Person
-            </Button>
           )}
           {sourceChip && (
             <FilterChip
@@ -175,37 +193,22 @@ export const RunsPage = () => {
           )}
         </div>
       </div>
+      {!canListPeople && (
+        <Alert variant="warning">
+          Filtering by person needs the Read grants permission.
+        </Alert>
+      )}
       {!canReadSources && (
         <Alert variant="warning">
           Filtering by source, and naming sources, needs the Read sources
           permission.
         </Alert>
       )}
-      <Modal
-        show={pickingPerson}
-        title="Show the runs of a person"
-        onClose={() => setPickingPerson(false)}
-      >
-        {!canSearchPeople && (
-          <p>
-            Searching by name needs the Read grants permission; paste a user id
-            instead.
-          </p>
-        )}
-        <PrincipalPicker
-          types={["user"]}
-          search={canSearchPeople}
-          value={userRef}
-          onChange={(p) => {
-            setFilters({ ...filters, user_id: p.id });
-            setPickingPerson(false);
-          }}
-        />
-      </Modal>
       <ErrorNotice error={error} />
       <ErrorNotice
         error={sources.error?.status === 403 ? null : sources.error}
       />
+      <ErrorNotice error={directory.error} />
       {isLoading ? (
         <Spinner size="lg" />
       ) : (

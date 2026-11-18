@@ -1,12 +1,11 @@
 import { makeSource, SOURCE_ID } from "@/features/sources/testFixtures";
 import { GRANT_ID, USER_ID, makeGrant } from "../testFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { Route, Routes, useLocation } from "react-router-dom";
 import { optionTexts, pickOption } from "@/test/searchSelect";
+import { GrantDialog, type FixedSource } from "./GrantDialog";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { GrantForm } from "./GrantForm";
 import {
   CUSTOMERS_ID,
   ORDERS_ID,
@@ -54,7 +53,7 @@ vi.mock("@/features/principals", async () => {
   };
 });
 
-const Where = () => <p data-testid="where">{useLocation().pathname}</p>;
+const onClose = vi.hoisted(() => vi.fn());
 
 const billing = makeSource({
   id: "8b2e1c1f-2d8b-4b64-8e1f-7b4c2d3e5f77",
@@ -80,16 +79,13 @@ const detail = makeTableDetail({
 });
 const COL = (n: number) => `c0000000-1c7a-4a53-9d0e-6a3b1f2c4d0${n}`;
 
-const renderForm = (grant?: ReturnType<typeof makeGrant>) =>
+const renderForm = (
+  grant?: ReturnType<typeof makeGrant>,
+  source?: FixedSource
+) =>
   renderWithProviders(
-    <>
-      <Where />
-      <Routes>
-        <Route path="/grants" element={<p>list</p>} />
-        <Route path="*" element={<GrantForm grant={grant} title="Grant" />} />
-      </Routes>
-    </>,
-    { route: "/grants/new" }
+    <GrantDialog grant={grant} source={source} onClose={onClose} />,
+    { route: "/grants" }
   );
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -107,8 +103,9 @@ const chooseTable = async (user: User) => {
   await pick(user, "Table", "public.orders");
 };
 
-describe("GrantForm", () => {
+describe("GrantDialog", () => {
   beforeEach(() => {
+    onClose.mockReset();
     held.permissions = ["zeteo.grants.write", "zeteo.sources.read"];
     post
       .mockReset()
@@ -206,10 +203,10 @@ describe("GrantForm", () => {
       table_id: ORDERS_ID,
       all_columns: true,
     });
-    expect(await screen.findByText("list")).toBeInTheDocument();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it("still returns to the list when a choice is made again mid-save", async () => {
+  it("still closes when a choice is made again mid-save", async () => {
     const user = userEvent.setup();
     let finish: (value: unknown) => void = () => undefined;
     post.mockImplementation(() => new Promise((resolve) => (finish = resolve)));
@@ -220,7 +217,7 @@ describe("GrantForm", () => {
     // Picking again resets the mutation while the request is in flight.
     await user.click(screen.getByRole("button", { name: "principal chosen" }));
     finish({ data: makeGrant() });
-    expect(await screen.findByText("list")).toBeInTheDocument();
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
   it("sends the chosen columns, not the missing ones", async () => {
@@ -276,7 +273,7 @@ describe("GrantForm", () => {
     expect(screen.getByRole("button", { name: "Create grant" })).toBeDisabled();
   });
 
-  it("links to the existing grant on 409 grant_exists", async () => {
+  it("opens the existing grant in its place on 409 grant_exists", async () => {
     const user = userEvent.setup();
     post.mockRejectedValue({
       status: 409,
@@ -294,13 +291,21 @@ describe("GrantForm", () => {
     await chooseTable(user);
     await user.click(screen.getByRole("button", { name: "Create grant" }));
     expect(
-      await screen.findByText(
-        "This principal already has a grant on this table"
-      )
+      await screen.findByText("They already have access to this table.")
     ).toBeInTheDocument();
+    expect(get).toHaveBeenCalledWith("/v1/grants", {
+      params: expect.objectContaining({
+        source_id: SOURCE_ID,
+        principal_id: USER_ID,
+        table_id: ORDERS_ID,
+      }),
+    });
+    await user.click(screen.getByRole("button", { name: "Edit that grant" }));
     expect(
-      screen.getByRole("link", { name: "Edit that grant" })
-    ).toHaveAttribute("href", `/grants/${GRANT_ID}/edit`);
+      await screen.findByRole("button", { name: "Save grant" })
+    ).toBeInTheDocument();
+    expect(screen.getByText("Edit grant")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
   });
 
   it("shows the description of other refusals", async () => {
@@ -375,7 +380,7 @@ describe("GrantForm", () => {
     await screen.findByText("exists");
     await pick(user, "Table", "public.customers");
     expect(screen.queryByText("exists")).not.toBeInTheDocument();
-    expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/already have access/)).not.toBeInTheDocument();
   });
 
   describe("after a 409 grant_exists", () => {
@@ -397,7 +402,7 @@ describe("GrantForm", () => {
         screen.getByRole("button", { name: "principal chosen" })
       );
       expect(screen.queryByText("exists")).not.toBeInTheDocument();
-      expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/already have access/)).not.toBeInTheDocument();
     });
 
     it("drops the notice when the source changes", async () => {
@@ -405,7 +410,7 @@ describe("GrantForm", () => {
       await conflict(user);
       await pick(user, "Source", "Billing");
       expect(screen.queryByText("exists")).not.toBeInTheDocument();
-      expect(screen.queryByText(/already has a grant/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/already have access/)).not.toBeInTheDocument();
     });
   });
 
@@ -508,6 +513,74 @@ describe("GrantForm", () => {
       await user.click(screen.getByRole("button", { name: "Save grant" }));
       await waitFor(() => expect(put).toHaveBeenCalled());
       expect(put.mock.calls[0][1]).toEqual({ all_columns: true });
+    });
+  });
+
+  describe("from a source's page", () => {
+    const fixed: FixedSource = {
+      id: SOURCE_ID,
+      tables: [
+        { id: ORDERS_ID, name: "orders", missing: false },
+        { id: CUSTOMERS_ID, name: "customers", missing: false },
+        {
+          id: "a3333333-1c7a-4a53-9d0e-6a3b1f2c4d03",
+          name: "gone",
+          missing: true,
+        },
+      ],
+    };
+
+    it("fixes the source and offers its tables that are still there", async () => {
+      const user = userEvent.setup();
+      renderForm(undefined, fixed);
+      expect(screen.getByText("Share a table")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Source")).not.toBeInTheDocument();
+      await user.click(screen.getByLabelText("Table"));
+      expect(options()).toEqual(["orders", "customers"]);
+      expect(get).not.toHaveBeenCalledWith("/v1/sources", expect.anything());
+    });
+
+    it("shares through the admin picker with zeteo.grants.write", async () => {
+      const user = userEvent.setup();
+      renderForm(undefined, fixed);
+      await user.click(
+        screen.getByRole("button", { name: "Choose principal" })
+      );
+      await pick(user, "Table", "orders");
+      await user.click(screen.getByRole("button", { name: "Share" }));
+      await waitFor(() =>
+        expect(post).toHaveBeenCalledWith("/v1/grants", {
+          principal_type: "user",
+          principal_id: USER_ID,
+          table_id: ORDERS_ID,
+          all_columns: true,
+        })
+      );
+      await waitFor(() => expect(onClose).toHaveBeenCalled());
+    });
+
+    it("searches the people an owner may share with, without zeteo.grants.write", () => {
+      held.permissions = ["zeteo.data.read"];
+      renderForm(undefined, fixed);
+      expect(
+        screen.queryByRole("button", { name: "Choose principal" })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("combobox", { name: "Search by name or email" })
+      ).toBeInTheDocument();
+    });
+
+    it("names the table as the page does when changing a grant", async () => {
+      renderForm(makeGrant(), {
+        ...fixed,
+        tables: [{ id: ORDERS_ID, name: "Orders table", missing: false }],
+      });
+      expect(screen.getByText("Change what is shared")).toBeInTheDocument();
+      expect(screen.getByText("Orders table")).toBeInTheDocument();
+      expect(screen.queryByText(/public\./)).not.toBeInTheDocument();
+      expect(
+        await screen.findByRole("button", { name: "Save" })
+      ).toBeInTheDocument();
     });
   });
 });

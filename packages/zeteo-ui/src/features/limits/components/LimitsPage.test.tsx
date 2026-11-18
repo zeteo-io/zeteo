@@ -1,9 +1,11 @@
 import { LIMIT_GROUP_ID, LIMIT_USER_ID, makeLimit } from "../testFixtures";
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { filterOptionChecked, toggleFilterOption } from "@/test/whoFilter";
+import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useLocation, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
+import { rowNamed } from "@/test/rowNamed";
 import { LimitsPage } from "./LimitsPage";
 
 const get = vi.hoisted(() => vi.fn());
@@ -37,6 +39,17 @@ const lookupAnswer = async (_url: string, body: { principals: unknown[] }) => ({
   },
 });
 
+const NOBODY_ID = "a9999999-1c7a-4a53-9d0e-6a3b1f2c4d77";
+/** `GET /v1/principals/all`: the Who filter's choices. */
+const directory = {
+  data: [
+    { type: "user", id: LIMIT_USER_ID, name: "Ada Lovelace", status: "active" },
+    { type: "group", id: LIMIT_GROUP_ID, name: "Analysts", status: "active" },
+    { type: "user", id: NOBODY_ID, name: "Nina Nobody", status: "active" },
+  ],
+  truncated: false,
+};
+
 const Probe = () => {
   const navigate = useNavigate();
   return (
@@ -61,18 +74,17 @@ describe("LimitsPage", () => {
       if (url === "/v1/principal-limits") {
         return { data: { data: [userLimit, groupLimit], next_cursor: null } };
       }
+      if (url === "/v1/principals/all") return { data: directory };
       throw new Error(`unexpected ${url}`);
     });
   });
 
   it("lists principals and values, Default for a null", async () => {
     renderWithProviders(<LimitsPage />);
-    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     expect(row).toHaveTextContent("8");
     expect(row).toHaveTextContent("3");
-    const orphanRow = (await screen.findByText(/Analysts|b2222222/)).closest(
-      "tr"
-    )!;
+    const orphanRow = await rowNamed(/Analysts|b2222222/);
     expect(within(orphanRow).getByText("Default")).toBeInTheDocument();
     expect(within(orphanRow).getByText("Orphaned")).toBeInTheDocument();
   });
@@ -84,15 +96,17 @@ describe("LimitsPage", () => {
       message: "Tereo could not be reached",
     });
     renderWithProviders(<LimitsPage />);
-    const row = (await screen.findByText(LIMIT_USER_ID)).closest("tr")!;
+    const row = await rowNamed(LIMIT_USER_ID);
     await waitFor(() => expect(row).toHaveTextContent("name unavailable"));
     expect(within(row).queryByText(/orphaned/i)).not.toBeInTheDocument();
   });
 
   it("says no limit matches with a principal filter, and no limits yet without one", async () => {
-    get.mockImplementation(async () => ({
-      data: { data: [], next_cursor: null },
-    }));
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/principals/all"
+        ? { data: directory }
+        : { data: { data: [], next_cursor: null } }
+    );
     const user = userEvent.setup();
     renderWithProviders(<LimitsPage />, {
       route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
@@ -101,9 +115,7 @@ describe("LimitsPage", () => {
       await screen.findByText("This person or group has no limit of its own.")
     ).toBeInTheDocument();
     expect(screen.queryByText(/No limits yet/)).toBeNull();
-    await user.click(
-      screen.getByRole("button", { name: "Clear person or group" })
-    );
+    await toggleFilterOption(user, "Ada Lovelace");
     expect(await screen.findByText(/No limits yet/)).toBeInTheDocument();
   });
 
@@ -158,7 +170,21 @@ describe("LimitsPage", () => {
     );
   });
 
-  it("shows the active filter as a chip with the resolved name", async () => {
+  it("preselects the principal of the address in the Who filter, by name", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LimitsPage />, {
+      route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
+    });
+    expect(await filterOptionChecked(user, "Ada Lovelace")).toBe(true);
+    expect(await filterOptionChecked(user, "Analysts (group)")).toBe(false);
+    expect(get).toHaveBeenCalledWith("/v1/principals/all", expect.anything());
+  });
+
+  it("shows the principal of the address as a chip when the directory is unreachable", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === "/v1/principals/all") throw new Error("down");
+      return { data: { data: [userLimit], next_cursor: null } };
+    });
     renderWithProviders(<LimitsPage />, {
       route: `/limits?principal_type=user&principal_id=${LIMIT_USER_ID}`,
     });
@@ -166,7 +192,7 @@ describe("LimitsPage", () => {
       await screen.findByRole("button", { name: "Clear person or group" })
     ).closest(".z-filter-chip")!;
     await waitFor(() => expect(chip).toHaveTextContent("Ada Lovelace"));
-    expect(chip).not.toHaveTextContent(LIMIT_USER_ID);
+    expect(screen.queryByRole("button", { name: /^Who/ })).toBeNull();
   });
 
   it("makes clearing a history step: Back returns to the filtered list", async () => {
@@ -180,10 +206,8 @@ describe("LimitsPage", () => {
         route: `/limits?principal_type=group&principal_id=${LIMIT_GROUP_ID}`,
       }
     );
-    await screen.findByText("Analysts");
-    await user.click(
-      screen.getByRole("button", { name: "Clear person or group" })
-    );
+    await screen.findAllByText("Analysts");
+    await toggleFilterOption(user, "Analysts (group)");
     await waitFor(() =>
       expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
     );
@@ -198,65 +222,36 @@ describe("LimitsPage", () => {
     renderWithProviders(<LimitsPage />, {
       route: `/limits?principal_type=group&principal_id=${LIMIT_GROUP_ID}`,
     });
-    await screen.findByText("Analysts");
-    await user.click(
-      screen.getByRole("button", { name: "Clear person or group" })
-    );
+    await screen.findAllByText("Analysts");
+    await toggleFilterOption(user, "Analysts (group)");
     await waitFor(() =>
       expect(limitParams().at(-1)).not.toHaveProperty("principal_id")
     );
   });
 
-  it("filters by a person picked in the dialog, as a history step", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    try {
-      get.mockImplementation(async (url: string) => {
-        if (url === "/v1/principals") {
-          return {
-            data: {
-              data: [
-                {
-                  type: "user",
-                  id: LIMIT_USER_ID,
-                  name: "Ada Lovelace",
-                  email: "ada@x.test",
-                  status: "active",
-                },
-              ],
-            },
-          };
-        }
-        return { data: { data: [userLimit], next_cursor: null } };
-      });
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-      renderWithProviders(
-        <>
-          <Probe />
-          <LimitsPage />
-        </>
-      );
-      await screen.findByText("Ada Lovelace");
-      await user.click(screen.getByRole("button", { name: "Person or group" }));
-      await user.type(screen.getByLabelText("Search by name or email"), "ada");
-      await act(() => vi.advanceTimersByTimeAsync(550));
-      await user.click(
-        await screen.findByRole("option", { name: /Ada Lovelace/ })
-      );
-      await waitFor(() =>
-        expect(screen.getByTestId("search")).toHaveTextContent(
-          `principal_type=user&principal_id=${LIMIT_USER_ID}`
-        )
-      );
-      await waitFor(() =>
-        expect(
-          screen.queryByRole("dialog", {
-            name: "Show the limit of a person or group",
-          })
-        ).not.toBeInTheDocument()
-      );
-    } finally {
-      vi.useRealTimers();
-    }
+  it("filters by anyone chosen in the Who filter, limited or not, as a history step", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <>
+        <Probe />
+        <LimitsPage />
+      </>
+    );
+    await screen.findAllByText("Ada Lovelace");
+    await toggleFilterOption(user, "Nina Nobody");
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(
+        `principal_type=user&principal_id=${NOBODY_ID}`
+      )
+    );
+    expect(limitParams().at(-1)).toMatchObject({
+      principal_type: "user",
+      principal_id: NOBODY_ID,
+    });
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("search")).toHaveTextContent(/^$/)
+    );
   });
 
   it("has write controls with zeteo.grants.write", async () => {
@@ -286,7 +281,7 @@ describe("LimitsPage", () => {
   it("deletes after a confirmation that names the principal", async () => {
     const user = userEvent.setup();
     renderWithProviders(<LimitsPage />);
-    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(await screen.findByText(/Ada Lovelace falls back/)).toBeVisible();
     await user.click(screen.getByRole("button", { name: "Delete limit" }));
@@ -298,8 +293,8 @@ describe("LimitsPage", () => {
   it("opens the edit form for a row", async () => {
     const user = userEvent.setup();
     renderWithProviders(<LimitsPage />);
-    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     await user.click(within(row).getByRole("button", { name: "Edit" }));
-    expect(await screen.findByLabelText("Queries at once")).toHaveValue("8");
+    expect(await screen.findByLabelText("Queries at once")).toHaveValue(8);
   });
 });

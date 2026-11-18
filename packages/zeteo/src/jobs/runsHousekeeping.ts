@@ -6,6 +6,10 @@ import { redis } from "../utils/redis.js";
 import { db } from "../utils/db/index.js";
 import { randomUUID } from "crypto";
 import env from "../env.js";
+import {
+  deleteExpiredStagings,
+  deleteOrphanStagingTables,
+} from "../uploads/staging.js";
 
 /** An export still running this long after it started has lost its process: its limit, plus a margin for its end to be recorded. */
 export const INTERRUPTED_AFTER_MS = EXPORT_TIMEOUT_MS + 5 * 60_000;
@@ -79,7 +83,7 @@ export const deleteOldRuns = async (
   }
 };
 
-/** One tick: both steps, under the lock. A Redis failure skips the tick. */
+/** One tick: its steps (exports, old runs, expired file stagings), under the lock. A Redis failure skips the tick. */
 export const runHousekeeping = async (
   now: Date = new Date(),
   shouldStop: () => boolean = () => false
@@ -100,6 +104,12 @@ export const runHousekeeping = async (
     if (shouldStop()) return;
     const deleted = await deleteOldRuns(env.QUERY_RUNS_RETENTION_DAYS, now);
     if (deleted > 0) logger.info({ deleted }, "deleted old query runs");
+    if (shouldStop()) return;
+    const stagings = await deleteExpiredStagings(now);
+    if (stagings > 0)
+      logger.info({ stagings }, "deleted expired file stagings");
+    const orphans = await deleteOrphanStagingTables(now);
+    if (orphans > 0) logger.info({ orphans }, "dropped orphan staging tables");
   } catch (err) {
     logger.error({ err }, "runs housekeeping failed");
   } finally {

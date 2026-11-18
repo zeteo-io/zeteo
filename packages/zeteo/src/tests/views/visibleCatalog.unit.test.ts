@@ -14,6 +14,7 @@ const table = (id: string, schemaName: string, name: string) => ({
   kind: "table" as const,
   description: null,
   missing: false,
+  lastSyncedAt: null as Date | null,
   columns: [],
 });
 
@@ -65,6 +66,25 @@ describe("visibleCatalogView", () => {
       ["mid", "public.customers"],
       ["zeta", "public.customers"],
     ]);
+  });
+});
+
+describe("visibleCatalogView upload sources", () => {
+  it("shows last_synced_at for an upload table, null for a database table, and the source kind", () => {
+    const at = new Date("2026-11-17T10:00:00.000Z");
+    const upload = visibleCatalogView(
+      catalog({
+        source: { ...catalog().source, type: "upload" },
+        tables: [{ ...table("t", "zu_a", "people"), lastSyncedAt: at }],
+        relations: [],
+      }),
+      {}
+    );
+    expect(upload.kind).toBe("upload");
+    expect(upload.tables[0]?.last_synced_at).toBe(at.toISOString());
+    const db = visibleCatalogView(catalog(), {});
+    expect(db.kind).toBe("database");
+    expect(db.tables.every((t) => t.last_synced_at === null)).toBe(true);
   });
 });
 

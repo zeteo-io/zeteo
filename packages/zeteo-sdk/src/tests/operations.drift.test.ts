@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 71 operations as the description", () => {
+  it("lists the same 81 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(71);
-    expect(Object.keys(found)).toHaveLength(71);
+    expect(blocks).toBe(81);
+    expect(Object.keys(found)).toHaveLength(81);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -80,6 +80,7 @@ describe("operations against the API description", () => {
       ["me.get", (c) => c.me.get()],
       ["me.runs", (c) => c.me.runs()],
       ["me.principals", (c) => c.me.principals({ type: "user", q: "ad" })],
+      ["me.allPrincipals", (c) => c.me.allPrincipals()],
       ["savedQueries.list", (c) => c.savedQueries.list()],
       [
         "savedQueries.create",
@@ -179,10 +180,16 @@ describe("operations against the API description", () => {
         "principals.search",
         (c) => c.principals.search({ type: "user", q: "ad" }),
       ],
+      ["principals.all", (c) => c.principals.all()],
       [
         "principals.lookup",
         (c) => c.principals.lookup([{ type: "user", id: ID }]),
       ],
+      [
+        "uploads.create",
+        (c) => c.uploads.create(new Blob(["a,b\n1,2\n"]), "a.csv"),
+      ],
+      ["uploads.discard", (c) => c.uploads.discard(ID)],
       ["sources.list", (c) => c.sources.list()],
       [
         "sources.create",
@@ -197,6 +204,25 @@ describe("operations against the API description", () => {
       ],
       ["sources.get", (c) => c.sources.get(ID)],
       ["sources.update", (c) => c.sources.update(ID, { name: "n" })],
+      ["sources.delete", (c) => c.sources.delete(ID)],
+      ["sources.transfer", (c) => c.sources.transfer(ID, { user_id: ID2 })],
+      [
+        "sources.addTables",
+        (c) =>
+          c.sources.addTables(ID, {
+            staging_id: ID2,
+            tables: [{ key: "csv" }],
+          }),
+      ],
+      [
+        "sources.reuploadTable",
+        (c) => c.sources.reuploadTable(ID, ID2, { staging_id: ID, key: "csv" }),
+      ],
+      ["sources.removeTable", (c) => c.sources.removeTable(ID, ID2)],
+      [
+        "sources.updateColumn",
+        (c) => c.sources.updateColumn(ID, ID2, ID, { type: "text" }),
+      ],
       ["sources.archive", (c) => c.sources.archive(ID)],
       ["sources.test", (c) => c.sources.test(ID)],
       ["sources.refresh", (c) => c.sources.refresh(ID)],

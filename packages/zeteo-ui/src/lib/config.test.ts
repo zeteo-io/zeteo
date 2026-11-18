@@ -34,6 +34,7 @@ describe("loadConfig", () => {
     await expect(loadConfig()).resolves.toEqual({
       tereoUrl: "https://tereo.example.com",
       clientId: "zeteo-ui",
+      uploads: false,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/ui-config.json",
@@ -56,6 +57,23 @@ describe("loadConfig", () => {
       expect((await loadConfig()).tereoUrl).toBe(kept);
     }
   );
+
+  it.each([
+    [true, true],
+    [false, false],
+    ["true", false],
+    [undefined, false],
+  ])("reads uploads %s as %s", async (raw, on) => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(200, {
+        tereo_url: "https://t.example",
+        client_id: "c",
+        uploads: raw,
+      })
+    );
+    const { loadConfig } = await load();
+    expect((await loadConfig()).uploads).toBe(on);
+  });
 
   it("fetches once however often it is asked", async () => {
     fetchMock.mockResolvedValue(

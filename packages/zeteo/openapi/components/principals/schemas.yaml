@@ -26,6 +26,17 @@ ListDirectoryPrincipalsResponse:
       type: array
       items: { $ref: '#/DirectoryPrincipal' }
 
+ListAllDirectoryPrincipalsResponse:
+  type: object
+  required: [data, truncated]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/DirectoryPrincipal' }
+    truncated:
+      type: boolean
+      description: True when tereo had more than 5000 users, or more than 5000 groups, and some are left out
+
 LookupPrincipalsRequest:
   type: object
   required: [principals]

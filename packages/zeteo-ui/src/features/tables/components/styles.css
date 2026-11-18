@@ -113,3 +113,32 @@
 .z-tables-list td:nth-child(2) {
   white-space: nowrap;
 }
+
+/* An upload's columns in the edit mode: the name and type fields keep a
+   usable width, and their labels are for screen readers (the column
+   headings already say what they are). */
+.z-columns-editing td {
+  position: relative;
+}
+
+.z-columns-editing td:nth-child(1) {
+  min-width: 16rem;
+}
+
+.z-columns-editing td:nth-child(2) {
+  min-width: 11rem;
+}
+
+.z-columns-editing .k-field-shell-label-row {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.z-column-edit {
+  display: grid;
+  gap: 0.25rem;
+}
