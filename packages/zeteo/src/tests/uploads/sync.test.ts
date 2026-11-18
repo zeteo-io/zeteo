@@ -2,13 +2,15 @@
 // @module-tag platform
 import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { changeColumn, createUploadSource } from "../../uploads/service.js";
-import { initializeTereo, stopTereo } from "../../utils/tereo.js";
+import { postQuery, removeRunsOf } from "../support/queries.js";
 import { presentSourceById } from "../../sources/present.js";
 import { syncSheetsSource } from "../../uploads/sync.js";
 import type { Caller } from "../../middleware/auth.js";
 import { schemaFor } from "../../uploads/storage.js";
 import { storedTables } from "../support/uploads.js";
+import { startV1Routes } from "../support/v1App.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
@@ -53,9 +55,10 @@ const owner: Caller = {
 };
 
 const sheets = new Map<string, FakeSpreadsheet>();
+let app: Awaited<ReturnType<typeof startV1Routes>>;
 
 beforeAll(async () => {
-  await initializeTereo();
+  app = await startV1Routes();
 });
 beforeEach(() => {
   serveSheets(google, sheets);
@@ -66,8 +69,9 @@ afterEach(async () => {
   await removeUploadSourcesOf([ownerId]);
 });
 afterAll(async () => {
+  await removeRunsOf([granteeId]);
   await prisma.source.deleteMany({ where: { createdBy: ownerId } });
-  await stopTereo();
+  await app.close();
 });
 
 const costs = () => ({
@@ -200,6 +204,57 @@ describe("syncSheetsSource", () => {
     google.getSpreadsheet.mockClear();
     await syncSheetsSource(id, ownerId);
     expect(await storedTables(id)).toEqual(["costs"]);
+  });
+
+  it("a tab restored after deletion syncs into its old table, keeping its id and grants", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const notes = await tableNamed(id, "notes");
+    await prisma.grant.create({
+      data: {
+        principalType: "user",
+        principalId: granteeId,
+        tableId: notes.id,
+        allColumns: true,
+        createdBy: ownerId,
+      },
+    });
+    const restored = sheet.tab(2);
+    sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== 2);
+    await syncSheetsSource(id, ownerId);
+    expect((await tableNamed(id, "notes")).missing).toBe(true);
+
+    // Undo in Sheets brings the tab back with its sheetId.
+    sheet.tabs.push({ ...restored, rows: [["note"], ["hello"], ["again"]] });
+    const summary = await syncSheetsSource(id, ownerId);
+
+    expect(summary.tables).toContainEqual({
+      id: notes.id,
+      name: "notes",
+      row_count: 2,
+      missing: false,
+    });
+    const after = await tableNamed(id, "notes");
+    expect(after.missing).toBe(false);
+    expect(after.columns.map((c) => [c.id, c.missing])).toEqual(
+      notes.columns.map((c) => [c.id, false])
+    );
+    expect(await storedTables(id)).toEqual(["costs", "notes"]);
+    const { slug } = await prisma.source.findUniqueOrThrow({ where: { id } });
+    const res = await postQuery(
+      tokenFor({ userId: granteeId, permissions: [DATA_READ] }),
+      {
+        source: slug,
+        from: "notes",
+        select: ["note"],
+        orderBy: [{ note: "desc" }],
+      },
+      app.url
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.rows).toEqual([["hello"], ["again"]]);
   });
 
   it("a new header column is added; a removed one is marked missing", async () => {

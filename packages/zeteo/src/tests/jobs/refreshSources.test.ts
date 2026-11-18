@@ -11,6 +11,7 @@ import { prisma } from "../../utils/db/prisma.js";
 import { db } from "../../utils/db/index.js";
 import { redis } from "../../utils/redis.js";
 import { randomUUID } from "crypto";
+import env from "../../env.js";
 import {
   DATA_READ,
   UPLOADS_WRITE,
@@ -305,6 +306,24 @@ describe("refreshStaleSources of Google Sheets sources", () => {
     expect(row.lastSyncAttemptAt!.getTime()).toBeGreaterThanOrEqual(
       now.getTime()
     );
+  });
+
+  it("lists no Sheets source while uploads are off", async () => {
+    const now = new Date();
+    const { id } = await makeSheets(61, now);
+    const cutoff = new Date(now.getTime() - 24 * HOUR);
+    expect((await db.sources.listDue(cutoff, now)).map((s) => s.id)).toContain(
+      id
+    );
+    const url = env.UPLOADS_READER_URL;
+    env.UPLOADS_READER_URL = undefined;
+    try {
+      expect(
+        (await db.sources.listDue(cutoff, now)).map((s) => s.id)
+      ).not.toContain(id);
+    } finally {
+      env.UPLOADS_READER_URL = url;
+    }
   });
 
   it("skips one synced within its interval", async () => {

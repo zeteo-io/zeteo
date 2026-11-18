@@ -695,8 +695,8 @@ export interface ColumnMatches<C extends CatalogColumn = CatalogColumn> {
 }
 
 /**
- * Matches a load's planned columns to a table's catalogue columns (missing
- * ones included, so a column back again is restored): by `name`, or, for a
+ * Matches a load's planned columns to a table's catalogue columns (live ones
+ * first, then missing ones, so a column back again is restored): by `name`, or, for a
  * sync, by the header it was read from (`original_name`), falling back to the
  * name, so a column renamed in Zeteo still matches its sheet header. A
  * matched planned column takes the column's name and, unless the caller set
@@ -709,27 +709,31 @@ export const matchColumns = <C extends CatalogColumn>(
   planned: PlannedColumn[],
   by: "name" | "original_name"
 ): ColumnMatches<C> => {
-  // Live columns are matched before missing ones.
-  const free = [
-    ...existing.filter((c) => c.missingSince === null),
-    ...existing.filter((c) => c.missingSince !== null),
-  ];
-  const take = (test: (c: C) => boolean): C | undefined => {
-    const i = free.findIndex(test);
-    return i === -1 ? undefined : free.splice(i, 1)[0];
-  };
+  // Every pass over the live columns runs before any over the missing ones,
+  // so a missing column never takes a header a live one still answers to.
+  const live = existing.filter((c) => c.missingSince === null);
+  const missing = existing.filter((c) => c.missingSince !== null);
   const matched: (C | undefined)[] = planned.map(() => undefined);
-  const pass = (test: (c: C, p: PlannedColumn) => boolean) =>
-    planned.forEach((p, i) => {
-      matched[i] ??= take((c) => test(c, p));
-    });
-  if (by === "original_name") {
-    pass((c, p) => c.originalName === p.originalName && c.name === p.name);
-    pass(
-      (c, p) => c.originalName !== null && c.originalName === p.originalName
-    );
+  const tests: ((c: C, p: PlannedColumn) => boolean)[] = [
+    ...(by === "original_name"
+      ? [
+          (c: C, p: PlannedColumn) =>
+            c.originalName === p.originalName && c.name === p.name,
+          (c: C, p: PlannedColumn) =>
+            c.originalName !== null && c.originalName === p.originalName,
+        ]
+      : []),
+    (c, p) => c.name === p.name,
+  ];
+  for (const pool of [live, missing]) {
+    for (const test of tests) {
+      planned.forEach((p, i) => {
+        if (matched[i]) return;
+        const at = pool.findIndex((c) => test(c, p));
+        if (at !== -1) matched[i] = pool.splice(at, 1)[0];
+      });
+    }
   }
-  pass((c, p) => c.name === p.name);
 
   const taken = new Set(existing.map((c) => c.name));
   for (const [i, p] of planned.entries()) {
@@ -746,7 +750,7 @@ export const matchColumns = <C extends CatalogColumn>(
     if (taken.has(p.name)) p.name = normalizeName(p.name, taken, p.index);
     else taken.add(p.name);
   }
-  return { matched, gone: free.filter((c) => c.missingSince === null) };
+  return { matched, gone: live };
 };
 
 /**
@@ -817,9 +821,15 @@ export const reuploadTable = async (
     "",
     table.name
   );
-  matchColumns(table.columns, planned.columns, "name");
 
   await withLoadLock(id, async () => {
+    // Under the lock no other change of the table's columns runs: these are
+    // its columns until the swap.
+    const columns = await prisma.sourceColumn.findMany({
+      where: { tableId },
+      orderBy: { position: "asc" },
+    });
+    const matches = matchColumns(columns, planned.columns, "name");
     const [loaded] = await loadTables(id, [planned]);
     await inSwap(id, [loaded!], async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
@@ -827,7 +837,6 @@ export const reuploadTable = async (
       // Read again under the lock: a rename may have landed since.
       const fresh = await tx.sourceTable.findFirst({
         where: { id: tableId, sourceId: id, missingSince: null },
-        include: { columns: true },
       });
       if (!fresh || fresh.name !== planned.name) {
         throw new NotFoundError("Table not found");
@@ -837,7 +846,7 @@ export const reuploadTable = async (
         tx,
         tableId,
         planned.columns,
-        matchColumns(fresh.columns, planned.columns, "name"),
+        matches,
         now
       );
       await tx.sourceTable.update({

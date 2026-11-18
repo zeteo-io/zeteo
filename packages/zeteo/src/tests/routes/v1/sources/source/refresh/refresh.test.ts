@@ -2,6 +2,7 @@
 // @module-tag platform
 import { sealSettings } from "../../../../../../utils/crypto/envelope.js";
 import { closeSourcePool } from "../../../../../../sources/pools.js";
+import { LOAD_LOCKING } from "../../../../../../uploads/loading.js";
 import { startV1Routes } from "../../../../../support/v1App.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../../../support/tokens.js";
@@ -242,6 +243,23 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     const retryAfter = Number(again.headers.get("retry-after"));
     expect(retryAfter).toBeGreaterThanOrEqual(1);
     expect(retryAfter).toBeLessThanOrEqual(60);
+  });
+
+  it("a Sync now refused as busy does not take the 60 s window", async () => {
+    const { id } = await makeSheets();
+    const wait = LOAD_LOCKING.lockWaitMs;
+    LOAD_LOCKING.lockWaitMs = 100;
+    await redis.set(`zeteo:upload-source-load:${id}`, "other", "EX", 60);
+    try {
+      const busy = await call("POST", `/${id}/refresh`, owner);
+      expect(busy.status).toBe(503);
+      expect(busy.body.error).toBe("upload_source_busy");
+      expect(await redis.get(`zeteo:sync-now:${id}`)).toBeNull();
+    } finally {
+      LOAD_LOCKING.lockWaitMs = wait;
+      await redis.del(`zeteo:upload-source-load:${id}`);
+    }
+    expect((await call("POST", `/${id}/refresh`, owner)).status).toBe(200);
   });
 
   it("a refused caller does not take the 60 s window", async () => {

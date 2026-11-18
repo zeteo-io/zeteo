@@ -1,5 +1,6 @@
 import type { Source } from "../../../prisma/generated/client/index.js";
 import { prisma } from "./prisma.js";
+import env from "../../env.js";
 
 export const findById = (id: string): Promise<Source | null> =>
   prisma.source.findUnique({ where: { id } });
@@ -52,7 +53,8 @@ export const syncIsDue = (
  * The unarchived sources due for the scheduled check, the longest-waiting
  * first: database sources never refreshed or last refreshed before
  * `olderThan`, then Google Sheets sources whose sync interval has passed at
- * `now` (`syncIsDue`). File upload sources never are: their uploads keep them.
+ * `now` (`syncIsDue`), while uploads are on (`UPLOADS_READER_URL`). File
+ * upload sources never are: their uploads keep them.
  */
 export const listDue = async (
   olderThan: Date,
@@ -69,6 +71,8 @@ export const listDue = async (
       { id: "asc" },
     ],
   });
+  // Sheets sources are synced only while uploads are on.
+  if (!env.UPLOADS_READER_URL) return databases;
   // The interval is per source, which Prisma's filters cannot compare with.
   // Timestamps are stored as UTC without a zone.
   const due = await prisma.$queryRaw<{ id: string }[]>`

@@ -19,6 +19,7 @@ import {
   NotFoundError,
   SourceArchivedError,
   TooManyRequestsError,
+  UploadSourceBusyError,
 } from "../utils/errors.js";
 import {
   assertUploadsOn,
@@ -127,19 +128,62 @@ interface TableSync {
   table: SourceTable;
   planned: PlannedTable;
   columns: ColumnMatches;
+  /** A missing table whose tab is back: it is no longer missing once swapped in. */
+  revived: boolean;
 }
 
+type CatalogTable = SourceTable & { columns: SourceColumn[] };
+
+/** The sheetId a missing table's locator names, or null for none (never thrown). */
+const missingSheetId = (table: SourceTable): number | null => {
+  const sheetId = (table.vendorLocator as { sheetId?: unknown } | null)
+    ?.sheetId;
+  return typeof sheetId === "number" ? sheetId : null;
+};
+
 /**
- * Reads the source's spreadsheet and stages and plans each of its tables
- * that is not missing; a table whose tab is gone is in `gone`. Staging
- * tables made go in `created`.
+ * The missing tables a sync may bring back: those whose locator names a tab
+ * no live table reads, the most recently missing one per tab. (Sheets keeps a
+ * tab's sheetId when a deletion is undone.)
+ */
+const revivable = (live: CatalogTable[], missing: CatalogTable[]) => {
+  const claimed = new Set(live.map((t) => locatorOf(t).sheetId));
+  const latest = new Map<number, CatalogTable>();
+  for (const table of missing) {
+    const sheetId = missingSheetId(table);
+    if (sheetId === null || claimed.has(sheetId)) continue;
+    const held = latest.get(sheetId);
+    if (!held || held.missingSince! < table.missingSince!) {
+      latest.set(sheetId, table);
+    }
+  }
+  return [...latest.values()];
+};
+
+/**
+ * Reads the source's spreadsheet and stages and plans each live table, and
+ * each missing table whose tab is back (`revivable`). A live table whose tab
+ * is gone is in `gone`; a missing one whose tab is still gone, or empty, stays
+ * as it is. Staging tables made go in `created`.
  */
 const readTables = async (
   spreadsheetId: string,
-  tables: (SourceTable & { columns: SourceColumn[] })[],
+  live: CatalogTable[],
+  missing: CatalogTable[],
   created: string[]
 ): Promise<{ syncs: TableSync[]; gone: SourceTable[] }> => {
-  const located = tables.map((table) => ({ table, locator: locatorOf(table) }));
+  const located = [
+    ...live.map((table) => ({
+      table,
+      locator: locatorOf(table),
+      revived: false,
+    })),
+    ...revivable(live, missing).map((table) => ({
+      table,
+      locator: locatorOf(table),
+      revived: true,
+    })),
+  ];
   const read = await readSpreadsheet(
     spreadsheetId,
     { maxRows: env.UPLOAD_MAX_ROWS, maxColumns: env.UPLOAD_MAX_COLUMNS },
@@ -148,10 +192,10 @@ const readTables = async (
   const tabs = new Map(read.tabs.map((t) => [t.sheetId, t]));
   const syncs: TableSync[] = [];
   const gone: SourceTable[] = [];
-  for (const { table, locator } of located) {
+  for (const { table, locator, revived } of located) {
     const tab = tabs.get(locator.sheetId);
     if (!tab) {
-      gone.push(table);
+      if (!revived) gone.push(table);
       continue;
     }
     const key = `sheet:${locator.sheetId}`;
@@ -171,9 +215,10 @@ const readTables = async (
       (locator.headerRow !== null &&
         locator.headerRow >= staged.staged.rowCount)
     ) {
+      if (revived) continue;
       throw new FileUnreadableError(
         "empty_file",
-        `The tab of table "${table.name}" has no data`
+        `The tab of table "${table.name}" has no data; the last synced data is kept`
       );
     }
     const staging: StagingRecord = {
@@ -190,6 +235,7 @@ const readTables = async (
       table,
       planned,
       columns: matchColumns(table.columns, planned.columns, "original_name"),
+      revived,
     });
   }
   return { syncs, gone };
@@ -202,7 +248,7 @@ const sync = async (
 ): Promise<SyncSummary> => {
   // Under the load lock nothing else changes the tables' data or columns.
   const tables = await prisma.sourceTable.findMany({
-    where: { sourceId, missingSince: null },
+    where: { sourceId },
     include: { columns: { orderBy: { position: "asc" } } },
     orderBy: { name: "asc" },
   });
@@ -210,7 +256,12 @@ const sync = async (
   try {
     let read: Awaited<ReturnType<typeof readTables>>;
     try {
-      read = await readTables(spreadsheetId, tables, created);
+      read = await readTables(
+        spreadsheetId,
+        tables.filter((t) => t.missingSince === null),
+        tables.filter((t) => t.missingSince !== null),
+        created
+      );
     } catch (err) {
       throw toUnreadable(err);
     }
@@ -235,6 +286,7 @@ const sync = async (
             rowCount: loaded[i]!.rowCount,
             lastSyncedAt: now,
             lastSeenAt: now,
+            ...(s.revived && { missingSince: null }),
           },
         });
       }
@@ -265,6 +317,7 @@ const sync = async (
         source_id: sourceId,
         actor_id: actorId,
         tables: syncs.length,
+        revived: syncs.filter((s) => s.revived).length,
         missing: gone.length,
       },
       "a Google Sheets source synced"
@@ -293,7 +346,8 @@ const sync = async (
 
 /**
  * Syncs a Google Sheets source under its load lock: reads every tab backing a
- * table that is not missing, loads each table again (columns matched to the
+ * table that is not missing (and brings back a missing table whose tab has
+ * returned, keeping its id and grants), loads each table again (columns matched to the
  * sheet's headers by `original_name`, keeping their ids, grants and types;
  * new headers added, removed ones marked missing), marks missing the tables
  * whose tab is gone, and swaps everything in in one transaction that checks
@@ -320,8 +374,9 @@ export const syncSheetsSource = async (
 
 /**
  * Sync now: a sync the caller asked for, refused with 429 `sync_too_soon`
- * within `SYNC_NOW_SECONDS` of the last one asked for the source. Call it
- * only for a caller already allowed to sync the source.
+ * within `SYNC_NOW_SECONDS` of the last one asked for the source (one refused
+ * as `upload_source_busy` does not count). Call it only for a caller already
+ * allowed to sync the source.
  */
 export const syncNow = async (
   sourceId: string,
@@ -341,5 +396,18 @@ export const syncNow = async (
       "sync_too_soon"
     );
   }
-  return syncSheetsSource(sourceId, actorId);
+  try {
+    return await syncSheetsSource(sourceId, actorId);
+  } catch (err) {
+    // Busy: nothing was synced, so the window is not used up.
+    if (err instanceof UploadSourceBusyError) {
+      await withinRedisTimeout(redis.del(key)).catch((delErr: unknown) => {
+        logger.warn(
+          { err: delErr, source_id: sourceId },
+          "freeing the Sync now window failed"
+        );
+      });
+    }
+    throw err;
+  }
 };
