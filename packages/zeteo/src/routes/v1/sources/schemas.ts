@@ -126,7 +126,7 @@ export const CreateUploadSourceSchema = z.strictObject({
   tables: TablesSchema,
 });
 
-const TYPES = ["postgres", "azure-sql", "upload"] as const;
+const TYPES = ["postgres", "azure-sql", "upload", "google-sheets"] as const;
 
 export const ListSourcesQuerySchema = z.strictObject({
   include_archived: z

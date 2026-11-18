@@ -43,7 +43,9 @@ export const visibleCatalogView = (
     description: source.description,
     type: source.type,
     kind:
-      source.type === "upload" ? ("upload" as const) : ("database" as const),
+      source.type === "upload" || source.type === "google-sheets"
+        ? ("upload" as const)
+        : ("database" as const),
     language: {
       id: language.id,
       schema: languageSchema,

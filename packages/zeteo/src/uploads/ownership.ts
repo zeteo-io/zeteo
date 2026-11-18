@@ -64,7 +64,11 @@ export const grantPrincipalsOfOwnedSources = async (
   userId: string
 ): Promise<Set<string>> => {
   const grants = await prisma.grant.findMany({
-    where: { table: { source: { type: "upload", ownerId: userId } } },
+    where: {
+      table: {
+        source: { type: { in: ["upload", "google_sheets"] }, ownerId: userId },
+      },
+    },
     select: { principalType: true, principalId: true },
     distinct: ["principalType", "principalId"],
   });

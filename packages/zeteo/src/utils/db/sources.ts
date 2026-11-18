@@ -39,8 +39,8 @@ export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
   prisma.source.findMany({
     where: {
       archivedAt: null,
-      // Upload sources are never refreshed: their uploads keep the catalogue.
-      type: { not: "upload" },
+      // Upload sources (files and Sheets) are not refreshed here: their uploads keep the catalogue.
+      type: { notIn: ["upload", "google_sheets"] },
       OR: [{ lastRefreshedAt: null }, { lastRefreshedAt: { lt: olderThan } }],
     },
     orderBy: [
