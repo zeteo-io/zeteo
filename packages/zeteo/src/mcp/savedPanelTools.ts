@@ -1,13 +1,15 @@
 import { TimeColumnSchema } from "../routes/v1/dashboards/dashboard/panels/schemas.js";
 import { TimeRangeSchema } from "../routes/v1/dashboards/schemas.js";
 import { chartProblems, chartSchema } from "../dashboards/chart.js";
+import { NotFoundError, ValidationError } from "../utils/errors.js";
+import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
+import type { TimeRangeKey } from "../dashboards/timeRange.js";
 import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import { withTimeFilter } from "../dashboards/timeRange.js";
 import { PANEL_CARD_URI, withCardNote } from "./card.js";
-import { QUERY_TOOL_TIMEOUT_MS } from "./queryTool.js";
 import { LIMIT_PROFILES } from "../engine/limits.js";
-import { NotFoundError } from "../utils/errors.js";
+import type { Caller } from "../middleware/auth.js";
 import { CHART_SUMMARY } from "./reference.js";
 import { runQuery } from "../engine/index.js";
 import type { TereoMcp } from "@tereo-io/mcp";
@@ -40,6 +42,43 @@ const forModel = <T extends { owner: { id: string; name: string | null } }>(
 ) => {
   const { owner, ...rest } = view;
   return { ...rest, owner: { name: owner.name } };
+};
+
+/** What a preview runs: a body as the caller would query it, and the saved query it came from, if any. */
+export interface PreviewRun {
+  body: Record<string, unknown>;
+  savedQuery?: { id: string; sourceId: string };
+}
+
+/**
+ * The run of a preview of `saved_query_id` (run as `run_saved_query` would)
+ * or of `query` (run as the `query` tool would, recorded with no saved query),
+ * filtered by `time_column` over `time_range` when both are given.
+ */
+export const previewRun = async (
+  caller: Caller,
+  input: {
+    saved_query_id?: string;
+    query?: Record<string, unknown>;
+    time_column?: string;
+    time_range?: TimeRangeKey;
+  }
+): Promise<PreviewRun> => {
+  let run: PreviewRun;
+  if (input.query !== undefined) {
+    run = { body: input.query };
+  } else {
+    const found = await savedQueryToRun(caller, input.saved_query_id!, {});
+    run = { body: found.body, savedQuery: found.savedQuery };
+  }
+  if (input.time_column !== undefined && input.time_range !== undefined) {
+    run.body = withTimeFilter(
+      run.body,
+      input.time_column,
+      input.time_range
+    ) as Record<string, unknown>;
+  }
+  return run;
 };
 
 /** The tools for saved panels, and `preview_panel`, which checks a chart against a saved query's result. */
@@ -179,13 +218,16 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
     description: withCardNote(
       cards,
       "panel",
-      `Run a saved query you can see and check a chart against its result, before adding the panel. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A saved query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for chart and placement rules.`
+      `Check a chart against a query's result: give saved_query_id or query (the query tool's JSON, not saved), never both. To show the user a chart, preview it with query; save it only when they want to keep it. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for the language, chart and placement rules.`
     ),
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
     input: z.strictObject({
-      saved_query_id: Id("The saved query to run"),
+      saved_query_id: Id("The saved query to run").optional(),
+      query: QueryInput.optional().describe(
+        "A query to run as the query tool would, without saving it"
+      ),
       chart: chartSchema,
       time_column: TimeColumnSchema.optional(),
       time_range: TimeRangeSchema.optional(),
@@ -193,19 +235,17 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {
         const caller = requireDataRead(ctx.auth);
-        const run = await savedQueryToRun(caller, input.saved_query_id, {});
-        const body =
-          input.time_column !== undefined && input.time_range !== undefined
-            ? (withTimeFilter(
-                run.body,
-                input.time_column,
-                input.time_range
-              ) as Record<string, unknown>)
-            : run.body;
+        if (
+          (input.saved_query_id === undefined) ===
+          (input.query === undefined)
+        ) {
+          throw new ValidationError("Give saved_query_id or query, not both");
+        }
+        const run = await previewRun(caller, input);
         const result = await runQuery({
           caller,
           entryPoint: "mcp",
-          body,
+          body: run.body,
           savedQuery: run.savedQuery,
           signal: ctx.signal,
         });
@@ -214,7 +254,7 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
           row_count: result.rows.length,
           truncated: result.truncated,
           rows: result.rows.slice(0, PREVIEW_ROWS),
-          problems: chartProblems(input.chart, result.columns, body),
+          problems: chartProblems(input.chart, result.columns, run.body),
         };
       }),
   });

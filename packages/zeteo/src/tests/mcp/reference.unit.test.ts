@@ -15,10 +15,10 @@ import {
 } from "../../mcp/reference.js";
 
 describe("the MCP reference", () => {
-  it("names the dashboard tools and the order of building one", () => {
+  it("names the dashboard tools and the order of building one: preview, then save", () => {
     const at = [
-      "create_saved_query",
       "preview_panel",
+      "create_saved_query",
       "create_dashboard",
       "add_panel",
     ].map((tool) => DASHBOARDS_REFERENCE.indexOf(`\`${tool}\``, 0));

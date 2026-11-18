@@ -6,8 +6,10 @@ import { shareSavedPanelDirectly } from "../support/savedPanels.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { callTool, connectMcp, mcpToken } from "../support/mcp.js";
 import { shareDashboardDirectly } from "../support/dashboards.js";
-import { newQueryUser } from "../support/queries.js";
+import { removeSources } from "../support/sources.js";
+import { ENGINES } from "../support/engines.js";
 import { db } from "../../utils/db/index.js";
+import { randomUUID } from "crypto";
 import {
   removeNoAccessCases,
   seedCauseSources,
@@ -18,6 +20,13 @@ import {
   dashboardWith,
   removeDashboardsOf,
 } from "../support/panelDecisions.js";
+import {
+  grantTo,
+  newQueryUser,
+  removeRunsOf,
+  seedQuerySource,
+  type SeededSource,
+} from "../support/queries.js";
 
 // A viewer who cannot run a panel's saved query learns nothing of it through
 // the card's tools: the generic notice, and no rows, columns or chart.
@@ -29,6 +38,7 @@ const CHART = {
   version: 1,
   columns: ["id", "status", "customers.region"],
 };
+const postgres = ENGINES.find((e) => e.type === "postgres")!;
 const FIXTURE_NAMES = ["orders", "customers", "status", "region"];
 
 const as = async <R>(
@@ -163,6 +173,46 @@ describe("MCP card tools: a viewer without access", () => {
       expect(call.isError).toBe(true);
       const { request_id: _r, ...rest } = call.json;
       expect(rest).toEqual(expected);
+    }
+  });
+});
+
+describe("MCP card tools: a query that is not saved", () => {
+  let source: SeededSource;
+  const userId = randomUUID();
+
+  beforeAll(async () => {
+    source = await seedQuerySource(postgres, {}, "mcpcqleak");
+    await grantTo({ type: "user", id: userId }, source.tables.orders!, [
+      "id",
+      "status",
+    ]);
+  });
+  afterAll(async () => {
+    await removeRunsOf([userId]);
+    await removeSources([source.id]);
+  });
+
+  it("card_panel_rows gives the query tool's error for an ungranted or invented column", async () => {
+    for (const column of ["total", "zzqxw"]) {
+      const query = {
+        source: source.slug,
+        from: "orders",
+        select: ["id", column],
+      };
+      const [card, direct] = await as(userId, async (client) => [
+        await callTool(client, "card_panel_rows", {
+          query,
+          chart: { type: "table", version: 1 },
+        }),
+        await callTool(client, "query", query),
+      ]);
+      expect(card.isError, column).toBe(true);
+      const { request_id: _c, ...rest } = card.json;
+      const { request_id: _q, ...expected } = direct.json;
+      expect(rest, column).toEqual(expected);
+      expect(rest.error, column).toBe("not_found_or_not_accessible");
+      expect(card.text, column).not.toMatch(/"rows"|"columns"|"chart"/);
     }
   });
 });

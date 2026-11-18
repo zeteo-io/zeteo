@@ -83,6 +83,40 @@ describe("PanelCard", () => {
     expect(echarts.instance.setOption).toHaveBeenCalled();
   });
 
+  it("previews a query that is not saved, passing the query on, under a generic title", async () => {
+    const query = {
+      source: "sales-db",
+      from: "orders",
+      select: ["month", "revenue"],
+    };
+    const fake = fakeCardHost("panel", {
+      card_panel_rows: () => rows({ title: null }),
+    });
+    render(
+      <PanelCard
+        host={fake.host}
+        input={{
+          query,
+          chart: line,
+          time_column: "created_at",
+          time_range: "last_30_days",
+        }}
+        result={{ columns: [], rows: [], problems: [] }}
+      />
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Preview" })
+    ).toBeInTheDocument();
+    expect(fake.callsTo("card_panel_rows")).toEqual([
+      {
+        query,
+        chart: line,
+        time_column: "created_at",
+        time_range: "last_30_days",
+      },
+    ]);
+  });
+
   it("reads a saved panel named by the input's id", async () => {
     const fake = fakeCardHost("panel", { card_panel_rows: () => rows() });
     render(

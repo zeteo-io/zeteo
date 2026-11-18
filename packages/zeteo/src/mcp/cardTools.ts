@@ -4,12 +4,11 @@ import { findDashboardForViewer, getDashboard } from "../dashboards/service.js";
 import { TimeRangeSchema } from "../routes/v1/dashboards/schemas.js";
 import { runDashboard, type PanelLine } from "../dashboards/run.js";
 import { chartProblems, chartSchema } from "../dashboards/chart.js";
+import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
+import { previewRun, type PreviewRun } from "./savedPanelTools.js";
 import { DASHBOARD_CARD_URI, PANEL_CARD_URI } from "./card.js";
-import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
-import { withTimeFilter } from "../dashboards/timeRange.js";
 import { decideSavedPanel } from "../dashboards/decide.js";
-import { QUERY_TOOL_TIMEOUT_MS } from "./queryTool.js";
 import { ValidationError } from "../utils/errors.js";
 import { runQuery } from "../engine/index.js";
 import type { TereoMcp } from "@tereo-io/mcp";
@@ -45,13 +44,14 @@ export const defineCardTools = (mcp: TereoMcp): void => {
     name: "card_panel_rows",
     ui: { resourceUri: PANEL_CARD_URI, visibility: ["app"] },
     title: "A panel's rows for the preview card",
-    description: `${CARD_ONLY} Give saved_panel_id, or saved_query_id with chart (and optionally time_column with time_range). Returns { title, chart, columns, rows, truncated, problems }.`,
+    description: `${CARD_ONLY} Give saved_panel_id alone, or saved_query_id or query (not saved) with chart, and optionally time_column with time_range. Returns { title, chart, columns, rows, truncated, problems }.`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
     input: z.strictObject({
       saved_panel_id: Id("The saved panel to draw").optional(),
       saved_query_id: Id("The saved query to run").optional(),
+      query: QueryInput.optional().describe("A query that is not saved"),
       chart: chartSchema.optional(),
       time_column: TimeColumnSchema.optional(),
       time_range: TimeRangeSchema.optional(),
@@ -60,25 +60,24 @@ export const defineCardTools = (mcp: TereoMcp): void => {
       inToolCall(ctx, async () => {
         const caller = requireDataRead(ctx.auth);
         const byPanel = input.saved_panel_id !== undefined;
-        const byQuery =
-          input.saved_query_id !== undefined && input.chart !== undefined;
+        const bySavedQuery = input.saved_query_id !== undefined;
+        const byQuery = input.query !== undefined;
         const extra =
-          input.saved_query_id !== undefined ||
+          bySavedQuery ||
+          byQuery ||
           input.chart !== undefined ||
           input.time_column !== undefined ||
           input.time_range !== undefined;
-        if (byPanel ? extra : !byQuery) {
+        const preview = bySavedQuery !== byQuery && input.chart !== undefined;
+        if (byPanel ? extra : !preview) {
           throw new ValidationError(
-            "Give saved_panel_id alone, or saved_query_id with chart"
+            "Give saved_panel_id alone, or saved_query_id or query with chart"
           );
         }
 
         let title: string | null = null;
         let chart;
-        let run: {
-          body: Record<string, unknown>;
-          savedQuery: { id: string; sourceId: string };
-        };
+        let run: PreviewRun;
         if (input.saved_panel_id !== undefined) {
           // Decided as a panel is: the saved query a shared saved panel reaches
           // need not be shared with the viewer itself.
@@ -98,23 +97,10 @@ export const defineCardTools = (mcp: TereoMcp): void => {
             },
           };
         } else {
+          // As preview_panel runs it: a query that is not saved runs as the
+          // query tool would, with the viewer's own grants.
           chart = input.chart!;
-          const found = await savedQueryToRun(
-            caller,
-            input.saved_query_id!,
-            {}
-          );
-          run = {
-            body:
-              input.time_column !== undefined && input.time_range !== undefined
-                ? (withTimeFilter(
-                    found.body,
-                    input.time_column,
-                    input.time_range
-                  ) as Record<string, unknown>)
-                : found.body,
-            savedQuery: found.savedQuery,
-          };
+          run = await previewRun(caller, input);
         }
         const result = await runQuery({
           caller,

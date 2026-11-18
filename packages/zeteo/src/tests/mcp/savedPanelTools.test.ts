@@ -5,12 +5,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeDashboardsOf } from "../support/panelDecisions.js";
 import { uniqueName } from "../support/savedQueries.js";
 import { removeSources } from "../support/sources.js";
+import { BAR, TABLE } from "../support/dashboards.js";
 import { ENGINES } from "../support/engines.js";
-import { BAR } from "../support/dashboards.js";
 import { randomUUID } from "crypto";
 import {
   grantTo,
   removeRunsOf,
+  runsOf,
   seedQuerySource,
   type SeededSource,
 } from "../support/queries.js";
@@ -60,6 +61,7 @@ describe("MCP saved panel tools", () => {
       "That is the preview's limit, not the saved query's or the dashboard's"
     );
     expect(preview.description).toContain("up to 1,000 rows");
+    expect(preview.description).toContain("saved_query_id or query");
   });
 
   it("creates, lists, reads, updates and deletes a saved panel, with no owner id", async () => {
@@ -157,6 +159,86 @@ describe("MCP saved panel tools", () => {
       chart: BAR,
       saved_query_id: query,
     });
+  });
+
+  it("preview_panel previews a query that is not saved: rows, problems and time_range", async () => {
+    const query = {
+      source: source.slug,
+      from: "orders",
+      select: ["id", "status", "total"],
+      orderBy: [{ id: "asc" }],
+    };
+    const whole = await callTool(session.client, "preview_panel", {
+      query,
+      chart: { ...BAR, y: ["total", "revenue"] },
+    });
+    expect(whole.isError, whole.text).toBe(false);
+    expect(Object.keys(whole.json).sort()).toEqual([
+      "columns",
+      "problems",
+      "row_count",
+      "rows",
+      "truncated",
+    ]);
+    expect(whole.json.columns.map((c: { name: string }) => c.name)).toEqual([
+      "id",
+      "status",
+      "total",
+    ]);
+    expect(whole.json.row_count).toBe(12);
+    expect(whole.json.rows).toHaveLength(12);
+    expect(whole.json.rows[0]).toEqual([1, "paid", "10.00"]);
+    expect(whole.json.truncated).toBe(false);
+    expect(whole.json.problems).toEqual([
+      { setting: "y.1", problem: "missing_column" },
+    ]);
+
+    // Every fixture order is older than 30 days.
+    const filtered = await callTool(session.client, "preview_panel", {
+      query,
+      chart: BAR,
+      time_column: "created_at",
+      time_range: "last_30_days",
+    });
+    expect(filtered.isError, filtered.text).toBe(false);
+    expect(filtered.json).toMatchObject({
+      row_count: 0,
+      rows: [],
+      problems: [],
+    });
+  });
+
+  it("preview_panel with a query is recorded as an mcp run with no saved query", async () => {
+    const call = await callTool(session.client, "preview_panel", {
+      query: {
+        source: source.slug,
+        from: "orders",
+        select: ["id", "status", { count: "*", as: "n" }],
+        groupBy: ["id", "status"],
+      },
+      chart: TABLE,
+    });
+    expect(call.isError, call.text).toBe(false);
+    const runs = await runsOf([userId]);
+    const last = runs[runs.length - 1]!;
+    expect(last.outcome).toBe("ok");
+    expect(last.entryPoint).toBe("mcp");
+    expect(last.savedQueryId).toBeNull();
+    expect(last.sourceId).toBe(source.id);
+    expect(JSON.stringify(last.query)).toContain('"as":"n"');
+  });
+
+  it("preview_panel refuses both a saved query and a query, and neither, with invalid_request", async () => {
+    const id = await savedQuery();
+    const query = { source: source.slug, from: "orders", select: ["id"] };
+    for (const args of [
+      { saved_query_id: id, query, chart: TABLE },
+      { chart: TABLE },
+    ]) {
+      const call = await callTool(session.client, "preview_panel", args);
+      expect(call.isError, JSON.stringify(args)).toBe(true);
+      expect(call.json?.error, JSON.stringify(args)).toBe("invalid_request");
+    }
   });
 
   it("deletes only the caller's own saved panels", async () => {
