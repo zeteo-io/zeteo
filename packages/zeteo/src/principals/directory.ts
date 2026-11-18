@@ -102,7 +102,8 @@ const chunks = <T>(items: T[], size: number): T[][] =>
 
 const refKey = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
 
-const orphaned = (ref: PrincipalRef): Principal =>
+/** How an id the directory does not know is answered. */
+export const orphaned = (ref: PrincipalRef): Principal =>
   ref.type === "user"
     ? { type: "user", id: ref.id, name: null, email: null, status: "orphaned" }
     : { type: "group", id: ref.id, name: null, status: "orphaned" };

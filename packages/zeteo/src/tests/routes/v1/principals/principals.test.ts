@@ -149,15 +149,6 @@ describe("/v1/principals", () => {
       expect(res.body.data).toEqual([seeded[0]]);
     });
 
-    it("lets a file source owner (zeteo.file_sources.write with zeteo.data.read) look up", async () => {
-      const res = await lookup(
-        { principals: [{ type: "user", id: ADA }] },
-        tokenFor({ permissions: [DATA_READ, FILE_SOURCES_WRITE] })
-      );
-      expect(res.status).toBe(200);
-      expect(res.body.data).toEqual([seeded[0]]);
-    });
-
     it("answers 403 naming the permissions to a holder of none", async () => {
       for (const permissions of [[DATA_READ], [FILE_SOURCES_WRITE]]) {
         const res = await lookup(

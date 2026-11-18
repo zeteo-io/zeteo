@@ -58,3 +58,18 @@ export const assertOwnsInTx = async (
   });
   if (!row || !ownsFileSource(caller, row)) throw lacking(permission);
 };
+
+/**
+ * The principals (`type:id`) holding a grant on a table of a file source
+ * `userId` owns: whom an owner may name through the principals lookup.
+ */
+export const grantPrincipalsOfOwnedSources = async (
+  userId: string
+): Promise<Set<string>> => {
+  const grants = await prisma.grant.findMany({
+    where: { table: { source: { type: "upload", ownerId: userId } } },
+    select: { principalType: true, principalId: true },
+    distinct: ["principalType", "principalId"],
+  });
+  return new Set(grants.map((g) => `${g.principalType}:${g.principalId}`));
+};

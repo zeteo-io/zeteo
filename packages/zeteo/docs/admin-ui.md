@@ -224,7 +224,7 @@ is added when `PUBLIC_URL` is https.
 |------|------------|---------|
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
-| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.file_sources.write` with `zeteo.data.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
+| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.file_sources.write` with `zeteo.data.read` (then only for principals granted on the caller's own file sources, other ids answered `orphaned`, and counted against the search limit) | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 
