@@ -117,12 +117,15 @@ export const connectHost = async (kind: CardKind): Promise<CardHost> => {
   app.addEventListener("toolinput", (params) =>
     inputs.emit(params.arguments ?? {})
   );
-  app.addEventListener("toolresult", (params) =>
-    results.emit(readToolResult(params))
-  );
-  app.addEventListener("toolcancelled", () =>
-    results.emit({ ok: false, error: CANCELLED })
-  );
+  // A cancellation that arrives once the result is in changes nothing.
+  let answered = false;
+  app.addEventListener("toolresult", (params) => {
+    answered = true;
+    results.emit(readToolResult(params));
+  });
+  app.addEventListener("toolcancelled", () => {
+    if (!answered) results.emit({ ok: false, error: CANCELLED });
+  });
   app.addEventListener("hostcontextchanged", (params) => {
     const next = themeOf(params.theme);
     if (next && next !== theme) {

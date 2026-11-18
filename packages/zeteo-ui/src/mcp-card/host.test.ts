@@ -1,5 +1,5 @@
 import { CANCELLED, connectHost, type ToolOutcome } from "./host";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Listener = (params: Record<string, unknown>) => void;
 
@@ -26,6 +26,11 @@ vi.mock("@modelcontextprotocol/ext-apps", () => ({
 }));
 
 describe("connectHost", () => {
+  // Each test's connectHost adds its own listeners; drop the last test's.
+  beforeEach(() => {
+    fakeApp.listeners = {};
+  });
+
   it("passes the tool's input and result on, replaying them to a late listener", async () => {
     const host = await connectHost("panel");
     fakeApp.emit("toolinput", { arguments: { id: "p1" } });
@@ -46,6 +51,17 @@ describe("connectHost", () => {
     host.onToolResult((o) => outcomes.push(o));
     fakeApp.emit("toolcancelled", { reason: "user action" });
     expect(outcomes.at(-1)).toEqual({ ok: false, error: CANCELLED });
+  });
+
+  it("ignores a cancellation that arrives after the result", async () => {
+    const host = await connectHost("panel");
+    const outcomes: ToolOutcome[] = [];
+    host.onToolResult((o) => outcomes.push(o));
+    fakeApp.emit("toolresult", {
+      content: [{ type: "text", text: '{"id":"p1"}' }],
+    });
+    fakeApp.emit("toolcancelled", { reason: "late" });
+    expect(outcomes).toEqual([{ ok: true, value: { id: "p1" } }]);
   });
 
   it("follows the host's theme as its context changes", async () => {
