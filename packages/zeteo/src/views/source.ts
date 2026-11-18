@@ -1,5 +1,5 @@
+import { isSheetsSource, isUploadSource, typeOf } from "../sources/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
-import { isUploadSource, typeOf } from "../sources/types.js";
 import { readSettings } from "../sources/connect.js";
 import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
@@ -30,7 +30,51 @@ export interface SourceViewExtras {
   lastLoadedAt?: Date | null;
 }
 
-export const sourceView = (row: Source, extras: SourceViewExtras) => ({
+/** How long after its last good sync a failing Google Sheets source is called stale. */
+const STALE_AFTER_MS = 24 * 3600_000;
+
+/** A stored sync error as the view shows it. */
+const syncError = (
+  value: Source["lastSyncError"]
+): { code: string; message: string } | null => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const { code, message } = value as { code?: unknown; message?: unknown };
+  return {
+    code: String(code ?? "sync_failed"),
+    message: String(message ?? ""),
+  };
+};
+
+/**
+ * A Google Sheets source's spreadsheet and sync state. Only the source's own
+ * view (its owner, or `zeteo.sources.read`) carries it; no catalogue does.
+ */
+const sheetsBlocks = (row: Source, now: Date) => {
+  const lastError = syncError(row.lastSyncError);
+  return {
+    sheet: {
+      spreadsheet_id: row.vendorFileId,
+      url: `https://docs.google.com/spreadsheets/d/${row.vendorFileId}`,
+    },
+    sync: {
+      interval_minutes: row.syncIntervalMinutes,
+      last_attempt_at: row.lastSyncAttemptAt?.toISOString() ?? null,
+      last_error: lastError,
+      stale:
+        lastError !== null &&
+        (row.lastRefreshedAt === null ||
+          now.getTime() - row.lastRefreshedAt.getTime() > STALE_AFTER_MS),
+    },
+  };
+};
+
+export const sourceView = (
+  row: Source,
+  extras: SourceViewExtras,
+  now: Date = new Date()
+) => ({
   id: row.id,
   slug: row.slug,
   name: row.name,
@@ -74,6 +118,7 @@ export const sourceView = (row: Source, extras: SourceViewExtras) => ({
   share_count: extras.shareCount,
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
+  ...(isSheetsSource(row) && sheetsBlocks(row, now)),
 });
 
 export type SourceView = ReturnType<typeof sourceView>;

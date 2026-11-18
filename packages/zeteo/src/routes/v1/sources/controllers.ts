@@ -21,6 +21,7 @@ import {
 } from "../../../uploads/service.js";
 import {
   CreateSourceSchema,
+  CreateSheetsSourceSchema,
   CreateUploadSourceSchema,
   ListSourcesQuerySchema,
   SourceCursorSchema,
@@ -65,7 +66,9 @@ export const listSources = async (req: Request, res: Response) => {
 const isUpload = (body: unknown): boolean =>
   typeof body === "object" &&
   body !== null &&
-  (body as { type?: unknown }).type === "upload";
+  ["upload", "google-sheets"].includes(
+    (body as { type?: unknown }).type as string
+  );
 
 /**
  * A database source for `zeteo.sources.write`; an upload source (`type:
@@ -81,7 +84,10 @@ export const createSource = async (req: Request, res: Response) => {
         throw lacking(permission);
       }
     }
-    const { type: _, ...input } = validateBody(CreateUploadSourceSchema, req);
+    const input =
+      (req.body as { type: string }).type === "google-sheets"
+        ? validateBody(CreateSheetsSourceSchema, req)
+        : validateBody(CreateUploadSourceSchema, req);
     res.status(201).json(await createUploadSource(caller, input));
     return;
   }

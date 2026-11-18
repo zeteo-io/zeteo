@@ -1,9 +1,9 @@
+import { assertSheetUnclaimed, discardStaging, getStaging } from "./staging.js";
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
+import type { Source } from "../../prisma/generated/client/index.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
-import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { presentSourceById } from "../sources/present.js";
-import { discardStaging, getStaging } from "./staging.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
 import type { SourceView } from "../views/source.js";
@@ -19,13 +19,28 @@ import {
   SOURCES_WRITE,
 } from "../definitions/tereoDeclaration.js";
 import {
+  isUniqueViolationOfIndex,
+  mapUniqueViolation,
+} from "../utils/prismaErrors.js";
+import {
+  isFileUpload,
+  isSheetsSource,
+  isUploadSource,
+  typeOf,
+} from "../sources/types.js";
+import {
   ConflictError,
   UploadSourceBusyError,
   UploadsNotConfiguredError,
   isDatabaseBusy,
+  NotAFileUploadError,
   NotAnUploadSourceError,
   NotFoundError,
+  NotSyncedError,
+  SheetInUseError,
   SourceArchivedError,
+  StagingKindMismatchError,
+  TabAlreadyAddedError,
 } from "../utils/errors.js";
 import {
   checkQuota,
@@ -91,13 +106,17 @@ const mayChange = (caller: Caller, row: { ownerId: string | null }): boolean =>
 
 /** The checks on a source row an upload-only change makes, in order. */
 const checkChangeable = <
-  T extends { type: string; ownerId: string | null; archivedAt: Date | null },
+  T extends {
+    type: Source["type"];
+    ownerId: string | null;
+    archivedAt: Date | null;
+  },
 >(
   caller: Caller,
   row: T | null
 ): T => {
   if (!row) throw new NotFoundError("Source not found");
-  if (row.type !== "upload") throw new NotAnUploadSourceError();
+  if (!isUploadSource(row)) throw new NotAnUploadSourceError();
   if (!mayChange(caller, row)) throw lacking(SOURCES_WRITE);
   if (row.archivedAt) throw new SourceArchivedError();
   return row;
@@ -188,6 +207,31 @@ const giveOwnerGrant = async (
   await tx.grantColumn.deleteMany({ where: { grantId: grant.id } });
 };
 
+/** Where a Sheets table's data lives in its spreadsheet, as its `vendor_locator` keeps it. */
+export interface SheetLocator {
+  sheetId: number;
+  /** The 0-based header row the table was loaded with, null for none. */
+  headerRow: number | null;
+}
+
+type Staged = Awaited<ReturnType<typeof getStaging>>;
+
+/** The locator of each planned table of a Sheets staging, in order; empty for a file staging. */
+const locatorsOf = (
+  staging: Staged,
+  keys: string[],
+  planned: PlannedTable[]
+): SheetLocator[] =>
+  staging.kind !== "google-sheets"
+    ? []
+    : planned.map((t, i) => ({
+        sheetId: staging.tables.find((s) => s.key === keys[i])!.locator!
+          .sheetId,
+        headerRow: t.headerRow,
+      }));
+
+const kindMismatch = (message: string) => new StagingKindMismatchError(message);
+
 /** Creates a loaded table's catalogue rows and its owner grant; the load must be swapped in. */
 const recordNewTable = async (
   tx: Prisma.TransactionClient,
@@ -196,7 +240,8 @@ const recordNewTable = async (
   loaded: Loaded,
   ownerId: string,
   actorId: string,
-  now: Date
+  now: Date,
+  vendorLocator?: SheetLocator
 ) => {
   const table = await mapUniqueViolation(
     () =>
@@ -209,6 +254,7 @@ const recordNewTable = async (
           lastSeenAt: now,
           lastSyncedAt: now,
           rowCount: loaded.rowCount,
+          ...(vendorLocator && { vendorLocator: { ...vendorLocator } }),
           columns: {
             create: planned.columns.map((c, i) => ({
               name: c.name,
@@ -250,11 +296,15 @@ const checkDistinctNames = (planned: PlannedTable[]) => {
 };
 
 export interface CreateUploadSourceInput {
+  /** `google-sheets` for a spreadsheet's staging, `upload` for a file's. */
+  type: "upload" | "google-sheets";
   staging_id: string;
   name: string;
   description?: string;
   slug?: string;
   tables: TableCorrection[];
+  /** Minutes between syncs, Sheets only; 60 when not given. */
+  sync_interval_minutes?: number;
 }
 
 /**
@@ -270,11 +320,26 @@ export const createUploadSource = async (
 ): Promise<SourceView> => {
   assertUploadsOn();
   const staging = await getStaging(input.staging_id, caller.userId);
+  const sheets = staging.kind === "google-sheets";
+  if (sheets !== (input.type === "google-sheets")) {
+    throw kindMismatch(
+      sheets
+        ? 'A staged spreadsheet is created with type "google-sheets"'
+        : 'A staged file is created with type "upload"'
+    );
+  }
+  const vendorFileId = sheets ? staging.vendorFileId : null;
+  if (vendorFileId) await assertSheetUnclaimed(vendorFileId);
   const planned: PlannedTable[] = [];
   for (const [i, t] of input.tables.entries()) {
     planned.push(await planTable(staging, t, `tables.${i}`));
   }
   checkDistinctNames(planned);
+  const locators = locatorsOf(
+    staging,
+    input.tables.map((t) => t.key),
+    planned
+  );
   let slug: string;
   if (input.slug !== undefined) {
     if (await prisma.source.findUnique({ where: { slug: input.slug } })) {
@@ -292,22 +357,42 @@ export const createUploadSource = async (
       await inSwap(id, loaded, async (tx, audit) => {
         const now = new Date();
         await mapUniqueViolation(
-          () =>
-            tx.source.create({
-              data: {
-                id,
-                slug,
-                name: input.name,
-                ...(input.description !== undefined && {
-                  description: input.description,
-                }),
-                type: "upload",
-                ownerId: caller.userId,
-                sealedSettings: {},
-                schemas: [schemaFor(id)],
-                createdBy: caller.userId,
-              },
-            }),
+          async () => {
+            try {
+              await tx.source.create({
+                data: {
+                  id,
+                  slug,
+                  name: input.name,
+                  ...(input.description !== undefined && {
+                    description: input.description,
+                  }),
+                  type: sheets ? "google_sheets" : "upload",
+                  ownerId: caller.userId,
+                  sealedSettings: {},
+                  schemas: [schemaFor(id)],
+                  createdBy: caller.userId,
+                  ...(sheets && {
+                    vendorFileId,
+                    syncIntervalMinutes: input.sync_interval_minutes ?? 60,
+                    lastRefreshedAt: now,
+                    lastSyncAttemptAt: now,
+                  }),
+                },
+              });
+            } catch (err) {
+              // Another create claimed the spreadsheet between the check and here.
+              if (
+                isUniqueViolationOfIndex(err, "sources_vendor_file_key", [
+                  "type",
+                  "vendor_file_id",
+                ])
+              ) {
+                throw new SheetInUseError();
+              }
+              throw err;
+            }
+          },
           slugTaken().message,
           "name_taken"
         );
@@ -321,7 +406,8 @@ export const createUploadSource = async (
             loaded[i]!,
             caller.userId,
             caller.userId,
-            now
+            now,
+            locators[i]
           );
           tables.push(tableMetadata(table, t.columns.length));
         }
@@ -333,8 +419,9 @@ export const createUploadSource = async (
           actorId: caller.userId,
           metadata: {
             slug,
-            type: "upload",
+            type: input.type,
             name: input.name,
+            ...(vendorFileId && { vendor_file_id: vendorFileId }),
             owner_id: caller.userId,
             tables,
             owner_grant: {
@@ -351,6 +438,11 @@ export const createUploadSource = async (
           "dropping the schema of a source not created failed"
         );
       });
+      // A racing create of the same spreadsheet may have failed on the slug
+      // first: the spreadsheet being claimed is the cause to tell.
+      if (vendorFileId && err instanceof ConflictError) {
+        await assertSheetUnclaimed(vendorFileId);
+      }
       throw err;
     }
   });
@@ -368,6 +460,8 @@ const discardQuietly = async (stagingId: string) => {
 export interface UploadSourceDetails {
   name?: string;
   description?: string;
+  /** Minutes between syncs; a Google Sheets source only. */
+  sync_interval_minutes?: number;
 }
 
 /** Renames an upload source or changes its description, for its owner or an admin. */
@@ -376,12 +470,18 @@ export const changeUploadSource = async (
   id: string,
   change: UploadSourceDetails
 ): Promise<SourceView> => {
-  await findChangeable(caller, id);
+  const found = await findChangeable(caller, id);
+  if (change.sync_interval_minutes !== undefined && !isSheetsSource(found)) {
+    throw new NotSyncedError();
+  }
   await withAudit(async (tx, audit) => {
     const row = await lockChangeable(tx, caller, id);
     await tx.source.update({
       where: { id },
       data: {
+        ...(change.sync_interval_minutes !== undefined && {
+          syncIntervalMinutes: change.sync_interval_minutes,
+        }),
         ...(change.name !== undefined && { name: change.name }),
         ...(change.description !== undefined && {
           description: change.description,
@@ -395,7 +495,7 @@ export const changeUploadSource = async (
       actorId: caller.userId,
       metadata: {
         slug: row.slug,
-        type: "upload",
+        type: typeOf(row),
         changed: Object.keys(change),
         ...(change.name !== undefined && { name: change.name }),
       },
@@ -451,7 +551,7 @@ export const deleteUploadSource = async (
         actorId: caller.userId,
         metadata: {
           slug: row.slug,
-          type: "upload",
+          type: typeOf(row),
           name: row.name,
           owner_id: row.ownerId,
         },
@@ -461,19 +561,55 @@ export const deleteUploadSource = async (
   await closeSourcePool(id);
 };
 
+/** 409 `tab_already_added` when a tab of `locators` already backs a table of the source that is not missing. */
+const assertTabsFree = async (
+  db: Prisma.TransactionClient,
+  sourceId: string,
+  locators: SheetLocator[]
+) => {
+  if (locators.length === 0) return;
+  const tables = await db.sourceTable.findMany({
+    where: { sourceId, missingSince: null },
+    select: { vendorLocator: true },
+  });
+  const taken = new Set(
+    tables.map((t) => (t.vendorLocator as { sheetId?: number } | null)?.sheetId)
+  );
+  if (locators.some((l) => taken.has(l.sheetId))) {
+    throw new TabAlreadyAddedError();
+  }
+};
+
 /** Adds the staging's tables to the source, each with an owner grant to the source's owner. */
 export const addTables = async (
   caller: Caller,
   id: string,
   input: { staging_id: string; tables: TableCorrection[] }
 ): Promise<SourceView> => {
-  await findChangeable(caller, id);
+  const found = await findChangeable(caller, id);
   const staging = await getStaging(input.staging_id, caller.userId);
+  if (isSheetsSource(found)) {
+    if (staging.vendorFileId !== found.vendorFileId) {
+      throw kindMismatch(
+        "This upload is not a staging of the source's spreadsheet"
+      );
+    }
+  } else if (staging.kind === "google-sheets") {
+    throw kindMismatch(
+      "A staged spreadsheet cannot be added to a file upload source"
+    );
+  }
   const planned: PlannedTable[] = [];
   for (const [i, t] of input.tables.entries()) {
     planned.push(await planTable(staging, t, `tables.${i}`));
   }
   checkDistinctNames(planned);
+  const locators = locatorsOf(
+    staging,
+    input.tables.map((t) => t.key),
+    planned
+  );
+  await assertTabsFree(prisma, id, locators);
   const existing = await prisma.sourceTable.findMany({
     where: { sourceId: id, name: { in: planned.map((t) => t.name) } },
   });
@@ -483,6 +619,7 @@ export const addTables = async (
     const loaded = await loadTables(id, planned);
     await inSwap(id, loaded, async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
+      await assertTabsFree(tx, id, locators);
       const now = new Date();
       const tables = [];
       for (const [i, t] of planned.entries()) {
@@ -502,7 +639,8 @@ export const addTables = async (
           loaded[i]!,
           row.ownerId,
           caller.userId,
-          now
+          now,
+          locators[i]
         );
         tables.push(tableMetadata(table, t.columns.length));
       }
@@ -514,7 +652,7 @@ export const addTables = async (
         actorId: caller.userId,
         metadata: {
           slug: row.slug,
-          type: "upload",
+          type: typeOf(row),
           changed: ["tables"],
           tables_added: tables,
           owner_grant: {
@@ -551,7 +689,8 @@ export const reuploadTable = async (
   tableId: string,
   input: { staging_id: string } & Omit<TableCorrection, "name">
 ): Promise<SourceView> => {
-  await findChangeable(caller, id);
+  const found = await findChangeable(caller, id);
+  if (!isFileUpload(found)) throw new NotAFileUploadError();
   const table = await findTable(id, tableId);
   const staging = await getStaging(input.staging_id, caller.userId);
   const planned = await planTable(
@@ -678,7 +817,7 @@ export const removeTable = async (
         actorId: caller.userId,
         metadata: {
           slug: row.slug,
-          type: "upload",
+          type: typeOf(row),
           changed: ["tables"],
           tables_removed: [{ id: tableId, name: table.name }],
         },
@@ -754,7 +893,7 @@ export const changeColumn = async (
       actorId: caller.userId,
       metadata: {
         slug: row.slug,
-        type: "upload",
+        type: typeOf(row),
         changed: ["columns"],
         column: {
           id: columnId,
@@ -879,7 +1018,7 @@ export const transferUploadSource = async (
         actorId: caller.userId,
         metadata: {
           slug: row.slug,
-          type: "upload",
+          type: typeOf(row),
           from: row.ownerId,
           to: userId,
           keep_access: keepAccess,

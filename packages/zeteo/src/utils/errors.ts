@@ -393,6 +393,46 @@ export class SheetInUseError extends AppError {
   }
 }
 
+/** A staging of the other kind, or of another spreadsheet, than the source it is used for. */
+export class StagingKindMismatchError extends AppError {
+  constructor(message: string) {
+    super(422, "staging_kind_mismatch", message);
+    this.name = "StagingKindMismatchError";
+  }
+}
+
+/** A spreadsheet tab that already backs a table of the source. */
+export class TabAlreadyAddedError extends AppError {
+  constructor() {
+    super(
+      409,
+      "tab_already_added",
+      "This tab is already a table of the source."
+    );
+    this.name = "TabAlreadyAddedError";
+  }
+}
+
+/** A re-upload of a table that syncs from Google Sheets. */
+export class NotAFileUploadError extends AppError {
+  constructor() {
+    super(
+      409,
+      "not_a_file_upload",
+      "This table syncs from Google Sheets; use Sync now."
+    );
+    this.name = "NotAFileUploadError";
+  }
+}
+
+/** A sync setting on a source that does not sync. */
+export class NotSyncedError extends AppError {
+  constructor() {
+    super(422, "not_synced", "Only a Google Sheets source syncs.");
+    this.name = "NotSyncedError";
+  }
+}
+
 /** A staging that does not exist, has expired or is another user's: one answer for all. */
 export class StagingNotFoundError extends AppError {
   constructor() {

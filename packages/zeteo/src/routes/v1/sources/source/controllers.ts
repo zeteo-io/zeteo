@@ -1,10 +1,10 @@
 import { validateBody, validateParams } from "../../../../utils/validateReq.js";
 import { SOURCES_WRITE } from "../../../../definitions/tereoDeclaration.js";
+import { NotFoundError, NotSyncedError } from "../../../../utils/errors.js";
 import { SourceParamsSchema, UpdateSourceSchema } from "./schemas.js";
 import { refreshAfterChange } from "../../../../catalog/refresh.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { isUploadSource } from "../../../../sources/types.js";
-import { NotFoundError } from "../../../../utils/errors.js";
 import { lacking } from "../../../../uploads/ownership.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { db } from "../../../../utils/db/index.js";
@@ -38,17 +38,21 @@ export const updateSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
   const row = await db.sources.findById(sourceId);
   if (!row) throw new NotFoundError("Source not found");
+  const { sync_interval_minutes: syncInterval, ...rest } = body;
   if (
     isUploadSource(row) &&
-    Object.keys(body).every((key) =>
-      UPLOAD_SOURCE_FIELDS.has(key as keyof typeof body)
+    Object.keys(rest).every((key) =>
+      UPLOAD_SOURCE_FIELDS.has(key as keyof typeof rest)
     )
   ) {
-    const { name, description } = body;
+    const { name, description } = rest;
     res.status(200).json(
       await changeUploadSource(caller, sourceId, {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
+        ...(syncInterval !== undefined && {
+          sync_interval_minutes: syncInterval,
+        }),
       })
     );
     return;
@@ -56,7 +60,8 @@ export const updateSource = async (req: Request, res: Response) => {
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {
     throw lacking(SOURCES_WRITE);
   }
-  const updated = await update(sourceId, body, caller.userId);
+  if (syncInterval !== undefined) throw new NotSyncedError();
+  const updated = await update(sourceId, rest, caller.userId);
   // New settings or schemas describe another target: the catalogue follows now,
   // not at the next daily refresh. The change stands whether or not this works.
   if (body.settings === undefined && body.schemas === undefined) {
