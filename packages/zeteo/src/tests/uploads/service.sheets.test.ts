@@ -13,7 +13,7 @@ const column = (
   id,
   name,
   originalName,
-  type: "number",
+  type: "number" as const,
   missingSince: missing ? new Date() : null,
 });
 
