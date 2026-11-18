@@ -1,7 +1,7 @@
 SourceType:
   type: string
-  enum: [postgres, azure-sql]
-  description: The kind of database.
+  enum: [postgres, azure-sql, upload]
+  description: The kind of source. `upload` is a file source, whose data Zeteo stores from uploaded files.
 
 PostgresSettings:
   type: object
@@ -73,7 +73,7 @@ LoginFinding:
 
 Source:
   type: object
-  description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+  description: A registered database or a file source. `settings` is the redacted form; it is null for a file source and when the stored settings cannot be decrypted.
   required:
     - id
     - slug
@@ -89,6 +89,7 @@ Source:
     - query_concurrency
     - export_concurrency
     - writable_login_allowed
+    - owner_id
     - status
     - last_refreshed_at
     - created_at
@@ -116,6 +117,10 @@ Source:
     writable_login_allowed:
       type: boolean
       description: True when the login check found something and an administrator allowed it
+    owner_id:
+      type: [string, 'null']
+      format: uuid
+      description: A file source's owner; null for a database source
     status:
       type: string
       enum: [active, unreachable]
@@ -144,7 +149,10 @@ CreateSourceRequest:
       pattern: '^[a-z][a-z0-9-]{1,62}$'
       description: Unique, lower case letters, digits and hyphens, starting with a letter
     name: { type: string, minLength: 1, maxLength: 255 }
-    type: { $ref: '#/SourceType' }
+    type:
+      type: string
+      enum: [postgres, azure-sql]
+      description: The kind of database
     settings:
       description: The type's settings, PostgresSettings or AzureSqlSettings
       anyOf:

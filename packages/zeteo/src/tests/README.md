@@ -50,6 +50,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `calc`        | calculations: expression operations, their types and levels           |
   | `relative`    | relative dates: a moment as an offset from now, in a filter           |
   | `available`   | saved queries available for dashboards                                |
+  | `files`       | file sources: the same behaviour over an uploaded source              |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

@@ -9,7 +9,8 @@
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+      **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+      (a file source has no login to test), `422 host_not_allowed`,
       `502 source_unreachable`.
     operationId: testSource
     parameters:

@@ -7,6 +7,11 @@ import { sealSettings } from "../../../../../utils/crypto/envelope.js";
 import { startV1Routes } from "../../../../support/v1App.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../support/http.js";
+import { randomUUID } from "crypto";
+import {
+  removeUploadSources,
+  seedUploadSource,
+} from "../../../../support/fileSources.js";
 import {
   isSourcePoolOpen,
   withSourceConnection,
@@ -333,6 +338,52 @@ describe("/v1/sources/:sourceId", () => {
       action: "ARCHIVE",
       metadata: { event: "zeteo.source.archived" },
     });
+  });
+
+  describe("a file source", () => {
+    const ownerId = randomUUID();
+    let fileId: string;
+    beforeAll(async () => {
+      fileId = (await seedUploadSource({ ownerId, tables: [] })).id;
+    });
+    afterAll(async () => {
+      await removeUploadSources([fileId]);
+    });
+
+    it("GET shows settings null and the owner", async () => {
+      const res = await call("GET", `/${fileId}`);
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        type: "upload",
+        settings: null,
+        owner_id: ownerId,
+      });
+    });
+
+    it("GET shows owner_id null for a database source", async () => {
+      const source = await create();
+      expect((await call("GET", `/${source.id}`)).body.owner_id).toBeNull();
+    });
+
+    it.each([
+      ["PATCH", "", { name: "Renamed" }],
+      ["POST", "/test", undefined],
+      ["POST", "/archive", undefined],
+    ])(
+      "%s %s answers 409 file_source_managed_elsewhere and changes nothing",
+      async (method, path, body) => {
+        const before = await prisma.source.findUniqueOrThrow({
+          where: { id: fileId },
+        });
+        const res = await call(method, `/${fileId}${path}`, body);
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("file_source_managed_elsewhere");
+        expect(
+          await prisma.source.findUniqueOrThrow({ where: { id: fileId } })
+        ).toEqual(before);
+        expect(await auditRows(fileId)).toEqual([]);
+      }
+    );
   });
 
   it("POST /test returns the findings and changes nothing", async () => {

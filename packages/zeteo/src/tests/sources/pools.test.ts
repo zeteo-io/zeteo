@@ -10,6 +10,11 @@ import { fetchJson } from "../support/http.js";
 import { db } from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Router } from "express";
+import env from "../../env.js";
+import {
+  removeUploadSources,
+  seedUploadSource,
+} from "../support/fileSources.js";
 import {
   closeAllSourcePools,
   closeSourcePool,
@@ -437,6 +442,46 @@ describe("withSourceConnection", () => {
       withSourceConnection(source.id, (c) => c.checkLogin())
     ).rejects.toMatchObject({ code: "host_not_allowed" });
     expect(isSourcePoolOpen(source.id)).toBe(false);
+  });
+
+  it("connects a file source as the reader role, outside SOURCE_ALLOWED_HOSTS, while a database source is still held to them", async () => {
+    const file = await seedUploadSource({
+      ownerId: randomUUID(),
+      tables: [
+        {
+          name: "items",
+          columns: [{ name: "n", type: "number" }],
+          rows: [["1"], ["2"]],
+        },
+      ],
+    });
+    const database = await newSource();
+    const rules = env.SOURCE_ALLOWED_HOSTS;
+    env.SOURCE_ALLOWED_HOSTS = [];
+    try {
+      const who = await withSourceConnection(file.id, async (c) => {
+        const { rows } = await (c as PostgresConnection).pool.query<{
+          role: string;
+          ro: string;
+        }>(
+          "SELECT current_user AS role, current_setting('default_transaction_read_only') AS ro"
+        );
+        return rows[0];
+      });
+      expect(who).toEqual({
+        role: decodeURIComponent(
+          new URL(env.FILE_SOURCES_READER_URL!).username
+        ),
+        ro: "on",
+      });
+      await expect(
+        withSourceConnection(database.id, (c) => c.checkLogin())
+      ).rejects.toMatchObject({ code: "host_not_allowed" });
+    } finally {
+      env.SOURCE_ALLOWED_HOSTS = rules;
+      await closeSourcePool(file.id);
+      await removeUploadSources([file.id]);
+    }
   });
 
   it("fails as a generic internal error when the settings cannot be opened", async () => {

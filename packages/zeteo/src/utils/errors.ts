@@ -229,6 +229,21 @@ export class SourceArchivedError extends AppError {
   }
 }
 
+/**
+ * A change, test or refresh of a file source through the database sources'
+ * routes: its settings, data and catalogue are managed by its uploads.
+ */
+export class FileSourceManagedElsewhereError extends AppError {
+  constructor() {
+    super(
+      409,
+      "file_source_managed_elsewhere",
+      "A file source is managed through its uploads, not here"
+    );
+    this.name = "FileSourceManagedElsewhereError";
+  }
+}
+
 /** A declared relation the catalogue cannot hold; the message says which check failed. */
 export class InvalidRelationError extends AppError {
   constructor(message: string) {

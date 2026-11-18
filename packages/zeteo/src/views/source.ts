@@ -1,15 +1,16 @@
 import type { Source } from "../../prisma/generated/client/index.js";
+import { isFileSource, typeOf } from "../sources/types.js";
 import { readSettings } from "../sources/connect.js";
 import { adapterFor } from "../adapters/index.js";
-import { typeOf } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
 
 /**
  * The settings as the adapter redacts them; null, with the cause logged, when
  * the type has no adapter or the stored value cannot be read, so the source
- * can still be listed and viewed.
+ * can still be listed and viewed. A file source has none: Zeteo holds its data.
  */
 const settingsView = (row: Source): Record<string, unknown> | null => {
+  if (isFileSource(row)) return null;
   try {
     const adapter = adapterFor(typeOf(row));
     return adapter.redact(readSettings(adapter, row.id, row.sealedSettings));
@@ -34,6 +35,8 @@ export const sourceView = (row: Source) => ({
   query_concurrency: row.queryConcurrency,
   export_concurrency: row.exportConcurrency,
   writable_login_allowed: row.writableLoginAllowed,
+  /** A file source's owner; null for a database source. */
+  owner_id: row.ownerId,
   status: row.status,
   last_refreshed_at: row.lastRefreshedAt?.toISOString() ?? null,
   created_at: row.createdAt.toISOString(),

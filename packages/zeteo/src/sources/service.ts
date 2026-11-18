@@ -2,17 +2,18 @@ import type { LoginFinding, SourceAdapter } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
+import { isFileSource, storedType, typeOf } from "./types.js";
 import { sealSettings } from "../utils/crypto/envelope.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { adapterFor } from "../adapters/index.js";
-import { storedType, typeOf } from "./types.js";
 import { closeSourcePool } from "./pools.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
   ConflictError,
+  FileSourceManagedElsewhereError,
   issuesOf,
   NotFoundError,
   SourceArchivedError,
@@ -182,9 +183,16 @@ export const createSource = async (
   });
 };
 
+/** Refuses a file source: its uploads, not these routes, manage it. */
+const refuseFileSource = (row: Pick<Source, "type">): void => {
+  if (isFileSource(row)) throw new FileSourceManagedElsewhereError();
+};
+
+/** An unarchived database source. */
 const requireActive = async (id: string): Promise<Source> => {
   const row = await db.sources.findById(id);
   if (!row) throw new NotFoundError("Source not found");
+  refuseFileSource(row);
   if (row.archivedAt) throw new SourceArchivedError();
   return row;
 };
@@ -269,6 +277,8 @@ export const archiveSource = async (
   await withAudit(async (tx, audit) => {
     const row = await tx.source.findUnique({ where: { id } });
     if (!row) throw new NotFoundError("Source not found");
+    // A file source is archived by deleting it, which also drops its data.
+    refuseFileSource(row);
     const { count } = await tx.source.updateMany({
       where: { id, archivedAt: null },
       data: { archivedAt: new Date() },

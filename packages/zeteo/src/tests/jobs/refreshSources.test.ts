@@ -91,6 +91,35 @@ describe("refreshStaleSources", () => {
     );
   });
 
+  it("skips file sources, never refreshed or not", async () => {
+    const files = [null, 30].map(async (hoursAgo) => {
+      const id = randomUUID();
+      created.push(id);
+      await prisma.source.create({
+        data: {
+          id,
+          slug: uniqueSlug("job"),
+          name: "File job test",
+          type: "upload",
+          ownerId: randomUUID(),
+          sealedSettings: {},
+          schemas: [],
+          createdBy: randomUUID(),
+          lastRefreshedAt:
+            hoursAgo === null
+              ? null
+              : new Date(NOW.getTime() - hoursAgo * HOUR),
+        },
+      });
+      return id;
+    });
+    const ids = await Promise.all(files);
+    const spy = vi.spyOn(refresh, "refreshSource");
+    await refreshStaleSources(NOW);
+    const called = spy.mock.calls.map(([id]) => id);
+    for (const id of ids) expect(called).not.toContain(id);
+  });
+
   it("skips archived sources", async () => {
     const archived = await newSource(30, { archivedAt: new Date() });
     const spy = vi.spyOn(refresh, "refreshSource");

@@ -324,7 +324,8 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+        (a file source is changed through its own routes), `422 host_not_allowed`,
         `422 writable_login`, `502 source_unreachable`.
       operationId: updateSource
       parameters:
@@ -381,7 +382,8 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived` (already archived).
+        **Errors:** `404 not_found`, `409 source_archived` (already archived),
+        `409 file_source_managed_elsewhere` (a file source is deleted, not archived).
       operationId: archiveSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -414,7 +416,8 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+        (a file source has no login to test), `422 host_not_allowed`,
         `502 source_unreachable`.
       operationId: testSource
       parameters:
@@ -469,7 +472,8 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+        (a file source's catalogue follows its uploads), `422 host_not_allowed`,
         `502 source_unreachable`.
       operationId: refreshSource
       parameters:
@@ -4110,7 +4114,8 @@ components:
       enum:
         - postgres
         - azure-sql
-      description: The kind of database.
+        - upload
+      description: The kind of source. `upload` is a file source, whose data Zeteo stores from uploaded files.
     PostgresSettings:
       type: object
       description: |
@@ -4219,7 +4224,7 @@ components:
           type: string
     Source:
       type: object
-      description: A registered database. `settings` is the redacted form; it is null when the stored settings cannot be decrypted.
+      description: A registered database or a file source. `settings` is the redacted form; it is null for a file source and when the stored settings cannot be decrypted.
       required:
         - id
         - slug
@@ -4235,6 +4240,7 @@ components:
         - query_concurrency
         - export_concurrency
         - writable_login_allowed
+        - owner_id
         - status
         - last_refreshed_at
         - created_at
@@ -4295,6 +4301,12 @@ components:
         writable_login_allowed:
           type: boolean
           description: True when the login check found something and an administrator allowed it
+        owner_id:
+          type:
+            - string
+            - 'null'
+          format: uuid
+          description: A file source's owner; null for a database source
         status:
           type: string
           enum:
@@ -4347,7 +4359,11 @@ components:
           minLength: 1
           maxLength: 255
         type:
-          $ref: '#/components/schemas/SourceType'
+          type: string
+          enum:
+            - postgres
+            - azure-sql
+          description: The kind of database
         settings:
           description: The type's settings, PostgresSettings or AzureSqlSettings
           anyOf:

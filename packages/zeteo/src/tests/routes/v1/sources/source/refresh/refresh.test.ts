@@ -8,6 +8,10 @@ import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
+  removeUploadSources,
+  seedUploadSource,
+} from "../../../../../support/fileSources.js";
+import {
   auditRows,
   readToken,
   removeSources,
@@ -68,6 +72,22 @@ describe("POST /v1/sources/:sourceId/refresh", () => {
     const res = await call("POST", `/${id}/refresh`);
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("source_archived");
+  });
+
+  it("answers 409 file_source_managed_elsewhere for a file source, and changes nothing", async () => {
+    const file = await seedUploadSource({ ownerId: randomUUID(), tables: [] });
+    try {
+      const res = await call("POST", `/${file.id}/refresh`);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("file_source_managed_elsewhere");
+      const row = await prisma.source.findUniqueOrThrow({
+        where: { id: file.id },
+      });
+      expect(row.lastRefreshedAt).toBeNull();
+      expect(await auditRows(file.id)).toEqual([]);
+    } finally {
+      await removeUploadSources([file.id]);
+    }
   });
 
   it("answers 502 source_unreachable and marks the source unreachable", async () => {

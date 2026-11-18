@@ -35,6 +35,8 @@ export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
   prisma.source.findMany({
     where: {
       archivedAt: null,
+      // File sources are never refreshed: their uploads keep the catalogue.
+      type: { not: "upload" },
       OR: [{ lastRefreshedAt: null }, { lastRefreshedAt: { lt: olderThan } }],
     },
     orderBy: [

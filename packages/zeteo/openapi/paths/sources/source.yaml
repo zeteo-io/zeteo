@@ -39,7 +39,8 @@
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found`, `409 source_archived`, `422 host_not_allowed`,
+      **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+      (a file source is changed through its own routes), `422 host_not_allowed`,
       `422 writable_login`, `502 source_unreachable`.
     operationId: updateSource
     parameters:
