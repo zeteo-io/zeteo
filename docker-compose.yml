@@ -63,6 +63,25 @@ services:
       retries: 30
       start_period: 120s
 
+  # The File Sources reader role (docker/postgres/files-reader.sql), once per
+  # `up`, so a volume made before it existed gets it too. For `npm run dev`:
+  #   docker compose up -d postgres redis files-reader
+  # then FILE_SOURCES_READER_URL=postgresql://zeteo_files_reader:zeteo-files-reader-local-only@localhost:5462/zeteo
+  files-reader:
+    image: postgres:18-alpine
+    command:
+      ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/files-reader.sql"]
+    environment:
+      PGHOST: postgres
+      PGUSER: zeteo
+      PGPASSWORD: zeteo
+      PGDATABASE: zeteo
+    volumes:
+      - ./docker/postgres/files-reader.sql:/files-reader.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # Migrations, once per `up`, before zeteo starts.
   migrate:
     image: zeteo:local
@@ -94,6 +113,8 @@ services:
       PUBLIC_URL: http://localhost:${ZETEO_PORT:-4201}
       DATABASE_URL: *database-url
       REDIS_URL: *redis-url
+      # File Sources on, read through the role files-reader creates.
+      FILE_SOURCES_READER_URL: postgresql://zeteo_files_reader:zeteo-files-reader-local-only@postgres:5432/zeteo
       # A fixed key for this local stack only (32 bytes of 0x07); set
       # ZETEO_MASTER_KEY to use another. Never reuse it anywhere else.
       ZETEO_MASTER_KEY: ${ZETEO_MASTER_KEY:-BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc}
@@ -111,6 +132,8 @@ services:
       - "127.0.0.1:${ZETEO_PORT:-4201}:4201"
     depends_on:
       migrate:
+        condition: service_completed_successfully
+      files-reader:
         condition: service_completed_successfully
       redis:
         condition: service_healthy

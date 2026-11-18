@@ -105,6 +105,35 @@ async function recreateFixtureDatabase(databaseUrl: string) {
   }
 }
 
+/**
+ * Creates the File Sources reader role `readerUrl` signs in as, or resets its
+ * password. Roles belong to the whole server, which other worktrees' test
+ * databases may share, so the role is kept, never dropped. It gets no
+ * privileges here: storage grants it what it may read.
+ */
+async function ensureReaderRole(databaseUrl: string, readerUrl: string) {
+  const { Client } = await import("pg");
+  const reader = new URL(readerUrl);
+  const user = decodeURIComponent(reader.username);
+  const password = decodeURIComponent(reader.password);
+  const client = new Client({ connectionString: databaseUrl });
+  await client.connect();
+  try {
+    const found = await client.query(
+      "SELECT 1 FROM pg_roles WHERE rolname = $1",
+      [user]
+    );
+    if (found.rowCount === 0) {
+      await client.query(`CREATE ROLE ${quoteIdent(user)}`);
+    }
+    await client.query(
+      `ALTER ROLE ${quoteIdent(user)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD ${quoteLiteral(password)}`
+    );
+  } finally {
+    await client.end();
+  }
+}
+
 export async function setup() {
   // globalSetup runs in the main vitest process, where the config's `env`
   // option doesn't apply: load the same environment the workers get.
@@ -124,6 +153,10 @@ export async function setup() {
   });
 
   await recreateFixtureDatabase(process.env.DATABASE_URL!);
+  await ensureReaderRole(
+    process.env.DATABASE_URL!,
+    process.env.FILE_SOURCES_READER_URL!
+  );
   const { recreateMssqlFixture } = await import("../support/mssqlFixture.js");
   await recreateMssqlFixture();
 
