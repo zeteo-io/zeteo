@@ -63,12 +63,14 @@ export const listSources = async (req: Request, res: Response) => {
   });
 };
 
-const isUpload = (body: unknown): boolean =>
-  typeof body === "object" &&
-  body !== null &&
-  ["upload", "google-sheets"].includes(
-    (body as { type?: unknown }).type as string
-  );
+/** The upload type a create body names, or null for a database source. */
+const uploadTypeOf = (body: unknown): "upload" | "google-sheets" | null => {
+  const type =
+    typeof body === "object" && body !== null
+      ? (body as { type?: unknown }).type
+      : undefined;
+  return type === "upload" || type === "google-sheets" ? type : null;
+};
 
 /**
  * A database source for `zeteo.sources.write`; an upload source (`type:
@@ -77,7 +79,8 @@ const isUpload = (body: unknown): boolean =>
  */
 export const createSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
-  if (isUpload(req.body)) {
+  const uploadType = uploadTypeOf(req.body);
+  if (uploadType) {
     assertUploadsOn();
     for (const permission of [DATA_READ, UPLOADS_WRITE]) {
       if (!hasPermission(caller.permissions, permission)) {
@@ -85,7 +88,7 @@ export const createSource = async (req: Request, res: Response) => {
       }
     }
     const input =
-      (req.body as { type: string }).type === "google-sheets"
+      uploadType === "google-sheets"
         ? validateBody(CreateSheetsSourceSchema, req)
         : validateBody(CreateUploadSourceSchema, req);
     res.status(201).json(await createUploadSource(caller, input));
