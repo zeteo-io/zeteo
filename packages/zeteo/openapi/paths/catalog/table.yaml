@@ -83,6 +83,9 @@
       **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
       source is `409 source_archived`; `404 uploads_not_configured` while
       `UPLOADS_READER_URL` is unset.
+
+      **A Google Sheets source's table** is not loaded from a file: `409 not_a_file_upload`; use
+      Sync now (`POST /v1/sources/{sourceId}/refresh`).
     operationId: reuploadTable
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -110,7 +113,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `not_an_upload_source`, `source_archived`, or `quota_exceeded`
+        description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the source syncs from Google Sheets)
         content:
           application/json:
             schema:

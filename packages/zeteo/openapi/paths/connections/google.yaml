@@ -1,0 +1,76 @@
+/v1/connections/google:
+  get:
+    tags: [Connections]
+    summary: Read the Google connection
+    description: |
+      Returns who Zeteo signs in to Google as (the service account's email), never the key. An
+      uploader reads it to learn which address to share a spreadsheet with.
+
+      **Required permissions:** `zeteo.sources.read` or `zeteo.uploads.write` (`403 forbidden`
+      without both).
+
+      **Errors:** `404 google_not_configured` when no key has been set.
+    operationId: getGoogleConnection
+    responses:
+      '200':
+        description: The connection
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/connections/schemas.yaml#/GoogleConnection'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `google_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Connections]
+    summary: Set the Google connection
+    description: |
+      Replaces the service-account key Zeteo reads Google Sheets with. The key is `service_account_key`,
+      either the JSON object or the text of the downloaded key file. Before anything is stored,
+      Google signs the key in; a key it refuses is `422 google_key_rejected` and nothing is
+      stored. The key is stored encrypted and never returned. A `zeteo.connection.updated` audit
+      entry carries the service account's email.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request` (not a key, or text that is not JSON), `422
+      google_key_rejected`, `502 google_unavailable`.
+    operationId: putGoogleConnection
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/connections/schemas.yaml#/PutGoogleConnectionRequest'
+    responses:
+      '200':
+        description: The connection now in force
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/connections/schemas.yaml#/GoogleConnection'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: Unprocessable - `google_key_rejected`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `google_unavailable`, Google could not be reached
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

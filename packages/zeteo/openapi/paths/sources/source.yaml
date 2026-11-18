@@ -43,10 +43,14 @@
       which writes `zeteo.source.updated` (as does an admin's change of those alone); its limits
       need `zeteo.sources.write`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` and `description` alone; anyone else gets the same 403.
+      On a Google Sheets source `sync_interval_minutes` (15 to 1440) sets the minutes between
+      syncs; its owner may send it with `name` and `description`. On any other source it is
+      `422 not_synced`.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload or Sheets source its owner may send `name`, `description` and (Sheets) `sync_interval_minutes` alone; anyone else gets the same 403.
 
       **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
-      `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
+      `422 host_not_allowed`, `422 writable_login`, `422 not_synced`, `502 source_unreachable`.
     operationId: updateSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -70,7 +74,7 @@
       '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
-        description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+        description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`), or `not_synced` (`sync_interval_minutes` on a source that does not sync)
         content:
           application/json:
             schema:

@@ -36,6 +36,13 @@ info:
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
     as a source they may not see does. See `docs/uploads.md`.
 
+    A Google Sheets source (`type: google-sheets`) is an upload source whose tables are the tabs
+    of a Google spreadsheet, kept current by a sync. Zeteo reads Google as one service account, set
+    with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a Viewer.
+    Its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a spreadsheet with
+    `POST /v1/uploads/links`, creates the source, adds tabs, changes its sync interval and runs
+    Sync now (`POST /v1/sources/{sourceId}/refresh`) through the same routes as an upload source.
+
     ## Sources
 
     A source's `settings` depend on its `type` and are write-only in part: the response carries
@@ -125,6 +132,8 @@ tags:
     description: Databases registered with Zeteo
   - name: Uploads
     description: CSV and xlsx files staged for upload sources, which their owners manage and grant
+  - name: Connections
+    description: The connection to Google that Google Sheets sources read through
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -139,7 +148,7 @@ tags:
     description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
-    tags: [Sources, Uploads, Catalogue]
+    tags: [Sources, Uploads, Connections, Catalogue]
   - name: Access
     tags: [Grants]
   - name: Querying
@@ -203,6 +212,10 @@ paths:
     $ref: './paths/principals/my-all-principals.yaml#/~1v1~1me~1principals~1all'
   /v1/uploads:
     $ref: './paths/uploads/uploads.yaml#/~1v1~1uploads'
+  /v1/uploads/links:
+    $ref: './paths/uploads/links.yaml#/~1v1~1uploads~1links'
+  /v1/connections/google:
+    $ref: './paths/connections/google.yaml#/~1v1~1connections~1google'
   /v1/uploads/{uploadId}:
     $ref: './paths/uploads/upload.yaml#/~1v1~1uploads~1{uploadId}'
   /v1/saved-queries:
@@ -410,6 +423,18 @@ components:
       $ref: './components/uploads/schemas.yaml#/StagedTable'
     UploadResponse:
       $ref: './components/uploads/schemas.yaml#/UploadResponse'
+    SheetsUploadResponse:
+      $ref: './components/uploads/schemas.yaml#/SheetsUploadResponse'
+    LinkRequest:
+      $ref: './components/uploads/schemas.yaml#/LinkRequest'
+    CreateSheetsSourceRequest:
+      $ref: './components/uploads/schemas.yaml#/CreateSheetsSourceRequest'
+    GoogleConnection:
+      $ref: './components/connections/schemas.yaml#/GoogleConnection'
+    PutGoogleConnectionRequest:
+      $ref: './components/connections/schemas.yaml#/PutGoogleConnectionRequest'
+    SyncSummary:
+      $ref: './components/catalog/schemas.yaml#/SyncSummary'
     ColumnCorrection:
       $ref: './components/uploads/schemas.yaml#/ColumnCorrection'
     TableCorrection:

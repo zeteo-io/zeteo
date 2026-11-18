@@ -36,6 +36,13 @@ info:
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
     as a source they may not see does. See `docs/uploads.md`.
 
+    A Google Sheets source (`type: google-sheets`) is an upload source whose tables are the tabs
+    of a Google spreadsheet, kept current by a sync. Zeteo reads Google as one service account, set
+    with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a Viewer.
+    Its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a spreadsheet with
+    `POST /v1/uploads/links`, creates the source, adds tabs, changes its sync interval and runs
+    Sync now (`POST /v1/sources/{sourceId}/refresh`) through the same routes as an upload source.
+
     ## Sources
 
     A source's `settings` depend on its `type` and are write-only in part: the response carries
@@ -125,6 +132,8 @@ tags:
     description: Databases registered with Zeteo
   - name: Uploads
     description: CSV and xlsx files staged for upload sources, which their owners manage and grant
+  - name: Connections
+    description: The connection to Google that Google Sheets sources read through
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -219,7 +228,7 @@ paths:
         - name: owner_id
           in: query
           required: false
-          description: Only the upload sources of this owner; `me` for the caller
+          description: Only the upload and Sheets sources of this owner; `me` for the caller
           schema:
             type: string
             pattern: ^(me|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$
@@ -248,7 +257,7 @@ paths:
     post:
       tags:
         - Sources
-      summary: Register a database or create an upload source
+      summary: Register a database or create an upload or Sheets source
       description: |
         **A database** (`type` `postgres` or `azure-sql`): before anything is stored, Zeteo validates `settings` against the
         type's schema, checks the host against the deploy's network rules, connects with the login
@@ -274,6 +283,14 @@ paths:
         the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
         upload_source_busy`.
 
+        **A Google Sheets source** (`type: google-sheets`): as an upload source, from the caller's
+        staging of a spreadsheet (see `POST /v1/uploads/links`); the tabs are loaded now and again
+        every `sync_interval_minutes` (15 to 1440, default 60). Needs `zeteo.uploads.write` and
+        `zeteo.data.read`. Further errors: `409 sheet_in_use` (an unarchived source already reads the
+        spreadsheet), `422 staging_kind_mismatch` (the staging is a file's, not a spreadsheet's),
+        `404 google_not_configured`, `422 sheet_not_accessible`, `502 google_unavailable`,
+        `502 google_sign_in_failed`. The response carries `sheet` and `sync`.
+
         **Required permissions:** `zeteo.sources.write` or `zeteo.uploads.write` to reach the
         route, then as above for the body's `type` (`403 forbidden` without).
       operationId: createSource
@@ -285,6 +302,7 @@ paths:
               oneOf:
                 - $ref: '#/components/schemas/CreateSourceRequest'
                 - $ref: '#/components/schemas/CreateUploadSourceRequest'
+                - $ref: '#/components/schemas/CreateSheetsSourceRequest'
       responses:
         '201':
           description: The source
@@ -299,13 +317,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          description: Not found - `uploads_not_configured` or `staging_not_found` (an upload source)
+          description: Not found - `uploads_not_configured`, `staging_not_found` (an upload source) or `google_not_configured` (a Sheets source)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source)
+          description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source), `sheet_in_use` (a Sheets source)
           content:
             application/json:
               schema:
@@ -313,7 +331,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source
+          description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source, `staging_kind_mismatch` or `sheet_not_accessible` for a Sheets source
           content:
             application/json:
               schema:
@@ -321,7 +339,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '502':
-          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login
+          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login; `google_unavailable` or `google_sign_in_failed` for a Sheets source
           content:
             application/json:
               schema:
@@ -385,10 +403,14 @@ paths:
         which writes `zeteo.source.updated` (as does an admin's change of those alone); its limits
         need `zeteo.sources.write`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` and `description` alone; anyone else gets the same 403.
+        On a Google Sheets source `sync_interval_minutes` (15 to 1440) sets the minutes between
+        syncs; its owner may send it with `name` and `description`. On any other source it is
+        `422 not_synced`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload or Sheets source its owner may send `name`, `description` and (Sheets) `sync_interval_minutes` alone; anyone else gets the same 403.
 
         **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
-        `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
+        `422 host_not_allowed`, `422 writable_login`, `422 not_synced`, `502 source_unreachable`.
       operationId: updateSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -418,7 +440,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`), or `not_synced` (`sync_interval_minutes` on a source that does not sync)
           content:
             application/json:
               schema:
@@ -656,21 +678,31 @@ paths:
         `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
         See `docs/catalog.md`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **A Google Sheets source** is synced instead (Sync now): every tab is read again and its
+        table reloaded, and the answer is a `SyncSummary`. The source's owner may do this, and a
+        second one within a minute is `429 sync_too_soon` (with `Retry-After`). A sync that fails
+        is the error of its cause, and is recorded in the source's `sync.last_error`.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). A Sheets source's
+        owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
 
         **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
         (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
-        `502 source_unreachable`.
+        `502 source_unreachable`; on a Sheets source also `404 google_not_configured`,
+        `422 sheet_not_accessible`, `429 sync_too_soon`, `502 google_unavailable`,
+        `502 google_sign_in_failed`, `503 upload_source_busy`.
       operationId: refreshSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
       responses:
         '200':
-          description: What the refresh changed
+          description: What the refresh changed (`RefreshSummary`), or for a Google Sheets source what the sync did (`SyncSummary`)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RefreshSummary'
+                oneOf:
+                  - $ref: '#/components/schemas/RefreshSummary'
+                  - $ref: '#/components/schemas/SyncSummary'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -682,7 +714,13 @@ paths:
         '409':
           $ref: '#/components/responses/ConflictResponse'
         '422':
-          description: The host is not permitted - `host_not_allowed`
+          description: The host is not permitted - `host_not_allowed`; or `sheet_not_accessible` (a Sheets source)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Too many requests - `sync_too_soon` (a Sheets source synced less than a minute ago), with `retry_after` and the `Retry-After` header
           content:
             application/json:
               schema:
@@ -690,7 +728,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '502':
-          description: Bad gateway - `source_unreachable`
+          description: Bad gateway - `source_unreachable`; `google_unavailable` or `google_sign_in_failed` (a Sheets source)
           content:
             application/json:
               schema:
@@ -756,6 +794,10 @@ paths:
         **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
         source is `409 source_archived`; `404 uploads_not_configured` while
         `UPLOADS_READER_URL` is unset.
+
+        **A Google Sheets source** takes tabs of its own spreadsheet, staged with `POST
+        /v1/uploads/links` by `source_id`: a staging of a file or of another spreadsheet is `422
+        staging_kind_mismatch`, and a tab the source already has is `409 tab_already_added`.
       operationId: addTables
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -785,7 +827,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken` or `quota_exceeded`
+          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, `quota_exceeded` or `tab_already_added` (a Sheets source)
           content:
             application/json:
               schema:
@@ -793,7 +835,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: Unprocessable - `cast_failed`
+          description: Unprocessable - `cast_failed`, or `staging_kind_mismatch` (a Sheets source)
           content:
             application/json:
               schema:
@@ -908,6 +950,9 @@ paths:
         **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
         source is `409 source_archived`; `404 uploads_not_configured` while
         `UPLOADS_READER_URL` is unset.
+
+        **A Google Sheets source's table** is not loaded from a file: `409 not_a_file_upload`; use
+        Sync now (`POST /v1/sources/{sourceId}/refresh`).
       operationId: reuploadTable
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -938,7 +983,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, `source_archived`, or `quota_exceeded`
+          description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the source syncs from Google Sheets)
           content:
             application/json:
               schema:
@@ -2573,6 +2618,178 @@ paths:
                 $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/uploads/links:
+    post:
+      tags:
+        - Uploads
+      summary: Stage a Google spreadsheet
+      description: |
+        Reads every tab of a Google spreadsheet into a staging, like `POST /v1/uploads` does a file,
+        and returns the same preview plus the spreadsheet's id and title. Name the spreadsheet by
+        `url` (the link from its address bar or Share dialog, or its bare id) or, to add tabs to a
+        Sheets source, by `source_id`. The spreadsheet must be shared with the service account
+        (`GET /v1/connections/google`) as a Viewer. A staging is used by `POST /v1/sources` with
+        `type: google-sheets`, or by `POST /v1/sources/{sourceId}/tables` for a source's new tabs. It
+        expires one hour after creation and counts against `UPLOAD_MAX_STAGINGS` and the caller's
+        upload slots like a file (`429 too_many_stagings`, `too_many_uploads`).
+
+        With `source_id` the caller must own the source or hold `zeteo.sources.write`; a source that
+        is missing and one that is someone else's both answer `404 not_found`.
+
+        **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read` (`403 forbidden`
+        without).
+
+        **Errors:** `404 uploads_not_configured` or `google_not_configured`, `404 not_found`,
+        `409 sheet_in_use` (an unarchived source already reads this spreadsheet; says nothing of
+        whose), `409 not_a_sheets_source`, `409 source_archived`, `422 invalid_sheet_link`, `422
+        sheet_not_accessible` (not shared with the service account, or it does not exist), `422`
+        codes a file's limits give (`too_many_rows`, `too_many_columns`, `empty_file`),
+        `502 google_unavailable`, `502 google_sign_in_failed` (Google refused the stored key; an
+        admin should check it).
+      operationId: createUploadFromLink
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkRequest'
+      responses:
+        '201':
+          description: The staged spreadsheet and its preview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SheetsUploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found`, `uploads_not_configured` or `google_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `sheet_in_use`, `not_a_sheets_source` or `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `invalid_sheet_link`, `sheet_not_accessible`, or a limit of the spreadsheet (`too_many_rows`, `too_many_columns`, `empty_file`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Too many requests - `too_many_stagings` or `too_many_uploads`, with `retry_after` and the `Retry-After` header
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `google_unavailable` or `google_sign_in_failed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/connections/google:
+    get:
+      tags:
+        - Connections
+      summary: Read the Google connection
+      description: |
+        Returns who Zeteo signs in to Google as (the service account's email), never the key. An
+        uploader reads it to learn which address to share a spreadsheet with.
+
+        **Required permissions:** `zeteo.sources.read` or `zeteo.uploads.write` (`403 forbidden`
+        without both).
+
+        **Errors:** `404 google_not_configured` when no key has been set.
+      operationId: getGoogleConnection
+      responses:
+        '200':
+          description: The connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleConnection'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `google_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Connections
+      summary: Set the Google connection
+      description: |
+        Replaces the service-account key Zeteo reads Google Sheets with. The key is `service_account_key`,
+        either the JSON object or the text of the downloaded key file. Before anything is stored,
+        Google signs the key in; a key it refuses is `422 google_key_rejected` and nothing is
+        stored. The key is stored encrypted and never returned. A `zeteo.connection.updated` audit
+        entry carries the service account's email.
+
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (not a key, or text that is not JSON), `422
+        google_key_rejected`, `502 google_unavailable`.
+      operationId: putGoogleConnection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutGoogleConnectionRequest'
+      responses:
+        '200':
+          description: The connection now in force
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GoogleConnection'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `google_key_rejected`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `google_unavailable`, Google could not be reached
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/uploads/{uploadId}:
@@ -4819,7 +5036,8 @@ components:
         - postgres
         - azure-sql
         - upload
-      description: The kind of source. `upload` is an upload source (an upload source), whose data Zeteo stores from uploaded files.
+        - google-sheets
+      description: The kind of source. `upload` is an upload source, whose data Zeteo stores from uploaded files. `google-sheets` is a Google Sheets source, stored the same way and synced from a spreadsheet on a schedule.
     PostgresSettings:
       type: object
       description: |
@@ -4928,7 +5146,7 @@ components:
           type: string
     Source:
       type: object
-      description: A registered database or an upload source. `settings` is the redacted form; it is null for an upload source and when the stored settings cannot be decrypted.
+      description: A registered database, an upload source or a Google Sheets source. `settings` is the redacted form; it is null for an upload or Sheets source and when the stored settings cannot be decrypted.
       required:
         - id
         - slug
@@ -5018,7 +5236,7 @@ components:
             - string
             - 'null'
           format: uuid
-          description: An upload source's owner; null for a database source
+          description: An upload or Sheets source's owner; null for a database source
         status:
           type: string
           enum:
@@ -5029,7 +5247,7 @@ components:
             - string
             - 'null'
           format: date-time
-          description: A database source's last catalogue refresh; an upload source's last load of any of its tables (null before one).
+          description: A database source's last catalogue refresh; an upload or Sheets source's last load of any of its tables (null before one), which for a Sheets source is its last good sync.
         size_bytes:
           type:
             - integer
@@ -5059,6 +5277,54 @@ components:
             - string
             - 'null'
           format: date-time
+        sheet:
+          type: object
+          description: A Google Sheets source's spreadsheet; absent on any other type
+          required:
+            - spreadsheet_id
+            - url
+          properties:
+            spreadsheet_id:
+              type: string
+            url:
+              type: string
+              format: uri
+        sync:
+          type: object
+          description: A Google Sheets source's sync state; absent on any other type
+          required:
+            - interval_minutes
+            - last_attempt_at
+            - last_error
+            - stale
+          properties:
+            interval_minutes:
+              type: integer
+              minimum: 15
+              maximum: 1440
+            last_attempt_at:
+              type:
+                - string
+                - 'null'
+              format: date-time
+              description: The last sync tried, good or not
+            last_error:
+              type:
+                - object
+                - 'null'
+              description: Why the last sync failed; null after a good one
+              required:
+                - code
+                - message
+              properties:
+                code:
+                  type: string
+                  description: An error code such as `sheet_not_accessible`, `google_unavailable` or `sync_failed`
+                message:
+                  type: string
+            stale:
+              type: boolean
+              description: The last sync failed and the last good one (`last_refreshed_at`) is over 24 hours old or never happened
     ListSourcesResponse:
       type: object
       required:
@@ -5190,6 +5456,11 @@ components:
             description: At most 63 bytes, no control characters, no leading or trailing whitespace
         allow_writable_login:
           type: boolean
+        sync_interval_minutes:
+          type: integer
+          minimum: 15
+          maximum: 1440
+          description: A Google Sheets source only (`422 not_synced` on any other); minutes between syncs
         timeout_ms:
           type: integer
           minimum: 1000
@@ -5305,7 +5576,7 @@ components:
             - string
             - 'null'
           format: date-time
-          description: An upload source's table, when it was last loaded; null for a database source's
+          description: An upload or Sheets source's table, when it was last loaded (for a Sheets table, its last good sync); null for a database source's
     Column:
       type: object
       required:
@@ -6305,7 +6576,7 @@ components:
         - kind
         - description
         - missing
-        - last_synced_at
+        - last_loaded_at
         - columns
         - relations
       properties:
@@ -6326,12 +6597,12 @@ components:
         missing:
           type: boolean
           description: The last refresh did not find the table
-        last_synced_at:
+        last_loaded_at:
           type:
             - string
             - 'null'
           format: date-time
-          description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table'
+          description: 'When an upload or Sheets source''s table was last loaded: its data is as of then. Null for a database table'
         columns:
           type: array
           description: Only the granted columns, in the table's order
@@ -6369,7 +6640,7 @@ components:
           enum:
             - database
             - upload
-          description: '`upload` for an upload source, whose tables carry `last_synced_at`'
+          description: '`upload` for an upload source, whose tables carry `last_loaded_at`'
         language:
           type: object
           required:
@@ -6530,6 +6801,156 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/StagedTable'
+    SheetsUploadResponse:
+      description: A spreadsheet's tabs staged like a file's, with the spreadsheet they came from
+      allOf:
+        - $ref: '#/components/schemas/UploadResponse'
+        - type: object
+          required:
+            - spreadsheet
+          properties:
+            spreadsheet:
+              type: object
+              required:
+                - id
+                - title
+              properties:
+                id:
+                  type: string
+                  description: The Google spreadsheet's id
+                title:
+                  type: string
+    LinkRequest:
+      description: A spreadsheet to stage, named by its link or by an existing Sheets source
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - url
+          properties:
+            url:
+              type: string
+              minLength: 1
+              maxLength: 2048
+              description: The link from the sheet's address bar or Share dialog, or the bare spreadsheet id
+        - type: object
+          additionalProperties: false
+          required:
+            - source_id
+          properties:
+            source_id:
+              type: string
+              format: uuid
+              description: 'A Google Sheets source the caller owns (or, with `zeteo.sources.write`, any): stages its spreadsheet again, to add tabs'
+    CreateSheetsSourceRequest:
+      type: object
+      description: A Google Sheets source, made from the caller's staging of a spreadsheet (`POST /v1/uploads/links`)
+      additionalProperties: false
+      required:
+        - type
+        - staging_id
+        - name
+        - tables
+      properties:
+        type:
+          type: string
+          const: google-sheets
+        staging_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type: string
+          maxLength: 500
+          description: What the source holds, for the people and the AI that query it; trimmed
+        slug:
+          type: string
+          pattern: ^[a-z][a-z0-9-]{1,62}$
+          description: Generated from the name when omitted
+        sync_interval_minutes:
+          type: integer
+          minimum: 15
+          maximum: 1440
+          default: 60
+          description: Minutes between syncs
+        tables:
+          type: array
+          minItems: 1
+          maxItems: 100
+          description: The staged tabs to load, with any corrections
+          items:
+            $ref: '#/components/schemas/TableCorrection'
+    GoogleConnection:
+      type: object
+      description: The Google connection as a caller sees it - who it signs in as, never the key
+      required:
+        - provider
+        - service_account_email
+        - updated_at
+        - updated_by
+      properties:
+        provider:
+          type: string
+          const: google
+        service_account_email:
+          type: string
+          description: The address to share a spreadsheet with, as a Viewer
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          format: uuid
+          description: The tereo user who last set the key
+    PutGoogleConnectionRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - service_account_key
+      properties:
+        service_account_key:
+          description: The service account's JSON key, as the object or as the text of the downloaded file
+          oneOf:
+            - type: object
+              additionalProperties: true
+              writeOnly: true
+            - type: string
+              writeOnly: true
+    SyncSummary:
+      type: object
+      description: What a sync of a Google Sheets source did, answered by `POST /v1/sources/{sourceId}/refresh`
+      required:
+        - synced_at
+        - tables
+      properties:
+        synced_at:
+          type: string
+          format: date-time
+        tables:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - row_count
+              - missing
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              row_count:
+                type: integer
+                minimum: 0
+                description: Rows loaded
+              missing:
+                type: boolean
+                description: The tab is no longer in the spreadsheet; the table keeps its last data
     ColumnCorrection:
       type: object
       additionalProperties: false
@@ -8291,6 +8712,7 @@ x-tagGroups:
     tags:
       - Sources
       - Uploads
+      - Connections
       - Catalogue
   - name: Access
     tags:

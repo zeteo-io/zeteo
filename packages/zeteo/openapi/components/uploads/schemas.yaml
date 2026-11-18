@@ -131,3 +131,50 @@ TransferSourceRequest:
   properties:
     user_id: { type: string, format: uuid, description: 'The new owner, a tereo user who is not a service account' }
     keep_access: { type: boolean, default: true, description: The previous owner keeps an ordinary all-columns grant; false drops it }
+
+SheetsUploadResponse:
+  description: A spreadsheet's tabs staged like a file's, with the spreadsheet they came from
+  allOf:
+    - $ref: '#/UploadResponse'
+    - type: object
+      required: [spreadsheet]
+      properties:
+        spreadsheet:
+          type: object
+          required: [id, title]
+          properties:
+            id: { type: string, description: The Google spreadsheet's id }
+            title: { type: string }
+
+LinkRequest:
+  description: A spreadsheet to stage, named by its link or by an existing Sheets source
+  oneOf:
+    - type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url: { type: string, minLength: 1, maxLength: 2048, description: 'The link from the sheet''s address bar or Share dialog, or the bare spreadsheet id' }
+    - type: object
+      additionalProperties: false
+      required: [source_id]
+      properties:
+        source_id: { type: string, format: uuid, description: 'A Google Sheets source the caller owns (or, with `zeteo.sources.write`, any): stages its spreadsheet again, to add tabs' }
+
+CreateSheetsSourceRequest:
+  type: object
+  description: A Google Sheets source, made from the caller's staging of a spreadsheet (`POST /v1/uploads/links`)
+  additionalProperties: false
+  required: [type, staging_id, name, tables]
+  properties:
+    type: { type: string, const: google-sheets }
+    staging_id: { type: string, format: uuid }
+    name: { type: string, minLength: 1, maxLength: 255 }
+    description: { type: string, maxLength: 500, description: 'What the source holds, for the people and the AI that query it; trimmed' }
+    slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$', description: Generated from the name when omitted }
+    sync_interval_minutes: { type: integer, minimum: 15, maximum: 1440, default: 60, description: Minutes between syncs }
+    tables:
+      type: array
+      minItems: 1
+      maxItems: 100
+      description: The staged tabs to load, with any corrections
+      items: { $ref: '#/TableCorrection' }

@@ -47,6 +47,10 @@
       **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
       source is `409 source_archived`; `404 uploads_not_configured` while
       `UPLOADS_READER_URL` is unset.
+
+      **A Google Sheets source** takes tabs of its own spreadsheet, staged with `POST
+      /v1/uploads/links` by `source_id`: a staging of a file or of another spreadsheet is `422
+      staging_kind_mismatch`, and a tab the source already has is `409 tab_already_added`.
     operationId: addTables
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -73,14 +77,14 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken` or `quota_exceeded`
+        description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, `quota_exceeded` or `tab_already_added` (a Sheets source)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
-        description: Unprocessable - `cast_failed`
+        description: Unprocessable - `cast_failed`, or `staging_kind_mismatch` (a Sheets source)
         content:
           application/json:
             schema:

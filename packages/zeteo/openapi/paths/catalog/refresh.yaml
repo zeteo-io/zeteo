@@ -12,21 +12,31 @@
       `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
       See `docs/catalog.md`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+      **A Google Sheets source** is synced instead (Sync now): every tab is read again and its
+      table reloaded, and the answer is a `SyncSummary`. The source's owner may do this, and a
+      second one within a minute is `429 sync_too_soon` (with `Retry-After`). A sync that fails
+      is the error of its cause, and is recorded in the source's `sync.last_error`.
+
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). A Sheets source's
+      owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
 
       **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
       (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
-      `502 source_unreachable`.
+      `502 source_unreachable`; on a Sheets source also `404 google_not_configured`,
+      `422 sheet_not_accessible`, `429 sync_too_soon`, `502 google_unavailable`,
+      `502 google_sign_in_failed`, `503 upload_source_busy`.
     operationId: refreshSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
     responses:
       '200':
-        description: What the refresh changed
+        description: What the refresh changed (`RefreshSummary`), or for a Google Sheets source what the sync did (`SyncSummary`)
         content:
           application/json:
             schema:
-              $ref: '../../components/catalog/schemas.yaml#/RefreshSummary'
+              oneOf:
+                - $ref: '../../components/catalog/schemas.yaml#/RefreshSummary'
+                - $ref: '../../components/catalog/schemas.yaml#/SyncSummary'
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
@@ -34,14 +44,20 @@
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
       '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '429':
+        description: Too many requests - `sync_too_soon` (a Sheets source synced less than a minute ago), with `retry_after` and the `Retry-After` header
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: The host is not permitted - `host_not_allowed`
+        description: The host is not permitted - `host_not_allowed`; or `sheet_not_accessible` (a Sheets source)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '502':
-        description: Bad gateway - `source_unreachable`
+        description: Bad gateway - `source_unreachable`; `google_unavailable` or `google_sign_in_failed` (a Sheets source)
         content:
           application/json:
             schema:

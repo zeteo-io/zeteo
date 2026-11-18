@@ -26,7 +26,7 @@ Table:
     last_loaded_at:
       type: [string, 'null']
       format: date-time
-      description: An upload source's table, when it was last loaded; null for a database source's
+      description: An upload or Sheets source's table, when it was last loaded (for a Sheets table, its last good sync); null for a database source's
 
 Column:
   type: object
@@ -179,3 +179,20 @@ RefreshSummary:
         added: { type: integer, minimum: 0 }
         missing: { type: integer, minimum: 0 }
         restored: { type: integer, minimum: 0 }
+
+SyncSummary:
+  type: object
+  description: What a sync of a Google Sheets source did, answered by `POST /v1/sources/{sourceId}/refresh`
+  required: [synced_at, tables]
+  properties:
+    synced_at: { type: string, format: date-time }
+    tables:
+      type: array
+      items:
+        type: object
+        required: [id, name, row_count, missing]
+        properties:
+          id: { type: string, format: uuid }
+          name: { type: string }
+          row_count: { type: integer, minimum: 0, description: Rows loaded }
+          missing: { type: boolean, description: The tab is no longer in the spreadsheet; the table keeps its last data }

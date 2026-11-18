@@ -1,0 +1,23 @@
+GoogleConnection:
+  type: object
+  description: The Google connection as a caller sees it - who it signs in as, never the key
+  required: [provider, service_account_email, updated_at, updated_by]
+  properties:
+    provider: { type: string, const: google }
+    service_account_email: { type: string, description: 'The address to share a spreadsheet with, as a Viewer' }
+    updated_at: { type: string, format: date-time }
+    updated_by: { type: string, format: uuid, description: 'The tereo user who last set the key' }
+
+PutGoogleConnectionRequest:
+  type: object
+  additionalProperties: false
+  required: [service_account_key]
+  properties:
+    service_account_key:
+      description: The service account's JSON key, as the object or as the text of the downloaded file
+      oneOf:
+        - type: object
+          additionalProperties: true
+          writeOnly: true
+        - type: string
+          writeOnly: true

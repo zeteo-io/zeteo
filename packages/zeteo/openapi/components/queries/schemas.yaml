@@ -359,14 +359,14 @@ DiscoveredRelation:
 DiscoveredTable:
   type: object
   description: A table the caller may query
-  required: [name, schema_name, kind, description, missing, last_synced_at, columns, relations]
+  required: [name, schema_name, kind, description, missing, last_loaded_at, columns, relations]
   properties:
     name: { type: string, description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`' }
     schema_name: { type: string }
     kind: { type: string, enum: [table, view] }
     description: { type: [string, 'null'] }
     missing: { type: boolean, description: The last refresh did not find the table }
-    last_synced_at: { type: [string, 'null'], format: date-time, description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table' }
+    last_loaded_at: { type: [string, 'null'], format: date-time, description: 'When an upload or Sheets source''s table was last loaded: its data is as of then. Null for a database table' }
     columns:
       type: array
       description: Only the granted columns, in the table's order
@@ -383,7 +383,7 @@ DiscoveredSource:
     name: { type: string }
     description: { type: string, maxLength: 500, description: What the source holds; empty when none was given }
     type: { $ref: '../sources/schemas.yaml#/SourceType' }
-    kind: { type: string, enum: [database, upload], description: '`upload` for an upload source, whose tables carry `last_synced_at`' }
+    kind: { type: string, enum: [database, upload], description: '`upload` for an upload source, whose tables carry `last_loaded_at`' }
     language:
       type: object
       required: [id, schema]
