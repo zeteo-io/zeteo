@@ -78,6 +78,7 @@ describe("/v1/grants", () => {
           missing: false,
         },
         all_columns: true,
+        owner_grant: false,
         columns: [],
         created_by: expect.any(String),
         created_at: expect.any(String),

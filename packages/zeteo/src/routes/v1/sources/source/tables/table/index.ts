@@ -1,5 +1,7 @@
+import { allowOwnerOr } from "../../../../../../middleware/fileSourceOwner.js";
 import { requirePermission } from "../../../../../../middleware/auth.js";
 import { getTable, patchTable } from "./controllers.js";
+import { sourceOfParams } from "../../middleware.js";
 import express, { Router } from "express";
 import {
   SOURCES_READ,
@@ -11,6 +13,11 @@ const tableRouter = Router({ mergeParams: true });
 const json64k = express.json({ limit: "64kb" });
 
 tableRouter.get("/", requirePermission(SOURCES_READ), getTable);
-tableRouter.patch("/", requirePermission(SOURCES_WRITE), json64k, patchTable);
+tableRouter.patch(
+  "/",
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
+  json64k,
+  patchTable
+);
 
 export default tableRouter;

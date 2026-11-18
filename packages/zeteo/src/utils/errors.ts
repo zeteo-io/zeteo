@@ -356,6 +356,30 @@ export class InvalidGrantError extends AppError {
   }
 }
 
+/** A group a file source's owner may not grant to: not global and not of their signed-in organization, or unknown. */
+export class GroupNotAllowedError extends AppError {
+  constructor() {
+    super(
+      422,
+      "group_not_allowed",
+      "Groups can only be granted to in your signed-in organization"
+    );
+    this.name = "GroupNotAllowedError";
+  }
+}
+
+/** A removal or narrowing of a file source's owner grant: it can only move by a transfer. */
+export class OwnerGrantLockedError extends AppError {
+  constructor() {
+    super(
+      409,
+      "owner_grant_locked",
+      "The owner's grant cannot be removed or narrowed; transfer the file source instead"
+    );
+    this.name = "OwnerGrantLockedError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

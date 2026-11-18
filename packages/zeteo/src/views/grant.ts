@@ -17,6 +17,8 @@ export const grantView = (
     missing: row.table.missingSince !== null,
   },
   all_columns: row.allColumns,
+  /** The file source owner's own grant: not removed or narrowed while set. */
+  owner_grant: row.ownerGrant,
   columns: row.columns.map(({ column }) => ({
     id: column.id,
     name: column.name,

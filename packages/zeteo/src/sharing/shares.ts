@@ -64,20 +64,31 @@ export const checkNewGroups = async (
   const newGroups = principals
     .filter((p) => p.type === "group" && !groupsBefore.has(p.id))
     .map((p) => p.id);
-  const organizations = await mapConcurrently(
-    newGroups,
-    GROUP_READS_IN_FLIGHT,
-    groupOrganizationOf
-  );
-  if (
-    organizations.some(
-      (org) =>
-        org === undefined || (org !== null && org !== caller.organizationId)
-    )
-  ) {
+  if (!(await groupsInReach(caller, newGroups))) {
     throw new BadRequestError("invalid_share", SHARE_OTHER_ORGANIZATION);
   }
   return newGroups;
+};
+
+/**
+ * Whether every one of `groupIds` is global or of the caller's signed-in
+ * organization (false for a group the directory does not have): the groups a
+ * caller may share with, or a file source's owner grant to. Asks tereo: never
+ * inside a transaction.
+ */
+export const groupsInReach = async (
+  caller: Caller,
+  groupIds: readonly string[]
+): Promise<boolean> => {
+  const organizations = await mapConcurrently(
+    groupIds,
+    GROUP_READS_IN_FLIGHT,
+    groupOrganizationOf
+  );
+  return organizations.every(
+    (org) =>
+      org !== undefined && (org === null || org === caller.organizationId)
+  );
 };
 
 /**

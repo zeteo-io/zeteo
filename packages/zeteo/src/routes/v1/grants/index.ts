@@ -1,4 +1,5 @@
-import { requirePermission } from "../../../middleware/auth.js";
+import { sourceOfBodyTable, sourceOfListQuery } from "./middleware.js";
+import { allowOwnerOr } from "../../../middleware/fileSourceOwner.js";
 import { createGrant, listGrants } from "./controllers.js";
 import grantRouter from "./grant/index.js";
 import express, { Router } from "express";
@@ -13,7 +14,14 @@ const json64k = express.json({ limit: "64kb" });
 
 grantsRouter.use("/:grantId", grantRouter);
 
-grantsRouter.get("/", requirePermission(GRANTS_READ), listGrants);
-grantsRouter.post("/", requirePermission(GRANTS_WRITE), json64k, createGrant);
+// A file source's owner may list and create grants on its tables.
+grantsRouter.get("/", allowOwnerOr(GRANTS_READ, sourceOfListQuery), listGrants);
+grantsRouter.post(
+  "/",
+  allowOwnerOr(GRANTS_WRITE),
+  json64k,
+  allowOwnerOr(GRANTS_WRITE, sourceOfBodyTable),
+  createGrant
+);
 
 export default grantsRouter;
