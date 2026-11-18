@@ -3,6 +3,7 @@ import type { SourceType } from "../api/types";
 const TYPE_NAMES: Record<SourceType, string> = {
   postgres: "PostgreSQL",
   "azure-sql": "Azure SQL",
+  upload: "Upload",
 };
 
 /** A source type by its product name. */

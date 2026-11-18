@@ -1,0 +1,41 @@
+import { ErrorNotice } from "@/components/ErrorNotice";
+import type { ApiError } from "@/lib/api";
+import { Alert } from "@kosmeo-ui/react";
+import { listRows } from "./labels";
+
+/**
+ * A failed load or retype. A `cast_failed` names the column and the rows whose
+ * values do not fit its type (the uploader's own data); any other failure is
+ * the usual notice.
+ */
+export const LoadFailure = ({ error }: { error: ApiError | null }) => {
+  if (error?.code !== "cast_failed" || !error.cast) {
+    return <ErrorNotice error={error} />;
+  }
+  const { table, column, rows } = error.cast;
+  return (
+    <Alert variant="danger">
+      <p>
+        Column <strong>{column}</strong>
+        {table && (
+          <>
+            {" "}
+            of <strong>{table}</strong>
+          </>
+        )}{" "}
+        has values that do not fit its type
+        {rows.length > 0 && (
+          <>
+            {" "}
+            (row{rows.length > 1 ? "s" : ""} {listRows(rows)} of the file)
+          </>
+        )}
+        .
+      </p>
+      <p>
+        Choose another type (Text always fits), or fix the file. Nothing was
+        changed.
+      </p>
+    </Alert>
+  );
+};

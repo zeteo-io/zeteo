@@ -1,5 +1,7 @@
+import { fileSourceHref } from "@/features/file-sources/components/labels";
 import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { PrincipalLabel } from "@/features/principals";
 import { useAllSources } from "../api/useAllSources";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
@@ -25,11 +27,12 @@ const FILTERS: InfiniteScrollMenuFilter[] = [
   { type: "SEARCH", title: "Search", dataKey: "q" },
   {
     type: "SELECT",
-    title: "Database",
+    title: "Kind",
     dataKey: "type",
     options: [
       { id: "postgres", name: "PostgreSQL", selected: false },
       { id: "azure-sql", name: "Azure SQL", selected: false },
+      { id: "upload", name: "Upload", selected: false },
     ],
   },
 ];
@@ -96,7 +99,14 @@ export const SourcesPage = () => {
               title: "Name",
               cellElement: (source) => (
                 <span className="z-sources-name">
-                  <TableCellLink as={Link} to={`/sources/${source.id}`}>
+                  <TableCellLink
+                    as={Link}
+                    to={
+                      source.type === "upload"
+                        ? fileSourceHref(source.id)
+                        : `/sources/${source.id}`
+                    }
+                  >
                     {source.name}
                   </TableCellLink>
                   <code className="z-muted">{source.slug}</code>
@@ -104,8 +114,19 @@ export const SourcesPage = () => {
               ),
             },
             {
-              title: "Database",
+              title: "Kind",
               cellElement: (source) => sourceTypeName(source.type),
+            },
+            {
+              title: "Owner",
+              cellElement: (source) =>
+                source.owner_id ? (
+                  <PrincipalLabel
+                    refValue={{ type: "user", id: source.owner_id }}
+                  />
+                ) : (
+                  <span className="z-muted">—</span>
+                ),
             },
             {
               title: "Status",

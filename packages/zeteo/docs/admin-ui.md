@@ -17,8 +17,10 @@ exercised end to end by `e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and
 | `UI_TEREO_URL` | `TEREO_URL` | The Tereo URL the browser calls. It is published to browsers at `/ui-config.json`. It must be `https` when `PUBLIC_URL` is `https` (a page served over https cannot call an http origin: browsers block mixed content); under an `http` `PUBLIC_URL` an `http` URL is accepted, in production too. It may carry no credentials, query or fragment. Set it whenever `TEREO_URL` is an internal address |
 | `UI_DIST_PATH` | `packages/zeteo-ui/dist` | The UI build to serve; a relative path resolves from `packages/zeteo`. Without an `index.html` there the UI is not served, and the start log says why |
 
-`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "..." }`, needs no sign-in and
-answers whenever `UI_CLIENT_ID` is set, build or not.
+`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "...", "file_sources": true }`,
+needs no sign-in and answers whenever `UI_CLIENT_ID` is set, build or not. `file_sources` is true
+when `FILE_SOURCES_READER_URL` is set (its value is never sent); the UI shows File Sources only
+then.
 
 ## The login client in Tereo
 
@@ -78,7 +80,8 @@ someone holding its permission; a person with no zeteo admin permission at all s
 page and no sections.
 
 - **Sources** (`zeteo.sources.read`, changes with `.write`): the registered databases with their
-  status. A new source takes its connection (host, port, database, login, TLS mode and an optional
+  status, and file sources with their owner, filtered by kind; a file source links to its page
+  under My Zeteo. A new source takes its connection (host, port, database, login, TLS mode and an optional
   CA certificate), its schemas and its limits. A source's page runs **Test** (does the login hold
   rights a read-only one would not), **Refresh** (reads the catalogue again and says what changed),
   edits and archives it.
@@ -109,6 +112,17 @@ page and no sections.
   extend your access." and carries no query or source. Sharing searches people with
   `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
   The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
+  With `zeteo.file_sources.write`, while File Sources are on, My Zeteo has a **My data** tab: the
+  person's own file sources (tables, last load, size; Delete). **Add data** (`/my/data/new`)
+  uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
+  keep, their names, the header row, and each column's name and type with sample values and the
+  parse warnings; a value that does not fit its type names the column and rows. A file source's
+  page (`/my/data/<id>`, also reached by admins from Sources) lists its tables (rows, when last
+  loaded, columns with type and description) with **Re-upload** and remove per table and a
+  column dialog to rename, retype (warning that saved queries using it may stop working) or
+  describe it; **Add tables**, **Rename**, **Transfer** and **Delete** in its header; and a
+  **Shared with** tab listing every grant on its tables, the owner's own marked and locked, where
+  **Share** grants a table (all columns or chosen ones) to a person or group.
 
 - **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
   Its tabs list the person's own dashboards and those shared with them, and their saved panels

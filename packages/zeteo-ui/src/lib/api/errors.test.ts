@@ -45,6 +45,23 @@ describe("toApiError", () => {
     expect(err.problems).toEqual([{ setting: "y.1", problem: "wrong_type" }]);
   });
 
+  it("keeps the table, column and rows of a cast_failed", () => {
+    const err = toApiError(
+      axiosError(422, {
+        error: "cast_failed",
+        error_description: "Column amount has values that are not of its type",
+        table: "orders",
+        column: "amount",
+        rows: [3, 7],
+      })
+    );
+    expect(err.cast).toEqual({
+      table: "orders",
+      column: "amount",
+      rows: [3, 7],
+    });
+  });
+
   it("maps a network failure to status null and code network", () => {
     const err = toApiError(new AxiosError("Network Error", "ERR_NETWORK"));
     expect(err.status).toBeNull();

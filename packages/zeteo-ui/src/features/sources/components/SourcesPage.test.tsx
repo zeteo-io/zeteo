@@ -6,11 +6,12 @@ import userEvent from "@testing-library/user-event";
 import { SourcesPage } from "./SourcesPage";
 
 const get = vi.hoisted(() => vi.fn());
+const post = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: ["zeteo.sources.write"] }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
     permissions: () => held.permissions,
-    api: { get },
+    api: { get, post },
   })
 );
 
@@ -96,16 +97,64 @@ describe("SourcesPage", () => {
     expect(screen.getByText("Orders DB")).toBeInTheDocument();
   });
 
-  it("filters by database, and says when nothing matches", async () => {
+  it("filters by kind, and says when nothing matches", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SourcesPage />);
     await screen.findByText("Orders DB");
-    await user.click(screen.getByRole("button", { name: /Database/ }));
+    await user.click(screen.getByRole("button", { name: /Kind/ }));
     await user.click(screen.getByRole("checkbox", { name: "Azure SQL" }));
     expect(
       await screen.findByText("No sources match these filters.")
     ).toBeInTheDocument();
     expect(screen.queryByText("Orders DB")).not.toBeInTheDocument();
+  });
+
+  it("lists file sources with their owner, linking to their own page, and filters them by kind", async () => {
+    const user = userEvent.setup();
+    const ownerId = "9c3f2d20-3e9c-4c75-9f20-8c5d3e4f6a88";
+    const upload = makeSource({
+      id: "6e1f0a0e-1c7a-4a53-9d0e-6a3b1f2c4d99",
+      slug: "q3-sales",
+      name: "Q3 sales",
+      type: "upload",
+      settings: null,
+      schemas: [],
+      owner_id: ownerId,
+      last_refreshed_at: null,
+    });
+    get.mockResolvedValue({
+      data: { data: [makeSource(), upload], next_cursor: null },
+    });
+    post.mockResolvedValue({
+      data: {
+        data: [
+          {
+            type: "user",
+            id: ownerId,
+            name: "Olive Owner",
+            email: "olive@example.com",
+            status: "active",
+          },
+        ],
+      },
+    });
+    renderWithProviders(<SourcesPage />);
+    const link = await screen.findByRole("link", { name: "Q3 sales" });
+    expect(link).toHaveAttribute("href", `/my/data/${upload.id}`);
+    const row = link.closest("tr")!;
+    expect(row).toHaveTextContent("Upload");
+    await waitFor(() => expect(row).toHaveTextContent("Olive Owner"));
+    // A database source has no owner.
+    expect(
+      screen.getByRole("link", { name: "Orders DB" }).closest("tr")
+    ).toHaveTextContent("—");
+
+    await user.click(screen.getByRole("button", { name: /Kind/ }));
+    await user.click(screen.getByRole("checkbox", { name: "Upload" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Orders DB")).not.toBeInTheDocument()
+    );
+    expect(screen.getByText("Q3 sales")).toBeInTheDocument();
   });
 
   it("says there are no sources yet when there are none", async () => {

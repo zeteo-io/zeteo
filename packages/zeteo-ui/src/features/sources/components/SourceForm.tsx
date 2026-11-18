@@ -29,7 +29,7 @@ import type {
   CreateSource,
   Source,
   SourceSettings,
-  SourceType,
+  DatabaseType,
   UpdateSource,
 } from "../api/types";
 
@@ -97,7 +97,7 @@ type Limits = Record<NumberField["key"], string>;
 const shownPaths = (
   creating: boolean,
   connectionOpen: boolean,
-  type: SourceType,
+  type: DatabaseType,
   tls: string
 ): string[] => [
   ...(creating ? ["slug"] : []),
@@ -126,7 +126,7 @@ const parseSchemas = (text: string): string[] =>
 const sameList = (a: string[], b: string[]) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
-const isTls = (type: SourceType, value: unknown): value is string =>
+const isTls = (type: DatabaseType, value: unknown): value is string =>
   typeof value === "string" && TLS_MODES[type].includes(value);
 
 const connectionOf = (source: Source): ConnectionState => {
@@ -135,17 +135,17 @@ const connectionOf = (source: Source): ConnectionState => {
     typeof v === "string" || typeof v === "number" ? String(v) : fallback;
   return {
     host: text(s.host),
-    port: text(s.port, DEFAULT_PORT[source.type]),
+    port: text(s.port, DEFAULT_PORT[source.type as DatabaseType]),
     database: text(s.database),
     user: text(s.user),
     password: "",
-    tls: isTls(source.type, s.tls) ? s.tls : "verify",
+    tls: isTls(source.type as DatabaseType, s.tls) ? s.tls : "verify",
     ca: "",
   };
 };
 
 const buildSettings = (
-  type: SourceType,
+  type: DatabaseType,
   c: ConnectionState
 ): SourceSettings => {
   const port = parseNumberField(c.port);
@@ -185,7 +185,9 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
   // The slug follows the name until it is edited by hand.
   const [slugEdited, setSlugEdited] = useState(false);
   const [name, setName] = useState(source?.name ?? "");
-  const [type, setType] = useState<SourceType>(source?.type ?? "postgres");
+  const [type, setType] = useState<DatabaseType>(
+    (source?.type as DatabaseType | undefined) ?? "postgres"
+  );
   const [connectionOpen, setConnectionOpen] = useState(!source);
   const [conn, setConn] = useState<ConnectionState>(
     source ? connectionOf(source) : emptyConnection("postgres")
@@ -253,7 +255,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     mutation.reset();
   };
 
-  const changeType = (next: SourceType) => {
+  const changeType = (next: DatabaseType) => {
     loginChanged();
     edited("settings.port", "settings.tls", "settings.ca");
     setConn((c) => ({
@@ -327,7 +329,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     if (exportEnabled !== src.export_enabled)
       body.export_enabled = exportEnabled;
     if (connectionOpen) {
-      body.settings = buildSettings(src.type, conn);
+      body.settings = buildSettings(type, conn);
       if (allowWritable) body.allow_writable_login = true;
     }
     return body;
@@ -383,12 +385,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
     );
   }
 
-  const fieldPaths = shownPaths(
-    !source,
-    connectionOpen,
-    source?.type ?? type,
-    conn.tls
-  );
+  const fieldPaths = shownPaths(!source, connectionOpen, type, conn.tls);
   const allIssuesShown =
     serverError?.status === 400 &&
     (serverError.issues?.length ?? 0) > 0 &&
@@ -477,7 +474,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
               <div>
                 <div className="z-field-label">Database</div>
                 <div className="z-segmented" role="group" aria-label="Database">
-                  {(["postgres", "azure-sql"] as SourceType[]).map((t) => (
+                  {(["postgres", "azure-sql"] as DatabaseType[]).map((t) => (
                     <button
                       key={t}
                       type="button"
@@ -522,7 +519,7 @@ export const SourceForm = ({ source, title }: SourceFormProps) => {
         >
           {connectionOpen ? (
             <ConnectionFields
-              type={source?.type ?? type}
+              type={type}
               value={conn}
               onChange={changeConnection}
               editing={!!source}

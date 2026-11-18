@@ -1,7 +1,10 @@
 // Field for field the OpenAPI `Source`, `CreateSourceRequest`,
 // `UpdateSourceRequest`, `TestSourceResponse` and `RefreshSummary` schemas.
 
-export type SourceType = "postgres" | "azure-sql";
+export type SourceType = "postgres" | "azure-sql" | "upload";
+
+/** The types a person registers a database source with; `upload` sources come from File Sources. */
+export type DatabaseType = Exclude<SourceType, "upload">;
 
 export interface PostgresSettings {
   host: string;
@@ -39,6 +42,8 @@ export interface Source {
   query_concurrency: number;
   export_concurrency: number;
   writable_login_allowed: boolean;
+  /** A file source's owner; null for a database source. */
+  owner_id?: string | null;
   status: "active" | "unreachable";
   last_refreshed_at: string | null;
   created_at: string;

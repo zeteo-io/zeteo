@@ -11,6 +11,8 @@ export interface ApiError {
   problems?: { setting: string; problem: string }[];
   /** Seconds, from `Retry-After`. */
   retryAfter?: number;
+  /** `cast_failed`: the column (and table) whose values do not fit its type, and the first 1-based rows at fault. */
+  cast?: { table?: string; column: string; rows: number[] };
 }
 
 const isApiError = (err: unknown): err is ApiError =>
@@ -23,6 +25,15 @@ const isApiError = (err: unknown): err is ApiError =>
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
+
+const castOf = (body: Record<string, unknown>): ApiError["cast"] =>
+  typeof body.column === "string" && Array.isArray(body.rows)
+    ? {
+        ...(typeof body.table === "string" && { table: body.table }),
+        column: body.column,
+        rows: body.rows.filter((r): r is number => typeof r === "number"),
+      }
+    : undefined;
 
 const issuesOf = (v: unknown): ApiError["issues"] =>
   Array.isArray(v)
@@ -106,6 +117,10 @@ export const toApiError = (err: unknown): ApiError => {
   if (findings) out.findings = findings;
   const problems = problemsOf(body.problems);
   if (problems) out.problems = problems;
+  if (out.code === "cast_failed") {
+    const cast = castOf(body);
+    if (cast) out.cast = cast;
+  }
   const retry = retryAfterSeconds(res.headers?.["retry-after"]);
   if (retry !== undefined) out.retryAfter = retry;
   return out;

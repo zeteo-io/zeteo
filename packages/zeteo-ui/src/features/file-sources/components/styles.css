@@ -1,0 +1,77 @@
+/* File Sources: the upload and preview pages, a source's page and its dialogs. */
+
+/* The preview's column tables need more room than a form page's 48rem. */
+.z-fs-form-page {
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.z-fs-form,
+.z-fs-tables {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.z-fs-reading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 0;
+}
+
+.z-fs-problem {
+  color: var(--k-danger-color);
+}
+
+.z-fs-preview-meta,
+.z-fs-table-meta,
+.z-fs-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1.25rem;
+  margin: 0 0 0.75rem;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+/* Each preview row's fields carry a label for screen readers; the column
+   headings already say what they are. */
+.z-fs-columns .k-field-shell-label-row {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.z-fs-samples {
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+  overflow-wrap: anywhere;
+}
+
+.z-fs-table-names {
+  overflow-wrap: anywhere;
+}
+
+.z-fs-dialog {
+  display: grid;
+  gap: 1rem;
+}
+
+/* A faint link in an empty description cell, for those who may add one. */
+.z-fs-add-description {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--k-text-color-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.z-fs-add-description:hover {
+  color: var(--k-primary-color);
+  text-decoration: underline;
+}

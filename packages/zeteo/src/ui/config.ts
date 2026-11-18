@@ -26,9 +26,10 @@ export const uiEnabled = (): boolean => {
 };
 
 /**
- * The browser's runtime settings, public by design: where tereo is and which
- * login client the UI signs in with. Answers whenever UI_CLIENT_ID is set,
- * even with no build.
+ * The browser's runtime settings, public by design: where tereo is, which
+ * login client the UI signs in with, and whether File Sources are on
+ * (FILE_SOURCES_READER_URL is set; never its value). Answers whenever
+ * UI_CLIENT_ID is set, even with no build.
  */
 export const uiConfigRouter = Router();
 
@@ -39,5 +40,6 @@ uiConfigRouter.get("/ui-config.json", (_req, res) => {
   res.set("Cache-Control", "no-cache").json({
     tereo_url: env.UI_TEREO_URL,
     client_id: env.UI_CLIENT_ID,
+    file_sources: !!env.FILE_SOURCES_READER_URL,
   });
 });

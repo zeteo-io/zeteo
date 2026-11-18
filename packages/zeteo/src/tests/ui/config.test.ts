@@ -40,6 +40,7 @@ describe("GET /ui-config.json", () => {
       UI_CLIENT_ID: "zeteo-ui",
       UI_TEREO_URL: "https://core.example.com/",
       TEREO_URL: "http://tereo.internal:4001",
+      FILE_SOURCES_READER_URL: "",
     });
     const res = await fetch(`${url}/ui-config.json`);
     expect(res.status).toBe(200);
@@ -47,18 +48,36 @@ describe("GET /ui-config.json", () => {
     expect(await res.json()).toEqual({
       tereo_url: "https://core.example.com",
       client_id: "zeteo-ui",
+      file_sources: false,
     });
+  });
+
+  it("says File Sources are on when FILE_SOURCES_READER_URL is set", async () => {
+    const url = await serve({
+      UI_CLIENT_ID: "zeteo-ui",
+      TEREO_URL: "https://tereo.example.com",
+      FILE_SOURCES_READER_URL:
+        "postgresql://reader:secret@db.internal:5432/zeteo",
+    });
+    const body = (await (await fetch(`${url}/ui-config.json`)).json()) as {
+      file_sources: unknown;
+    };
+    expect(body.file_sources).toBe(true);
+    // Only the switch: never the reader's address or credentials.
+    expect(JSON.stringify(body)).not.toContain("reader");
   });
 
   it("falls back to TEREO_URL when UI_TEREO_URL is unset", async () => {
     const url = await serve({
       UI_CLIENT_ID: "zeteo-ui",
       TEREO_URL: "https://tereo.example.com",
+      FILE_SOURCES_READER_URL: "",
     });
     const res = await fetch(`${url}/ui-config.json`);
     expect(await res.json()).toEqual({
       tereo_url: "https://tereo.example.com",
       client_id: "zeteo-ui",
+      file_sources: false,
     });
   });
 
