@@ -3,7 +3,7 @@ export type MyTab =
 
 export const TABS: { id: MyTab; label: string }[] = [
   { id: "overview", label: "Overview" },
-  // File Sources: shown only with `zeteo.file_sources.write` while they are on.
+  // Uploads: shown only with `zeteo.uploads.write` while they are on.
   { id: "sources", label: "My sources" },
   { id: "mine", label: "My saved queries" },
   { id: "shared", label: "Shared with me" },

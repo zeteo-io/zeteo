@@ -1,4 +1,4 @@
-import { allowOwnerOr } from "../../../../../../middleware/fileSourceOwner.js";
+import { allowOwnerOr } from "../../../../../../middleware/uploadOwner.js";
 import { sourceOfParams } from "../../middleware.js";
 import columnsRouter from "./columns/index.js";
 import express, { Router } from "express";

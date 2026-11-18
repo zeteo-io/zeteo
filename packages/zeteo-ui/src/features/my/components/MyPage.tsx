@@ -1,11 +1,11 @@
-import { FILE_SOURCES_WRITE, MyDataPanel } from "@/features/sources";
 import { BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
+import { UPLOADS_WRITE, MyDataPanel } from "@/features/sources";
 import type { SavedQuery } from "@/features/saved-queries";
 import { RecentSavedQueries } from "./RecentSavedQueries";
 import { isTab, TABS, tabHref, type MyTab } from "./tabs";
-import { useFileSourcesEnabled } from "@/lib/useUiConfig";
 import { Link, useSearchParams } from "react-router-dom";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { useUploadsEnabled } from "@/lib/useUiConfig";
 import { PageHeader } from "@/components/PageHeader";
 import { SavedQueryCard } from "./SavedQueryCard";
 import { CatalogList } from "./CatalogPanel";
@@ -77,9 +77,8 @@ const ViewAll = ({ tab, children }: { tab: MyTab; children: string }) => (
 export const MyPage = () => {
   const [params] = useSearchParams();
   const { user, hasPermission } = useAuth<Me>();
-  const fileSources =
-    useFileSourcesEnabled() === true && hasPermission(FILE_SOURCES_WRITE);
-  const tabs = TABS.filter((t) => t.id !== "sources" || fileSources);
+  const uploads = useUploadsEnabled() === true && hasPermission(UPLOADS_WRITE);
+  const tabs = TABS.filter((t) => t.id !== "sources" || uploads);
   const raw = params.get("tab");
   const tab: MyTab =
     isTab(raw) && tabs.some((t) => t.id === raw) ? raw : "overview";

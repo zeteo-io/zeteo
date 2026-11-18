@@ -34,7 +34,7 @@ describe("loadConfig", () => {
     await expect(loadConfig()).resolves.toEqual({
       tereoUrl: "https://tereo.example.com",
       clientId: "zeteo-ui",
-      fileSources: false,
+      uploads: false,
     });
     expect(fetchMock).toHaveBeenCalledWith(
       "/ui-config.json",
@@ -63,16 +63,16 @@ describe("loadConfig", () => {
     [false, false],
     ["true", false],
     [undefined, false],
-  ])("reads file_sources %s as %s", async (raw, on) => {
+  ])("reads uploads %s as %s", async (raw, on) => {
     fetchMock.mockResolvedValue(
       jsonResponse(200, {
         tereo_url: "https://t.example",
         client_id: "c",
-        file_sources: raw,
+        uploads: raw,
       })
     );
     const { loadConfig } = await load();
-    expect((await loadConfig()).fileSources).toBe(on);
+    expect((await loadConfig()).uploads).toBe(on);
   });
 
   it("fetches once however often it is asked", async () => {

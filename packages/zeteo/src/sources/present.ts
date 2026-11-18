@@ -1,9 +1,9 @@
 import type { Source } from "../../prisma/generated/client/index.js";
 import { sourceView, type SourceView } from "../views/source.js";
-import { sourceStoredBytes } from "../file-sources/storage.js";
+import { sourceStoredBytes } from "../uploads/storage.js";
 import { NotFoundError } from "../utils/errors.js";
 import { prisma } from "../utils/db/prisma.js";
-import { isFileSource } from "./types.js";
+import { isUploadSource } from "./types.js";
 
 /**
  * Per source, how many people and groups its tables are shared with: the
@@ -55,9 +55,9 @@ const lastLoads = async (ids: string[]): Promise<Map<string, Date>> => {
 export const presentSources = async (rows: Source[]): Promise<SourceView[]> => {
   const ids = rows.map((r) => r.id);
   const stored = rows
-    .filter((r) => isFileSource(r) && !r.archivedAt)
+    .filter((r) => isUploadSource(r) && !r.archivedAt)
     .map((r) => r.id);
-  const uploads = rows.filter(isFileSource).map((r) => r.id);
+  const uploads = rows.filter(isUploadSource).map((r) => r.id);
   const [shares, bytes, loads] = await Promise.all([
     shareCounts(ids),
     sourceStoredBytes(stored),
@@ -67,7 +67,7 @@ export const presentSources = async (rows: Source[]): Promise<SourceView[]> => {
     sourceView(r, {
       shareCount: shares.get(r.id) ?? 0,
       storedBytes: bytes.get(r.id) ?? 0,
-      ...(isFileSource(r) && { lastLoadedAt: loads.get(r.id) ?? null }),
+      ...(isUploadSource(r) && { lastLoadedAt: loads.get(r.id) ?? null }),
     })
   );
 };

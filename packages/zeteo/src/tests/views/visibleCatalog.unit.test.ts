@@ -69,13 +69,13 @@ describe("visibleCatalogView", () => {
   });
 });
 
-describe("visibleCatalogView file sources", () => {
+describe("visibleCatalogView upload sources", () => {
   it("shows last_synced_at for an upload table, null for a database table, and the source kind", () => {
     const at = new Date("2026-11-17T10:00:00.000Z");
     const upload = visibleCatalogView(
       catalog({
         source: { ...catalog().source, type: "upload" },
-        tables: [{ ...table("t", "zf_a", "people"), lastSyncedAt: at }],
+        tables: [{ ...table("t", "zu_a", "people"), lastSyncedAt: at }],
         relations: [],
       }),
       {}

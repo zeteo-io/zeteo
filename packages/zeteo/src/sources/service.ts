@@ -1,8 +1,8 @@
 import type { LoginFinding, SourceAdapter } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { isUploadSource, storedType, typeOf } from "./types.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
-import { isFileSource, storedType, typeOf } from "./types.js";
 import { sealSettings } from "../utils/crypto/envelope.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
@@ -53,7 +53,7 @@ export type CreateSourceInput = Pick<
 
 export type UpdateSourceInput = Partial<SourceFields>;
 
-/** The per-source limits: the only fields a change of a file source may set here. */
+/** The per-source limits: the only fields a change of an upload source may set here. */
 const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
   "timeout_ms",
   "row_cap",
@@ -194,16 +194,16 @@ export const createSource = async (
   });
 };
 
-/** Refuses a file source: its uploads, not these routes, manage it. */
-const refuseFileSource = (row: Pick<Source, "type">): void => {
-  if (isFileSource(row)) throw new NotADatabaseSourceError();
+/** Refuses an upload source: its uploads, not these routes, manage it. */
+const refuseUploadSource = (row: Pick<Source, "type">): void => {
+  if (isUploadSource(row)) throw new NotADatabaseSourceError();
 };
 
 /** An unarchived database source. */
 const requireActive = async (id: string): Promise<Source> => {
   const row = await db.sources.findById(id);
   if (!row) throw new NotFoundError("Source not found");
-  refuseFileSource(row);
+  refuseUploadSource(row);
   if (row.archivedAt) throw new SourceArchivedError();
   return row;
 };
@@ -222,7 +222,7 @@ export const updateSource = async (
   // An upload source's name and limits are an admin's, as a database
   // source's; its settings and schemas are managed through its uploads.
   if (
-    isFileSource(row) &&
+    isUploadSource(row) &&
     Object.keys(input).some(
       (key) => key !== "name" && !LIMIT_FIELDS.has(key as keyof SourceFields)
     )
@@ -300,8 +300,8 @@ export const archiveSource = async (
   await withAudit(async (tx, audit) => {
     const row = await tx.source.findUnique({ where: { id } });
     if (!row) throw new NotFoundError("Source not found");
-    // A file source is archived by deleting it, which also drops its data.
-    refuseFileSource(row);
+    // An upload source is archived by deleting it, which also drops its data.
+    refuseUploadSource(row);
     const { count } = await tx.source.updateMany({
       where: { id, archivedAt: null },
       data: { archivedAt: new Date() },

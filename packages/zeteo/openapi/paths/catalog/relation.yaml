@@ -12,7 +12,7 @@
       **Upload-source owners:** the owner of an upload source is admitted here for its own tables
       and relations without `zeteo.sources.write`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
       **Errors:** `400 invalid_request`, `404 not_found` (also a relation of another source),
       `409 relation_name_taken`, `409 source_archived`.
@@ -48,7 +48,7 @@
       Removes a declared relation. A discovered relation comes from a foreign key and cannot be
       removed. An audit entry `zeteo.relation.removed` is written.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
       **Errors:** `404 not_found` (also a relation of another source), `409 relation_discovered`,
       `409 source_archived`.

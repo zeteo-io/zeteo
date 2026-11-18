@@ -11,17 +11,17 @@ import { fetchJson } from "../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   GRANTS_READ,
 } from "../../../../../definitions/tereoDeclaration.js";
-import {
-  removeUploadSources,
-  seedUploadSource,
-} from "../../../../support/fileSources.js";
 import {
   clearDirectory,
   seedDirectory,
 } from "../../../../support/principals.js";
+import {
+  removeUploadSources,
+  seedUploadSource,
+} from "../../../../support/uploads.js";
 
 const tag = randomUUID().slice(0, 8);
 const ownerId = randomUUID();
@@ -55,9 +55,9 @@ const TABLE = {
 };
 
 const ownerToken = () =>
-  tokenFor({ userId: ownerId, permissions: [DATA_READ, FILE_SOURCES_WRITE] });
+  tokenFor({ userId: ownerId, permissions: [DATA_READ, UPLOADS_WRITE] });
 
-describe("POST /v1/principals/lookup for a file source owner", () => {
+describe("POST /v1/principals/lookup for an upload source owner", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   const sources: string[] = [];
 
@@ -148,7 +148,7 @@ describe("POST /v1/principals/lookup for a file source owner", () => {
   it("counts an owner's lookups against the search rate limit", async () => {
     const token = tokenFor({
       userId: randomUUID(),
-      permissions: [DATA_READ, FILE_SOURCES_WRITE],
+      permissions: [DATA_READ, UPLOADS_WRITE],
     });
     for (let i = 0; i < SEARCH_LIMIT_PER_MINUTE; i++) {
       expect((await lookup([{ type: "user", id: ADA }], token)).status).toBe(

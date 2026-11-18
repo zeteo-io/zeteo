@@ -17,9 +17,9 @@ exercised end to end by `e2e/tests/me.e2e.test.ts`, `directory.e2e.test.ts` and
 | `UI_TEREO_URL` | `TEREO_URL` | The Tereo URL the browser calls. It is published to browsers at `/ui-config.json`. It must be `https` when `PUBLIC_URL` is `https` (a page served over https cannot call an http origin: browsers block mixed content); under an `http` `PUBLIC_URL` an `http` URL is accepted, in production too. It may carry no credentials, query or fragment. Set it whenever `TEREO_URL` is an internal address |
 | `UI_DIST_PATH` | `packages/zeteo-ui/dist` | The UI build to serve; a relative path resolves from `packages/zeteo`. Without an `index.html` there the UI is not served, and the start log says why |
 
-`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "...", "file_sources": true }`,
-needs no sign-in and answers whenever `UI_CLIENT_ID` is set, build or not. `file_sources` is true
-when `FILE_SOURCES_READER_URL` is set (its value is never sent); the UI shows File Sources only
+`GET /ui-config.json` returns `{ "tereo_url": "...", "client_id": "...", "uploads": true }`,
+needs no sign-in and answers whenever `UI_CLIENT_ID` is set, build or not. `uploads` is true
+when `UPLOADS_READER_URL` is set (its value is never sent); the UI shows Uploads only
 then.
 
 ## The login client in Tereo
@@ -80,16 +80,16 @@ someone holding its permission; a person with no zeteo admin permission at all s
 page and no sections.
 
 - **Sources** (`zeteo.sources.read`, changes with `.write`): the registered databases with their
-  status, and file sources with their owner, filtered by kind; every source links to its page,
+  status, and upload sources with their owner, filtered by kind; every source links to its page,
   `/sources/<id>`. A new source takes its connection (host, port, database, login, TLS mode and an optional
   CA certificate), its schemas and its limits. A source's page runs **Test** (does the login hold
   rights a read-only one would not), **Refresh** (reads the catalogue again and says what changed),
   edits and archives it.
-- A source's page, `/sources/<id>` for a database and a file source alike, has one header (name, slug, kind and status, with the actions of its kind) and the tabs
+- A source's page, `/sources/<id>` for a database and an upload source alike, has one header (name, slug, kind and status, with the actions of its kind) and the tabs
   **Overview**, **Tables**, **Relations** and **Shared with**. Overview shows the querying and
   export limits, and for a database the catalogue (schemas, last refresh, size on disk of its
   schemas' tables as measured at that refresh, "Unknown" when it could not be read) and the
-  connection; for a file source its owner, size, tables and when it was added. With
+  connection; for an upload source its owner, size, tables and when it was added. With
   `zeteo.sources.write`, the Querying and Exports sections each have an **Edit** that opens the
   limits dialog (time limit, row cap, concurrency, exports), for both kinds of source.
 - **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
@@ -121,15 +121,15 @@ page and no sections.
   extend your access." and carries no query or source. Sharing searches people with
   `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
   The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
-  With `zeteo.file_sources.write`, while File Sources are on, My Zeteo has a **My sources** tab: the
-  person's own file sources (name, size, how many people and groups it is shared with, when it
+  With `zeteo.uploads.write`, while Uploads are on, My Zeteo has a **My sources** tab: the
+  person's own upload sources (name, size, how many people and groups it is shared with, when it
   was added; Delete). **Add data** (`/my/data/new`)
   uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
   keep, their names, the header row, and each column's name and type with sample values and the
   parse warnings; a value that does not fit its type names the column and rows. Leaving Add
   data, Add tables or Re-upload without creating discards the upload. Creating lands on the new
-  source's page. A file source's page (`/sources/<id>`, reached by its owner from My sources and
-  by admins from Sources; its owner needs only `zeteo.file_sources.write`) is the same page as a
+  source's page. An upload source's page (`/sources/<id>`, reached by its owner from My sources and
+  by admins from Sources; its owner needs only `zeteo.uploads.write`) is the same page as a
   database source's (above). Its Tables list adds each table's rows and last load; a table's page adds
   **Re-upload**, remove and, per column, a dialog to rename or retype it (warning that saved
   queries using it may stop working); its header has **Add tables**, **Transfer**, **Edit** (its
@@ -239,13 +239,13 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
 | `GET /v1/principals/all` | `zeteo.grants.read` | `{ data: Principal[], truncated }`: every user (service accounts included) and every live group, by name, for the admin pages' "Who" filters |
-| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.file_sources.write` with `zeteo.data.read` (then only for principals granted on the caller's own file sources, other ids answered `orphaned`, and counted against the search limit) | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
+| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.uploads.write` with `zeteo.data.read` (then only for principals granted on the caller's own upload sources, other ids answered `orphaned`, and counted against the search limit) | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 | `GET /v1/me/principals/all` | `zeteo.data.read` | `{ data: Principal[], truncated }` as `GET /v1/principals/all`, over the people and groups `GET /v1/me/principals` searches; the "Who" filter of an upload source's owner |
 
-The saved queries the UI manages are in [saved-queries.md](saved-queries.md), and File Sources in
-[file-sources.md](file-sources.md).
+The saved queries the UI manages are in [saved-queries.md](saved-queries.md), and Uploads in
+[uploads.md](uploads.md).
 
 A `Principal` is `{ type, id, name, email?, status }`, with `email` for users only and `status`
 `active`, `inactive` or `orphaned`.

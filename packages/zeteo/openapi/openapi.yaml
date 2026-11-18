@@ -30,11 +30,11 @@ info:
     relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
     `403 forbidden`, before the body is validated or any source is looked up.
 
-    An upload source (`type: upload`, a file source made from an uploaded CSV or xlsx while File
-    Sources are on) belongs to the user who made it. Its owner, holding `zeteo.file_sources.write`
+    An upload source (`type: upload`, an upload source made from an uploaded CSV or xlsx while File
+    Sources are on) belongs to the user who made it. Its owner, holding `zeteo.uploads.write`
     and `zeteo.data.read`, reads, renames, transfers and deletes it, changes its tables and columns
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
-    as a source they may not see does. See `docs/file-sources.md`.
+    as a source they may not see does. See `docs/uploads.md`.
 
     ## Sources
 
@@ -400,30 +400,30 @@ components:
       $ref: './components/queries/schemas.yaml#/DiscoveredSource'
     CatalogResponse:
       $ref: './components/queries/schemas.yaml#/CatalogResponse'
-    FileColumnType:
-      $ref: './components/file-sources/schemas.yaml#/FileColumnType'
-    FileColumnName:
-      $ref: './components/file-sources/schemas.yaml#/FileColumnName'
+    UploadColumnType:
+      $ref: './components/uploads/schemas.yaml#/UploadColumnType'
+    UploadColumnName:
+      $ref: './components/uploads/schemas.yaml#/UploadColumnName'
     StagedColumn:
-      $ref: './components/file-sources/schemas.yaml#/StagedColumn'
+      $ref: './components/uploads/schemas.yaml#/StagedColumn'
     StagedTable:
-      $ref: './components/file-sources/schemas.yaml#/StagedTable'
+      $ref: './components/uploads/schemas.yaml#/StagedTable'
     UploadResponse:
-      $ref: './components/file-sources/schemas.yaml#/UploadResponse'
+      $ref: './components/uploads/schemas.yaml#/UploadResponse'
     ColumnCorrection:
-      $ref: './components/file-sources/schemas.yaml#/ColumnCorrection'
+      $ref: './components/uploads/schemas.yaml#/ColumnCorrection'
     TableCorrection:
-      $ref: './components/file-sources/schemas.yaml#/TableCorrection'
+      $ref: './components/uploads/schemas.yaml#/TableCorrection'
     CreateUploadSourceRequest:
-      $ref: './components/file-sources/schemas.yaml#/CreateUploadSourceRequest'
+      $ref: './components/uploads/schemas.yaml#/CreateUploadSourceRequest'
     AddTablesRequest:
-      $ref: './components/file-sources/schemas.yaml#/AddTablesRequest'
+      $ref: './components/uploads/schemas.yaml#/AddTablesRequest'
     ReuploadTableRequest:
-      $ref: './components/file-sources/schemas.yaml#/ReuploadTableRequest'
-    UpdateFileColumnRequest:
-      $ref: './components/file-sources/schemas.yaml#/UpdateFileColumnRequest'
+      $ref: './components/uploads/schemas.yaml#/ReuploadTableRequest'
+    UpdateUploadColumnRequest:
+      $ref: './components/uploads/schemas.yaml#/UpdateUploadColumnRequest'
     TransferSourceRequest:
-      $ref: './components/file-sources/schemas.yaml#/TransferSourceRequest'
+      $ref: './components/uploads/schemas.yaml#/TransferSourceRequest'
     SavedQuery:
       $ref: './components/saved-queries/schemas.yaml#/SavedQuery'
     ListSavedQueriesResponse:

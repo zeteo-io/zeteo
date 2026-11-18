@@ -1,4 +1,4 @@
-import { grantPrincipalsOfOwnedSources } from "../../../../file-sources/ownership.js";
+import { grantPrincipalsOfOwnedSources } from "../../../../uploads/ownership.js";
 import { validateBody } from "../../../../utils/validateReq.js";
 import { LookupPrincipalsBodySchema } from "./schemas.js";
 import { callerOf } from "../../../../middleware/auth.js";
@@ -13,7 +13,7 @@ import {
 const keyOf = (ref: PrincipalRef) => `${ref.type}:${ref.id}`;
 
 /**
- * For a caller let in only as a file source owner: the principals holding a
+ * For a caller let in only as an upload source owner: the principals holding a
  * grant on a source of theirs are looked up; any other id is answered as one
  * tereo does not know (`orphaned`), so nothing tells the two apart, and tereo
  * is not asked about it.

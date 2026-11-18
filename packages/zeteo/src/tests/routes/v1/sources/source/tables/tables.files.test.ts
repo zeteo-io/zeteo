@@ -11,22 +11,22 @@ import { fetchJson } from "../../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../../../../definitions/tereoDeclaration.js";
 import {
-  createFileSource,
+  createUploadSource,
   csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
   removeUploadSources,
   seedUploadSource,
   sourcesCall,
   stageFile,
   storedTables,
   type UploadTableSpec,
-} from "../../../../../support/fileSources.js";
+} from "../../../../../support/uploads.js";
 
 const CUSTOMERS: UploadTableSpec = {
   name: "customers",
@@ -40,18 +40,18 @@ const CUSTOMERS: UploadTableSpec = {
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const nobody = tokenFor({ permissions: [] });
 const adminId = randomUUID();
 const admin = tokenFor({
   userId: adminId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE, SOURCES_READ, SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE, SOURCES_READ, SOURCES_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 
 const bodyOf = (res: { body: Record<string, unknown> }) => {
@@ -59,7 +59,7 @@ const bodyOf = (res: { body: Record<string, unknown> }) => {
   return rest;
 };
 
-describe("/v1/sources/:sourceId/tables (file sources)", () => {
+describe("/v1/sources/:sourceId/tables (upload sources)", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   let own: Awaited<ReturnType<typeof seedUploadSource>>;
   let others: Awaited<ReturnType<typeof seedUploadSource>>;
@@ -160,7 +160,7 @@ describe("/v1/sources/:sourceId/tables (file sources)", () => {
     expect(res.body.description).toBe("Our customers");
   });
 
-  it("refuses the owner on a database source or another owner's file source, as today", async () => {
+  it("refuses the owner on a database source or another owner's upload source, as today", async () => {
     const dbTable = await prisma.sourceTable.findFirstOrThrow({
       where: { sourceId: databaseSourceId, name: "customers" },
     });
@@ -177,7 +177,7 @@ describe("/v1/sources/:sourceId/tables (file sources)", () => {
     }
   });
 
-  it("refuses an owner who no longer holds zeteo.file_sources.write", async () => {
+  it("refuses an owner who no longer holds zeteo.uploads.write", async () => {
     const lapsed = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
     const res = await patch(
       `/${own.id}/tables/${own.tables.customers!.id}`,
@@ -209,13 +209,13 @@ describe("POST /v1/sources/:sourceId/tables", () => {
   });
   afterAll(async () => {
     await removeRunsOf([ownerId]);
-    await removeFileSourcesOf([ownerId, adminId, otherId]);
+    await removeUploadSourcesOf([ownerId, adminId, otherId]);
     await removeSources([databaseSourceId]);
     await app.close();
   });
 
   it("adds tables from a staging, each with an owner grant", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const staged = await stageFile(ownerId, MORE);
     const res = await call("POST", `/${source.id}/tables`, owner, {
       staging_id: staged.stagingId,
@@ -223,7 +223,7 @@ describe("POST /v1/sources/:sourceId/tables", () => {
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(res.body).toMatchObject({ id: source.id, type: "upload" });
-    const tables = await fileTablesOf(source.id);
+    const tables = await uploadTablesOf(source.id);
     expect(tables.map((t) => t.name)).toEqual(["codes", "data"]);
     const codes = tables.find((t) => t.name === "codes")!;
     expect(codes.row_count).toBe(2);
@@ -247,13 +247,13 @@ describe("POST /v1/sources/:sourceId/tables", () => {
   });
 
   it("gives an admin's added table to the owner, not the admin", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const res = await call("POST", `/${source.id}/tables`, admin, {
       staging_id: (await stageFile(adminId, MORE)).stagingId,
       tables: [{ key: "csv", name: "codes" }],
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    const codes = (await fileTablesOf(source.id)).find(
+    const codes = (await uploadTablesOf(source.id)).find(
       (t) => t.name === "codes"
     )!;
     expect(
@@ -264,7 +264,7 @@ describe("POST /v1/sources/:sourceId/tables", () => {
   });
 
   it("answers 409 name_taken for a table name the source has", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const res = await call("POST", `/${source.id}/tables`, owner, {
       staging_id: (await stageFile(ownerId, MORE)).stagingId,
       tables: [{ key: "csv", name: "data" }],
@@ -275,7 +275,7 @@ describe("POST /v1/sources/:sourceId/tables", () => {
   });
 
   it("answers someone else as it answers anyone without the permission", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const body = {
       staging_id: (await stageFile(otherId, MORE)).stagingId,
       tables: [{ key: "csv", name: "codes" }],

@@ -1,4 +1,5 @@
 import { RequirePermission } from "@/components/RequirePermission";
+import { Suspense, createElement, lazy, useState } from "react";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
 import { DisplaySignedOut } from "@/features/dashboards";
@@ -15,13 +16,6 @@ import {
   Navigate,
   RouterProvider,
 } from "react-router-dom";
-import {
-  Suspense,
-  createElement,
-  lazy,
-  useState,
-  type ComponentType,
-} from "react";
 
 const pages = {
   "/sources": lazy(() =>
@@ -132,31 +126,6 @@ const displayRoute = {
   errorElement: <RouteError />,
 };
 
-const grantNewPage = lazy(() =>
-  import("@/features/grants").then((m) => ({ default: m.GrantNewPage }))
-);
-const grantEditPage = lazy(() =>
-  import("@/features/grants").then((m) => ({ default: m.GrantEditPage }))
-);
-
-const inSuspense = (Page: ComponentType) => (
-  <Suspense fallback={<Spinner size="lg" />}>
-    <Page />
-  </Suspense>
-);
-
-const grantWriteRoutes = [
-  { path: "grants/new", page: grantNewPage },
-  { path: "grants/:grantId/edit", page: grantEditPage },
-].map(({ path, page }) => ({
-  path,
-  element: (
-    <RequirePermission permission="zeteo.grants.write">
-      {inSuspense(page)}
-    </RequirePermission>
-  ),
-}));
-
 export const routes = [
   // Public: the provider lets these render without a session.
   { path: "/callback", element: <Callback />, errorElement: <RouteError /> },
@@ -190,7 +159,6 @@ export const routes = [
         };
       }),
       ...sourceRoutes,
-      ...grantWriteRoutes,
       ...savedQueryRoutes,
       ...dashboardRoutes,
       { path: "*", element: <NotFound /> },

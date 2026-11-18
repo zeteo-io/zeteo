@@ -25,3 +25,7 @@ export const MY_DATA_HREF = "/my?tab=sources";
 
 /** Where an upload source is made from a file. */
 export const ADD_DATA_HREF = "/my/data/new";
+
+/** Said before a column's type changes. */
+export const RETYPE_WARNING =
+  "Saved queries and dashboards that use this column may stop working with the new type.";

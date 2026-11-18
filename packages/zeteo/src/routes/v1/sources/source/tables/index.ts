@@ -1,4 +1,4 @@
-import { allowOwnerOr } from "../../../../../middleware/fileSourceOwner.js";
+import { allowOwnerOr } from "../../../../../middleware/uploadOwner.js";
 import { addTables, listTables } from "./controllers.js";
 import { sourceOfParams } from "../middleware.js";
 import tableRouter from "./table/index.js";

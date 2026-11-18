@@ -10,7 +10,7 @@ import { sourceRoutes } from "./routes";
 const get = vi.hoisted(() => vi.fn());
 const state = vi.hoisted(() => ({
   permissions: ["zeteo.sources.read"],
-  fileSources: true,
+  uploads: true,
 }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
@@ -22,7 +22,7 @@ vi.mock("@/lib/config", async () => ({
   ...(await vi.importActual<typeof import("@/lib/config")>("@/lib/config")),
   loadConfig: async () => ({
     ...TEST_UI_CONFIG,
-    fileSources: state.fileSources,
+    uploads: state.uploads,
   }),
 }));
 
@@ -35,11 +35,11 @@ const renderAt = (path: string) => {
   );
 };
 
-const OWNER = ["zeteo.data.read", "zeteo.file_sources.write"];
+const OWNER = ["zeteo.data.read", "zeteo.uploads.write"];
 
 beforeEach(() => {
   state.permissions = ["zeteo.sources.read"];
-  state.fileSources = true;
+  state.uploads = true;
   get.mockReset().mockImplementation(async () => ({ data: makeSource() }));
 });
 
@@ -76,7 +76,7 @@ describe("an upload's pages", () => {
     get.mockImplementation(uploadGet());
   });
 
-  it("show an upload at /sources/:id to its owner, who holds only zeteo.file_sources.write", async () => {
+  it("show an upload at /sources/:id to its owner, who holds only zeteo.uploads.write", async () => {
     state.permissions = OWNER;
     renderAt(`/sources/${FS_ID}`);
     expect(
@@ -92,9 +92,9 @@ describe("an upload's pages", () => {
     ).toBeInTheDocument();
   });
 
-  it("refuse an owner while File Sources are off, asking zeteo nothing", async () => {
+  it("refuse an owner while Uploads are off, asking zeteo nothing", async () => {
     state.permissions = OWNER;
-    state.fileSources = false;
+    state.uploads = false;
     renderAt(`/sources/${FS_ID}`);
     expect(await screen.findByText("No access")).toBeInTheDocument();
     expect(screen.getByText(/zeteo\.sources\.read/)).toBeInTheDocument();
@@ -108,20 +108,20 @@ describe("an upload's pages", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("need zeteo.file_sources.write to add data", async () => {
+  it("need zeteo.uploads.write to add data", async () => {
     state.permissions = ["zeteo.data.read", "zeteo.sources.read"];
     renderAt("/my/data/new");
     expect(await screen.findByText("No access")).toBeInTheDocument();
-    expect(screen.getByText(/zeteo\.file_sources\.write/)).toBeInTheDocument();
+    expect(screen.getByText(/zeteo\.uploads\.write/)).toBeInTheDocument();
   });
 
   it.each([
     "/my/data/new",
     `/sources/${FS_ID}/add`,
     `/sources/${FS_ID}/tables/${FS_ID}/reupload`,
-  ])("are not found at %s while File Sources are off", async (path) => {
+  ])("are not found at %s while Uploads are off", async (path) => {
     state.permissions = OWNER;
-    state.fileSources = false;
+    state.uploads = false;
     renderAt(path);
     expect(await screen.findByText("Page not found")).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();

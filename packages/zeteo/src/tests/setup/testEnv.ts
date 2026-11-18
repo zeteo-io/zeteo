@@ -11,17 +11,17 @@ export const TEST_MCP_CLIENT = "zeteo-test-connector";
 /** The one browser origin the test environment lets call the MCP endpoint. */
 export const TEST_MCP_ORIGIN = "https://connector.example.com";
 
-/** The test database's File Sources reader role; `globalSetup` creates it. */
-export const TEST_FILES_READER = {
-  user: "zeteo_files_reader",
-  password: "zeteo-files-reader-test-only",
+/** The test database's uploads reader role; `globalSetup` creates it. */
+export const TEST_UPLOADS_READER = {
+  user: "zeteo_uploads_reader",
+  password: "zeteo-uploads-reader-test-only",
 };
 
-/** `databaseUrl` signed in as the File Sources reader role instead. */
+/** `databaseUrl` signed in as the uploads reader role instead. */
 export const readerUrlFor = (databaseUrl: string): string => {
   const url = new URL(databaseUrl);
-  url.username = TEST_FILES_READER.user;
-  url.password = TEST_FILES_READER.password;
+  url.username = TEST_UPLOADS_READER.user;
+  url.password = TEST_UPLOADS_READER.password;
   return url.toString();
 };
 
@@ -85,10 +85,10 @@ export function loadTestEnv(): Record<string, string> {
     PUBLIC_URL: `http://localhost:${port}`,
     DATABASE_URL: databaseUrl,
     // The test database's reader, never `.env`'s, which names the dev one.
-    FILE_SOURCES_READER_URL: readerUrlFor(databaseUrl),
+    UPLOADS_READER_URL: readerUrlFor(databaseUrl),
     // Tests stage many files per user within the hour; the cap's own tests
     // lower it.
-    FILE_SOURCE_MAX_STAGINGS: "1000",
+    UPLOAD_MAX_STAGINGS: "1000",
     REDIS_URL:
       process.env.TEST_REDIS_URL ?? env.TEST_REDIS_URL ?? redis.toString(),
     // The SQL Server of the Azure SQL tests: docker-compose.yml's `mssql`.

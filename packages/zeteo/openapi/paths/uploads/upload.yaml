@@ -4,10 +4,10 @@
     summary: Discard a staged upload
     description: |
       Drops the staging's tables and deletes it, which frees its place under
-      `FILE_SOURCE_MAX_STAGINGS`. Only the user who uploaded it may; anyone else's, an expired
+      `UPLOAD_MAX_STAGINGS`. Only the user who uploaded it may; anyone else's, an expired
       one and an unknown id are all `404 staging_not_found`.
 
-      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+      **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 uploads_not_configured` when `UPLOADS_READER_URL` is unset.
     operationId: deleteUpload
     parameters:
       - name: uploadId
@@ -21,7 +21,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `staging_not_found`, or `file_sources_not_configured`
+        description: Not found - `staging_not_found`, or `uploads_not_configured`
         content:
           application/json:
             schema:

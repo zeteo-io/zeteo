@@ -1,5 +1,5 @@
 import { SOURCES_WRITE } from "../../../../../definitions/tereoDeclaration.js";
-import { allowOwnerOr } from "../../../../../middleware/fileSourceOwner.js";
+import { allowOwnerOr } from "../../../../../middleware/uploadOwner.js";
 import { sourceOfParams } from "../middleware.js";
 import { transferSource } from "./controllers.js";
 import express, { Router } from "express";

@@ -171,9 +171,9 @@
         description: |
           Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
           pool briefly unavailable, or the service is shutting down (an export refused for that
-          is not recorded). Retry, after `Retry-After` when given. Or `file_sources_misconfigured`:
-          a file source while `FILE_SOURCES_READER_URL` cannot be used (the detail is logged). A
-          file source exported while File Sources are off is `404 file_sources_not_configured`.
+          is not recorded). Retry, after `Retry-After` when given. Or `uploads_misconfigured`:
+          an upload source while `UPLOADS_READER_URL` cannot be used (the detail is logged). A
+          upload source exported while Uploads are off is `404 uploads_not_configured`.
         headers:
           Retry-After:
             description: Seconds to wait before retrying

@@ -11,24 +11,24 @@ import env from "../../../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../../../../definitions/tereoDeclaration.js";
-import {
-  createFileSource,
-  csvOf,
-  removeFileSourcesOf,
-  sourcesCall,
-} from "../../../../../support/fileSources.js";
 import {
   addToDirectory,
   addUserToDirectory,
   clearDirectory,
 } from "../../../../../support/principals.js";
+import {
+  createUploadSource,
+  csvOf,
+  removeUploadSourcesOf,
+  sourcesCall,
+} from "../../../../../support/uploads.js";
 
 const userToken = (id: string) =>
-  tokenFor({ userId: id, permissions: [DATA_READ, FILE_SOURCES_WRITE] });
+  tokenFor({ userId: id, permissions: [DATA_READ, UPLOADS_WRITE] });
 const adminId = randomUUID();
 const admin = tokenFor({
   userId: adminId,
@@ -61,7 +61,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await clearDirectory();
   await removeRunsOf(users);
-  await removeFileSourcesOf(users);
+  await removeUploadSourcesOf(users);
   await removeSources([databaseSourceId]);
   await app.close();
 });
@@ -70,7 +70,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("moves the owner grant; the previous owner keeps a plain grant", async () => {
     const from = await user();
     const to = await user();
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     const tableId = source.tables[0]!.id;
     const res = await call("POST", `/${source.id}/transfer`, from.token, {
       user_id: to.id,
@@ -95,7 +95,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("with keep_access false, leaves the previous owner nothing", async () => {
     const from = await user();
     const to = await user();
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     const res = await call("POST", `/${source.id}/transfer`, from.token, {
       user_id: to.id,
       keep_access: false,
@@ -111,7 +111,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("turns a grant the new owner had into the owner grant", async () => {
     const from = await user();
     const to = await user();
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     const tableId = source.tables[0]!.id;
     await prisma.grant.create({
       data: {
@@ -148,7 +148,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
         user_type: "service_account",
       },
     ]);
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     for (const target of [robot, randomUUID(), from.id]) {
       const res = await call("POST", `/${source.id}/transfer`, from.token, {
         user_id: target,
@@ -165,11 +165,11 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("answers 409 quota_exceeded when the recipient would pass their quota, changing nothing", async () => {
     const from = await user();
     const to = await user();
-    const theirs = await createFileSource(app.url, to.token, to.id, CSV);
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
-    const quota = env.FILE_SOURCE_QUOTA_BYTES;
+    const theirs = await createUploadSource(app.url, to.token, to.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
+    const quota = env.UPLOAD_QUOTA_BYTES;
     // Room for what the recipient has, not for one more.
-    env.FILE_SOURCE_QUOTA_BYTES = theirs.size_bytes + 1;
+    env.UPLOAD_QUOTA_BYTES = theirs.size_bytes + 1;
     try {
       const res = await call("POST", `/${source.id}/transfer`, admin, {
         user_id: to.id,
@@ -177,7 +177,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("quota_exceeded");
     } finally {
-      env.FILE_SOURCE_QUOTA_BYTES = quota;
+      env.UPLOAD_QUOTA_BYTES = quota;
     }
     expect(
       (await prisma.source.findUniqueOrThrow({ where: { id: source.id } }))
@@ -194,7 +194,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("records the owner grant moved and the grants removed", async () => {
     const from = await user();
     const to = await user();
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     const tableId = source.tables[0]!.id;
     const [old] = await grantsOn(tableId);
     const res = await call("POST", `/${source.id}/transfer`, from.token, {
@@ -204,7 +204,8 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
     expect(res.status).toBe(200);
     const entry = (await auditRows(source.id)).at(-1)!.payload;
     expect(entry.metadata).toMatchObject({
-      event: "zeteo.file_source.transferred",
+      event: "zeteo.source.transferred",
+      type: "upload",
       owner_grant: { user_id: to.id, table_ids: [tableId] },
       grants_removed: [old!.id],
     });
@@ -213,7 +214,7 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
   it("answers someone else as it answers anyone without the permission", async () => {
     const from = await user();
     const stranger = await user();
-    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
     const res = await call("POST", `/${source.id}/transfer`, stranger.token, {
       user_id: stranger.id,
     });

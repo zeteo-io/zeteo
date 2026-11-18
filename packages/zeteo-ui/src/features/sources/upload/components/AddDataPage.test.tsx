@@ -21,7 +21,7 @@ const put = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
-    permissions: ["zeteo.data.read", "zeteo.file_sources.write"],
+    permissions: ["zeteo.data.read", "zeteo.uploads.write"],
     api: { get, post, put, delete: del },
   })
 );
@@ -405,8 +405,8 @@ describe("AddDataPage", () => {
       if (url === "/v1/uploads") return { data: makeStaging() };
       throw {
         status: 503,
-        code: "file_source_busy",
-        message: "The file source is busy; retry shortly",
+        code: "upload_source_busy",
+        message: "The upload source is busy; retry shortly",
         retryAfter: 5,
       };
     });
@@ -416,7 +416,7 @@ describe("AddDataPage", () => {
     await screen.findByRole("heading", { name: "orders" });
     await user.click(screen.getByRole("button", { name: "Add tables" }));
     expect(
-      await screen.findByText("The file source is busy; retry shortly")
+      await screen.findByText("The upload source is busy; retry shortly")
     ).toBeInTheDocument();
     expect(screen.getByText("Try again in 5 seconds.")).toBeInTheDocument();
     // Still on the preview, to try again.

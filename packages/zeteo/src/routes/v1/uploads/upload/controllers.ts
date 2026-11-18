@@ -1,4 +1,4 @@
-import { discardOwnStaging } from "../../../../file-sources/staging.js";
+import { discardOwnStaging } from "../../../../uploads/staging.js";
 import { validateParams } from "../../../../utils/validateReq.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { UploadParamsSchema } from "./schemas.js";

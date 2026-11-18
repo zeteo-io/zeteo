@@ -91,7 +91,7 @@ describe("refreshStaleSources", () => {
     );
   });
 
-  it("skips file sources, never refreshed or not", async () => {
+  it("skips upload sources, never refreshed or not", async () => {
     const files = [null, 30].map(async (hoursAgo) => {
       const id = randomUUID();
       created.push(id);

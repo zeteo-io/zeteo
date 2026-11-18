@@ -13,7 +13,7 @@ export class NoAdapterError extends Error {
 /** The adapter for `type`; throws `NoAdapterError` for a type with none. */
 export const adapterFor = (type: SourceType): SourceAdapter => {
   switch (type) {
-    // A file source's data is in Zeteo's own Postgres, read by the reader role.
+    // An upload source's data is in Zeteo's own Postgres, read by the reader role.
     case "postgres":
     case "upload":
       return postgresAdapter as SourceAdapter;

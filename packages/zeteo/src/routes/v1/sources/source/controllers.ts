@@ -4,16 +4,16 @@ import { updateSource as update } from "../../../../sources/service.js";
 import { SourceParamsSchema, UpdateSourceSchema } from "./schemas.js";
 import { refreshAfterChange } from "../../../../catalog/refresh.js";
 import { hasPermission } from "../../../../utils/permissions.js";
-import { lacking } from "../../../../file-sources/ownership.js";
+import { isUploadSource } from "../../../../sources/types.js";
 import { NotFoundError } from "../../../../utils/errors.js";
-import { isFileSource } from "../../../../sources/types.js";
+import { lacking } from "../../../../uploads/ownership.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { db } from "../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import {
-  deleteFileSource,
-  renameFileSource,
-} from "../../../../file-sources/service.js";
+  deleteUploadSource,
+  renameUploadSource,
+} from "../../../../uploads/service.js";
 import {
   presentSource,
   presentSourceById,
@@ -36,11 +36,11 @@ export const updateSource = async (req: Request, res: Response) => {
   const row = await db.sources.findById(sourceId);
   if (!row) throw new NotFoundError("Source not found");
   if (
-    isFileSource(row) &&
+    isUploadSource(row) &&
     body.name !== undefined &&
     Object.keys(body).length === 1
   ) {
-    res.status(200).json(await renameFileSource(caller, sourceId, body.name));
+    res.status(200).json(await renameUploadSource(caller, sourceId, body.name));
     return;
   }
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {
@@ -61,6 +61,6 @@ export const updateSource = async (req: Request, res: Response) => {
 /** An upload source only: deletes its data and marks it deleted (archived). */
 export const deleteSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
-  await deleteFileSource(callerOf(req), sourceId);
+  await deleteUploadSource(callerOf(req), sourceId);
   res.status(204).end();
 };

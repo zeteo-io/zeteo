@@ -9,7 +9,7 @@ import env from "../env.js";
 import {
   deleteExpiredStagings,
   deleteOrphanStagingTables,
-} from "../file-sources/staging.js";
+} from "../uploads/staging.js";
 
 /** An export still running this long after it started has lost its process: its limit, plus a margin for its end to be recorded. */
 export const INTERRUPTED_AFTER_MS = EXPORT_TIMEOUT_MS + 5 * 60_000;

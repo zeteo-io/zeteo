@@ -91,7 +91,7 @@ enum RelationOrigin {
   @@schema("zeteo")
 }
 
-// A registered database, or a file source (type upload, owned by one user).
+// A registered database, or an upload source (type upload, owned by one user).
 // Archived, never deleted. CHECK constraints in the migrations: owner_id is set
 // exactly when type is upload; slug format, timeout_ms, row_cap, max_joins, export_row_cap,
 // query_concurrency and export_concurrency ranges.
@@ -265,10 +265,10 @@ model Grant {
   @@schema("zeteo")
 }
 
-// An upload waiting to become a file source (or to replace one's tables): the
+// An upload waiting to become an upload source (or to replace one's tables): the
 // preview shown to its owner and the names of the staging tables holding its
 // rows. Expires one hour after creation.
-model FileStaging {
+model UploadStaging {
   id        String   @id @default(uuid(7)) @db.Uuid
   ownerId   String   @map("owner_id") @db.Uuid
   kind      String
@@ -279,7 +279,7 @@ model FileStaging {
 
   @@index([expiresAt])
   @@index([ownerId])
-  @@map("file_stagings")
+  @@map("upload_stagings")
   @@schema("zeteo")
 }
 

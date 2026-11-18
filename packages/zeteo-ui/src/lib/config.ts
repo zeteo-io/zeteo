@@ -1,8 +1,8 @@
 export interface UiConfig {
   tereoUrl: string;
   clientId: string;
-  /** File Sources are on (the server has `FILE_SOURCES_READER_URL`). */
-  fileSources: boolean;
+  /** Uploads are on (the server has `UPLOADS_READER_URL`). */
+  uploads: boolean;
 }
 
 export class ConfigError extends Error {
@@ -18,10 +18,7 @@ const parseConfig = (body: unknown): UiConfig => {
   if (typeof body !== "object" || body === null || Array.isArray(body)) {
     throw new ConfigError(`${CONFIG_PATH} is not a JSON object`);
   }
-  const { tereo_url, client_id, file_sources } = body as Record<
-    string,
-    unknown
-  >;
+  const { tereo_url, client_id, uploads } = body as Record<string, unknown>;
   if (typeof client_id !== "string" || client_id === "") {
     throw new ConfigError(`${CONFIG_PATH} has no client_id`);
   }
@@ -50,7 +47,7 @@ const parseConfig = (body: unknown): UiConfig => {
     tereoUrl: `${url.origin}${url.pathname}`.replace(/\/+$/, ""),
     clientId: client_id,
     // Anything but a plain true (an older zeteo sends nothing) is off.
-    fileSources: file_sources === true,
+    uploads: uploads === true,
   };
 };
 

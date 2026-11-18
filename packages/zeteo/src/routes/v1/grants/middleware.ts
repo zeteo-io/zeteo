@@ -1,8 +1,8 @@
-import type { SourceLocator } from "../../../middleware/fileSourceOwner.js";
-import { idOrUndefined } from "../../../middleware/fileSourceOwner.js";
+import type { SourceLocator } from "../../../middleware/uploadOwner.js";
+import { idOrUndefined } from "../../../middleware/uploadOwner.js";
 import { prisma } from "../../../utils/db/prisma.js";
 
-/** A list's `source_id`: an owner may list the grants of their own file source. */
+/** A list's `source_id`: an owner may list the grants of their own upload source. */
 export const sourceOfListQuery: SourceLocator = async (req) =>
   idOrUndefined(req.query.source_id);
 

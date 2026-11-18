@@ -53,6 +53,23 @@ describe("SourcesPage", () => {
     );
   });
 
+  it("shows the same columns as My sources, with the kind, owner, status and last refresh besides", async () => {
+    renderWithProviders(<SourcesPage />);
+    await screen.findByRole("link", { name: "Orders DB" });
+    expect(
+      screen.getAllByRole("columnheader").map((h) => h.textContent)
+    ).toEqual([
+      "Name",
+      "Kind",
+      "Owner",
+      "Status",
+      "Size",
+      "Shared with",
+      "Last refreshed",
+      "Added",
+    ]);
+  });
+
   it("loads archived sources once and shows them when asked", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SourcesPage />);
@@ -109,7 +126,7 @@ describe("SourcesPage", () => {
     expect(screen.queryByText("Orders DB")).not.toBeInTheDocument();
   });
 
-  it("lists file sources with their owner, linking to their own page, and filters them by kind", async () => {
+  it("lists upload sources with their owner, linking to their own page, and filters them by kind", async () => {
     const user = userEvent.setup();
     const ownerId = "9c3f2d20-3e9c-4c75-9f20-8c5d3e4f6a88";
     const upload = makeSource({

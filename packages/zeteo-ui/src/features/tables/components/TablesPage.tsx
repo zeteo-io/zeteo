@@ -37,7 +37,7 @@ export interface TablesListProps {
   /** Whether the caller may describe the tables. */
   canEdit: boolean;
   tableHref: (tableId: string) => string;
-  /** `upload`: a file source, whose tables have no schema or views to tell apart. */
+  /** `upload`: an upload source, whose tables have no schema or views to tell apart. */
   catalogue?: "database" | "upload";
   /** Columns after the description, for what only this kind of source has. */
   extraColumns?: TableColumn<Table>[];
@@ -80,7 +80,7 @@ const databaseFilters = (schemaKey: string): InfiniteScrollMenuFilter[] => [
   },
 ];
 
-/** A source's tables: the Tables tab of a database source, and of a file source. */
+/** A source's tables: the Tables tab of a database source, and of an upload source. */
 export const TablesList = ({
   sourceId,
   canEdit,

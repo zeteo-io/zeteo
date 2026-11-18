@@ -136,7 +136,7 @@ export const catalogueOf = (
   const tableOf = (t: UploadTable) => ({
     id: t.id,
     source_id: source.id,
-    schema_name: "zf_x",
+    schema_name: "zu_x",
     name: t.name,
     kind: "table" as const,
     description: t.description,

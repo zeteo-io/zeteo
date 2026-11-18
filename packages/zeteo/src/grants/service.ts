@@ -2,7 +2,7 @@ import { GRANTS_WRITE, AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import type { PrincipalType } from "../../prisma/generated/client/index.js";
 import { detailInclude, type GrantDetail } from "../utils/db/grants.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
-import { assertOwnsInTx } from "../file-sources/ownership.js";
+import { assertOwnsInTx } from "../uploads/ownership.js";
 import { db, type Prisma } from "../utils/db/index.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Caller } from "../middleware/auth.js";
@@ -27,7 +27,7 @@ export interface CreateGrantInput {
 
 /**
  * Who changes grants: `actorId`, and `owner` when they act as the owner of
- * the table's file source rather than as a holder of `zeteo.grants.write`
+ * the table's upload source rather than as a holder of `zeteo.grants.write`
  * (checked again in the transaction, against a transfer meanwhile).
  */
 export interface GrantActor {

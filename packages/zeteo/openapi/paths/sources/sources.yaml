@@ -9,7 +9,7 @@
       `settings: null`.
 
       **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes. With
-      `owner_id=me`, a caller holding `zeteo.file_sources.write` and `zeteo.data.read` instead,
+      `owner_id=me`, a caller holding `zeteo.uploads.write` and `zeteo.data.read` instead,
       who sees only their own upload sources. `403 forbidden` otherwise.
     operationId: listSources
     parameters:
@@ -65,16 +65,16 @@
       ordinary `all_columns` user grant flagged `owner_grant`) on each table. Column types are the
       inferred ones unless corrected; forcing a type the values do not fit is `422 cast_failed`
       (naming the column and the first rows, 1-based rows of the file with its header counted).
-      The new data counts against the owner's `FILE_SOURCE_QUOTA_BYTES` (`409 quota_exceeded`,
+      The new data counts against the owner's `UPLOAD_QUOTA_BYTES` (`409 quota_exceeded`,
       checked under a per-owner lock). Nothing is left on any failure, and the staging is used up
-      on success. A `zeteo.file_source.created` audit entry is written (never any cell data).
-      Needs `zeteo.file_sources.write` and `zeteo.data.read`. Errors: `404
-      file_sources_not_configured` (`FILE_SOURCES_READER_URL` unset), `404 staging_not_found`
+      on success. A `zeteo.source.created` audit entry (metadata `type: upload`) is written (never any cell data).
+      Needs `zeteo.uploads.write` and `zeteo.data.read`. Errors: `404
+      uploads_not_configured` (`UPLOADS_READER_URL` unset), `404 staging_not_found`
       (expired, missing or someone else's), `409 name_taken` (the slug is in use; a slug made from
       the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
-      file_source_busy`.
+      upload_source_busy`.
 
-      **Required permissions:** `zeteo.sources.write` or `zeteo.file_sources.write` to reach the
+      **Required permissions:** `zeteo.sources.write` or `zeteo.uploads.write` to reach the
       route, then as above for the body's `type` (`403 forbidden` without).
     operationId: createSource
     requestBody:
@@ -84,7 +84,7 @@
           schema:
             oneOf:
               - $ref: '../../components/sources/schemas.yaml#/CreateSourceRequest'
-              - $ref: '../../components/file-sources/schemas.yaml#/CreateUploadSourceRequest'
+              - $ref: '../../components/uploads/schemas.yaml#/CreateUploadSourceRequest'
     responses:
       '201':
         description: The source
@@ -96,7 +96,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `file_sources_not_configured` or `staging_not_found` (an upload source)
+        description: Not found - `uploads_not_configured` or `staging_not_found` (an upload source)
         content:
           application/json:
             schema:
@@ -122,7 +122,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '503':
-        description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+        description: Service unavailable - `upload_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
         content:
           application/json:
             schema:

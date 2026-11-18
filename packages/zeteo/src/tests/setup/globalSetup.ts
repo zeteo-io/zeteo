@@ -106,11 +106,11 @@ async function recreateFixtureDatabase(databaseUrl: string) {
 }
 
 /**
- * Creates the File Sources reader role `readerUrl` signs in as, or resets its
+ * Creates the uploads reader role `readerUrl` signs in as, or resets its
  * password. Roles belong to the whole server, which other worktrees' test
  * databases may share, so the role is kept, never dropped. It gets no
  * privileges here: storage grants it what it may read. The test database's
- * PUBLIC loses TEMP, as an operator's does (docker/postgres/files-reader.sql).
+ * PUBLIC loses TEMP, as an operator's does (docker/postgres/uploads-reader.sql).
  */
 async function ensureReaderRole(databaseUrl: string, readerUrl: string) {
   const { Client } = await import("pg");
@@ -161,7 +161,7 @@ export async function setup() {
   await recreateFixtureDatabase(process.env.DATABASE_URL!);
   await ensureReaderRole(
     process.env.DATABASE_URL!,
-    process.env.FILE_SOURCES_READER_URL!
+    process.env.UPLOADS_READER_URL!
   );
   const { recreateMssqlFixture } = await import("../support/mssqlFixture.js");
   await recreateMssqlFixture();

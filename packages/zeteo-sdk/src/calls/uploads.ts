@@ -1,4 +1,4 @@
-import type { UploadResponse } from "../types/fileSources.js";
+import type { UploadResponse } from "../types/uploads.js";
 import { send, type CallContext } from "../send.js";
 
 export const uploadsCalls = (ctx: CallContext) => ({

@@ -1,7 +1,7 @@
 SourceType:
   type: string
   enum: [postgres, azure-sql, upload]
-  description: The kind of source. `upload` is an upload source (a file source), whose data Zeteo stores from uploaded files.
+  description: The kind of source. `upload` is an upload source (an upload source), whose data Zeteo stores from uploaded files.
 
 PostgresSettings:
   type: object

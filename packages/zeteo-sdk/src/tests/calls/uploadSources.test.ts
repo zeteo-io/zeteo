@@ -12,7 +12,7 @@ const source: Source = {
   type: "upload",
   owner_id: USER,
   settings: null,
-  schemas: ["zf_11111111111141118111111111111111"],
+  schemas: ["zu_11111111111141118111111111111111"],
   timeout_ms: 30000,
   row_cap: 50000,
   max_joins: 4,

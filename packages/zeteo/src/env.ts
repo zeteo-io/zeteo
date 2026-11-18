@@ -160,19 +160,19 @@ const EnvFields = z
     DASHBOARD_RECORD_WINDOW_MINUTES: int(1, 1440, 60),
     DASHBOARD_MIN_REFRESH_SECONDS: int(10, 86400, 60),
     DASHBOARD_PARALLELISM: int(1, 20, 4),
-    // File Sources: the read-only role's URL (unset, File Sources are off) and
+    // Uploads: the read-only role's URL (unset, Uploads are off) and
     // the limits on an upload and on what one owner stores.
-    FILE_SOURCES_READER_URL: z.string().url().optional(),
-    FILE_SOURCE_MAX_BYTES: int(1, Number.MAX_SAFE_INTEGER, 52_428_800),
-    FILE_SOURCE_MAX_ROWS: int(1, Number.MAX_SAFE_INTEGER, 1_000_000),
-    FILE_SOURCE_MAX_COLUMNS: int(1, Number.MAX_SAFE_INTEGER, 500),
-    FILE_SOURCE_QUOTA_BYTES: int(1, Number.MAX_SAFE_INTEGER, 1_073_741_824),
+    UPLOADS_READER_URL: z.string().url().optional(),
+    UPLOAD_MAX_BYTES: int(1, Number.MAX_SAFE_INTEGER, 52_428_800),
+    UPLOAD_MAX_ROWS: int(1, Number.MAX_SAFE_INTEGER, 1_000_000),
+    UPLOAD_MAX_COLUMNS: int(1, Number.MAX_SAFE_INTEGER, 500),
+    UPLOAD_QUOTA_BYTES: int(1, Number.MAX_SAFE_INTEGER, 1_073_741_824),
     // Uploads not yet confirmed (unexpired stagings) one user may hold, uploads
     // one user may have in flight at once (across replicas), and workbooks one
     // process reads at once (an xlsx is read whole into memory).
-    FILE_SOURCE_MAX_STAGINGS: int(1, 1000, 5),
-    FILE_SOURCE_MAX_UPLOADS: int(1, 100, 2),
-    FILE_SOURCE_XLSX_CONCURRENCY: int(1, 100, 2),
+    UPLOAD_MAX_STAGINGS: int(1, 1000, 5),
+    UPLOAD_MAX_IN_FLIGHT: int(1, 100, 2),
+    UPLOAD_XLSX_CONCURRENCY: int(1, 100, 2),
     DB_POOL_MAX: int(1, 1000, 10),
     DB_POOL_MIN: int(0, 1000, 0),
     // How long a query waits for a free connection before it fails.

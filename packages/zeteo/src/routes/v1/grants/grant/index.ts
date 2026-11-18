@@ -1,5 +1,5 @@
-import { allowOwnerOr } from "../../../../middleware/fileSourceOwner.js";
 import { deleteGrant, getGrant, replaceGrant } from "./controllers.js";
+import { allowOwnerOr } from "../../../../middleware/uploadOwner.js";
 import { sourceOfGrant } from "./middleware.js";
 import express, { Router } from "express";
 import {
@@ -11,7 +11,7 @@ const grantRouter = Router({ mergeParams: true });
 
 const json64k = express.json({ limit: "64kb" });
 
-// A file source's owner may read, change and remove grants on its tables.
+// An upload source's owner may read, change and remove grants on its tables.
 grantRouter.get("/", allowOwnerOr(GRANTS_READ, sourceOfGrant), getGrant);
 grantRouter.put(
   "/",

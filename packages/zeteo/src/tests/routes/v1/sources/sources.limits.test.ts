@@ -9,20 +9,20 @@ import env from "../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
 } from "../../../../definitions/tereoDeclaration.js";
 import {
-  createFileSource,
+  createUploadSource,
   csvOf,
   sourcesCall,
-  removeFileSourcesOf,
+  removeUploadSourcesOf,
   stageFile,
-} from "../../../support/fileSources.js";
+} from "../../../support/uploads.js";
 
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const CSV = csvOf(
   ["id", "name"],
@@ -34,29 +34,29 @@ const zfSchemas = async () =>
   (
     await prisma.$queryRaw<Array<{ n: string }>>`
       SELECT nspname AS n FROM pg_namespace
-      WHERE nspname LIKE 'zf\\_%' ORDER BY nspname`
+      WHERE nspname LIKE 'zu\\_%' ORDER BY nspname`
   ).map((r) => r.n);
 
 beforeAll(async () => {
   app = await startV1Routes();
 });
 afterAll(async () => {
-  await removeFileSourcesOf([ownerId]);
+  await removeUploadSourcesOf([ownerId]);
   await app.close();
 });
 
 describe("POST /v1/sources (upload): quota", () => {
   it("lets one of two parallel creates that together pass the quota through", async () => {
     // The size of one such source, measured, then given back.
-    const probe = await createFileSource(app.url, owner, ownerId, CSV);
+    const probe = await createUploadSource(app.url, owner, ownerId, CSV);
     const one = probe.size_bytes;
     expect(
       (await sourcesCall(app.url, "DELETE", `/${probe.id}`, owner)).status
     ).toBe(204);
     const schemasBefore = await zfSchemas();
 
-    const quota = env.FILE_SOURCE_QUOTA_BYTES;
-    env.FILE_SOURCE_QUOTA_BYTES = Math.floor(one * 1.5);
+    const quota = env.UPLOAD_QUOTA_BYTES;
+    env.UPLOAD_QUOTA_BYTES = Math.floor(one * 1.5);
     try {
       const staged = await Promise.all([
         stageFile(ownerId, CSV),
@@ -83,10 +83,10 @@ describe("POST /v1/sources (upload): quota", () => {
         })
       ).toBe(1);
       expect(await zfSchemas()).toEqual(
-        [...schemasBefore, `zf_${created.id.replace(/-/g, "")}`].sort()
+        [...schemasBefore, `zu_${created.id.replace(/-/g, "")}`].sort()
       );
     } finally {
-      env.FILE_SOURCE_QUOTA_BYTES = quota;
+      env.UPLOAD_QUOTA_BYTES = quota;
     }
   });
 });

@@ -10,7 +10,7 @@ import { fetchJson } from "../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   GRANTS_READ,
   GRANTS_WRITE,
 } from "../../../../definitions/tereoDeclaration.js";
@@ -18,7 +18,7 @@ import {
   removeUploadSources,
   seedUploadSource,
   type UploadTableSpec,
-} from "../../../support/fileSources.js";
+} from "../../../support/uploads.js";
 
 const TABLE = (name: string): UploadTableSpec => ({
   name,
@@ -34,7 +34,7 @@ const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
   org: ORG,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherOwnerId = randomUUID();
 const admin = tokenFor({ permissions: [GRANTS_READ, GRANTS_WRITE] });
@@ -47,7 +47,7 @@ const bodyOf = (res: { body: Record<string, unknown> }) => {
   return rest;
 };
 
-describe("/v1/grants (file sources)", () => {
+describe("/v1/grants (upload sources)", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   let own: Awaited<ReturnType<typeof seedUploadSource>>;
   let others: Awaited<ReturnType<typeof seedUploadSource>>;
@@ -188,7 +188,7 @@ describe("/v1/grants (file sources)", () => {
     expect((await call("DELETE", `/${made.body.id}`, owner)).status).toBe(204);
   });
 
-  it("refuses the owner grants on a database source or another owner's file source, as today", async () => {
+  it("refuses the owner grants on a database source or another owner's upload source, as today", async () => {
     for (const tableId of [databaseTableId, others.tables.customers!.id]) {
       const body = {
         principal_type: "user",
@@ -219,7 +219,7 @@ describe("/v1/grants (file sources)", () => {
     expect((await call("DELETE", `/${randomUUID()}`, owner)).status).toBe(403);
   });
 
-  it("refuses an owner who no longer holds zeteo.file_sources.write", async () => {
+  it("refuses an owner who no longer holds zeteo.uploads.write", async () => {
     const lapsed = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
     const res = await grant(lapsed, own.tables.customers!.id);
     expect(res.status).toBe(403);

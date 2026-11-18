@@ -1,6 +1,6 @@
-import { mayActAsOwner, lacking } from "../../../file-sources/ownership.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
 import { presentSource, presentSources } from "../../../sources/present.js";
+import { mayActAsOwner, lacking } from "../../../uploads/ownership.js";
 import { encodeCursor, parseCursor } from "../../../utils/cursor.js";
 import { createSource as create } from "../../../sources/service.js";
 import { refreshAfterChange } from "../../../catalog/refresh.js";
@@ -11,14 +11,14 @@ import type { Request, Response } from "express";
 import { db } from "../../../utils/db/index.js";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../definitions/tereoDeclaration.js";
 import {
-  assertFileSourcesOn,
-  createFileSource,
-} from "../../../file-sources/service.js";
+  assertUploadsOn,
+  createUploadSource,
+} from "../../../uploads/service.js";
 import {
   CreateSourceSchema,
   CreateUploadSourceSchema,
@@ -28,7 +28,7 @@ import {
 
 /**
  * Every source for `zeteo.sources.read`; with `owner_id=me`, also an owner
- * holding `zeteo.file_sources.write` (and `zeteo.data.read`), who sees only
+ * holding `zeteo.uploads.write` (and `zeteo.data.read`), who sees only
  * their own.
  */
 export const listSources = async (req: Request, res: Response) => {
@@ -69,20 +69,20 @@ const isUpload = (body: unknown): boolean =>
 
 /**
  * A database source for `zeteo.sources.write`; an upload source (`type:
- * "upload"`, from the caller's staging) for `zeteo.file_sources.write` with
+ * "upload"`, from the caller's staging) for `zeteo.uploads.write` with
  * `zeteo.data.read`.
  */
 export const createSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
   if (isUpload(req.body)) {
-    assertFileSourcesOn();
-    for (const permission of [DATA_READ, FILE_SOURCES_WRITE]) {
+    assertUploadsOn();
+    for (const permission of [DATA_READ, UPLOADS_WRITE]) {
       if (!hasPermission(caller.permissions, permission)) {
         throw lacking(permission);
       }
     }
     const { type: _, ...input } = validateBody(CreateUploadSourceSchema, req);
-    res.status(201).json(await createFileSource(caller, input));
+    res.status(201).json(await createUploadSource(caller, input));
     return;
   }
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {

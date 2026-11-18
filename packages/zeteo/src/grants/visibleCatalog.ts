@@ -26,7 +26,7 @@ export interface VisibleTable {
   kind: SourceTable["kind"];
   description: string | null;
   missing: boolean;
-  /** When a file source's table was last loaded; null for a database source. */
+  /** When an upload source's table was last loaded; null for a database source. */
   lastSyncedAt: Date | null;
   columns: VisibleColumn[];
 }

@@ -1,9 +1,9 @@
 // @module-tag int
 // @module-tag platform
-import { LOAD_LOCKING } from "../../../../../../../file-sources/service.js";
-import { schemaFor } from "../../../../../../../file-sources/storage.js";
+import { LOAD_LOCKING } from "../../../../../../../uploads/service.js";
 import { removeSources } from "../../../../../../support/sources.js";
 import { registerSource } from "../../../../../../support/grants.js";
+import { schemaFor } from "../../../../../../../uploads/storage.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startV1Routes } from "../../../../../../support/v1App.js";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
@@ -12,19 +12,19 @@ import { redis } from "../../../../../../../utils/redis.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_WRITE,
 } from "../../../../../../../definitions/tereoDeclaration.js";
 import {
-  createFileSource,
+  createUploadSource,
   csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
   sourcesCall,
-  type FileTable,
+  type UploadTable,
   stageFile,
   storedTables,
-} from "../../../../../../support/fileSources.js";
+} from "../../../../../../support/uploads.js";
 import {
   newQueryUser,
   postQuery,
@@ -34,12 +34,12 @@ import {
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const nobody = tokenFor({ permissions: [] });
 const admin = tokenFor({ permissions: [DATA_READ, SOURCES_WRITE] });
@@ -83,25 +83,25 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await removeRunsOf([ownerId, ...users]);
-  await removeFileSourcesOf([ownerId, otherId]);
+  await removeUploadSourcesOf([ownerId, otherId]);
   await removeSources([databaseSourceId]);
   await app.close();
 });
 
-const columnsOf = (tables: FileTable[]) =>
+const columnsOf = (tables: UploadTable[]) =>
   Object.fromEntries(
     tables[0]!.columns.map((c) => [c.name, [c.id, c.type, c.missing]])
   );
 
-/** The source as `createFileSource` gives it: its view, and its tables. */
+/** The source as `createUploadSource` gives it: its view, and its tables. */
 const stateOf = async (id: string) => ({
   ...(await call("GET", `/${id}`, owner)).body,
-  tables: await fileTablesOf(id),
+  tables: await uploadTablesOf(id),
 });
 
 describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
   it("replaces the data, keeping column ids and grants, adding and marking missing", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const table = source.tables[0]!;
     const before = columnsOf(source.tables);
     // A grant of one column to someone else.
@@ -125,7 +125,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
     });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ id: source.id, type: "upload" });
-    const tables = await fileTablesOf(source.id);
+    const tables = await uploadTablesOf(source.id);
     const after = columnsOf(tables);
     expect(after.id).toEqual([before.id![0], "number", false]);
     expect(after.name).toEqual([before.name![0], "text", false]);
@@ -168,7 +168,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
   });
 
   it("keeps a matched column's type unless told otherwise, and fails to cast without changing anything", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const table = source.tables[0]!;
     // `id` now holds text: its current type, number, does not fit.
     const bad = csvOf(["id", "name"], [["A1", "z"]]);
@@ -197,18 +197,23 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
       }
     );
     expect(retyped.status, JSON.stringify(retyped.body)).toBe(200);
-    expect(columnsOf(await fileTablesOf(source.id)).id).toEqual([
+    expect(columnsOf(await uploadTablesOf(source.id)).id).toEqual([
       columnsOf(source.tables).id![0],
       "text",
       false,
     ]);
   });
 
-  it("answers 503 file_source_busy while another load holds the source", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+  it("answers 503 upload_source_busy while another load holds the source", async () => {
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const wait = LOAD_LOCKING.lockWaitMs;
     LOAD_LOCKING.lockWaitMs = 300;
-    await redis.set(`zeteo:file-source-load:${source.id}`, "someone", "EX", 60);
+    await redis.set(
+      `zeteo:upload-source-load:${source.id}`,
+      "someone",
+      "EX",
+      60
+    );
     try {
       const res = await call(
         "PUT",
@@ -217,15 +222,15 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
         { staging_id: (await stageFile(ownerId, SECOND)).stagingId, key: "csv" }
       );
       expect(res.status).toBe(503);
-      expect(res.body.error).toBe("file_source_busy");
+      expect(res.body.error).toBe("upload_source_busy");
     } finally {
       LOAD_LOCKING.lockWaitMs = wait;
-      await redis.del(`zeteo:file-source-load:${source.id}`);
+      await redis.del(`zeteo:upload-source-load:${source.id}`);
     }
   });
 
-  it("answers 503 file_source_busy when a reader holds the table past the swap's lock wait, and changes nothing", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+  it("answers 503 upload_source_busy when a reader holds the table past the swap's lock wait, and changes nothing", async () => {
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const timeout = LOAD_LOCKING.swapLockTimeoutMs;
     LOAD_LOCKING.swapLockTimeoutMs = 300;
     let release!: () => void;
@@ -251,7 +256,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
         { staging_id: (await stageFile(ownerId, SECOND)).stagingId, key: "csv" }
       );
       expect(res.status).toBe(503);
-      expect(res.body.error).toBe("file_source_busy");
+      expect(res.body.error).toBe("upload_source_busy");
     } finally {
       release();
       await holder;
@@ -261,8 +266,8 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
     expect(await stateOf(source.id)).toEqual(source);
   });
 
-  it("answers 503 file_source_busy when the swap runs out of time, and changes nothing", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+  it("answers 503 upload_source_busy when the swap runs out of time, and changes nothing", async () => {
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const timeout = LOAD_LOCKING.swapTimeoutMs;
     LOAD_LOCKING.swapTimeoutMs = 1;
     try {
@@ -273,7 +278,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
         { staging_id: (await stageFile(ownerId, SECOND)).stagingId, key: "csv" }
       );
       expect(res.status).toBe(503);
-      expect(res.body.error).toBe("file_source_busy");
+      expect(res.body.error).toBe("upload_source_busy");
     } finally {
       LOAD_LOCKING.swapTimeoutMs = timeout;
     }
@@ -282,7 +287,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
   });
 
   it("answers someone else as anyone without the permission, and 404 for a table of another source", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const staged = await stageFile(otherId, SECOND);
     const theirs = await call(
       "PUT",
@@ -301,7 +306,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
         )
       )
     );
-    const second = await createFileSource(app.url, owner, ownerId, FIRST);
+    const second = await createUploadSource(app.url, owner, ownerId, FIRST);
     const wrong = await call(
       "PUT",
       `/${source.id}/tables/${second.tables[0]!.id}`,
@@ -314,7 +319,7 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
 
 describe("DELETE /v1/sources/:sourceId/tables/:tableId", () => {
   it("drops the table and marks it and its columns missing", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+    const source = await createUploadSource(app.url, owner, ownerId, FIRST);
     const table = source.tables[0]!;
     const res = await call("DELETE", `/${source.id}/tables/${table.id}`, owner);
     expect(res.status).toBe(204);

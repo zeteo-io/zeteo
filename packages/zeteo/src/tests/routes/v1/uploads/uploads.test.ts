@@ -1,6 +1,6 @@
 // @module-tag int
 // @module-tag platform
-import { STAGING_SCHEMA } from "../../../../file-sources/storage.js";
+import { STAGING_SCHEMA } from "../../../../uploads/storage.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { leaseKey } from "../../../../engine/leases.js";
 import { prisma } from "../../../../utils/db/prisma.js";
@@ -13,13 +13,13 @@ import http from "node:http";
 import JSZip from "jszip";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
 } from "../../../../definitions/tereoDeclaration.js";
 import {
   discardStaging,
   getStaging,
   STAGING_TTL_MS,
-} from "../../../../file-sources/staging.js";
+} from "../../../../uploads/staging.js";
 import {
   afterAll,
   afterEach,
@@ -33,7 +33,7 @@ import {
 const owner = randomUUID();
 const ownerToken = tokenFor({
   userId: owner,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 
 const upload = async (
@@ -77,7 +77,7 @@ beforeAll(async () => {
   app = await startV1Routes();
 });
 afterEach(async () => {
-  const rows = await prisma.fileStaging.findMany({
+  const rows = await prisma.uploadStaging.findMany({
     where: { ownerId: owner },
   });
   for (const row of rows) {
@@ -87,7 +87,7 @@ afterEach(async () => {
       );
     }
   }
-  await prisma.fileStaging.deleteMany({ where: { ownerId: owner } });
+  await prisma.uploadStaging.deleteMany({ where: { ownerId: owner } });
   made.length = 0;
 });
 afterAll(async () => {
@@ -200,8 +200,8 @@ describe("POST /v1/uploads", () => {
     expect(staging.tables).toHaveLength(3);
   });
 
-  it("needs the file-sources permission and data read", async () => {
-    for (const permissions of [[DATA_READ], [FILE_SOURCES_WRITE], []]) {
+  it("needs the upload sources permission and data read", async () => {
+    for (const permissions of [[DATA_READ], [UPLOADS_WRITE], []]) {
       const res = await upload(tokenFor({ permissions }), "a,b\n1,2\n");
       expect(res.status).toBe(403);
     }
@@ -211,25 +211,25 @@ describe("POST /v1/uploads", () => {
     expect(none.status).toBe(401);
   });
 
-  it("answers 404 file_sources_not_configured when the feature is off", async () => {
-    const url = env.FILE_SOURCES_READER_URL;
-    env.FILE_SOURCES_READER_URL = undefined;
+  it("answers 404 uploads_not_configured when the feature is off", async () => {
+    const url = env.UPLOADS_READER_URL;
+    env.UPLOADS_READER_URL = undefined;
     try {
       const res = await upload(ownerToken, "a,b\n1,2\n");
       expect(res.status).toBe(404);
-      expect(res.body.error).toBe("file_sources_not_configured");
+      expect(res.body.error).toBe("uploads_not_configured");
       const denied = await upload(tokenFor({ permissions: [] }), "a\n1\n");
       expect(denied.status).toBe(404);
     } finally {
-      env.FILE_SOURCES_READER_URL = url;
+      env.UPLOADS_READER_URL = url;
     }
   });
 
   it("refuses a file over the byte limit mid-stream and keeps nothing", async () => {
     const before = await stagingTables();
-    const rowsBefore = await prisma.fileStaging.count();
-    const max = env.FILE_SOURCE_MAX_BYTES;
-    env.FILE_SOURCE_MAX_BYTES = 200_000;
+    const rowsBefore = await prisma.uploadStaging.count();
+    const max = env.UPLOAD_MAX_BYTES;
+    env.UPLOAD_MAX_BYTES = 200_000;
     try {
       // Enough rows that the staging table exists before the limit is hit.
       const row = "abcdefghij,klmnopqrst,uvwxyz\n";
@@ -242,9 +242,9 @@ describe("POST /v1/uploads", () => {
       expect(res.body.error).toBe("file_too_large");
       expect(res.connection).toBe("close");
     } finally {
-      env.FILE_SOURCE_MAX_BYTES = max;
+      env.UPLOAD_MAX_BYTES = max;
     }
-    expect(await prisma.fileStaging.count()).toBe(rowsBefore);
+    expect(await prisma.uploadStaging.count()).toBe(rowsBefore);
     expect((await stagingTables()).sort()).toEqual(before.sort());
   });
 
@@ -252,14 +252,14 @@ describe("POST /v1/uploads", () => {
     const wb = new ExcelJS.Workbook();
     wb.addWorksheet("S").addRows([["a"], ["b"]]);
     const buffer = Buffer.from(await wb.xlsx.writeBuffer());
-    const max = env.FILE_SOURCE_MAX_BYTES;
-    env.FILE_SOURCE_MAX_BYTES = 500;
+    const max = env.UPLOAD_MAX_BYTES;
+    env.UPLOAD_MAX_BYTES = 500;
     try {
       const res = await upload(ownerToken, buffer, "s.xlsx");
       expect(res.status).toBe(413);
       expect(res.body.error).toBe("file_too_large");
     } finally {
-      env.FILE_SOURCE_MAX_BYTES = max;
+      env.UPLOAD_MAX_BYTES = max;
     }
   });
 
@@ -314,7 +314,7 @@ describe("POST /v1/uploads", () => {
     const form = new FormData();
     form.append("file", new Blob(["a,b\n1,2\n"]), "a.csv");
     form.append("file", new Blob(["a,b\n1,2\n"]), "b.csv");
-    const rowsBefore = await prisma.fileStaging.count();
+    const rowsBefore = await prisma.uploadStaging.count();
     const tablesBefore = (await stagingTables()).sort();
     const two = await fetch(`${app.url}/v1/uploads`, {
       method: "POST",
@@ -323,13 +323,13 @@ describe("POST /v1/uploads", () => {
     });
     expect(two.status).toBe(400);
     // The first file's staging is cancelled and removed, not left behind.
-    expect(await prisma.fileStaging.count()).toBe(rowsBefore);
+    expect(await prisma.uploadStaging.count()).toBe(rowsBefore);
     expect((await stagingTables()).sort()).toEqual(tablesBefore);
   });
 
   it("drops its staging table when the client goes away mid-upload", async () => {
     const before = (await stagingTables()).sort();
-    const rowsBefore = await prisma.fileStaging.count();
+    const rowsBefore = await prisma.uploadStaging.count();
     const boundary = "----zeteotest";
     const head =
       `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.csv"\r\n` +
@@ -364,7 +364,7 @@ describe("POST /v1/uploads", () => {
       },
       { timeout: 10_000, interval: 100 }
     );
-    expect(await prisma.fileStaging.count()).toBe(rowsBefore);
+    expect(await prisma.uploadStaging.count()).toBe(rowsBefore);
   });
 
   it("refuses an xlsx whose directory understates an entry's size", async () => {
@@ -389,8 +389,8 @@ describe("POST /v1/uploads", () => {
       compression: "DEFLATE",
     });
     expect(bomb.length).toBeLessThan(100_000);
-    const max = env.FILE_SOURCE_MAX_BYTES;
-    env.FILE_SOURCE_MAX_BYTES = 1_000_000;
+    const max = env.UPLOAD_MAX_BYTES;
+    env.UPLOAD_MAX_BYTES = 1_000_000;
     try {
       const res = await upload(ownerToken, bomb, "bomb.xlsx");
       expect(res.status).toBe(413);
@@ -403,7 +403,7 @@ describe("POST /v1/uploads", () => {
         max_uncompressed_bytes: 2_000_000,
       });
     } finally {
-      env.FILE_SOURCE_MAX_BYTES = max;
+      env.UPLOAD_MAX_BYTES = max;
     }
   });
 
@@ -418,9 +418,9 @@ describe("POST /v1/uploads", () => {
     expect((await stagingTables()).sort()).toEqual(before.sort());
   });
 
-  it("answers 429 too_many_stagings once the caller holds FILE_SOURCE_MAX_STAGINGS unconfirmed uploads", async () => {
-    const max = env.FILE_SOURCE_MAX_STAGINGS;
-    env.FILE_SOURCE_MAX_STAGINGS = 2;
+  it("answers 429 too_many_stagings once the caller holds UPLOAD_MAX_STAGINGS unconfirmed uploads", async () => {
+    const max = env.UPLOAD_MAX_STAGINGS;
+    env.UPLOAD_MAX_STAGINGS = 2;
     try {
       expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
       expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
@@ -431,19 +431,19 @@ describe("POST /v1/uploads", () => {
         STAGING_TTL_MS / 1000 - 60
       );
       // An expired staging no longer counts.
-      await prisma.fileStaging.updateMany({
+      await prisma.uploadStaging.updateMany({
         where: { ownerId: owner },
         data: { expiresAt: new Date(Date.now() - 1000) },
       });
       expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
     } finally {
-      env.FILE_SOURCE_MAX_STAGINGS = max;
+      env.UPLOAD_MAX_STAGINGS = max;
     }
   });
 
-  it("answers 429 too_many_uploads past FILE_SOURCE_MAX_UPLOADS in flight, and frees the slot when one is aborted", async () => {
-    const max = env.FILE_SOURCE_MAX_UPLOADS;
-    env.FILE_SOURCE_MAX_UPLOADS = 1;
+  it("answers 429 too_many_uploads past UPLOAD_MAX_IN_FLIGHT in flight, and frees the slot when one is aborted", async () => {
+    const max = env.UPLOAD_MAX_IN_FLIGHT;
+    env.UPLOAD_MAX_IN_FLIGHT = 1;
     const boundary = "----zeteoslot";
     const slow = http.request(`${app.url}/v1/uploads`, {
       method: "POST",
@@ -489,7 +489,7 @@ describe("POST /v1/uploads", () => {
       );
     } finally {
       slow.destroy();
-      env.FILE_SOURCE_MAX_UPLOADS = max;
+      env.UPLOAD_MAX_IN_FLIGHT = max;
     }
   });
 });
@@ -500,7 +500,7 @@ describe("discardStaging", () => {
     const id = res.body.staging_id as string;
     await Promise.all([discardStaging(id), discardStaging(id)]);
     await discardStaging(id);
-    expect(await prisma.fileStaging.findUnique({ where: { id } })).toBeNull();
+    expect(await prisma.uploadStaging.findUnique({ where: { id } })).toBeNull();
   });
 });
 

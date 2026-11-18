@@ -52,10 +52,10 @@ created_at, updated_at }`.
   when the column does.
 - **A view is granted as itself.** A grant on a view exposes what the view exposes.
 - **A relation is usable only when every key column on both sides is granted.**
-- **A file source's owner holds a locked grant.** The owner of a file source has an `all_columns` grant
+- **An upload source's owner holds a locked grant.** The owner of an upload source has an `all_columns` grant
   on each of its tables, flagged `owner_grant`, which cannot be removed or narrowed. An owner may also
   list, create, change and remove grants on their own tables, with groups limited to global ones and
-  those of their signed-in organization ([file-sources.md](file-sources.md#owning-granting-and-sharing)).
+  those of their signed-in organization ([uploads.md](uploads.md#owning-granting-and-sharing)).
 
 ## Principal statuses
 

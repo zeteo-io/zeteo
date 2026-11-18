@@ -1,0 +1,132 @@
+UploadColumnType:
+  type: string
+  enum: [text, number, boolean, date, timestamp]
+  description: An upload source column's type. `number` is numeric, `timestamp` is `timestamptz`. All columns are nullable.
+
+UploadColumnName:
+  type: string
+  pattern: '^[a-z][a-z0-9_]{0,62}$'
+  description: Lowercase letters, digits and `_`, starting with a letter; at most 63 bytes
+
+StagedColumn:
+  type: object
+  required: [index, name, original_name, type, samples]
+  properties:
+    index: { type: integer, minimum: 0, description: The column's 0-based position in the file }
+    name: { type: string, description: 'The name it would get: duplicates are suffixed `_2`, `_3`, blank headers are `column_<n>`' }
+    original_name: { type: string, description: The header as written in the file }
+    type: { $ref: '#/UploadColumnType' }
+    samples:
+      type: array
+      description: Up to 10 values seen in the column, as text
+      items: { type: string }
+
+StagedTable:
+  type: object
+  description: One table found in an upload
+  required: [key, name, kind, header_row, row_count, columns, warnings]
+  properties:
+    key: { type: string, description: 'Names the table within the staging: `csv`, `sheet:<name>` or `table:<name>`' }
+    name: { type: string }
+    kind: { type: string, enum: [csv, sheet, table] }
+    header_row: { type: [integer, 'null'], description: The 0-based header row; null when the first row looks like data }
+    row_count: { type: integer, minimum: 0, description: 'Data rows, the header not counted' }
+    columns:
+      type: array
+      items: { $ref: '#/StagedColumn' }
+    warnings:
+      type: array
+      items: { type: string }
+
+UploadResponse:
+  type: object
+  required: [staging_id, expires_at, tables]
+  properties:
+    staging_id: { type: string, format: uuid }
+    expires_at: { type: string, format: date-time, description: One hour after the upload }
+    tables:
+      type: array
+      items: { $ref: '#/StagedTable' }
+
+ColumnCorrection:
+  type: object
+  additionalProperties: false
+  required: [index]
+  properties:
+    index: { type: integer, minimum: 0, maximum: 1600 }
+    name: { $ref: '#/UploadColumnName' }
+    type: { $ref: '#/UploadColumnType' }
+
+TableCorrection:
+  type: object
+  additionalProperties: false
+  required: [key]
+  properties:
+    key: { type: string, minLength: 1, maxLength: 1024, description: A staged table's `key` }
+    name:
+      allOf: [{ $ref: '#/UploadColumnName' }]
+      description: The table's name; it cannot contain `__load_`
+    header_row: { type: [integer, 'null'], minimum: 0 }
+    columns:
+      type: array
+      maxItems: 1600
+      items: { $ref: '#/ColumnCorrection' }
+
+CreateUploadSourceRequest:
+  type: object
+  description: An upload source, made from the caller's staging
+  additionalProperties: false
+  required: [type, staging_id, name, tables]
+  properties:
+    type: { type: string, const: upload }
+    staging_id: { type: string, format: uuid }
+    name: { type: string, minLength: 1, maxLength: 255 }
+    slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$', description: Generated from the name when omitted }
+    tables:
+      type: array
+      minItems: 1
+      maxItems: 100
+      description: The staged tables to load, with any corrections
+      items: { $ref: '#/TableCorrection' }
+
+AddTablesRequest:
+  type: object
+  additionalProperties: false
+  required: [staging_id, tables]
+  properties:
+    staging_id: { type: string, format: uuid }
+    tables:
+      type: array
+      minItems: 1
+      maxItems: 100
+      items: { $ref: '#/TableCorrection' }
+
+ReuploadTableRequest:
+  type: object
+  additionalProperties: false
+  required: [staging_id, key]
+  properties:
+    staging_id: { type: string, format: uuid }
+    key: { type: string, minLength: 1, maxLength: 1024 }
+    header_row: { type: [integer, 'null'], minimum: 0 }
+    columns:
+      type: array
+      maxItems: 1600
+      items: { $ref: '#/ColumnCorrection' }
+
+UpdateUploadColumnRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    type: { $ref: '#/UploadColumnType' }
+    name: { $ref: '#/UploadColumnName' }
+    description: { type: [string, 'null'], maxLength: 2000 }
+
+TransferSourceRequest:
+  type: object
+  additionalProperties: false
+  required: [user_id]
+  properties:
+    user_id: { type: string, format: uuid, description: 'The new owner, a tereo user who is not a service account' }
+    keep_access: { type: boolean, default: true, description: The previous owner keeps an ordinary all-columns grant; false drops it }

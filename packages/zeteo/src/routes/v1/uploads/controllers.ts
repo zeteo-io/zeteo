@@ -1,4 +1,4 @@
-import { acquireUploadSlot } from "../../../file-sources/uploadLimits.js";
+import { acquireUploadSlot } from "../../../uploads/uploadLimits.js";
 import { ValidationError } from "../../../utils/errors.js";
 import { callerOf } from "../../../middleware/auth.js";
 import type { Request, Response } from "express";
@@ -8,7 +8,7 @@ import {
   checkStagingRoom,
   discardStaging,
   stageUpload,
-} from "../../../file-sources/staging.js";
+} from "../../../uploads/staging.js";
 
 type Staged = Awaited<ReturnType<typeof stageUpload>>;
 
@@ -23,8 +23,8 @@ type Staged = Awaited<ReturnType<typeof stageUpload>>;
  * read to its end.
  *
  * Before reading anything, the caller must hold fewer than
- * `FILE_SOURCE_MAX_STAGINGS` unconfirmed uploads (429 `too_many_stagings`)
- * and get one of their `FILE_SOURCE_MAX_UPLOADS` upload slots (429
+ * `UPLOAD_MAX_STAGINGS` unconfirmed uploads (429 `too_many_stagings`)
+ * and get one of their `UPLOAD_MAX_IN_FLIGHT` upload slots (429
  * `too_many_uploads`), held until the staging has ended, an aborted one
  * included.
  */

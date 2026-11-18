@@ -4,7 +4,7 @@ import { vi } from "vitest";
 export const TEST_UI_CONFIG: UiConfig = {
   tereoUrl: "https://tereo.test",
   clientId: "zeteo-ui",
-  fileSources: true,
+  uploads: true,
 };
 
 /** A stand-in for `@/lib/config` whose `/ui-config.json` answers at once. */

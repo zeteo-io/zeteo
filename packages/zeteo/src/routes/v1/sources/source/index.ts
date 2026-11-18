@@ -1,5 +1,5 @@
-import { allowOwnerOr } from "../../../../middleware/fileSourceOwner.js";
 import { deleteSource, getSource, updateSource } from "./controllers.js";
+import { allowOwnerOr } from "../../../../middleware/uploadOwner.js";
 import relationsRouter from "./relations/index.js";
 import transferRouter from "./transfer/index.js";
 import { sourceOfParams } from "./middleware.js";

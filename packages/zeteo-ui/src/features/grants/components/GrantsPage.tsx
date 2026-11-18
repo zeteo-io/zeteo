@@ -4,14 +4,15 @@ import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { FilterChip } from "@/components/FilterChip";
-import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { EditButton } from "@/components/EditButton";
 import { useEffect, useMemo, useState } from "react";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { useGrants } from "../api/useGrants";
+import { GrantDialog } from "./GrantDialog";
 import { useAuth } from "@tereo-io/react";
+import { Link } from "react-router-dom";
 import "./styles.css";
 import {
   PrincipalCell,
@@ -61,7 +62,6 @@ const filtersOf = (params: URLSearchParams): GrantFilters => {
 
 export const GrantsPage = () => {
   const { hasPermission } = useAuth();
-  const navigate = useNavigate();
   const [filters, setFilters] = useUrlFilters(
     ["source_id", "table_id", "principal_type", "principal_id"],
     filtersOf
@@ -83,6 +83,7 @@ export const GrantsPage = () => {
   const anyFilter = !!(filters.source_id || filters.table_id || principal);
   const selectsUnavailable = !canReadSources || sources.error?.status === 403;
   const canWrite = hasPermission("zeteo.grants.write");
+  const [dialog, setDialog] = useState<{ grant?: Grant } | null>(null);
 
   // A filter the selects cannot show (no Read sources, or a table from the
   // address without its source) is a chip, named from what is known.
@@ -234,11 +235,7 @@ export const GrantsPage = () => {
           )}
         </div>
         {canWrite && (
-          <Button
-            size="sm"
-            fullWidth={false}
-            onClick={() => navigate("/grants/new")}
-          >
+          <Button size="sm" fullWidth={false} onClick={() => setDialog({})}>
             New grant
           </Button>
         )}
@@ -322,9 +319,7 @@ export const GrantsPage = () => {
                       title: "",
                       cellElement: (grant: Grant) => (
                         <RowActions align="end">
-                          <EditButton
-                            onClick={() => navigate(`/grants/${grant.id}/edit`)}
-                          />
+                          <EditButton onClick={() => setDialog({ grant })} />
                           <GrantDeleteButton
                             grant={grant}
                             size="sm"
@@ -357,6 +352,9 @@ export const GrantsPage = () => {
             Load more
           </Button>
         </div>
+      )}
+      {dialog && (
+        <GrantDialog grant={dialog.grant} onClose={() => setDialog(null)} />
       )}
     </>
   );

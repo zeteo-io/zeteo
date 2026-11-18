@@ -9,13 +9,13 @@ import { prisma } from "../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
-  removeUploadSources,
-  seedUploadSource,
-} from "../../../../support/fileSources.js";
-import {
   isSourcePoolOpen,
   withSourceConnection,
 } from "../../../../../sources/pools.js";
+import {
+  removeUploadSources,
+  seedUploadSource,
+} from "../../../../support/uploads.js";
 import {
   auditRows,
   removeSources,
@@ -357,7 +357,7 @@ describe("/v1/sources/:sourceId", () => {
     );
   });
 
-  describe("a file source", () => {
+  describe("an upload source", () => {
     const ownerId = randomUUID();
     let fileId: string;
     beforeAll(async () => {
@@ -377,7 +377,7 @@ describe("/v1/sources/:sourceId", () => {
       });
     });
 
-    it("GET shows a file source's stored bytes as its size, never measured", async () => {
+    it("GET shows an upload source's stored bytes as its size, never measured", async () => {
       const res = await call("GET", `/${fileId}`);
       expect(res.body).toMatchObject({
         size_bytes: 0,

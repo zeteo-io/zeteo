@@ -31,7 +31,7 @@ export interface DiscoveredTable {
   kind: "table" | "view";
   description: string | null;
   missing: boolean;
-  /** When a file source's table was last loaded (its data is as of then); null for a database table. */
+  /** When an upload source's table was last loaded (its data is as of then); null for a database table. */
   last_synced_at: string | null;
   columns: DiscoveredColumn[];
   relations: DiscoveredRelation[];
@@ -42,7 +42,7 @@ export interface DiscoveredSource {
   slug: string;
   name: string;
   type: SourceType;
-  /** `upload` for a file source. */
+  /** `upload` for an upload source. */
   kind: "database" | "upload";
   language: {
     id: "sql";

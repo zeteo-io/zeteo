@@ -1,5 +1,5 @@
-import type { SourceLocator } from "../../../../middleware/fileSourceOwner.js";
-import { idOrUndefined } from "../../../../middleware/fileSourceOwner.js";
+import type { SourceLocator } from "../../../../middleware/uploadOwner.js";
+import { idOrUndefined } from "../../../../middleware/uploadOwner.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 
 /** The source of the grant's table. */

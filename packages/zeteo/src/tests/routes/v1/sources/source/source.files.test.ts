@@ -11,32 +11,32 @@ import { fetchJson } from "../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   GRANTS_READ,
   GRANTS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../../../definitions/tereoDeclaration.js";
 import {
-  createFileSource,
+  createUploadSource,
   csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
   removeUploadSources,
   schemaExists,
   seedUploadSource,
   sourcesCall,
-} from "../../../../support/fileSources.js";
+} from "../../../../support/uploads.js";
 
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const adminId = randomUUID();
 const admin = tokenFor({
@@ -47,7 +47,7 @@ const reader = tokenFor({
   userId: randomUUID(),
   permissions: [DATA_READ, SOURCES_READ],
 });
-// The owner without the permission to manage file sources.
+// The owner without the permission to manage upload sources.
 const demoted = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
 const nobody = tokenFor({ permissions: [] });
 
@@ -70,7 +70,7 @@ let othersId: string;
 let databaseSourceId: string;
 const call = (method: string, path: string, token: string, body?: unknown) =>
   sourcesCall(app.url, method, path, token, body);
-const make = () => createFileSource(app.url, owner, ownerId, CSV);
+const make = () => createUploadSource(app.url, owner, ownerId, CSV);
 
 beforeAll(async () => {
   app = await startV1Routes();
@@ -81,7 +81,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await removeRunsOf([ownerId, otherId, adminId]);
   await removeUploadSources([seededId, othersId]);
-  await removeFileSourcesOf([ownerId, otherId, adminId]);
+  await removeUploadSourcesOf([ownerId, otherId, adminId]);
   await removeSources([databaseSourceId]);
   await app.close();
 });
@@ -247,7 +247,7 @@ describe("/v1/sources/:sourceId (upload)", () => {
     expect(view.status).toBe(200);
     expect(view.body.archived_at).toEqual(expect.any(String));
     expect(view.body.size_bytes).toBe(0);
-    expect((await fileTablesOf(source.id))[0]!.missing).toBe(true);
+    expect((await uploadTablesOf(source.id))[0]!.missing).toBe(true);
     const again = await call("DELETE", `/${source.id}`, owner);
     expect(again.status).toBe(409);
     expect(again.body.error).toBe("source_archived");

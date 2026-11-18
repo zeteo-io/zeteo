@@ -1,6 +1,6 @@
 // @module-tag int
 // @module-tag platform
-import { STAGING_SCHEMA } from "../../../../../file-sources/storage.js";
+import { STAGING_SCHEMA } from "../../../../../uploads/storage.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startV1Routes } from "../../../../support/v1App.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
@@ -9,23 +9,23 @@ import env from "../../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
 } from "../../../../../definitions/tereoDeclaration.js";
 import {
-  removeFileSourcesOf,
+  removeUploadSourcesOf,
   stageFile,
   uploadsCall,
-} from "../../../../support/fileSources.js";
+} from "../../../../support/uploads.js";
 
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 
 const CSV = "a,b\n1,2\n";
@@ -61,19 +61,19 @@ beforeAll(async () => {
   app = await startV1Routes();
 });
 afterAll(async () => {
-  await removeFileSourcesOf([ownerId, otherId]);
+  await removeUploadSourcesOf([ownerId, otherId]);
   await app.close();
 });
 
 describe("DELETE /v1/uploads/:uploadId", () => {
   it("discards the caller's own staging: its tables, its row and its place under the cap", async () => {
-    const max = env.FILE_SOURCE_MAX_STAGINGS;
-    env.FILE_SOURCE_MAX_STAGINGS = 1;
+    const max = env.UPLOAD_MAX_STAGINGS;
+    env.UPLOAD_MAX_STAGINGS = 1;
     try {
       const first = await upload(owner, CSV);
       expect(first.status).toBe(201);
       const id = first.body.staging_id as string;
-      const row = await prisma.fileStaging.findUniqueOrThrow({
+      const row = await prisma.uploadStaging.findUniqueOrThrow({
         where: { id },
       });
       const tables = (row.tables as { stagingTable: string }[]).map(
@@ -84,7 +84,9 @@ describe("DELETE /v1/uploads/:uploadId", () => {
 
       const res = await call("DELETE", `/${id}`, owner);
       expect(res.status).toBe(204);
-      expect(await prisma.fileStaging.findUnique({ where: { id } })).toBeNull();
+      expect(
+        await prisma.uploadStaging.findUnique({ where: { id } })
+      ).toBeNull();
       const left = await stagingTables();
       for (const t of tables) expect(left).not.toContain(t);
       // The cap has room again.
@@ -96,7 +98,7 @@ describe("DELETE /v1/uploads/:uploadId", () => {
         "staging_not_found",
       ]);
     } finally {
-      env.FILE_SOURCE_MAX_STAGINGS = max;
+      env.UPLOAD_MAX_STAGINGS = max;
     }
   });
 
@@ -111,11 +113,11 @@ describe("DELETE /v1/uploads/:uploadId", () => {
       expect(res.body.error).toBe("staging_not_found");
     }
     expect(
-      await prisma.fileStaging.findUnique({ where: { id: staged.stagingId } })
+      await prisma.uploadStaging.findUnique({ where: { id: staged.stagingId } })
     ).not.toBeNull();
   });
 
-  it("needs zeteo.file_sources.write", async () => {
+  it("needs zeteo.uploads.write", async () => {
     const staged = await stageFile(ownerId, CSV);
     const reader = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
     expect((await call("DELETE", `/${staged.stagingId}`, reader)).status).toBe(

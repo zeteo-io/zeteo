@@ -1,7 +1,7 @@
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { isUploadSource, typeOf } from "../sources/types.js";
 import { withSourceConnection } from "../sources/pools.js";
-import { isFileSource, typeOf } from "../sources/types.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { withAudit } from "../utils/transaction.js";
 import { db, prisma } from "../utils/db/index.js";
@@ -667,8 +667,8 @@ export const refreshSource = async (
   for (let round = 1; ; round++) {
     const row = await db.sources.findById(sourceId);
     if (!row) throw new NotFoundError("Source not found");
-    // A file source's catalogue follows its uploads; there is nothing to read.
-    if (isFileSource(row)) throw new NotADatabaseSourceError();
+    // An upload source's catalogue follows its uploads; there is nothing to read.
+    if (isUploadSource(row)) throw new NotADatabaseSourceError();
     if (row.archivedAt) throw new SourceArchivedError();
     const { snapshot, size, rowCounts } = await readSource(row);
     const lastRound = round >= MAX_READ_ROUNDS;

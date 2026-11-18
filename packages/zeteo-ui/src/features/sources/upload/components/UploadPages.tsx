@@ -1,22 +1,24 @@
 import { Facts, LimitSections, When, type Row } from "../../components/Facts";
-import { ColumnTypeDialog, type EditedColumn } from "./ColumnTypeDialog";
+import { FILE_COLUMN_TYPES, type UpdateColumn } from "../api/types";
+import { useRemoveTable, useUpdateColumn } from "../api/uploads";
 import { useSourceContext } from "../../components/context";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { sourceHref } from "../../components/sourceLabels";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { BorderedSection, Button } from "@kosmeo-ui/react";
+import { columnTypeName, RETYPE_WARNING } from "./labels";
 import { PrincipalLabel } from "@/features/principals";
-import { EditButton } from "@/components/EditButton";
-import { useRemoveTable } from "../api/uploads";
+import { LoadFailure } from "./CastFailedNotice";
+import { nameProblem } from "@/utils/queryName";
 import { useNavigate } from "react-router-dom";
 import { formatBytes } from "./labels";
-import { useState } from "react";
 import "./styles.css";
 import {
   TableView,
   TablesList,
   useAllTables,
   useTable,
+  type ColumnEditing,
 } from "@/features/tables";
 
 /** An upload's overview: its data and owner, and its limits, laid out as a database source's. */
@@ -136,49 +138,52 @@ const TableActions = ({
   );
 };
 
-/** One upload table: the database source's table page, with re-upload, removal and retyping. */
+const TYPE_CHOICES = FILE_COLUMN_TYPES.map((t) => ({
+  id: t,
+  label: columnTypeName(t),
+}));
+
+/** One upload table: the database source's table page, with re-upload, removal, renaming and retyping. */
 export const UploadTablePage = ({ tableId }: { tableId: string }) => {
   const { source, access } = useSourceContext();
-  const [column, setColumn] = useState<EditedColumn | null>(null);
+  const updateColumn = useUpdateColumn(source.id, tableId);
   const base = sourceHref(source.id);
+  const columnEditing: ColumnEditing = {
+    types: TYPE_CHOICES,
+    nameProblem,
+    // A new type reloads the table from its stored values; a value that
+    // does not fit fails it with the rows, and nothing changes.
+    saveColumn: (columnId, change) =>
+      updateColumn.mutateAsync({
+        columnId,
+        body: change as UpdateColumn,
+      }),
+    retypeWarning: `${RETYPE_WARNING} The table is reloaded with the new type; if a value does not fit, nothing changes.`,
+    failure: (error) => <LoadFailure error={error} rowsOf="table" />,
+  };
   return (
-    <>
-      <TableView
-        key={tableId}
-        sourceId={source.id}
-        tableId={tableId}
-        canEdit={access.canManage}
-        catalogue="upload"
-        tablesHref={`${base}/tables`}
-        relationsHref={`${base}/relations`}
-        headerActions={
-          access.canManage && (
-            <TableActions sourceId={source.id} tableId={tableId} />
-          )
-        }
-        columnNote={(c) =>
-          c.original_name &&
-          c.original_name !== c.name && (
-            <span className="z-muted" title="Header in the file">
-              {c.original_name}
-            </span>
-          )
-        }
-        columnAction={
-          access.canManage
-            ? (c) =>
-                !c.missing_since && <EditButton onClick={() => setColumn(c)} />
-            : undefined
-        }
-      />
-      {column && (
-        <ColumnTypeDialog
-          sourceId={source.id}
-          tableId={tableId}
-          column={column}
-          onClose={() => setColumn(null)}
-        />
-      )}
-    </>
+    <TableView
+      key={tableId}
+      sourceId={source.id}
+      tableId={tableId}
+      canEdit={access.canManage}
+      catalogue="upload"
+      tablesHref={`${base}/tables`}
+      relationsHref={`${base}/relations`}
+      headerActions={
+        access.canManage && (
+          <TableActions sourceId={source.id} tableId={tableId} />
+        )
+      }
+      columnNote={(c) =>
+        c.original_name &&
+        c.original_name !== c.name && (
+          <span className="z-muted" title="Header in the file">
+            {c.original_name}
+          </span>
+        )
+      }
+      columnEditing={access.canManage ? columnEditing : undefined}
+    />
   );
 };

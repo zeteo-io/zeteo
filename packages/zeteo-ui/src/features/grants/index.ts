@@ -1,5 +1,4 @@
 export { GrantsPage } from "./components/GrantsPage";
-export { GrantNewPage, GrantEditPage } from "./components/GrantFormPages";
 export { useGrants } from "./api/useGrants";
 export { useCreateGrant } from "./api/useCreateGrant";
 export { useReplaceGrant } from "./api/useReplaceGrant";
@@ -10,4 +9,5 @@ export {
   type ColumnChoice,
 } from "./components/ColumnChooser";
 export type { Grant } from "./api/types";
-export { SourceGrants, type ShareableTable } from "./components/SourceGrants";
+export { SourceGrants } from "./components/SourceGrants";
+export { GrantDialog, type ShareableTable } from "./components/GrantDialog";

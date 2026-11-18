@@ -11,7 +11,7 @@ import {
   removeUploadSources,
   seedUploadSource,
   type UploadTableSpec,
-} from "../../../support/fileSources.js";
+} from "../../../support/uploads.js";
 import {
   grantTo,
   newQueryUser,
@@ -52,7 +52,7 @@ const ORDERS: UploadTableSpec = {
   ],
 };
 
-describe("POST /v1/query: file sources", () => {
+describe("POST /v1/query: upload sources", () => {
   const ownerId = randomUUID();
   const ownerToken = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
   let source: SeededSource;

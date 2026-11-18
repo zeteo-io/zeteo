@@ -21,12 +21,12 @@ import {
 import {
   deleteExpiredStagings,
   deleteOrphanStagingTables,
-} from "../../file-sources/staging.js";
+} from "../../uploads/staging.js";
 import {
   createStagingTable,
   STAGING_SCHEMA,
   stagingNameAt,
-} from "../../file-sources/storage.js";
+} from "../../uploads/storage.js";
 import {
   recordExportEnd,
   recordInterruptedExport,
@@ -109,7 +109,7 @@ describe("runs housekeeping", () => {
   describe("expired file stagings", () => {
     const stagingRow = async (expiresAt: Date) => {
       const table = await createStagingTable(2);
-      const row = await prisma.fileStaging.create({
+      const row = await prisma.uploadStaging.create({
         data: {
           ownerId: randomUUID(),
           kind: "csv",
@@ -136,14 +136,14 @@ describe("runs housekeeping", () => {
       const live = await stagingRow(new Date(NOW.getTime() + MINUTE));
       expect(await deleteExpiredStagings(NOW)).toBe(1);
       expect(
-        await prisma.fileStaging.findUnique({ where: { id: expired.id } })
+        await prisma.uploadStaging.findUnique({ where: { id: expired.id } })
       ).toBeNull();
       expect(await tableExists(expired.table)).toBe(false);
       expect(
-        await prisma.fileStaging.findUnique({ where: { id: live.id } })
+        await prisma.uploadStaging.findUnique({ where: { id: live.id } })
       ).not.toBeNull();
       expect(await tableExists(live.table)).toBe(true);
-      await prisma.fileStaging.delete({ where: { id: live.id } });
+      await prisma.uploadStaging.delete({ where: { id: live.id } });
       await prisma.$executeRawUnsafe(
         `DROP TABLE "${STAGING_SCHEMA}"."${live.table}"`
       );
@@ -160,7 +160,7 @@ describe("runs housekeeping", () => {
       const old = await make(new Date(NOW.getTime() - 2 * 60 * MINUTE));
       const young = await make(new Date(NOW.getTime() - 5 * MINUTE));
       const namedName = await make(new Date(NOW.getTime() - 2 * 60 * MINUTE));
-      const row = await prisma.fileStaging.create({
+      const row = await prisma.uploadStaging.create({
         data: {
           ownerId: randomUUID(),
           kind: "csv",
@@ -173,7 +173,7 @@ describe("runs housekeeping", () => {
       expect(await tableExists(old)).toBe(false);
       expect(await tableExists(young)).toBe(true);
       expect(await tableExists(namedName)).toBe(true);
-      await prisma.fileStaging.delete({ where: { id: row.id } });
+      await prisma.uploadStaging.delete({ where: { id: row.id } });
       for (const name of [young, namedName]) {
         await prisma.$executeRawUnsafe(
           `DROP TABLE "${STAGING_SCHEMA}"."${name}"`
@@ -185,7 +185,7 @@ describe("runs housekeeping", () => {
       const expired = await stagingRow(new Date(NOW.getTime() - MINUTE));
       await runHousekeeping(NOW);
       expect(
-        await prisma.fileStaging.findUnique({ where: { id: expired.id } })
+        await prisma.uploadStaging.findUnique({ where: { id: expired.id } })
       ).toBeNull();
       expect(await tableExists(expired.table)).toBe(false);
     });

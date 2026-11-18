@@ -65,7 +65,7 @@ describe("a source page's back link", () => {
   });
 
   it("goes to My sources, without a known origin, for whoever may not", async () => {
-    held.permissions = ["zeteo.data.read", "zeteo.file_sources.write"];
+    held.permissions = ["zeteo.data.read", "zeteo.uploads.write"];
     get.mockResolvedValue({
       data: makeSource({ type: "upload" as never, settings: null }),
     });

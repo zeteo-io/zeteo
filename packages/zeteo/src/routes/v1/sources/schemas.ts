@@ -85,7 +85,7 @@ export const TableNameSchema = ColumnNameSchema.refine(
   { message: "A table name cannot contain __load_" }
 );
 
-export const FileColumnTypeSchema = z.enum([
+export const UploadColumnTypeSchema = z.enum([
   "text",
   "number",
   "boolean",
@@ -96,7 +96,7 @@ export const FileColumnTypeSchema = z.enum([
 export const ColumnCorrectionSchema = z.strictObject({
   index: z.number().int().min(0).max(1600),
   name: ColumnNameSchema.optional(),
-  type: FileColumnTypeSchema.optional(),
+  type: UploadColumnTypeSchema.optional(),
 });
 
 /** The 0-based header row, or null for none. */

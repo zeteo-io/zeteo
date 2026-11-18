@@ -3,7 +3,7 @@
     tags: [Grants]
     summary: Get a grant
     description: |
-      **File-source owners:** the owner of a file source is admitted here for grants on its own
+      **Upload source owners:** the owner of an upload source is admitted here for grants on its own
       tables (and `source_id` filters to a source they own) without `zeteo.grants.*`; for anyone
       else's table, or a database source's, the answer is the same `403 forbidden` as ever. An
       owner's `group` grants must be to groups that are global or of their signed-in organization

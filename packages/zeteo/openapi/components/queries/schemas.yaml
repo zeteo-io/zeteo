@@ -366,7 +366,7 @@ DiscoveredTable:
     kind: { type: string, enum: [table, view] }
     description: { type: [string, 'null'] }
     missing: { type: boolean, description: The last refresh did not find the table }
-    last_synced_at: { type: [string, 'null'], format: date-time, description: 'When a file source''s table was last loaded: its data is as of then. Null for a database table' }
+    last_synced_at: { type: [string, 'null'], format: date-time, description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table' }
     columns:
       type: array
       description: Only the granted columns, in the table's order
@@ -382,7 +382,7 @@ DiscoveredSource:
     slug: { type: string, description: What a query's `source` names }
     name: { type: string }
     type: { $ref: '../sources/schemas.yaml#/SourceType' }
-    kind: { type: string, enum: [database, upload], description: '`upload` for a file source, whose tables carry `last_synced_at`' }
+    kind: { type: string, enum: [database, upload], description: '`upload` for an upload source, whose tables carry `last_synced_at`' }
     language:
       type: object
       required: [id, schema]

@@ -1,4 +1,4 @@
-import { transferFileSource } from "../../../../../file-sources/service.js";
+import { transferUploadSource } from "../../../../../uploads/service.js";
 import { callerOf } from "../../../../../middleware/auth.js";
 import { TransferSourceSchema } from "./schemas.js";
 import { SourceParamsSchema } from "../schemas.js";
@@ -13,7 +13,7 @@ export const transferSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
   const body = validateBody(TransferSourceSchema, req);
   res.status(200).json(
-    await transferFileSource(callerOf(req), sourceId, {
+    await transferUploadSource(callerOf(req), sourceId, {
       userId: body.user_id,
       keepAccess: body.keep_access,
     })

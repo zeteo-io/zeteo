@@ -6,7 +6,7 @@
       Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
       (`missing_since` set) are left out unless `include_missing=true`.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
     operationId: listTables
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -37,16 +37,16 @@
       Loads the chosen tables of the caller's staging into the upload source, each with an owner
       grant to the source's owner (also when an admin adds it). A table name the source already
       has is `409 name_taken`; the new data counts against the owner's quota (`409
-      quota_exceeded`). The staging is used up on success. A `zeteo.file_source.updated` audit
+      quota_exceeded`). The staging is used up on success. A `zeteo.source.tables_added` audit
       entry is written.
 
       **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
-      `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+      `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
       not, gets the same `403 forbidden`.
 
       **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
-      source is `409 source_archived`; `404 file_sources_not_configured` while
-      `FILE_SOURCES_READER_URL` is unset.
+      source is `409 source_archived`; `404 uploads_not_configured` while
+      `UPLOADS_READER_URL` is unset.
     operationId: addTables
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -55,7 +55,7 @@
       content:
         application/json:
           schema:
-            $ref: '../../components/file-sources/schemas.yaml#/AddTablesRequest'
+            $ref: '../../components/uploads/schemas.yaml#/AddTablesRequest'
     responses:
       '201':
         description: The source
@@ -67,7 +67,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`
+        description: Not found - `not_found`, `staging_not_found` (expired, missing or someone else's), or `uploads_not_configured`
         content:
           application/json:
             schema:
@@ -87,7 +87,7 @@
               $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503':
-        description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+        description: Service unavailable - `upload_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
         content:
           application/json:
             schema:

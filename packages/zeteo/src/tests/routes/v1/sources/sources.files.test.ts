@@ -2,7 +2,7 @@
 // @module-tag platform
 import { postQuery, removeRunsOf } from "../../../support/queries.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getStaging } from "../../../../file-sources/staging.js";
+import { getStaging } from "../../../../uploads/staging.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../support/tokens.js";
@@ -10,28 +10,28 @@ import env from "../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../../definitions/tereoDeclaration.js";
 import {
   csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
   sourcesCall,
   stageFile,
   storedTables,
-} from "../../../support/fileSources.js";
+} from "../../../support/uploads.js";
 
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const adminId = randomUUID();
 const admin = tokenFor({
@@ -56,7 +56,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await removeRunsOf([ownerId, otherId, adminId]);
-  await removeFileSourcesOf([ownerId, otherId, adminId]);
+  await removeUploadSourcesOf([ownerId, otherId, adminId]);
   await app.close();
 });
 
@@ -64,7 +64,7 @@ const zfSchemas = async () =>
   (
     await prisma.$queryRaw<Array<{ n: string }>>`
       SELECT nspname AS n FROM pg_namespace
-      WHERE nspname LIKE 'zf\\_%' ORDER BY nspname`
+      WHERE nspname LIKE 'zu\\_%' ORDER BY nspname`
   ).map((r) => r.n);
 
 const ownSources = (id: string) =>
@@ -95,7 +95,7 @@ describe("POST /v1/sources (upload)", () => {
     });
     expect(res.body).not.toHaveProperty("tables");
     expect(res.body.size_bytes).toBeGreaterThan(0);
-    expect(await fileTablesOf(res.body.id)).toEqual([
+    expect(await uploadTablesOf(res.body.id)).toEqual([
       {
         id: expect.any(String),
         name: "my_orders",
@@ -119,7 +119,7 @@ describe("POST /v1/sources (upload)", () => {
       },
     ]);
 
-    const tableId = (await fileTablesOf(res.body.id))[0]!.id;
+    const tableId = (await uploadTablesOf(res.body.id))[0]!.id;
 
     // The tables' and columns' views carry what an upload says of them.
     const listed = await call("GET", `/${res.body.id}/tables`, owner);
@@ -210,14 +210,17 @@ describe("POST /v1/sources (upload)", () => {
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
     expect(
-      (await fileTablesOf(res.body.id))[0]!.columns.map((c) => [c.name, c.type])
+      (await uploadTablesOf(res.body.id))[0]!.columns.map((c) => [
+        c.name,
+        c.type,
+      ])
     ).toEqual([
       ["order_id", "text"],
       ["total", "number"],
       ["postcode", "text"],
       ["paid", "boolean"],
     ]);
-    expect((await fileTablesOf(res.body.id))[0]!.name).toBe("orders");
+    expect((await uploadTablesOf(res.body.id))[0]!.name).toBe("orders");
   });
 
   it("re-infers the types when the header row differs from the preview's", async () => {
@@ -241,9 +244,9 @@ describe("POST /v1/sources (upload)", () => {
       ],
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect((await fileTablesOf(res.body.id))[0]!.row_count).toBe(2);
+    expect((await uploadTablesOf(res.body.id))[0]!.row_count).toBe(2);
     expect(
-      (await fileTablesOf(res.body.id))[0]!.columns.map((c) => [
+      (await uploadTablesOf(res.body.id))[0]!.columns.map((c) => [
         c.name,
         c.original_name,
         c.type,
@@ -264,9 +267,12 @@ describe("POST /v1/sources (upload)", () => {
       tables: [{ key: "csv", header_row: null }],
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect((await fileTablesOf(res.body.id))[0]!.row_count).toBe(3);
+    expect((await uploadTablesOf(res.body.id))[0]!.row_count).toBe(3);
     expect(
-      (await fileTablesOf(res.body.id))[0]!.columns.map((c) => [c.name, c.type])
+      (await uploadTablesOf(res.body.id))[0]!.columns.map((c) => [
+        c.name,
+        c.type,
+      ])
     ).toEqual([
       ["column_1", "text"],
       ["column_2", "text"],
@@ -301,8 +307,8 @@ describe("POST /v1/sources (upload)", () => {
   it("answers 409 quota_exceeded and creates nothing", async () => {
     const before = await ownSources(ownerId);
     const schemasBefore = await zfSchemas();
-    const quota = env.FILE_SOURCE_QUOTA_BYTES;
-    env.FILE_SOURCE_QUOTA_BYTES = 1;
+    const quota = env.UPLOAD_QUOTA_BYTES;
+    env.UPLOAD_QUOTA_BYTES = 1;
     try {
       const staged = await stageFile(ownerId, ORDERS);
       const res = await call("POST", "", owner, {
@@ -314,7 +320,7 @@ describe("POST /v1/sources (upload)", () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("quota_exceeded");
     } finally {
-      env.FILE_SOURCE_QUOTA_BYTES = quota;
+      env.UPLOAD_QUOTA_BYTES = quota;
     }
     expect(await ownSources(ownerId)).toEqual(before);
     expect(await zfSchemas()).toEqual(schemasBefore);
@@ -381,7 +387,7 @@ describe("POST /v1/sources (upload)", () => {
     expect(res.body.error).toBe("staging_not_found");
   });
 
-  it("answers 403 without zeteo.file_sources.write", async () => {
+  it("answers 403 without zeteo.uploads.write", async () => {
     const res = await call("POST", "", admin, {
       type: "upload",
       staging_id: randomUUID(),
@@ -393,7 +399,7 @@ describe("POST /v1/sources (upload)", () => {
 });
 
 describe("GET /v1/sources (upload)", () => {
-  it("lists an owner's own with owner_id=me, given only zeteo.file_sources.write, and every one for an admin", async () => {
+  it("lists an owner's own with owner_id=me, given only zeteo.uploads.write, and every one for an admin", async () => {
     const created = await call("POST", "", other, {
       type: "upload",
       staging_id: (await stageFile(otherId, ORDERS)).stagingId,
@@ -426,7 +432,7 @@ describe("GET /v1/sources (upload)", () => {
     expect(mine.body.data[0].share_count).toBe(0);
 
     // A user and a group on its table, the user twice over: two principals.
-    const tableId = (await fileTablesOf(created.body.id))[0]!.id;
+    const tableId = (await uploadTablesOf(created.body.id))[0]!.id;
     const reader = randomUUID();
     const team = randomUUID();
     await prisma.grant.createMany({

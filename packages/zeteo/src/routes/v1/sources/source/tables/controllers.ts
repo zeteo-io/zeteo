@@ -1,5 +1,5 @@
 import { encodeCursor, parseCursor } from "../../../../../utils/cursor.js";
-import { addTables as add } from "../../../../../file-sources/service.js";
+import { addTables as add } from "../../../../../uploads/service.js";
 import { NotFoundError } from "../../../../../utils/errors.js";
 import { callerOf } from "../../../../../middleware/auth.js";
 import { tableView } from "../../../../../views/catalog.js";

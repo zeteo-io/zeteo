@@ -23,7 +23,7 @@ const patch = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
-    permissions: ["zeteo.data.read", "zeteo.file_sources.write"],
+    permissions: ["zeteo.data.read", "zeteo.uploads.write"],
     api: { get, post, put, patch, delete: del },
   })
 );
@@ -54,7 +54,7 @@ const twoTables = (): UploadTable[] => [
 
 const shared = makeGrant({
   source: { id: FS_ID, slug: "q3-sales" },
-  table: { id: TABLE_ID, schema_name: "zf_x", name: "orders", missing: false },
+  table: { id: TABLE_ID, schema_name: "zu_x", name: "orders", missing: false },
   all_columns: false,
   columns: [{ id: AMOUNT_ID, name: "amount", missing: false }],
 });
@@ -156,7 +156,7 @@ describe("an upload source's page: flows", () => {
       within(notesRow).getByRole("link", { name: "Add description" })
     );
     await user.click(
-      await screen.findByRole("button", { name: "Edit descriptions" })
+      await screen.findByRole("button", { name: "Edit columns" })
     );
     await user.type(screen.getByLabelText("Table description"), "Free notes");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -225,7 +225,7 @@ describe("an upload source's page: flows", () => {
     expect(row).toHaveTextContent("notes");
     expect(row).toHaveTextContent("orders");
     expect(row).toHaveTextContent("order_region → region");
-    expect(row).not.toHaveTextContent("zf_x");
+    expect(row).not.toHaveTextContent("zu_x");
     expect(row).toHaveTextContent("Many");
 
     await user.click(within(row).getByRole("button", { name: "Edit" }));

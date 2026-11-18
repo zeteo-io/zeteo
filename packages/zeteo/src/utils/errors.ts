@@ -256,61 +256,66 @@ export class NotAnUploadSourceError extends AppError {
   }
 }
 
-/** A load that would take the owner's stored file-source data past `FILE_SOURCE_QUOTA_BYTES`. */
+/** A load that would take the owner's stored upload source data past `UPLOAD_QUOTA_BYTES`. */
 export class QuotaExceededError extends AppError {
   constructor(quotaBytes: number) {
     super(
       409,
       "quota_exceeded",
-      `This would store more than the ${quotaBytes} bytes allowed for your file sources`,
+      `This would store more than the ${quotaBytes} bytes allowed for your upload sources`,
       { details: { quota_bytes: quotaBytes } }
     );
     this.name = "QuotaExceededError";
   }
 }
 
-const FILE_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
+const UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
 
 /**
- * A change of a file source's data that could not start or finish in time:
+ * A change of an upload source's data that could not start or finish in time:
  * another load of it holds its lock, or queries reading a table kept the swap
  * waiting past its lock timeout. Nothing changed; retry later.
  */
-export class FileSourceBusyError extends AppError {
+export class UploadSourceBusyError extends AppError {
   constructor() {
-    super(503, "file_source_busy", "The file source is busy; retry shortly", {
-      headers: { "Retry-After": FILE_SOURCE_BUSY_RETRY_AFTER_SECONDS },
-    });
-    this.name = "FileSourceBusyError";
+    super(
+      503,
+      "upload_source_busy",
+      "The upload source is busy; retry shortly",
+      {
+        headers: { "Retry-After": UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS },
+      }
+    );
+    this.name = "UploadSourceBusyError";
   }
 }
 
-/** File Sources are off: `FILE_SOURCES_READER_URL` is not set. */
-export class FileSourcesNotConfiguredError extends AppError {
+/** Uploads are off: `UPLOADS_READER_URL` is not set. */
+export class UploadsNotConfiguredError extends AppError {
   constructor() {
-    super(404, "file_sources_not_configured", "File Sources are not enabled");
-    this.name = "FileSourcesNotConfiguredError";
+    super(404, "uploads_not_configured", "Uploads are not enabled");
+    this.name = "UploadsNotConfiguredError";
   }
 }
 
 /**
- * File Sources are on but `FILE_SOURCES_READER_URL` cannot be used (an
+ * Uploads are on but `UPLOADS_READER_URL` cannot be used (an
  * unsupported `sslmode`). `problem` names what is wrong for the log and for
  * start-up, which refuses it; the answer never carries it.
  */
-export class FileSourcesMisconfiguredError extends AppError {
+export class UploadsMisconfiguredError extends AppError {
   constructor(public readonly problem: string) {
     super(
       503,
-      "file_sources_misconfigured",
-      "File Sources are misconfigured; ask the operator"
+      "uploads_misconfigured",
+      "Uploads are misconfigured; ask the operator"
     );
-    this.name = "FileSourcesMisconfiguredError";
+    this.name = "UploadsMisconfiguredError";
   }
 }
 
 /**
- * An upload over `FILE_SOURCE_MAX_BYTES` (`max_bytes`), or an xlsx workbook
+ * An upload over `UPLOAD_MAX_BYTES` (`max_bytes`), or an xlsx workbook
  * whose content inflates past `max_uncompressed_bytes` (twice the limit).
  */
 export class FileTooLargeError extends AppError {
@@ -388,7 +393,7 @@ export class InvalidGrantError extends AppError {
   }
 }
 
-/** A group a file source's owner may not grant to: not global and not of their signed-in organization, or unknown. */
+/** A group an upload source's owner may not grant to: not global and not of their signed-in organization, or unknown. */
 export class GroupNotAllowedError extends AppError {
   constructor() {
     super(
@@ -400,13 +405,13 @@ export class GroupNotAllowedError extends AppError {
   }
 }
 
-/** A removal or narrowing of a file source's owner grant: it can only move by a transfer. */
+/** A removal or narrowing of an upload source's owner grant: it can only move by a transfer. */
 export class OwnerGrantLockedError extends AppError {
   constructor() {
     super(
       409,
       "owner_grant_locked",
-      "The owner's grant cannot be removed or narrowed; transfer the file source instead"
+      "The owner's grant cannot be removed or narrowed; transfer the upload source instead"
     );
     this.name = "OwnerGrantLockedError";
   }

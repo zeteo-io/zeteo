@@ -5,13 +5,13 @@ import { callerOf } from "../../../../../../middleware/auth.js";
 import { db } from "../../../../../../utils/db/index.js";
 import type { Request, Response } from "express";
 import {
-  removeTable as remove,
-  reuploadTable as reupload,
-} from "../../../../../../file-sources/service.js";
-import {
   validateBody,
   validateParams,
 } from "../../../../../../utils/validateReq.js";
+import {
+  removeTable as remove,
+  reuploadTable as reupload,
+} from "../../../../../../uploads/service.js";
 import {
   PatchTableSchema,
   ReuploadTableSchema,

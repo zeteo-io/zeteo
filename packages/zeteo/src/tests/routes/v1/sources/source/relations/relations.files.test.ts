@@ -10,14 +10,14 @@ import { fetchJson } from "../../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_WRITE,
 } from "../../../../../../definitions/tereoDeclaration.js";
 import {
   removeUploadSources,
   seedUploadSource,
   type UploadTableSpec,
-} from "../../../../../support/fileSources.js";
+} from "../../../../../support/uploads.js";
 
 const CUSTOMERS: UploadTableSpec = {
   name: "customers",
@@ -39,7 +39,7 @@ const ORDERS: UploadTableSpec = {
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const admin = tokenFor({ permissions: [SOURCES_WRITE] });
 const nobody = tokenFor({ permissions: [] });
@@ -49,7 +49,7 @@ const bodyOf = (res: { body: Record<string, unknown> }) => {
   return rest;
 };
 
-describe("/v1/sources/:sourceId/relations (file sources)", () => {
+describe("/v1/sources/:sourceId/relations (upload sources)", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   let own: Awaited<ReturnType<typeof seedUploadSource>>;
   let others: Awaited<ReturnType<typeof seedUploadSource>>;
@@ -130,7 +130,7 @@ describe("/v1/sources/:sourceId/relations (file sources)", () => {
     expect(res.status).toBe(422);
   });
 
-  it("refuses the owner on a database source or another owner's file source, as today", async () => {
+  it("refuses the owner on a database source or another owner's upload source, as today", async () => {
     const dbOrders = await prisma.sourceTable.findFirstOrThrow({
       where: { sourceId: databaseSourceId, name: "orders" },
     });
@@ -169,7 +169,7 @@ describe("/v1/sources/:sourceId/relations (file sources)", () => {
     }
   });
 
-  it("refuses an owner who no longer holds zeteo.file_sources.write", async () => {
+  it("refuses an owner who no longer holds zeteo.uploads.write", async () => {
     const lapsed = tokenFor({ userId: ownerId, permissions: [DATA_READ] });
     const res = await call(
       "POST",

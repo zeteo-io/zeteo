@@ -6,7 +6,7 @@
       Returns one source, archived or not. `settings` is redacted, and null when the stored
       settings cannot be decrypted.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
     operationId: getSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -38,8 +38,8 @@
       the new settings without `password` and `ca`.
 
       On an upload source only `name` and the limit fields apply (`409 not_a_database_source`
-      for `settings` or `schemas`). Its owner (holding `zeteo.file_sources.write` and
-      `zeteo.data.read`) may rename it, which writes `zeteo.file_source.updated` (as does an
+      for `settings` or `schemas`). Its owner (holding `zeteo.uploads.write` and
+      `zeteo.data.read`) may rename it, which writes `zeteo.source.updated` (as does an
       admin's rename alone); its limits need `zeteo.sources.write`.
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` alone; anyone else gets the same 403.
@@ -87,18 +87,18 @@
     summary: Delete an upload source
     description: |
       Archives the upload source and drops its stored data (waiting for queries reading it, up to
-      the swap's lock wait: `503 file_source_busy` past it). Catalogue rows stay, marked missing.
+      the swap's lock wait: `503 upload_source_busy` past it). Catalogue rows stay, marked missing.
       Grants stay too, and the owner grants lose their `owner_grant` flag, so an admin with
-      `zeteo.grants.write` may remove them. A `zeteo.file_source.deleted` audit entry is written.
+      `zeteo.grants.write` may remove them. A `zeteo.source.deleted` audit entry is written.
       A database source is archived instead (`POST /v1/sources/{sourceId}/archive`).
 
       **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
-      `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+      `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
       not, gets the same `403 forbidden`.
 
       **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
-      source is `409 source_archived`; `404 file_sources_not_configured` while
-      `FILE_SOURCES_READER_URL` is unset.
+      source is `409 source_archived`; `404 uploads_not_configured` while
+      `UPLOADS_READER_URL` is unset.
     operationId: deleteSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -108,7 +108,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `not_found`, or `file_sources_not_configured`
+        description: Not found - `not_found`, or `uploads_not_configured`
         content:
           application/json:
             schema:
@@ -121,7 +121,7 @@
               $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503':
-        description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+        description: Service unavailable - `upload_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
         content:
           application/json:
             schema:

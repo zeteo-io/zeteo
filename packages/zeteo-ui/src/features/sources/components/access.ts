@@ -3,7 +3,7 @@ import { useAuth } from "@tereo-io/react";
 import type { Me } from "@/lib/auth";
 
 /** The permission that lets a person upload files and own the sources they make. */
-export const FILE_SOURCES_WRITE = "zeteo.file_sources.write";
+export const UPLOADS_WRITE = "zeteo.uploads.write";
 
 /** What a source's pages may do, worked out once by its layout. */
 export interface SourceAccess {
@@ -46,7 +46,7 @@ export const useSourceAccess = (source: Source): SourceAccess => {
   const isOwner = !!user && source.owner_id === user.id;
   // The owner acts as the owner while they hold the permission; anyone else
   // needs the admin permission each action's route asks for.
-  const asOwner = isOwner && hasPermission(FILE_SOURCES_WRITE);
+  const asOwner = isOwner && hasPermission(UPLOADS_WRITE);
   const canShare = !archived && (asOwner || grantsAdmin);
   return {
     isOwner,

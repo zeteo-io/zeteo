@@ -10,8 +10,8 @@ import type {
   SourceConnection,
 } from "../adapters/types.js";
 import {
-  FileSourcesMisconfiguredError,
-  FileSourcesNotConfiguredError,
+  UploadsMisconfiguredError,
+  UploadsNotConfiguredError,
 } from "../utils/errors.js";
 
 export const CONNECT_TIMEOUT_MS = 5000;
@@ -56,7 +56,7 @@ const connectOptions = (poolSize: number): ConnectOptions => ({
   queryTimeoutMs: QUERY_TIMEOUT_MS,
 });
 
-/** `sslmode` in `FILE_SOURCES_READER_URL` as the Postgres adapter's `tls`. */
+/** `sslmode` in `UPLOADS_READER_URL` as the Postgres adapter's `tls`. */
 const READER_TLS: Record<string, PostgresSettings["tls"]> = {
   disable: "off",
   require: "require",
@@ -64,26 +64,26 @@ const READER_TLS: Record<string, PostgresSettings["tls"]> = {
 };
 
 /**
- * The File Sources reader's connection settings, from
- * `FILE_SOURCES_READER_URL`: the role that may only read `zf_*` schemas.
+ * The uploads reader's connection settings, from
+ * `UPLOADS_READER_URL`: the role that may only read `zu_*` schemas.
  * `sslmode` is `disable` (the default), `require` or `verify-full`. An unset
- * URL (File Sources turned off while `upload` sources remain) is
- * `FileSourcesNotConfiguredError` (404); another `sslmode` is
- * `FileSourcesMisconfiguredError` (503), whose `problem` says what is wrong
+ * URL (Uploads turned off while `upload` sources remain) is
+ * `UploadsNotConfiguredError` (404); another `sslmode` is
+ * `UploadsMisconfiguredError` (503), whose `problem` says what is wrong
  * and is logged, never answered. Start-up refuses both
- * (`checkFileSourcesSetup`), so at run time they mean the environment changed.
+ * (`checkUploadsSetup`), so at run time they mean the environment changed.
  */
-export const fileReaderSettings = (): PostgresSettings => {
-  if (!env.FILE_SOURCES_READER_URL) {
-    throw new FileSourcesNotConfiguredError();
+export const uploadsReaderSettings = (): PostgresSettings => {
+  if (!env.UPLOADS_READER_URL) {
+    throw new UploadsNotConfiguredError();
   }
-  const url = new URL(env.FILE_SOURCES_READER_URL);
+  const url = new URL(env.UPLOADS_READER_URL);
   const sslmode = url.searchParams.get("sslmode") ?? "disable";
   const tls = READER_TLS[sslmode];
   if (!tls) {
-    const problem = `FILE_SOURCES_READER_URL's sslmode must be disable, require or verify-full, not "${sslmode}"`;
-    logger.error({ problem }, "File Sources reader misconfigured");
-    throw new FileSourcesMisconfiguredError(problem);
+    const problem = `UPLOADS_READER_URL's sslmode must be disable, require or verify-full, not "${sslmode}"`;
+    logger.error({ problem }, "uploads reader misconfigured");
+    throw new UploadsMisconfiguredError(problem);
   }
   return {
     host: url.hostname.replace(/^\[(.*)\]$/, "$1"),
@@ -96,17 +96,17 @@ export const fileReaderSettings = (): PostgresSettings => {
 };
 
 /**
- * Connects as the File Sources reader. Not checked against
+ * Connects as the uploads reader. Not checked against
  * `SOURCE_ALLOWED_HOSTS`: those rules are for the databases admins register,
  * and the reader is Zeteo's own database, named by the operator in its
  * environment. The adapter's queries run READ ONLY at read committed, never
  * REPEATABLE READ: storage swaps tables in with DDL, which is not MVCC-safe.
  */
-export const connectFileReader = (
+export const connectUploadsReader = (
   adapter: SourceAdapter,
   poolSize: number
 ): Promise<SourceConnection> => {
-  const settings = fileReaderSettings();
+  const settings = uploadsReaderSettings();
   const target: ResolvedTarget = {
     host: settings.host,
     address: settings.host,

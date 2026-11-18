@@ -3,13 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeGrant } from "@/features/grants/testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { RETYPE_WARNING } from "./ColumnTypeDialog";
 import { SourceTestRoutes } from "../testRoutes";
 import { pickOption } from "@/test/searchSelect";
 import { formatDate } from "@/utils/formatDate";
+import { RETYPE_WARNING } from "./labels";
 import {
   AMOUNT_ID,
   FS_ID,
+  REGION_ID,
   TABLE_ID,
   uploadGet,
   makeUploadSource,
@@ -20,7 +21,7 @@ const post = vi.hoisted(() => vi.fn());
 const patch = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({
-  permissions: ["zeteo.data.read", "zeteo.file_sources.write"],
+  permissions: ["zeteo.data.read", "zeteo.uploads.write"],
 }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
@@ -33,12 +34,12 @@ const ownerGrant = makeGrant({
   id: "e2222222-1c7a-4a53-9d0e-6a3b1f2c4d02",
   principal_id: "0b6c3c1e-8a52-4f7e-9b1d-2f4f8f0e9a11",
   source: { id: FS_ID, slug: "q3-sales" },
-  table: { id: TABLE_ID, schema_name: "zf_x", name: "orders", missing: false },
+  table: { id: TABLE_ID, schema_name: "zu_x", name: "orders", missing: false },
   owner_grant: true,
 });
 const shared = makeGrant({
   source: { id: FS_ID, slug: "q3-sales" },
-  table: { id: TABLE_ID, schema_name: "zf_x", name: "orders", missing: false },
+  table: { id: TABLE_ID, schema_name: "zu_x", name: "orders", missing: false },
   all_columns: false,
   columns: [{ id: AMOUNT_ID, name: "amount", missing: false }],
 });
@@ -77,7 +78,7 @@ const SHARING_PAGE = `/sources/${FS_ID}/sharing`;
 
 describe("an upload source's page", () => {
   beforeEach(() => {
-    held.permissions = ["zeteo.data.read", "zeteo.file_sources.write"];
+    held.permissions = ["zeteo.data.read", "zeteo.uploads.write"];
     get
       .mockReset()
       .mockImplementation(
@@ -122,8 +123,8 @@ describe("an upload source's page", () => {
       "title",
       formatDate("2026-11-15T09:30:00.000Z")
     );
-    // No schema: Zeteo names a file source's schema itself.
-    expect(screen.queryByText("zf_x")).toBeNull();
+    // No schema: Zeteo names an upload source's schema itself.
+    expect(screen.queryByText("zu_x")).toBeNull();
     expect(screen.getByRole("link", { name: "orders" })).toHaveAttribute(
       "href",
       TABLE_PAGE
@@ -140,8 +141,13 @@ describe("an upload source's page", () => {
     expect(amount).toHaveTextContent("number");
     expect(amount).toHaveTextContent("Order total");
     expect(
-      screen.getByRole("button", { name: "Edit descriptions" })
+      screen.getByRole("button", { name: "Edit columns" })
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Edit descriptions" })
+    ).toBeNull();
+    // Columns are edited inline, not row by row.
+    expect(within(amount).queryByRole("button", { name: "Edit" })).toBeNull();
   });
 
   it("goes to the re-upload page of a table", async () => {
@@ -151,49 +157,148 @@ describe("an upload source's page", () => {
     expect(await screen.findByText("Re-upload page")).toBeInTheDocument();
   });
 
-  it("warns that saved queries may stop working before a retype, and sends the new type", async () => {
-    const user = userEvent.setup();
-    renderAt(TABLE_PAGE);
-    const row = (await screen.findByText("amount")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: "Edit" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(screen.queryByText(RETYPE_WARNING, { exact: false })).toBeNull();
-    await pickOption(user, within(dialog).getByLabelText("Type"), "Text");
-    expect(
-      within(dialog).getByText(
-        /Saved queries and dashboards that use this column may stop working/
-      )
-    ).toBeInTheDocument();
-    await user.click(
-      within(dialog).getByRole("button", { name: "Save column" })
-    );
-    await waitFor(() =>
-      expect(patch).toHaveBeenCalledWith(
-        `/v1/sources/${FS_ID}/tables/${TABLE_ID}/columns/${AMOUNT_ID}`,
-        { type: "text" }
-      )
-    );
-  });
+  describe("editing its columns inline", () => {
+    const editColumns = async (user: ReturnType<typeof userEvent.setup>) => {
+      renderAt(TABLE_PAGE);
+      await user.click(
+        await screen.findByRole("button", { name: "Edit columns" })
+      );
+    };
+    const COLUMN = (id: string) =>
+      `/v1/sources/${FS_ID}/tables/${TABLE_ID}/columns/${id}`;
 
-  it("shows a retype's cast_failed with the rows, keeping the dialog open", async () => {
-    const user = userEvent.setup();
-    patch.mockRejectedValue({
-      status: 422,
-      code: "cast_failed",
-      message: "x",
-      cast: { column: "region", rows: [2] },
+    it("renames a column through its own route, and only that", async () => {
+      const user = userEvent.setup();
+      await editColumns(user);
+      const name = screen.getByLabelText("Name of column region");
+      await user.clear(name);
+      await user.type(name, "area");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(patch).toHaveBeenCalledWith(COLUMN(REGION_ID), {
+          name: "area",
+        })
+      );
+      expect(patch).toHaveBeenCalledTimes(1);
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "Save" })).toBeNull()
+      );
     });
-    renderAt(TABLE_PAGE);
-    const row = (await screen.findByText("region")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: "Edit" }));
-    const dialog = await screen.findByRole("dialog");
-    await pickOption(user, within(dialog).getByLabelText("Type"), "Number");
-    await user.click(
-      within(dialog).getByRole("button", { name: "Save column" })
-    );
-    expect(
-      await within(dialog).findByText(/has values that do not fit its type/)
-    ).toHaveTextContent("data row 2 of the table");
+
+    it("refuses a name the query language cannot use", async () => {
+      const user = userEvent.setup();
+      await editColumns(user);
+      const name = screen.getByLabelText("Name of column region");
+      await user.clear(name);
+      await user.type(name, "Area 1");
+      expect(
+        screen.getByText(/A lowercase letter, then lowercase letters/)
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.clear(name);
+      await user.type(name, "amount");
+      expect(
+        screen.getByText("Another column has this name.")
+      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    });
+
+    it("warns that saved queries may stop working before a retype, and sends the new type", async () => {
+      const user = userEvent.setup();
+      await editColumns(user);
+      expect(screen.queryByText(RETYPE_WARNING, { exact: false })).toBeNull();
+      await pickOption(
+        user,
+        screen.getByLabelText("Type of column amount"),
+        "Text"
+      );
+      expect(
+        screen.getByText(RETYPE_WARNING, { exact: false })
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(patch).toHaveBeenCalledWith(COLUMN(AMOUNT_ID), {
+          type: "text",
+        })
+      );
+    });
+
+    it("shows a retype's cast_failed with the column and rows, staying in the edit mode", async () => {
+      const user = userEvent.setup();
+      patch.mockRejectedValue({
+        status: 422,
+        code: "cast_failed",
+        message: "x",
+        cast: { column: "region", rows: [2] },
+      });
+      await editColumns(user);
+      await pickOption(
+        user,
+        screen.getByLabelText("Type of column region"),
+        "Number"
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      const failure = await screen.findByText(
+        /has values that do not fit its type/
+      );
+      expect(failure).toHaveTextContent("region");
+      expect(failure).toHaveTextContent("data row 2 of the table");
+      expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+      expect(
+        screen.getByLabelText("Type of column region")
+      ).toBeInTheDocument();
+    });
+
+    it("saves descriptions as before, by the names they had, then the renames", async () => {
+      const user = userEvent.setup();
+      await editColumns(user);
+      const description = screen.getByLabelText("Description of column amount");
+      await user.clear(description);
+      await user.type(description, "Total in EUR");
+      const name = screen.getByLabelText("Name of column amount");
+      await user.clear(name);
+      await user.type(name, "total");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+      expect(patch.mock.calls[0]).toEqual([
+        `/v1/sources/${FS_ID}/tables/${TABLE_ID}`,
+        { columns: [{ name: "amount", description: "Total in EUR" }] },
+      ]);
+      expect(patch.mock.calls[1]).toEqual([
+        COLUMN(AMOUNT_ID),
+        { name: "total" },
+      ]);
+    });
+
+    it("sends only what is left when a save is tried again after a failure", async () => {
+      const user = userEvent.setup();
+      patch.mockImplementation(async (url: string) => {
+        if (url === COLUMN(AMOUNT_ID)) {
+          throw {
+            status: 422,
+            code: "cast_failed",
+            message: "x",
+            cast: { column: "amount", rows: [1] },
+          };
+        }
+        return { data: makeUploadSource() };
+      });
+      await editColumns(user);
+      const name = screen.getByLabelText("Name of column region");
+      await user.clear(name);
+      await user.type(name, "area");
+      await pickOption(
+        user,
+        screen.getByLabelText("Type of column amount"),
+        "True/false"
+      );
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await screen.findByText(/has values that do not fit its type/);
+      patch.mockClear();
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(patch).toHaveBeenCalled());
+      expect(patch.mock.calls.map(([url]) => url)).toEqual([COLUMN(AMOUNT_ID)]);
+    });
   });
 
   it("filters by who it is shared with, chosen by name from everyone the owner may share with, and by table, through the API", async () => {
@@ -385,7 +490,7 @@ describe("an upload source's page", () => {
     renderAt();
     await user.click(await screen.findByRole("button", { name: "Edit" }));
     const dialog = await screen.findByRole("dialog");
-    // A file source has no connection or catalogue to edit.
+    // An upload source has no connection or catalogue to edit.
     expect(within(dialog).queryByText("Connection")).toBeNull();
     expect(within(dialog).queryByLabelText(/Schemas/)).toBeNull();
     expect(await within(dialog).findByLabelText("Row cap")).toHaveValue(50000);

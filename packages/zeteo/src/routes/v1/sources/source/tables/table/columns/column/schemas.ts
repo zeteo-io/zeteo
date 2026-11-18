@@ -3,7 +3,7 @@ import { noNul } from "../../../../../../../../utils/text.js";
 import { z } from "zod";
 import {
   ColumnNameSchema,
-  FileColumnTypeSchema,
+  UploadColumnTypeSchema,
 } from "../../../../../schemas.js";
 
 export const ColumnParamsSchema = z.object({
@@ -14,7 +14,7 @@ export const ColumnParamsSchema = z.object({
 
 export const UpdateColumnSchema = z
   .strictObject({
-    type: FileColumnTypeSchema.optional(),
+    type: UploadColumnTypeSchema.optional(),
     name: ColumnNameSchema.optional(),
     description: noNul(z.string().max(2000)).nullable().optional(),
   })

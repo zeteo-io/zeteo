@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { removeUploadSources, seedUploadSource } from "../support/uploads.js";
 import type { PostgresConnection } from "../../adapters/postgres/connect.js";
 import { postgresAdapter } from "../../adapters/postgres/index.js";
 import { startV1App, startV1Routes } from "../support/v1App.js";
@@ -11,10 +12,6 @@ import { db } from "../../utils/db/index.js";
 import { randomUUID } from "crypto";
 import { Router } from "express";
 import env from "../../env.js";
-import {
-  removeUploadSources,
-  seedUploadSource,
-} from "../support/fileSources.js";
 import {
   closeAllSourcePools,
   closeSourcePool,
@@ -444,7 +441,7 @@ describe("withSourceConnection", () => {
     expect(isSourcePoolOpen(source.id)).toBe(false);
   });
 
-  it("connects a file source as the reader role, outside SOURCE_ALLOWED_HOSTS, while a database source is still held to them", async () => {
+  it("connects an upload source as the reader role, outside SOURCE_ALLOWED_HOSTS, while a database source is still held to them", async () => {
     const file = await seedUploadSource({
       ownerId: randomUUID(),
       tables: [
@@ -469,9 +466,7 @@ describe("withSourceConnection", () => {
         return rows[0];
       });
       expect(who).toEqual({
-        role: decodeURIComponent(
-          new URL(env.FILE_SOURCES_READER_URL!).username
-        ),
+        role: decodeURIComponent(new URL(env.UPLOADS_READER_URL!).username),
         ro: "on",
       });
       await expect(
@@ -484,7 +479,7 @@ describe("withSourceConnection", () => {
     }
   });
 
-  it("answers 404 file_sources_not_configured for a file source while File Sources are off, and 503 file_sources_misconfigured for a bad sslmode", async () => {
+  it("answers 404 uploads_not_configured for an upload source while Uploads are off, and 503 uploads_misconfigured for a bad sslmode", async () => {
     const file = await seedUploadSource({
       ownerId: randomUUID(),
       tables: [
@@ -495,14 +490,14 @@ describe("withSourceConnection", () => {
         },
       ],
     });
-    const readerUrl = env.FILE_SOURCES_READER_URL;
+    const readerUrl = env.UPLOADS_READER_URL;
     try {
-      env.FILE_SOURCES_READER_URL = undefined;
+      env.UPLOADS_READER_URL = undefined;
       await expect(
         withSourceConnection(file.id, (c) => c.checkLogin())
       ).rejects.toMatchObject({
         statusCode: 404,
-        code: "file_sources_not_configured",
+        code: "uploads_not_configured",
       });
       const off = await fetchJson(
         "GET",
@@ -510,16 +505,16 @@ describe("withSourceConnection", () => {
         null
       );
       expect(off.status).toBe(404);
-      expect(off.body.error).toBe("file_sources_not_configured");
+      expect(off.body.error).toBe("uploads_not_configured");
 
       const url = new URL(readerUrl!);
       url.searchParams.set("sslmode", "prefer");
-      env.FILE_SOURCES_READER_URL = url.toString();
+      env.UPLOADS_READER_URL = url.toString();
       await expect(
         withSourceConnection(file.id, (c) => c.checkLogin())
       ).rejects.toMatchObject({
         statusCode: 503,
-        code: "file_sources_misconfigured",
+        code: "uploads_misconfigured",
       });
       const bad = await fetchJson(
         "GET",
@@ -531,7 +526,7 @@ describe("withSourceConnection", () => {
       expect(bad.body.error_description).not.toMatch(/sslmode/);
       expect(isSourcePoolOpen(file.id)).toBe(false);
     } finally {
-      env.FILE_SOURCES_READER_URL = readerUrl;
+      env.UPLOADS_READER_URL = readerUrl;
       await closeSourcePool(file.id);
       await removeUploadSources([file.id]);
     }

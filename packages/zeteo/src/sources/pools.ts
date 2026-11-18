@@ -1,7 +1,7 @@
 import type { Source } from "../../prisma/generated/client/index.js";
 import type { SourceConnection } from "../adapters/types.js";
+import { isUploadSource, typeOf } from "./types.js";
 import { adapterFor } from "../adapters/index.js";
-import { isFileSource, typeOf } from "./types.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import {
@@ -12,7 +12,7 @@ import {
 } from "../utils/errors.js";
 import {
   connectChecked,
-  connectFileReader,
+  connectUploadsReader,
   poolSizeFor,
   readSettings,
 } from "./connect.js";
@@ -72,9 +72,10 @@ const fingerprintOf = (row: Source): string => {
 
 const openConnection = (row: Source): Promise<SourceConnection> => {
   const adapter = adapterFor(typeOf(row));
-  // A file source reads Zeteo's own database as the reader role, READ ONLY
+  // An upload source reads Zeteo's own database as the reader role, READ ONLY
   // at read committed (never REPEATABLE READ: loads swap tables with DDL).
-  if (isFileSource(row)) return connectFileReader(adapter, poolSizeFor(row));
+  if (isUploadSource(row))
+    return connectUploadsReader(adapter, poolSizeFor(row));
   return connectChecked(
     adapter,
     readSettings(adapter, row.id, row.sealedSettings),

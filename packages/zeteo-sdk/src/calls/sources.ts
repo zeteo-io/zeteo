@@ -5,8 +5,8 @@ import type {
   CreateUploadSourceRequest,
   ReuploadTableRequest,
   TransferSourceRequest,
-  UpdateFileColumnRequest,
-} from "../types/fileSources.js";
+  UpdateUploadColumnRequest,
+} from "../types/uploads.js";
 import type {
   CreateSourceRequest,
   DeclareRelationRequest,
@@ -92,7 +92,7 @@ export const sourcesCalls = (ctx: CallContext) => ({
     sourceId: string,
     tableId: string,
     columnId: string,
-    body: UpdateFileColumnRequest
+    body: UpdateUploadColumnRequest
   ): Promise<Source> =>
     send(ctx, {
       op: "updateColumn",

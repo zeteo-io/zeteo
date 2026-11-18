@@ -49,7 +49,7 @@ Grant:
           missing: { type: boolean, description: The last refresh no longer found the column; the grant is kept }
     owner_grant:
       type: boolean
-      description: The owner's grant on a table of their file source. It is an ordinary all-columns user grant that cannot be removed or narrowed (`409 owner_grant_locked`); transfer the file source instead
+      description: The owner's grant on a table of their upload source. It is an ordinary all-columns user grant that cannot be removed or narrowed (`409 owner_grant_locked`); transfer the upload source instead
     created_by: { type: string, format: uuid }
     created_at: { type: string, format: date-time }
     updated_at: { type: string, format: date-time }

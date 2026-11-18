@@ -11,7 +11,7 @@ export interface Grant {
   table: { id: string; schema_name: string; name: string; missing: boolean };
   all_columns: boolean;
   columns: { id: string; name: string; missing: boolean }[];
-  /** The owner's grant on a file source's table; it cannot be removed or narrowed. */
+  /** The owner's grant on an upload source's table; it cannot be removed or narrowed. */
   owner_grant: boolean;
   created_by: string;
   created_at: string;

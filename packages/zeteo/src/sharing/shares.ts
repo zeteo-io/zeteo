@@ -73,7 +73,7 @@ export const checkNewGroups = async (
 /**
  * Whether every one of `groupIds` is global or of the caller's signed-in
  * organization (false for a group the directory does not have): the groups a
- * caller may share with, or a file source's owner grant to. Asks tereo: never
+ * caller may share with, or an upload source's owner grant to. Asks tereo: never
  * inside a transaction.
  */
 export const groupsInReach = async (

@@ -7,24 +7,24 @@ import { tokenFor } from "../../../support/tokens.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
 } from "../../../../definitions/tereoDeclaration.js";
-import {
-  csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
-  sourcesCall,
-  stageFile,
-} from "../../../support/fileSources.js";
 import {
   addUserToDirectory,
   clearDirectory,
 } from "../../../support/principals.js";
+import {
+  csvOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
+  sourcesCall,
+  stageFile,
+} from "../../../support/uploads.js";
 
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const nextId = randomUUID();
 
@@ -46,7 +46,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await clearDirectory();
-  await removeFileSourcesOf([ownerId, nextId]);
+  await removeUploadSourcesOf([ownerId, nextId]);
   await app.close();
 });
 
@@ -60,7 +60,7 @@ describe("/v1/sources audit (upload)", () => {
     });
     expect(created.status).toBe(201);
     const id = created.body.id as string;
-    const table = (await fileTablesOf(id))[0]!;
+    const table = (await uploadTablesOf(id))[0]!;
     const column = table.columns[1]!;
 
     const steps: [string, string, unknown][] = [
@@ -91,14 +91,14 @@ describe("/v1/sources audit (upload)", () => {
       const res = await call(method, path, body);
       expect(res.status, `${method} ${path}`).toBeLessThan(300);
     }
-    const more = (await fileTablesOf(id)).find((t) => t.name === "more")!;
+    const more = (await uploadTablesOf(id)).find((t) => t.name === "more")!;
     expect((await call("DELETE", `/${id}/tables/${more.id}`)).status).toBe(204);
     expect(
       (await call("POST", `/${id}/transfer`, { user_id: nextId })).status
     ).toBe(200);
     const nextToken = tokenFor({
       userId: nextId,
-      permissions: [DATA_READ, FILE_SOURCES_WRITE],
+      permissions: [DATA_READ, UPLOADS_WRITE],
     });
     expect(
       (await sourcesCall(app.url, "DELETE", `/${id}`, nextToken)).status
@@ -106,15 +106,19 @@ describe("/v1/sources audit (upload)", () => {
 
     const entries = (await auditRows(id)).map((r) => r.payload);
     expect(entries.map((e) => [e.action, e.metadata.event])).toEqual([
-      ["CREATE", "zeteo.file_source.created"],
-      ["UPDATE", "zeteo.file_source.updated"],
-      ["UPDATE", "zeteo.file_source.updated"],
-      ["UPDATE", "zeteo.file_source.reuploaded"],
-      ["UPDATE", "zeteo.file_source.updated"],
-      ["UPDATE", "zeteo.file_source.updated"],
-      ["UPDATE", "zeteo.file_source.transferred"],
-      ["DELETE", "zeteo.file_source.deleted"],
+      ["CREATE", "zeteo.source.created"],
+      ["UPDATE", "zeteo.source.updated"],
+      ["UPDATE", "zeteo.source.tables_added"],
+      ["UPDATE", "zeteo.source.table_reuploaded"],
+      ["UPDATE", "zeteo.source.updated"],
+      ["UPDATE", "zeteo.source.table_removed"],
+      ["UPDATE", "zeteo.source.transferred"],
+      ["DELETE", "zeteo.source.deleted"],
     ]);
+    for (const entry of entries) {
+      expect(entry.metadata.type).toBe("upload");
+      expect(entry.entityType).toBe("source");
+    }
     expect(entries.at(-1)!.userId).toBe(nextId);
     expect(entries[0]!.metadata.owner_grant).toEqual({
       user_id: ownerId,

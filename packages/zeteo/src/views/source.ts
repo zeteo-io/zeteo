@@ -1,5 +1,5 @@
 import type { Source } from "../../prisma/generated/client/index.js";
-import { isFileSource, typeOf } from "../sources/types.js";
+import { isUploadSource, typeOf } from "../sources/types.js";
 import { readSettings } from "../sources/connect.js";
 import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
@@ -7,10 +7,10 @@ import { logger } from "../utils/logger.js";
 /**
  * The settings as the adapter redacts them; null, with the cause logged, when
  * the type has no adapter or the stored value cannot be read, so the source
- * can still be listed and viewed. A file source has none: Zeteo holds its data.
+ * can still be listed and viewed. An upload source has none: Zeteo holds its data.
  */
 const settingsView = (row: Source): Record<string, unknown> | null => {
-  if (isFileSource(row)) return null;
+  if (isUploadSource(row)) return null;
   try {
     const adapter = adapterFor(typeOf(row));
     return adapter.redact(readSettings(adapter, row.id, row.sealedSettings));
@@ -45,7 +45,7 @@ export const sourceView = (row: Source, extras: SourceViewExtras) => ({
   query_concurrency: row.queryConcurrency,
   export_concurrency: row.exportConcurrency,
   writable_login_allowed: row.writableLoginAllowed,
-  /** A file source's owner; null for a database source. */
+  /** An upload source's owner; null for a database source. */
   owner_id: row.ownerId,
   status: row.status,
   // A database source's last catalogue refresh; an upload source's last load
@@ -60,13 +60,13 @@ export const sourceView = (row: Source, extras: SourceViewExtras) => ({
    * refresh, null when the source would not tell. An upload source: the bytes
    * it stores now.
    */
-  size_bytes: isFileSource(row)
+  size_bytes: isUploadSource(row)
     ? extras.storedBytes
     : row.sizeBytes === null
       ? null
       : Number(row.sizeBytes),
   /** When a database source's size was measured; null for an upload source. */
-  size_measured_at: isFileSource(row)
+  size_measured_at: isUploadSource(row)
     ? null
     : (row.sizeMeasuredAt?.toISOString() ?? null),
   share_count: extras.shareCount,

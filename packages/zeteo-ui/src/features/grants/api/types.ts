@@ -17,7 +17,7 @@ export interface Grant {
   source: { id: string; slug: string };
   table: { id: string; schema_name: string; name: string; missing: boolean };
   all_columns: boolean;
-  /** A file source owner's own grant: it cannot be removed or narrowed (only moved by a transfer). */
+  /** An upload source owner's own grant: it cannot be removed or narrowed (only moved by a transfer). */
   owner_grant?: boolean;
   /** Empty when `all_columns` is true. */
   columns: GrantColumn[];

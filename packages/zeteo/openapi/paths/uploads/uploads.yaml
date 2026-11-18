@@ -12,14 +12,14 @@
       detected among `,` `;` tab and `|`. A refused upload is answered at once and the connection is
       closed.
 
-      Uploads are bounded per user: one who already holds `FILE_SOURCE_MAX_STAGINGS` (default 5)
+      Uploads are bounded per user: one who already holds `UPLOAD_MAX_STAGINGS` (default 5)
       unexpired stagings is refused with `429 too_many_stagings` (`retry_after` is when the oldest
-      expires), and one with `FILE_SOURCE_MAX_UPLOADS` (default 2) uploads in flight with `429
+      expires), and one with `UPLOAD_MAX_IN_FLIGHT` (default 2) uploads in flight with `429
       too_many_uploads`; both before the body is read. An xlsx workbook, read whole into memory,
-      waits for one of `FILE_SOURCE_XLSX_CONCURRENCY` (default 2) reading slots of the process; one
+      waits for one of `UPLOAD_XLSX_CONCURRENCY` (default 2) reading slots of the process; one
       that waits over 30 seconds is `503 temporarily_unavailable`.
 
-      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+      **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 uploads_not_configured` when `UPLOADS_READER_URL` is unset.
     operationId: createUpload
     requestBody:
       required: true
@@ -36,18 +36,18 @@
         content:
           application/json:
             schema:
-              $ref: '../../components/file-sources/schemas.yaml#/UploadResponse'
+              $ref: '../../components/uploads/schemas.yaml#/UploadResponse'
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `file_sources_not_configured`
+        description: Not found - `uploads_not_configured`
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '413':
-        description: Payload too large - `file_too_large`, over `FILE_SOURCE_MAX_BYTES` (`max_bytes`), or an xlsx whose content inflates past twice that (`max_uncompressed_bytes` too); nothing is left behind
+        description: Payload too large - `file_too_large`, over `UPLOAD_MAX_BYTES` (`max_bytes`), or an xlsx whose content inflates past twice that (`max_uncompressed_bytes` too); nothing is left behind
         content:
           application/json:
             schema:

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import env from "../../env.js";
 import {
   CHECK_POOL_SIZE,
-  fileReaderSettings,
+  uploadsReaderSettings,
   poolSizeFor,
 } from "../../sources/connect.js";
 
@@ -25,28 +25,28 @@ describe("poolSizeFor", () => {
   });
 });
 
-describe("fileReaderSettings", () => {
-  const original = env.FILE_SOURCES_READER_URL;
+describe("uploadsReaderSettings", () => {
+  const original = env.UPLOADS_READER_URL;
   afterEach(() => {
-    env.FILE_SOURCES_READER_URL = original;
+    env.UPLOADS_READER_URL = original;
   });
 
-  it("reads the reader's settings from FILE_SOURCES_READER_URL, TLS off by default", () => {
-    env.FILE_SOURCES_READER_URL =
-      "postgresql://files%20reader:p%40ss@db.internal:6543/zeteo%5Fdb";
-    expect(fileReaderSettings()).toEqual({
+  it("reads the reader's settings from UPLOADS_READER_URL, TLS off by default", () => {
+    env.UPLOADS_READER_URL =
+      "postgresql://uploads%20reader:p%40ss@db.internal:6543/zeteo%5Fdb";
+    expect(uploadsReaderSettings()).toEqual({
       host: "db.internal",
       port: 6543,
       database: "zeteo_db",
-      user: "files reader",
+      user: "uploads reader",
       password: "p@ss",
       tls: "off",
     });
   });
 
   it("defaults the port to 5432 and unwraps an IPv6 host", () => {
-    env.FILE_SOURCES_READER_URL = "postgresql://r:p@[::1]/zeteo";
-    expect(fileReaderSettings()).toMatchObject({ host: "::1", port: 5432 });
+    env.UPLOADS_READER_URL = "postgresql://r:p@[::1]/zeteo";
+    expect(uploadsReaderSettings()).toMatchObject({ host: "::1", port: 5432 });
   });
 
   it.each([
@@ -54,30 +54,30 @@ describe("fileReaderSettings", () => {
     ["require", "require"],
     ["verify-full", "verify"],
   ])("maps sslmode=%s to tls %s", (sslmode, tls) => {
-    env.FILE_SOURCES_READER_URL = `postgresql://r:p@h/zeteo?sslmode=${sslmode}`;
-    expect(fileReaderSettings().tls).toBe(tls);
+    env.UPLOADS_READER_URL = `postgresql://r:p@h/zeteo?sslmode=${sslmode}`;
+    expect(uploadsReaderSettings().tls).toBe(tls);
   });
 
   it.each(["prefer", "verify-ca", "allow", ""])(
     "refuses sslmode=%s",
     (sslmode) => {
-      env.FILE_SOURCES_READER_URL = `postgresql://r:p@h/zeteo?sslmode=${sslmode}`;
-      expect(() => fileReaderSettings()).toThrow(
+      env.UPLOADS_READER_URL = `postgresql://r:p@h/zeteo?sslmode=${sslmode}`;
+      expect(() => uploadsReaderSettings()).toThrow(
         expect.objectContaining({
           statusCode: 503,
-          code: "file_sources_misconfigured",
+          code: "uploads_misconfigured",
           problem: expect.stringMatching(/sslmode/),
         })
       );
     }
   );
 
-  it("throws 404 file_sources_not_configured when File Sources are off", () => {
-    env.FILE_SOURCES_READER_URL = undefined;
-    expect(() => fileReaderSettings()).toThrow(
+  it("throws 404 uploads_not_configured when Uploads are off", () => {
+    env.UPLOADS_READER_URL = undefined;
+    expect(() => uploadsReaderSettings()).toThrow(
       expect.objectContaining({
         statusCode: 404,
-        code: "file_sources_not_configured",
+        code: "uploads_not_configured",
       })
     );
   });

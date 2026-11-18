@@ -40,7 +40,7 @@ export interface RelationsListProps {
   sourceId: string;
   /** Whether the caller may declare, rename and delete relations. */
   canEdit: boolean;
-  /** `upload`: a file source, whose tables are named without their schema. */
+  /** `upload`: an upload source, whose tables are named without their schema. */
   catalogue?: "database" | "upload";
 }
 
@@ -76,7 +76,7 @@ const keys = (r: Relation) =>
     ? r.from_columns.join(", ")
     : `${r.from_columns.join(", ")} → ${r.to_columns.join(", ")}`;
 
-/** A source's relations: the Relations tab of a database source, and of a file source. */
+/** A source's relations: the Relations tab of a database source, and of an upload source. */
 export const RelationsList = ({
   sourceId,
   canEdit,

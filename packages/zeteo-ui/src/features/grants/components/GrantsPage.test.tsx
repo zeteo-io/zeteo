@@ -363,9 +363,23 @@ describe("GrantsPage", () => {
       expect(del).toHaveBeenCalledWith(`/v1/grants/${GRANT_ID}`)
     );
     await user.click(within(row).getByRole("button", { name: "Edit" }));
-    expect(screen.getByTestId("path")).toHaveTextContent(
-      `/grants/${GRANT_ID}/edit`
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Edit grant")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
     );
+  });
+
+  it("opens New grant as a dialog over the list", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "New grant" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(
+      within(dialog).getByRole("button", { name: "Create grant" })
+    ).toBeDisabled();
+    expect(screen.getByTestId("path")).toHaveTextContent(/^\/grants$/);
   });
 
   it("has no write control without zeteo.grants.write", async () => {

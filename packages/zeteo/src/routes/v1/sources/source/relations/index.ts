@@ -1,4 +1,4 @@
-import { allowOwnerOr } from "../../../../../middleware/fileSourceOwner.js";
+import { allowOwnerOr } from "../../../../../middleware/uploadOwner.js";
 import { declareRelation, listRelations } from "./controllers.js";
 import { sourceOfParams } from "../middleware.js";
 import relationRouter from "./relation/index.js";

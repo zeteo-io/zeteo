@@ -10,7 +10,7 @@ import { redis } from "../../../../utils/redis.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   GRANTS_READ,
   RUNS_READ,
 } from "../../../../definitions/tereoDeclaration.js";
@@ -150,14 +150,14 @@ describe("/v1/principals", () => {
     });
 
     it("answers 403 naming the permissions to a holder of none", async () => {
-      for (const permissions of [[DATA_READ], [FILE_SOURCES_WRITE]]) {
+      for (const permissions of [[DATA_READ], [UPLOADS_WRITE]]) {
         const res = await lookup(
           { principals: [{ type: "user", id: ADA }] },
           tokenFor({ permissions })
         );
         expect(res.status).toBe(403);
         expect(res.body.error_description).toBe(
-          `Requires one of: ${GRANTS_READ}, ${RUNS_READ}, ${FILE_SOURCES_WRITE}`
+          `Requires one of: ${GRANTS_READ}, ${RUNS_READ}, ${UPLOADS_WRITE}`
         );
       }
     });

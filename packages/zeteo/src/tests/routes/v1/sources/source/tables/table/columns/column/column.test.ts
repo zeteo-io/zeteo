@@ -9,17 +9,17 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
-  FILE_SOURCES_WRITE,
+  UPLOADS_WRITE,
   SOURCES_WRITE,
 } from "../../../../../../../../../definitions/tereoDeclaration.js";
 import {
-  createFileSource,
+  createUploadSource,
   csvOf,
-  fileTablesOf,
-  removeFileSourcesOf,
+  uploadTablesOf,
+  removeUploadSourcesOf,
   sourcesCall,
   storedTables,
-} from "../../../../../../../../support/fileSources.js";
+} from "../../../../../../../../support/uploads.js";
 import {
   postQuery,
   removeRunsOf,
@@ -28,12 +28,12 @@ import {
 const ownerId = randomUUID();
 const owner = tokenFor({
   userId: ownerId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const otherId = randomUUID();
 const other = tokenFor({
   userId: otherId,
-  permissions: [DATA_READ, FILE_SOURCES_WRITE],
+  permissions: [DATA_READ, UPLOADS_WRITE],
 });
 const nobody = tokenFor({ permissions: [] });
 const admin = tokenFor({ permissions: [DATA_READ, SOURCES_WRITE] });
@@ -63,15 +63,15 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await removeRunsOf([ownerId]);
-  await removeFileSourcesOf([ownerId, otherId]);
+  await removeUploadSourcesOf([ownerId, otherId]);
   await removeSources([databaseSourceId]);
   await app.close();
 });
 
-/** The source as `createFileSource` gives it: its view, and its tables. */
+/** The source as `createUploadSource` gives it: its view, and its tables. */
 const stateOf = async (id: string) => ({
   ...(await call("GET", `/${id}`, owner)).body,
-  tables: await fileTablesOf(id),
+  tables: await uploadTablesOf(id),
 });
 
 const columnPath = (
@@ -97,7 +97,7 @@ const rowsOf = async (slug: string, select: string[]) =>
 
 describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => {
   it("round-trips every type through text and back", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const select = ["amount", "day", "at", "flag"];
     const before = await rowsOf(source.slug, select);
     expect(before[0]).toEqual([
@@ -121,7 +121,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
     }
     expect(await rowsOf(source.slug, select)).toEqual(before);
     // Ids stay.
-    const tables = await fileTablesOf(source.id);
+    const tables = await uploadTablesOf(source.id);
     expect(tables[0]!.columns.map((c) => c.id)).toEqual(
       source.tables[0]!.columns.map((c) => c.id)
     );
@@ -129,7 +129,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
   });
 
   it("answers 422 cast_failed for a value that does not fit, and changes nothing", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const res = await call("PATCH", columnPath(source, "note"), owner, {
       type: "number",
     });
@@ -145,7 +145,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
   });
 
   it("numbers a retype's failing rows as 1-based data rows of the table, the header not counted", async () => {
-    const source = await createFileSource(
+    const source = await createUploadSource(
       app.url,
       owner,
       ownerId,
@@ -166,7 +166,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
   });
 
   it("renames a column keeping its id and grants, and sets a description", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const path = columnPath(source, "note");
     const res = await call("PATCH", path, owner, {
       name: "remark",
@@ -174,7 +174,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
     });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body).toMatchObject({ id: source.id, type: "upload" });
-    const column = (await fileTablesOf(source.id))[0]!.columns.find(
+    const column = (await uploadTablesOf(source.id))[0]!.columns.find(
       (c) => c.name === "remark"
     )!;
     expect(column).toMatchObject({
@@ -203,7 +203,7 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId/columns/:columnId", () => 
   });
 
   it("answers someone else as it answers anyone without the permission", async () => {
-    const source = await createFileSource(app.url, owner, ownerId, CSV);
+    const source = await createUploadSource(app.url, owner, ownerId, CSV);
     const path = columnPath(source, "note");
     const res = await call("PATCH", path, other, { type: "text" });
     expect(res.status).toBe(403);

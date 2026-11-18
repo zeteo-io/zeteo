@@ -1,8 +1,8 @@
 import { RequirePermission } from "@/components/RequirePermission";
 import { NoAccessSection } from "@/components/NoAccessSection";
-import { useFileSourcesEnabled } from "@/lib/useUiConfig";
-import { FILE_SOURCES_WRITE } from "./components/access";
 import { Suspense, lazy, type ReactNode } from "react";
+import { useUploadsEnabled } from "@/lib/useUiConfig";
+import { UPLOADS_WRITE } from "./components/access";
 import { NotFound } from "@/components/NotFound";
 import { Spinner } from "@kosmeo-ui/react";
 import { useAuth } from "@tereo-io/react";
@@ -68,8 +68,8 @@ const guarded = (permission: string, page: ReactNode) => (
 );
 
 /**
- * Admits whoever holds one of `admin`, or, while File Sources are on, one
- * holding `zeteo.file_sources.write` (an upload's owner; zeteo decides which
+ * Admits whoever holds one of `admin`, or, while Uploads are on, one
+ * holding `zeteo.uploads.write` (an upload's owner; zeteo decides which
  * sources are theirs). Anyone else sees what `admin[0]` would give them.
  */
 const SourceGuard = ({
@@ -80,16 +80,16 @@ const SourceGuard = ({
   children: ReactNode;
 }) => {
   const { hasPermission } = useAuth();
-  const enabled = useFileSourcesEnabled();
+  const enabled = useUploadsEnabled();
   const asAdmin = admin.some((p) => hasPermission(p));
-  const asOwner = hasPermission(FILE_SOURCES_WRITE);
+  const asOwner = hasPermission(UPLOADS_WRITE);
   if (asAdmin) return loading(children);
   if (asOwner && enabled === undefined) return <Spinner size="lg" />;
   if (asOwner && enabled) return loading(children);
   return <NoAccessSection permission={admin[0]!} />;
 };
 
-/** Pages only File Sources have: not found while they are off. */
+/** Pages only uploads have: not found while they are off. */
 const UploadGuard = ({
   permissions,
   children,
@@ -98,7 +98,7 @@ const UploadGuard = ({
   children: ReactNode;
 }) => {
   const { hasPermission } = useAuth();
-  const enabled = useFileSourcesEnabled();
+  const enabled = useUploadsEnabled();
   if (enabled === undefined) return <Spinner size="lg" />;
   if (!enabled) return <NotFound />;
   if (!permissions.some((p) => hasPermission(p))) {
@@ -108,7 +108,7 @@ const UploadGuard = ({
 };
 
 // Changing an upload's tables: its owner, or a sources admin (zeteo decides).
-const CHANGE_UPLOAD = [FILE_SOURCES_WRITE, WRITE];
+const CHANGE_UPLOAD = [UPLOADS_WRITE, WRITE];
 
 /** A source's pages, of every type, beside the `/sources` list route; and Add data. */
 export const sourceRoutes = [
@@ -148,7 +148,7 @@ export const sourceRoutes = [
     // Add data is the person's own: under My Zeteo, beside My sources.
     path: "/my/data/new",
     element: (
-      <UploadGuard permissions={[FILE_SOURCES_WRITE]}>
+      <UploadGuard permissions={[UPLOADS_WRITE]}>
         <AddDataPage />
       </UploadGuard>
     ),

@@ -50,7 +50,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `calc`        | calculations: expression operations, their types and levels           |
   | `relative`    | relative dates: a moment as an offset from now, in a filter           |
   | `available`   | saved queries available for dashboards                                |
-  | `files`       | file sources: the same behaviour over an uploaded source              |
+  | `files`       | upload sources: the same behaviour over an uploaded source              |
   | `size`        | a source's size, measured by a catalogue refresh                      |
   | `rows`        | a table's estimated rows, measured by a catalogue refresh             |
 

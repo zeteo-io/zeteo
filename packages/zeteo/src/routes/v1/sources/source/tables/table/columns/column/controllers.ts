@@ -1,4 +1,4 @@
-import { changeColumn } from "../../../../../../../../file-sources/service.js";
+import { changeColumn } from "../../../../../../../../uploads/service.js";
 import { callerOf } from "../../../../../../../../middleware/auth.js";
 import { ColumnParamsSchema, UpdateColumnSchema } from "./schemas.js";
 import type { Request, Response } from "express";

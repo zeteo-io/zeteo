@@ -32,8 +32,6 @@ export interface TableEdit {
 
 export type Edits = Record<string, TableEdit>;
 
-export { nameProblem };
-
 /** The edits the preview starts with: every table kept (or only `only`), types as `types` says where it names the column. */
 export const initialEdits = (
   tables: PreviewTable[],

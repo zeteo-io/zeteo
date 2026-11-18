@@ -3,7 +3,7 @@ import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { startRunsHousekeepingJob } from "./jobs/runsHousekeeping.js";
-import { checkFileSourcesSetup } from "./file-sources/readerRole.js";
+import { checkUploadsSetup } from "./uploads/readerRole.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
 import { stopSourcePools } from "./sources/pools.js";
@@ -75,10 +75,10 @@ export function createAppServer(
     start: async () => {
       if (running) throw new Error("Server is already running");
       running = true;
-      // File Sources' data sits beside Zeteo's own: refuse to start with a
+      // Uploads' data sits beside Zeteo's own: refuse to start with a
       // reader URL Zeteo cannot use, a database too old or where Zeteo cannot
       // create schemas, or a reader role that can read Zeteo's schemas.
-      if (env.FILE_SOURCES_READER_URL) await checkFileSourcesSetup();
+      if (env.UPLOADS_READER_URL) await checkUploadsSetup();
       await initializeRedis();
       await initializeTereo();
       // The request handler and the outbox reaper run in this process.

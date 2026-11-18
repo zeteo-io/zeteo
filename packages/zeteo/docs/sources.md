@@ -3,23 +3,23 @@
 A source is a database an administrator registers, or an upload source a person makes from a
 file. The API is under `/v1/sources` (the reference is `openapi/openapi.yaml`; `npm run
 openapi:build` bundles it). Database sources are archived, never deleted. A source of type
-`upload` is a file source, owned by the person who uploaded it; it is listed, read and changed
-through these same routes, and a few apply to it alone ([file-sources.md](file-sources.md)).
+`upload` is an upload source, owned by the person who uploaded it; it is listed, read and changed
+through these same routes, and a few apply to it alone ([uploads.md](uploads.md)).
 
 | Route | Permission | Result |
 |-------|------------|--------|
-| `POST /v1/sources` | `zeteo.sources.write` (`type: "upload"`: `zeteo.file_sources.write`) | `201`, the source |
-| `GET /v1/sources` (`?include_archived=true`, `type`, `owner_id`, `limit`, `cursor`) | `zeteo.sources.read`; with `owner_id=me`, also an owner holding `zeteo.file_sources.write` | `{ data, next_cursor }` |
-| `GET /v1/sources/:sourceId` | `zeteo.sources.read`, or the owner of the file source | the source |
-| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write`; the owner of a file source for `name` alone | the source |
-| `DELETE /v1/sources/:sourceId` | an upload source only: `zeteo.sources.write`, or its owner | `204` ([file-sources.md](file-sources.md)) |
+| `POST /v1/sources` | `zeteo.sources.write` (`type: "upload"`: `zeteo.uploads.write`) | `201`, the source |
+| `GET /v1/sources` (`?include_archived=true`, `type`, `owner_id`, `limit`, `cursor`) | `zeteo.sources.read`; with `owner_id=me`, also an owner holding `zeteo.uploads.write` | `{ data, next_cursor }` |
+| `GET /v1/sources/:sourceId` | `zeteo.sources.read`, or the owner of the upload source | the source |
+| `PATCH /v1/sources/:sourceId` | `zeteo.sources.write`; the owner of an upload source for `name` alone | the source |
+| `DELETE /v1/sources/:sourceId` | an upload source only: `zeteo.sources.write`, or its owner | `204` ([uploads.md](uploads.md)) |
 | `POST /v1/sources/:sourceId/transfer` | an upload source only: `zeteo.sources.write`, or its owner | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
 | `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings, truncated? }` |
 | `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md) | |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
-validated. The owner of a file source (holding `zeteo.file_sources.write` and `zeteo.data.read`)
+validated. The owner of an upload source (holding `zeteo.uploads.write` and `zeteo.data.read`)
 may also read, rename, transfer and delete it here; anyone else gets the same `403`, whether the
 source exists or not. `archive`, `test`, `refresh`, and `settings` or `schemas` in a `PATCH`, are
 `409 not_a_database_source` on an upload source; `DELETE` and `transfer` (and the upload-only table
@@ -40,13 +40,13 @@ owner_id, size_bytes, size_measured_at, share_count, created_at, archived_at }`.
   needs `VIEW DATABASE STATE`). It counts every table in the schemas, including ones the login
   cannot select. Both are `null` until a refresh has measured them; when a later size read
   fails or the source will not tell, the refresh goes on and keeps the last measurement, with
-  `size_measured_at` saying when it was taken. A file source's `size_bytes` is instead the bytes it
+  `size_measured_at` saying when it was taken. An upload source's `size_bytes` is instead the bytes it
   stores now (its quota's measure), and its `size_measured_at` is always `null`.
-- `owner_id`: a file source's owner; `null` for a database source.
+- `owner_id`: an upload source's owner; `null` for a database source.
 - `last_refreshed_at`: a database source's last catalogue refresh; an upload source has no
   refresh, so it reports the last load of any of its tables.
 - `share_count`: how many people and groups the source's tables are granted to (distinct
-  principals; a file source's owner grants are not counted).
+  principals; an upload source's owner grants are not counted).
 - `settings`: the type's settings without the fields the adapter marks secret. It is `null` for a
   source whose stored settings cannot be decrypted (the master key changed); list and get still
   work, and using the source fails as a `500 server_error` with the generic body.
