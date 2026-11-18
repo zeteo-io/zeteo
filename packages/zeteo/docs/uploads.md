@@ -4,8 +4,9 @@ An upload source is a source whose data Zeteo stores: a person uploads a CSV or 
 checks and corrects a preview, and gets a source of type `upload` that they own. Its tables live in
 Zeteo's own Postgres database, one schema per source (`zu_<id without dashes>`), and are queried
 through the same query language, planner, limits, saved queries and exports as any Postgres source,
-under grants. Only uploads exist; a source never refreshes by itself, and changes only when its
-owner uploads again. Nothing else (Google Sheets, SharePoint, syncing) exists yet.
+under grants. A file upload never refreshes by itself and changes only when its owner uploads again.
+A Google Sheet is the other kind of upload source, of type `google-sheets`: it is read from Google
+and synced on an interval ([Google Sheets](#google-sheets)). SharePoint does not exist yet.
 
 Uploads are **off** until `UPLOADS_READER_URL` is set. While it is unset `/v1/uploads`,
 `POST /v1/sources` with `type: "upload"` and the upload-only routes on an upload source answer
@@ -242,7 +243,93 @@ like any source's pool (`query_concurrency + export_concurrency + 2` per replica
 [sources.md](sources.md#connection-pools)), so many busy upload sources raise the connections Zeteo's
 database holds. Count them against `max_connections`.
 
+## Google Sheets
+
+A source of type `google-sheets` (kind `upload`) backs its tables with a Google spreadsheet. It needs
+`zeteo.uploads.write` and, like file uploads, `UPLOADS_READER_URL` (off while unset). It is made
+with the plugin `@dianemo/plugin-google@^2.1.0`, and Zeteo reads sheets with one service account.
+
+### Setting up Google (admins)
+
+1. Create a Google Cloud project and enable the **Google Sheets API** in it.
+2. Create a service account and a JSON key for it.
+3. In Zeteo, Admin -> Connections -> Google, paste the JSON key (`PUT /v1/connections/google`,
+   `zeteo.sources.write`). The key is sealed; only the service account's email is shown afterwards
+   (`GET /v1/connections/google`, which people holding `zeteo.uploads.write` may read too, to know
+   whom to share with). The key is checked with Google before it is saved (a probe for a spreadsheet
+   that cannot exist): a rejected key is `google_key_rejected`, an unreachable Google
+   `google_unavailable`.
+
+A Google Workspace admin setting can block sharing files with addresses outside the domain, and a
+service account is outside it. Allow it, or share each sheet explicitly.
+
+Until a key is saved, creating or syncing a Sheets source is `google_not_configured`.
+
+### Adding a sheet
+
+Share the spreadsheet with the service account's email as **Viewer**, then in Add data choose Google
+Sheet and paste its link (`docs.google.com/spreadsheets/d/<id>` or the bare id; a published-to-web
+link is refused, `invalid_sheet_link`). `POST /v1/uploads/links` reads it and returns the same
+preview as a file: one table per grid tab (chart tabs are skipped), the header row, and each column's
+name and type to correct. A sheet not shared with the email is `sheet_not_accessible`, naming the
+email. Creating sends `sync_interval_minutes` (default 60, 15 to 1440).
+
+**First claim wins.** One spreadsheet backs at most one unarchived source; anyone else adding it
+gets `sheet_in_use`, without being told who owns it. An admin fixes a wrong claim by transferring the
+source. The risk, stated: someone who has the link and the share and registers first gets the
+sheet. Share a sheet only with people who should be able to register it.
+
+### How values load
+
+Zeteo reads Sheets' typed values with their number formats, in the spreadsheet's time zone (UTC when
+the sheet has none, or an invalid one).
+
+- Date: `YYYY-MM-DD`. A date-formatted cell that holds a time keeps only the date; the format decides.
+- Date time: a UTC instant, with daylight saving applied. A wall time that does not exist resolves
+  forward; an ambiguous one takes the earlier instant.
+- Time: zero-padded 24-hour text, `HH:MM:SS`. A duration over a day keeps its hours (`30:00:00`).
+- A serial outside the years 0001 to 9999 keeps the raw number. Booleans are `true`/`false`; errors
+  and empty cells are null.
+- Unlike an Excel file, a date time at midnight stays a timestamp: Sheets says which it is.
+
+Every row up to the grid's row count is read, in ranges of 5,000 rows (blank rows in the middle are
+fine). A tab's columns are its used width; trailing empty columns are dropped.
+
+**The header row** is suggested by the preview, for files and sheets alike. It also recognises a
+label row under a sparse banner (a title above the real header, in the first three rows). A sparse
+real header above a full row of text data can be mistaken for a banner: correct `header_row` in the
+preview.
+
+### Syncing
+
+A sync is a refresh of the source. A Sheets source loads on its interval, by the `refreshSources`
+job, which checks every five minutes (the interval is measured from the last attempt; nothing syncs
+while uploads are off). **Sync now** is `POST /v1/sources/:sourceId/refresh` (the owner, or
+`zeteo.sources.write`), at most once a minute: sooner is `429 sync_too_soon` with `Retry-After`.
+A busy `503 upload_source_busy` does not use the window. The answer is a `SyncSummary`.
+
+- Columns match by header text (`original_name`), then by name, so a column renamed in Zeteo keeps
+  syncing. New header columns are added (an `all_columns` grant covers them, a grant on named columns
+  does not); a column gone from the header gets `missing_since`.
+- Tabs match by sheet id, so renaming or reordering tabs is fine. A deleted tab's table goes missing;
+  restoring the tab revives it with its id and grants. Adding a tab that already backs a table
+  of the source is `tab_already_added`.
+- A value that no longer casts to its column's type fails the sync (`cast_failed`); the owner retypes
+  the column, for instance to text, and syncs again. A tab emptied of rows fails it too
+  (`empty_file`). The upload limits (rows, columns, quota) apply, and the limit errors fail a sync
+  as they fail an upload.
+- A failed sync keeps the last good data and records `last_error` under the source's `sync` (seen by
+  the owner and `zeteo.sources.read` only). After 24 hours of failures the source shows **Stale**.
+- Re-uploading a Sheets table is `not_a_file_upload`; its other routes (rename, retype, grants,
+  transfer, delete) work as for a file.
+
+Readers see `last_loaded_at` per table in the catalogue and over MCP, never a sync error.
+
+Error codes: `invalid_sheet_link`, `sheet_in_use`, `sheet_not_accessible`, `google_not_configured`,
+`google_key_rejected`, `google_unavailable`, `google_sign_in_failed`, `staging_kind_mismatch`,
+`tab_already_added`, `not_a_file_upload`, `not_synced`, `not_a_sheets_source`, `sync_too_soon`.
+
 ## Not supported yet
 
-Google Sheets, SharePoint Excel, scheduled syncing, attaching a file to a query on another source,
+SharePoint Excel, syncing a file from anywhere, attaching a file to a query on another source,
 and locale-aware parsing. Row filters on grants do not exist either.

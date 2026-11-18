@@ -681,7 +681,9 @@ paths:
         **A Google Sheets source** is synced instead (Sync now): every tab is read again and its
         table reloaded, and the answer is a `SyncSummary`. The source's owner may do this, and a
         second one within a minute is `429 sync_too_soon` (with `Retry-After`). A sync that fails
-        is the error of its cause, and is recorded in the source's `sync.last_error`.
+        is the error of its cause, and is recorded in the source's `sync.last_error`: besides the Google
+        errors below, `422 cast_failed` (a value no longer casts to its column's type), `422 empty_file`
+        (a tab has no rows), the upload limit errors (`422`) and `409 quota_exceeded`.
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). A Sheets source's
         owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
@@ -690,7 +692,8 @@ paths:
         (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
         `502 source_unreachable`; on a Sheets source also `404 google_not_configured`,
         `422 sheet_not_accessible`, `429 sync_too_soon`, `502 google_unavailable`,
-        `502 google_sign_in_failed`, `503 upload_source_busy`.
+        `502 google_sign_in_failed`, `503 upload_source_busy`; and from a sync `422 cast_failed`, `422 empty_file`, the upload limit
+        errors and `409 quota_exceeded`.
       operationId: refreshSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -712,9 +715,13 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          $ref: '#/components/responses/ConflictResponse'
+          description: Conflict - `source_archived`, `not_a_database_source`; or on a Sheets source `quota_exceeded` (the sync would pass the owner's storage quota)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
-          description: The host is not permitted - `host_not_allowed`; or `sheet_not_accessible` (a Sheets source)
+          description: The host is not permitted - `host_not_allowed`; or on a Sheets source `sheet_not_accessible`, `cast_failed`, `empty_file` or an upload limit error
           content:
             application/json:
               schema:

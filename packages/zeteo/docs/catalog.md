@@ -36,7 +36,8 @@ only when the login holds `SELECT` on the whole of it; one it can read only thro
   work. Having taken the lock, the job reads the source again and skips it if another replica
   refreshed it, or it was archived, since the list was read. A failing source is logged and the
   job goes on. The first check comes 30 to 60 seconds after start (a random delay, so replicas
-  started together spread out), then one every five minutes.
+  started together spread out), then one every five minutes. The same check syncs Google Sheets
+  sources on their own interval ([uploads.md](uploads.md#google-sheets)).
 
 The summary is `{ tables: { added, missing, restored }, columns: { added, changed, missing,
 restored }, relations: { added, missing, restored } }`. `missing` counts things newly marked

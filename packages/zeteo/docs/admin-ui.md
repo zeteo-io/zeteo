@@ -124,7 +124,8 @@ page and no sections.
   With `zeteo.uploads.write`, while Uploads are on, My Zeteo has a **My sources** tab: the
   person's own upload sources (name, size, how many people and groups it is shared with, when it
   was added; Delete). **Add data** (`/my/data/new`)
-  uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
+  uploads a CSV or `.xlsx` file, or takes a **Google Sheet** by its link (when a Google
+  connection is saved), and shows its preview before anything is created: the tables to
   keep, their names, the header row, and each column's name and type with sample values and the
   parse warnings; a value that does not fit its type names the column and rows. Leaving Add
   data, Add tables or Re-upload without creating discards the upload. Creating asks for a name,
@@ -244,6 +245,12 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 | `GET /v1/me/principals/all` | `zeteo.data.read` | `{ data: Principal[], truncated }` as `GET /v1/principals/all`, over the people and groups `GET /v1/me/principals` searches; the "Who" filter of an upload source's owner |
+
+**Connections** (`/connections`, in the Admin menu, `zeteo.sources.write`) is where an admin pastes
+the Google service-account JSON key (`GET`/`PUT /v1/connections/google`): only the account's email
+is shown after it is saved. A Google Sheets source's page shows its sync interval, when it last
+loaded, **Sync now** for its owner and admins, and **Stale** after 24 hours of failed syncs; its
+owner and `zeteo.sources.read` see the last error.
 
 The saved queries the UI manages are in [saved-queries.md](saved-queries.md), and Uploads in
 [uploads.md](uploads.md).
