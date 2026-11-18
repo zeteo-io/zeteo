@@ -231,13 +231,17 @@ describe("MCP saved panel tools", () => {
   it("preview_panel refuses both a saved query and a query, and neither, with invalid_request", async () => {
     const id = await savedQuery();
     const query = { source: source.slug, from: "orders", select: ["id"] };
-    for (const args of [
-      { saved_query_id: id, query, chart: TABLE },
-      { chart: TABLE },
-    ]) {
+    for (const [args, description] of [
+      [
+        { saved_query_id: id, query, chart: TABLE },
+        "Give saved_query_id or query, not both",
+      ],
+      [{ chart: TABLE }, "Give either saved_query_id or query, exactly one"],
+    ] as const) {
       const call = await callTool(session.client, "preview_panel", args);
       expect(call.isError, JSON.stringify(args)).toBe(true);
       expect(call.json?.error, JSON.stringify(args)).toBe("invalid_request");
+      expect(call.json?.error_description).toBe(description);
     }
   });
 

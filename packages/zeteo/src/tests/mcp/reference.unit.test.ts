@@ -25,6 +25,9 @@ describe("the MCP reference", () => {
     for (const index of at) expect(index).toBeGreaterThan(0);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     expect(DASHBOARDS_REFERENCE).toContain("never a bucket's `as` name");
+    expect(DASHBOARDS_REFERENCE).toContain(
+      "Save only when the user wants to keep the chart"
+    );
   });
 
   it("teaches saved queries with the verbatim no-access notice", () => {

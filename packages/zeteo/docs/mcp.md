@@ -141,7 +141,7 @@ are run by the tests.
 | `get_dashboard` | `{ id }` | the dashboard with its panels, each with `id`, place, `title`, `state` and, for an `ok` panel, its `chart`, `time_column` and `saved_query_id` or `saved_panel_id`; a panel that is not `ok` carries a message instead ([dashboards.md](dashboards.md#panel-states-and-their-copy)) |
 | `create_dashboard`, `update_dashboard`, `delete_dashboard` | name, description, `time_range`, `refresh_seconds`, `theme` | the caller's own dashboard |
 | `add_panel`, `update_panel`, `remove_panel` | a dashboard's id and a panel's saved query, chart, `time_column`, title and place | the panel; what is wrong with the chart is told as `problems` |
-| `preview_panel` | a saved query (`saved_query_id`) or a query that is not saved (`query`, as the `query` tool takes it), exactly one; a chart; optionally `time_range` with `time_column` | `{ columns, row_count, truncated, rows (the first 20), problems }`; a `query` runs exactly as the `query` tool's (recorded as an `mcp` run with no saved query), so a model can show a chart without saving anything; runs the saved query as the caller under MCP's row limits, so a saved query without its own `limit` reads at most 100 rows (`truncated` when there are more); the tool's description says so, so a model does not mistake it for the dashboard's limit (1,000 rows by default) |
+| `preview_panel` | a saved query (`saved_query_id`) or a query that is not saved (`query`, as the `query` tool takes it), exactly one; a chart; optionally `time_range` with `time_column` | `{ columns, row_count, truncated, rows (the first 20), problems }`; a `query` runs exactly as the `query` tool's (recorded as an `mcp` run with no saved query), so a model can show a chart without saving anything; runs as the caller under MCP's row limits, so a query (saved or not) without its own `limit` reads at most 100 rows (`truncated` when there are more); the tool's description says so, so a model does not mistake it for the dashboard's limit (1,000 rows by default) |
 | `list_saved_panels`, `get_saved_panel`, `create_saved_panel`, `update_saved_panel`, `delete_saved_panel` | as the saved query tools, with a chart | the saved panel (a saved query with its chart) |
 | `link_saved_panel`, `detach_panel` | a dashboard and a saved panel, or a linked panel | the panel |
 
@@ -242,8 +242,8 @@ stops waiting, but the query runs on to its end or its time limit.
   ([saved-queries.md](saved-queries.md#what-is-recorded)); creating, changing and deleting a saved
   query write that area's audit entries.
 - The dashboard and saved panel tools that change something write that area's audit entries
-  (`zeteo.dashboard.*`, `zeteo.saved_panel.*`). `preview_panel` runs the saved query as `query`
-  does.
+  (`zeteo.dashboard.*`, `zeteo.saved_panel.*`). `preview_panel` runs a saved query, or a query that is
+  not saved, as `query` does.
 - The discovery tools and the saved query, dashboard and saved panel tools that only read write no
   run and no audit entry.
 - Every tool call is one log line from `@tereo-io/mcp` (`tool`, `user_id`, `client_id`,

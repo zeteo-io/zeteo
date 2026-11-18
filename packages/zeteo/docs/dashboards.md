@@ -218,4 +218,4 @@ by their own grants. Anyone who may not see a dashboard gets `404 not_found`.
 
 The tools of [mcp.md](mcp.md#the-tools) list, read, create, change and delete the caller's own
 dashboards and saved panels, add, change, remove, link and detach panels, and `preview_panel`
-runs a saved query and checks a chart against its result before a panel is added.
+checks a chart against a query's result (saved or not), with nothing saved.

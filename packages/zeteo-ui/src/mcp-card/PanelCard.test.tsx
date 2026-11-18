@@ -2,8 +2,8 @@ import type { ChartSettings } from "@/features/dashboards/api/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubResizeObserver } from "@/test/echartsMock";
 import { render, screen } from "@testing-library/react";
+import { PanelCard, panelRowsArgs } from "./PanelCard";
 import { fakeCardHost } from "@/test/cardHost";
-import { PanelCard } from "./PanelCard";
 import { CardToolError } from "./host";
 
 const echarts = vi.hoisted(() => ({
@@ -115,6 +115,10 @@ describe("PanelCard", () => {
         time_range: "last_30_days",
       },
     ]);
+  });
+
+  it("does not take an array query for a preview", () => {
+    expect(panelRowsArgs({ query: [], chart: line }, {})).toBeNull();
   });
 
   it("reads a saved panel named by the input's id", async () => {

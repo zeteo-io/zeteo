@@ -46,7 +46,9 @@ export const panelRowsArgs = (
     return { saved_panel_id: result.id };
   const previewed =
     typeof input.saved_query_id === "string" ||
-    (typeof input.query === "object" && input.query !== null);
+    (typeof input.query === "object" &&
+      input.query !== null &&
+      !Array.isArray(input.query));
   if (previewed && input.chart) {
     const args: Record<string, unknown> = {};
     for (const key of PREVIEW_KEYS)

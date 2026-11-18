@@ -81,7 +81,7 @@ export const previewRun = async (
   return run;
 };
 
-/** The tools for saved panels, and `preview_panel`, which checks a chart against a saved query's result. */
+/** The tools for saved panels, and `preview_panel`, which checks a chart against a query's result (saved or not), with nothing saved. */
 export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
   mcp.define({
     name: "list_saved_panels",
@@ -235,11 +235,13 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
     handler: (input, ctx) =>
       inToolCall(ctx, async () => {
         const caller = requireDataRead(ctx.auth);
-        if (
-          (input.saved_query_id === undefined) ===
-          (input.query === undefined)
-        ) {
+        if (input.saved_query_id !== undefined && input.query !== undefined) {
           throw new ValidationError("Give saved_query_id or query, not both");
+        }
+        if (input.saved_query_id === undefined && input.query === undefined) {
+          throw new ValidationError(
+            "Give either saved_query_id or query, exactly one"
+          );
         }
         const run = await previewRun(caller, input);
         const result = await runQuery({
