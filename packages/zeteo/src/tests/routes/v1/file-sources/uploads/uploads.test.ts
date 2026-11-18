@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag platform
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { STAGING_SCHEMA } from "../../../../../file-sources/storage.js";
 import { startV1Routes } from "../../../../support/v1App.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
@@ -8,6 +7,8 @@ import { tokenFor } from "../../../../support/tokens.js";
 import env from "../../../../../env.js";
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
+import http from "node:http";
+import JSZip from "jszip";
 import {
   DATA_READ,
   FILE_SOURCES_WRITE,
@@ -16,6 +17,15 @@ import {
   getStaging,
   STAGING_TTL_MS,
 } from "../../../../../file-sources/staging.js";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 const owner = randomUUID();
 const ownerToken = tokenFor({
@@ -43,6 +53,7 @@ const upload = async (
   const text = await res.text();
   return {
     status: res.status,
+    connection: res.headers.get("connection"),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     body: (text ? JSON.parse(text) : null) as any,
   };
@@ -226,6 +237,7 @@ describe("POST /v1/file-sources/uploads", () => {
       );
       expect(res.status).toBe(413);
       expect(res.body.error).toBe("file_too_large");
+      expect(res.connection).toBe("close");
     } finally {
       env.FILE_SOURCE_MAX_BYTES = max;
     }
@@ -299,12 +311,70 @@ describe("POST /v1/file-sources/uploads", () => {
     const form = new FormData();
     form.append("file", new Blob(["a,b\n1,2\n"]), "a.csv");
     form.append("file", new Blob(["a,b\n1,2\n"]), "b.csv");
+    const rowsBefore = await prisma.fileStaging.count();
+    const tablesBefore = (await stagingTables()).sort();
     const two = await fetch(`${app.url}/v1/file-sources/uploads`, {
       method: "POST",
       headers: { Authorization: `Bearer ${ownerToken}` },
       body: form,
     });
     expect(two.status).toBe(400);
+    // The first file's staging is cancelled and removed, not left behind.
+    expect(await prisma.fileStaging.count()).toBe(rowsBefore);
+    expect((await stagingTables()).sort()).toEqual(tablesBefore);
+  });
+
+  it("drops its staging table when the client goes away mid-upload", async () => {
+    const before = (await stagingTables()).sort();
+    const rowsBefore = await prisma.fileStaging.count();
+    const boundary = "----zeteotest";
+    const head =
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.csv"\r\n` +
+      `Content-Type: text/csv\r\n\r\n`;
+    const part = "a,b,c\n" + "abcdefghij,klmnopqrst,uvwxyz\n".repeat(5_000);
+    await new Promise<void>((resolve) => {
+      const req = http.request(
+        `${app.url}/v1/file-sources/uploads`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${ownerToken}`,
+            "Content-Type": `multipart/form-data; boundary=${boundary}`,
+            // Promises far more than is sent.
+            "Content-Length": String(10_000_000),
+          },
+        },
+        () => undefined
+      );
+      req.on("error", () => resolve());
+      req.write(head + part);
+      // Give the server time to stage rows, then cut the connection.
+      setTimeout(() => {
+        req.destroy();
+        resolve();
+      }, 500);
+    });
+    // The staging table existed meanwhile; it must go, and no row appear.
+    await vi.waitFor(
+      async () => {
+        expect((await stagingTables()).sort()).toEqual(before);
+      },
+      { timeout: 10_000, interval: 100 }
+    );
+    expect(await prisma.fileStaging.count()).toBe(rowsBefore);
+  });
+
+  it("refuses a zip bomb as file_too_large", async () => {
+    const zip = new JSZip();
+    zip.file("xl/bomb.bin", Buffer.alloc(8 * 1024 * 1024));
+    const bomb = await zip.generateAsync({
+      type: "nodebuffer",
+      compression: "DEFLATE",
+    });
+    expect(bomb.length).toBeLessThan(100_000);
+    const res = await upload(ownerToken, bomb, "bomb.xlsx");
+    expect(res.status).toBe(413);
+    expect(res.body.error).toBe("file_too_large");
   });
 });
 

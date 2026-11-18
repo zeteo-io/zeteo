@@ -86,8 +86,8 @@ function readRange(
 /**
  * Reads an xlsx workbook: each sheet, and each named table in addition (listed straight after its
  * sheet). Values are text (dates ISO 8601, formulas their cached value, a merged cell its top-left
- * value); trailing empty rows and columns are trimmed. The workbook is read into memory, bounded
- * by the upload size limit.
+ * value); trailing empty rows and columns are trimmed. The whole workbook is read into memory; the
+ * caller bounds its compressed size and checks its ZIP directory first (`checkZipBounds`).
  */
 export async function parseXlsx(
   stream: Readable,

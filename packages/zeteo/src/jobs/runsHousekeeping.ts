@@ -1,4 +1,3 @@
-import { deleteExpiredStagings } from "../file-sources/staging.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import { recordInterruptedExport } from "../engine/record.js";
 import { EXPORT_TIMEOUT_MS } from "../engine/limits.js";
@@ -7,6 +6,10 @@ import { redis } from "../utils/redis.js";
 import { db } from "../utils/db/index.js";
 import { randomUUID } from "crypto";
 import env from "../env.js";
+import {
+  deleteExpiredStagings,
+  deleteOrphanStagingTables,
+} from "../file-sources/staging.js";
 
 /** An export still running this long after it started has lost its process: its limit, plus a margin for its end to be recorded. */
 export const INTERRUPTED_AFTER_MS = EXPORT_TIMEOUT_MS + 5 * 60_000;
@@ -105,6 +108,8 @@ export const runHousekeeping = async (
     const stagings = await deleteExpiredStagings(now);
     if (stagings > 0)
       logger.info({ stagings }, "deleted expired file stagings");
+    const orphans = await deleteOrphanStagingTables(now);
+    if (orphans > 0) logger.info({ orphans }, "dropped orphan staging tables");
   } catch (err) {
     logger.error({ err }, "runs housekeeping failed");
   } finally {

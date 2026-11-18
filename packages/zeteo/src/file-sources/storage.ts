@@ -54,6 +54,29 @@ const checkedTableName = (name: string): string => {
   return name;
 };
 
+/**
+ * A staging table's name: `s_`, the creation time in unix seconds (8 hex
+ * digits), then 12 random bytes. The time lets housekeeping tell an orphan
+ * (no staging row names it) that is old from an upload still in flight.
+ */
+export const stagingNameAt = (at: Date): string =>
+  `s_${Math.floor(at.getTime() / 1000)
+    .toString(16)
+    .padStart(8, "0")}${randomBytes(12).toString("hex")}`;
+
+/** When a staging table was created, from its name. */
+export const stagingCreatedAt = (name: string): Date =>
+  new Date(parseInt(checkedStaging(name).slice(2, 10), 16) * 1000);
+
+/** Every table in the staging schema. */
+export const listStagingTables = async (db: Db = prisma): Promise<string[]> => {
+  const rows = await db.$queryRawUnsafe<Array<{ table_name: string }>>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = $1`,
+    STAGING_SCHEMA
+  );
+  return rows.map((r) => r.table_name).filter((n) => STAGING_NAME.test(n));
+};
+
 const checkedStaging = (name: string): string => {
   if (!STAGING_NAME.test(name)) throw new Error(`Not a staging table: ${name}`);
   return name;
@@ -118,7 +141,7 @@ export const createStagingTable = async (
   ) {
     throw new Error(`A staging table cannot have ${columnsCount} columns`);
   }
-  const name = `s_${randomBytes(16).toString("hex")}`;
+  const name = stagingNameAt(new Date());
   const columns = Array.from(
     { length: columnsCount },
     (_, i) => `${stagingColumn(i)} text`

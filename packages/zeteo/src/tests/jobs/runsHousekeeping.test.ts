@@ -2,7 +2,6 @@
 // @module-tag platform
 // @module-tag job
 import type { RunOutcome } from "../../../prisma/generated/client/index.js";
-import { deleteExpiredStagings } from "../../file-sources/staging.js";
 import { sourceSettings, uniqueSlug } from "../support/sources.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { auditRows, removeSources } from "../support/sources.js";
@@ -20,8 +19,13 @@ import {
   startRunsHousekeepingJob,
 } from "../../jobs/runsHousekeeping.js";
 import {
+  deleteExpiredStagings,
+  deleteOrphanStagingTables,
+} from "../../file-sources/staging.js";
+import {
   createStagingTable,
   STAGING_SCHEMA,
+  stagingNameAt,
 } from "../../file-sources/storage.js";
 import {
   recordExportEnd,
@@ -143,6 +147,38 @@ describe("runs housekeeping", () => {
       await prisma.$executeRawUnsafe(
         `DROP TABLE "${STAGING_SCHEMA}"."${live.table}"`
       );
+    });
+
+    it("drops an old staging table no row names, and keeps young and named ones", async () => {
+      const make = async (at: Date) => {
+        const name = stagingNameAt(at);
+        await prisma.$executeRawUnsafe(
+          `CREATE UNLOGGED TABLE "${STAGING_SCHEMA}"."${name}" ("row_no" integer)`
+        );
+        return name;
+      };
+      const old = await make(new Date(NOW.getTime() - 2 * 60 * MINUTE));
+      const young = await make(new Date(NOW.getTime() - 5 * MINUTE));
+      const namedName = await make(new Date(NOW.getTime() - 2 * 60 * MINUTE));
+      const row = await prisma.fileStaging.create({
+        data: {
+          ownerId: randomUUID(),
+          kind: "csv",
+          preview: [],
+          tables: [{ key: "csv", stagingTable: namedName }],
+          expiresAt: new Date(NOW.getTime() + MINUTE),
+        },
+      });
+      expect(await deleteOrphanStagingTables(NOW)).toBeGreaterThanOrEqual(1);
+      expect(await tableExists(old)).toBe(false);
+      expect(await tableExists(young)).toBe(true);
+      expect(await tableExists(namedName)).toBe(true);
+      await prisma.fileStaging.delete({ where: { id: row.id } });
+      for (const name of [young, namedName]) {
+        await prisma.$executeRawUnsafe(
+          `DROP TABLE "${STAGING_SCHEMA}"."${name}"`
+        );
+      }
     });
 
     it("runs in the housekeeping tick", async () => {

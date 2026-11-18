@@ -1,13 +1,24 @@
-import { stageUpload } from "../../../../file-sources/staging.js";
 import { ValidationError } from "../../../../utils/errors.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import type { Request, Response } from "express";
+import type { Readable } from "node:stream";
 import busboy from "busboy";
+import {
+  discardStaging,
+  stageUpload,
+} from "../../../../file-sources/staging.js";
+
+type Staged = Awaited<ReturnType<typeof stageUpload>>;
 
 /**
  * `POST /v1/file-sources/uploads`: one file in the multipart field `file`,
- * staged as it streams in. The request is read to its end even when the file
- * is refused, so the client gets the answer and not a reset connection.
+ * staged as it streams in.
+ *
+ * A client that goes away (or a request the server times out) destroys the
+ * file stream with an error, so the staging in progress fails and drops its
+ * tables. A refused upload (too large, wrong type, unreadable, a second file)
+ * is answered at once with `Connection: close` and the request is cut, not
+ * read to its end.
  */
 export const postUpload = async (req: Request, res: Response) => {
   const ownerId = callerOf(req).userId;
@@ -18,52 +29,93 @@ export const postUpload = async (req: Request, res: Response) => {
     throw new ValidationError("Send the file as multipart/form-data");
   }
 
-  const result = await new Promise<Awaited<ReturnType<typeof stageUpload>>>(
-    (resolve, reject) => {
-      let staged: Promise<Awaited<ReturnType<typeof stageUpload>>> | null =
-        null;
-      let failure: unknown = null;
-      let extraFile = false;
+  let fileStream: Readable | null = null;
+  let staged: Promise<Staged> | null = null;
+  let refused: Error | null = null;
+  let aborted = false;
+  let settle: ((err: Error) => void) | null = null;
+
+  const abort = () => {
+    if (aborted) return;
+    aborted = true;
+    const err = new Error("The upload was aborted");
+    fileStream?.destroy(err);
+    parser.destroy();
+    settle?.(err);
+  };
+  req.on("aborted", abort);
+  req.on("error", abort);
+  res.on("close", () => {
+    if (!res.writableEnded) abort();
+  });
+
+  let result: Staged;
+  try {
+    result = await new Promise<Staged>((resolve, reject) => {
+      settle = reject;
+      // A refusal cancels the first file's staging and removes what it made.
+      const refuse = async (err: Error) => {
+        if (refused) return;
+        refused = err;
+        fileStream?.destroy(err);
+        if (staged) {
+          try {
+            await discardStaging((await staged).stagingId);
+          } catch {
+            // It failed (and cleaned up) or was never made.
+          }
+        }
+        reject(err);
+      };
       parser.on("file", (field, file, info) => {
+        file.on("error", () => undefined);
         if (field !== "file" || staged) {
-          extraFile = true;
           file.resume();
+          void refuse(
+            new ValidationError("Send one file, in the field `file`")
+          );
           return;
         }
+        fileStream = file;
         staged = stageUpload({
           ownerId,
           filename: info.filename ?? "",
           stream: file,
         });
-        staged.catch((err: unknown) => {
-          failure = err;
-          file.resume();
-        });
+        // A failure ends the request at once; success waits for the close.
+        staged.catch((err: unknown) => reject(err));
       });
       parser.on("filesLimit", () => {
-        extraFile = true;
+        void refuse(new ValidationError("Send one file, in the field `file`"));
       });
       parser.on("error", (err) => {
-        failure ??= new ValidationError(
-          `The upload is not valid multipart: ${(err as Error).message}`
+        reject(
+          new ValidationError(
+            `The upload is not valid multipart: ${(err as Error).message}`
+          )
         );
       });
       parser.on("close", () => {
-        if (failure) return reject(failure);
-        if (extraFile) {
-          return reject(
-            new ValidationError("Send one file, in the field `file`")
-          );
-        }
+        if (refused) return;
         if (!staged) {
           return reject(new ValidationError("Send a file in the field `file`"));
         }
         staged.then(resolve, reject);
       });
       req.pipe(parser);
-    }
-  );
+    });
+  } catch (err) {
+    // Nothing to answer to a client that has gone.
+    if (aborted) return;
+    res.setHeader("Connection", "close");
+    if (!req.complete) res.once("finish", () => req.destroy());
+    throw err;
+  }
 
+  if (aborted) {
+    await discardStaging(result.stagingId);
+    return;
+  }
   res.status(201).json({
     staging_id: result.stagingId,
     expires_at: result.expiresAt.toISOString(),

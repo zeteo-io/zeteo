@@ -3,6 +3,7 @@ import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
 import type { FileColumnType } from "./types.js";
 import { normalizeName } from "./parse/names.js";
 import { prisma } from "../utils/db/prisma.js";
+import { checkZipBounds } from "./zipGuard.js";
 import { parseXlsx } from "./parse/xlsx.js";
 import { logger } from "../utils/logger.js";
 import { parseCsv } from "./parse/csv.js";
@@ -19,6 +20,8 @@ import {
   appendStagingRows,
   createStagingTable,
   dropStagingTable,
+  listStagingTables,
+  stagingCreatedAt,
 } from "./storage.js";
 
 /**
@@ -28,7 +31,10 @@ import {
  *
  * Nothing holds the whole file: a CSV streams through the parser into the
  * staging table in batches; only an xlsx is buffered (the workbook reader
- * needs it all), bounded by `FILE_SOURCE_MAX_BYTES`, counted as it arrives.
+ * needs it all): its compressed bytes are counted against `FILE_SOURCE_MAX_BYTES`
+ * as they arrive, and its ZIP directory is checked before reading (`checkZipBounds`: declared
+ * inflated size within twice the limit, no entry over 100:1). Memory is not strictly
+ * bounded for an archive that lies about its sizes.
  * A table's types come from per-column state kept while its rows go by.
  */
 
@@ -367,10 +373,9 @@ export const stageUpload = async ({
       } else {
         const parts: Buffer[] = [];
         for await (const chunk of bytes) parts.push(chunk as Buffer);
-        const sheets = await parseXlsx(
-          Readable.from(Buffer.concat(parts)),
-          limits
-        );
+        const workbook = Buffer.concat(parts);
+        checkZipBounds(workbook, 2 * maxBytes);
+        const sheets = await parseXlsx(Readable.from(workbook), limits);
         for (const sheet of sheets) {
           const result = await stageTable(
             sheet.rows,
@@ -402,13 +407,6 @@ export const stageUpload = async ({
     });
     return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
   } catch (err) {
-    // Read the rest of the upload and discard it, so the request can finish
-    // and be answered; a stream being iterated does not flow on `resume()`.
-    try {
-      while (!(await iterator.next()).done);
-    } catch {
-      // The stream is broken: nothing more to read.
-    }
     for (const table of created) {
       await dropStagingTable(table).catch((dropErr: unknown) => {
         logger.error(
@@ -417,6 +415,42 @@ export const stageUpload = async ({
         );
       });
     }
+    // Stop reading the upload; this destroys the stream.
+    await iterator.return?.().catch(() => undefined);
     throw err;
   }
+};
+
+/** Deletes a staging row and drops its tables; a staging already gone is fine. */
+export const discardStaging = async (id: string): Promise<void> => {
+  const row = await prisma.fileStaging.findUnique({ where: { id } });
+  if (!row) return;
+  for (const table of row.tables as unknown as StagedTable[]) {
+    await dropStagingTable(table.stagingTable);
+  }
+  await prisma.fileStaging.deleteMany({ where: { id } });
+};
+
+/**
+ * Drops staging tables no `FileStaging` row names that are older than the
+ * staging lifetime: what an upload leaves when its process dies between
+ * creating a table and recording the row. A table's age is in its name
+ * (`stagingCreatedAt`). Returns how many it dropped.
+ */
+export const deleteOrphanStagingTables = async (
+  now: Date = new Date()
+): Promise<number> => {
+  const cutoff = now.getTime() - STAGING_TTL_MS;
+  let dropped = 0;
+  for (const name of await listStagingTables()) {
+    if (stagingCreatedAt(name).getTime() > cutoff) continue;
+    const named = await prisma.fileStaging.findFirst({
+      where: { tables: { array_contains: [{ stagingTable: name }] } },
+      select: { id: true },
+    });
+    if (named) continue;
+    await dropStagingTable(name);
+    dropped += 1;
+  }
+  return dropped;
 };
