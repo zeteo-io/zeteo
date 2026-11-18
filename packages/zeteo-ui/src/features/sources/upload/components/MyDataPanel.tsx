@@ -40,7 +40,7 @@ export const MyDataPanel = () => {
       error={error}
       back={MY_DATA_BACK}
       hide={["kind", "owner", "status", "refreshed"]}
-      emptyText="Upload a CSV or Excel file to query it and share it."
+      emptyText="Upload a CSV or Excel file, or add a Google Sheet, to query it and share it."
       actions={
         <Button
           size="sm"

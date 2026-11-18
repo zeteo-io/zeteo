@@ -1,6 +1,6 @@
+import { isUploadType, sourceHref, sourceTypeName } from "./sourceLabels";
 import { useUploadActions } from "../upload/components/UploadActions";
 import { useSourceAccess, type SourceAccess } from "./access";
-import { sourceHref, sourceTypeName } from "./sourceLabels";
 import { SourceFrame, type SourceTab } from "./SourceFrame";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { Outlet, useParams } from "react-router-dom";
@@ -42,7 +42,7 @@ const SourceLoader = ({ sourceId }: { sourceId: string }) => {
   if (isLoading) return <Spinner size="lg" />;
   if (!source) return <ErrorNotice error={error} />;
 
-  return source.type === "upload" ? (
+  return isUploadType(source.type) ? (
     <UploadShell source={source} />
   ) : (
     <DatabaseShell source={source} />

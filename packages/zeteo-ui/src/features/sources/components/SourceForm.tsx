@@ -38,6 +38,10 @@ import type {
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
 
+/** A Google Sheets source's "Sync every", in minutes. */
+const MIN_INTERVAL = 15;
+const MAX_INTERVAL = 1440;
+
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
@@ -101,6 +105,7 @@ const shownPaths = (
   "name",
   "description",
   "schemas",
+  "sync_interval_minutes",
   ...(connectionOpen
     ? [
         "settings.host",
@@ -216,6 +221,11 @@ export const SourceForm = ({
   const [exportEnabled, setExportEnabled] = useState(
     source?.export_enabled ?? false
   );
+  // Only a Google Sheets source syncs.
+  const syncs = source?.type === "google-sheets";
+  const [syncEvery, setSyncEvery] = useState(
+    String(source?.sync?.interval_minutes ?? 60)
+  );
   const [allowWritable, setAllowWritable] = useState(false);
   const [offerWritable, setOfferWritable] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -324,6 +334,17 @@ export const SourceForm = ({
     ) {
       found.schemas = `A schema name is at most ${MAX_SCHEMA_BYTES} bytes.`;
     }
+    if (syncs) {
+      const n = parseNumberField(syncEvery);
+      if (
+        n === undefined ||
+        Number.isNaN(n) ||
+        n < MIN_INTERVAL ||
+        n > MAX_INTERVAL
+      ) {
+        found.sync_interval_minutes = `Sync every is ${MIN_INTERVAL} to ${MAX_INTERVAL} minutes.`;
+      }
+    }
     for (const field of NUMBER_FIELDS) {
       const n = parseNumberField(limits[field.key]);
       if (n !== undefined && Number.isNaN(n)) {
@@ -343,6 +364,15 @@ export const SourceForm = ({
       if (name.trim() !== src.name) body.name = name.trim();
       if (description.trim() !== src.description) {
         body.description = description.trim();
+      }
+      const minutes = parseNumberField(syncEvery);
+      if (
+        syncs &&
+        minutes !== undefined &&
+        !Number.isNaN(minutes) &&
+        minutes !== src.sync?.interval_minutes
+      ) {
+        body.sync_interval_minutes = minutes;
       }
       if (!upload.canSetLimits) return body;
       for (const field of NUMBER_FIELDS) {
@@ -536,6 +566,22 @@ export const SourceForm = ({
             )}
           </div>
         </BorderedSection>
+
+        {syncs && (
+          <BorderedSection title="Sync" as="h2">
+            <Input
+              label="Sync every"
+              type="number"
+              value={syncEvery}
+              error={errorFor("sync_interval_minutes")}
+              helperText="Minutes between syncs, 15 to 1440."
+              onChange={(e) => {
+                setSyncEvery(e.target.value);
+                edited("sync_interval_minutes");
+              }}
+            />
+          </BorderedSection>
+        )}
 
         {!upload && (
           <BorderedSection

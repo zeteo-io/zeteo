@@ -10,6 +10,11 @@ import {
   STAGING_ID,
   TABLE_ID,
   makePreviewTable,
+  GOOGLE_CONNECTION,
+  ROBOT_EMAIL,
+  SHEET_ID,
+  makeSheetStaging,
+  makeSheetsSource,
   makeStaging,
   makeUploadSource,
   uploadGet,
@@ -44,6 +49,9 @@ const renderAt = (route: string) =>
 type User = ReturnType<typeof userEvent.setup>;
 
 const upload = async (user: User, name = "Q3 sales.xlsx") => {
+  // Add data opens with a choice; Add tables and Re-upload go straight to a file.
+  const choice = screen.queryByRole("button", { name: /Upload a file/ });
+  if (choice) await user.click(choice);
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
   await user.upload(input, new File(["x"], name));
 };
@@ -464,5 +472,114 @@ describe("AddDataPage", () => {
     expect(screen.getByText("Try again in 5 seconds.")).toBeInTheDocument();
     // Still on the preview, to try again.
     expect(screen.getByRole("button", { name: "Add tables" })).toBeEnabled();
+  });
+});
+
+describe("AddDataPage: Google Sheet", () => {
+  const LINK = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
+  beforeEach(() => {
+    get
+      .mockReset()
+      .mockImplementation(
+        uploadGet(makeSheetsSource, undefined, (url) =>
+          url === "/v1/connections/google"
+            ? { data: GOOGLE_CONNECTION }
+            : undefined
+        )
+      );
+    post
+      .mockReset()
+      .mockImplementation(async (url: string) =>
+        url === "/v1/uploads/links"
+          ? { data: makeSheetStaging() }
+          : { data: makeSheetsSource() }
+      );
+    del.mockReset().mockResolvedValue({});
+  });
+
+  it("offers a file or a Google Sheet first", async () => {
+    renderAt("/my/data/new");
+    expect(
+      await screen.findByRole("button", { name: /Upload a file/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Google Sheet/ })
+    ).toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it("shows the share email, posts the link, then creates the source with its interval", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    expect(await screen.findByText(ROBOT_EMAIL)).toBeInTheDocument();
+    expect(screen.getByText(/as a Viewer/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(post).toHaveBeenCalledWith("/v1/uploads/links", { url: LINK });
+    expect(
+      await screen.findByRole("heading", { name: "orders" })
+    ).toBeInTheDocument();
+    // The name comes from the spreadsheet's title; Sync every defaults to 60.
+    expect(screen.getByRole("textbox", { name: /^Name\W*$/ })).toHaveValue(
+      "Budget 2027"
+    );
+    const every = screen.getByLabelText(/Sync every/);
+    expect(every).toHaveValue(60);
+    await user.clear(every);
+    await user.type(every, "30");
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/v1/sources",
+        expect.objectContaining({
+          type: "google-sheets",
+          staging_id: STAGING_ID,
+          name: "Budget 2027",
+          sync_interval_minutes: 30,
+        })
+      )
+    );
+    expect(await screen.findByText("Source page")).toBeInTheDocument();
+  });
+
+  it("blocks an interval outside 15 to 1440", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    await screen.findByText(ROBOT_EMAIL);
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    const every = await screen.findByLabelText(/Sync every/);
+    await user.clear(every);
+    await user.type(every, "2000");
+    expect(
+      screen.getByRole("button", { name: "Create source" })
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Sync every is 15 to 1440 minutes.")
+    ).toBeInTheDocument();
+  });
+
+  it("stages Add tables from the source itself, with no link field", async () => {
+    renderAt(`/sources/${FS_ID}/add`);
+    expect(
+      await screen.findByRole("heading", { name: "Add tables to Budget sheet" })
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/v1/uploads/links", {
+        source_id: FS_ID,
+      })
+    );
+    expect(
+      await screen.findByRole("heading", { name: "orders" })
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Link to the Google Sheet/)).toBeNull();
   });
 });

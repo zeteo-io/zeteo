@@ -1,0 +1,9 @@
+/* Admin → Connections. */
+.z-connections {
+  max-width: 40rem;
+}
+
+.z-connections-dialog {
+  display: grid;
+  gap: 1rem;
+}

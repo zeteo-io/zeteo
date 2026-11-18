@@ -38,7 +38,7 @@ describe("TopBar", () => {
     ]);
   });
 
-  it("lists the seven admin sections under Admin", async () => {
+  it("lists the eight admin sections under Admin", async () => {
     renderAt("/my");
     const button = adminButton();
     expect(button).toHaveAttribute("aria-haspopup", "menu");
@@ -52,6 +52,7 @@ describe("TopBar", () => {
     expect(links.map((l) => l.textContent)).toEqual([
       "Dashboards",
       "Sources",
+      "Connections",
       "Grants",
       "Limits",
       "Runs",
@@ -62,6 +63,7 @@ describe("TopBar", () => {
     expect(links.map((l) => l.getAttribute("href"))).toEqual([
       "/dashboards",
       "/sources",
+      "/connections",
       "/grants",
       "/limits",
       "/runs",
