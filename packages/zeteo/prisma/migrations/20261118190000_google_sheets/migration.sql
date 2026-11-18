@@ -23,6 +23,12 @@ CREATE TABLE "zeteo"."connections" (
     CONSTRAINT "connections_pkey" PRIMARY KEY ("provider")
 );
 
-
 -- A spreadsheet is one live source at a time.
 CREATE UNIQUE INDEX "sources_vendor_file_key" ON "zeteo"."sources" ("type", "vendor_file_id") WHERE "archived_at" IS NULL AND "vendor_file_id" IS NOT NULL;
+
+-- A source has an owner exactly when it is an upload source, a Sheets one
+-- included. Compared as text: the enum value added above cannot be used in the
+-- transaction that adds it.
+ALTER TABLE "zeteo"."sources" DROP CONSTRAINT "sources_owner_id_upload_check";
+ALTER TABLE "zeteo"."sources" ADD CONSTRAINT "sources_owner_id_upload_check"
+  CHECK (("owner_id" IS NOT NULL) = ("type"::text IN ('upload', 'google-sheets')));

@@ -464,4 +464,29 @@ describe("storedBytes", () => {
     });
     expect(await storedBytes(ownerId)).toBe(0);
   });
+
+  it("counts a google_sheets source's stored bytes too", async () => {
+    const ownerId = randomUUID();
+    await prisma.source.create({
+      data: {
+        id: sourceId,
+        slug: `sheets-${sourceId.slice(0, 8)}`,
+        name: "Sheet",
+        type: "google_sheets",
+        sealedSettings: {},
+        ownerId,
+        createdBy: ownerId,
+      },
+    });
+    const staging = await stage([["a"], ["b"]]);
+    const loaded = await loadTypedTable(sourceId, staging, {
+      name: "letters",
+      headerRow: null,
+      columns: [{ index: 0, name: "letter", type: "text" }],
+    });
+    await prisma.$transaction((tx) =>
+      swapIn(tx, sourceId, "letters", loaded.physicalName)
+    );
+    expect(await storedBytes(ownerId)).toBeGreaterThan(0);
+  });
 });
