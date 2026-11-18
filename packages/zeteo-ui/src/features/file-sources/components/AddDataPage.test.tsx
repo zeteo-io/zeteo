@@ -1,7 +1,7 @@
+import { AddDataPage, AddTablesPage, ReuploadPage } from "./AddDataPage";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { optionTexts, pickOption } from "@/test/searchSelect";
-import { AddDataPage, ReuploadPage } from "./AddDataPage";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
@@ -28,6 +28,7 @@ const renderAt = (route: string) =>
   renderWithProviders(
     <Routes>
       <Route path="/my/data/new" element={<AddDataPage />} />
+      <Route path="/my/data/:fileSourceId/add" element={<AddTablesPage />} />
       <Route
         path="/my/data/:fileSourceId/tables/:tableId/reupload"
         element={<ReuploadPage />}
@@ -219,5 +220,98 @@ describe("AddDataPage", () => {
         }
       )
     );
+  });
+
+  it("leaves a table out with its Keep switch, and refuses to create with none kept", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.click(within(section("orders")).getByLabelText("Keep"));
+    expect(
+      within(section("orders")).getByText("Left out: it is not created.")
+    ).toBeInTheDocument();
+    expect(within(section("orders")).queryByLabelText("Table name")).toBeNull();
+    await user.click(within(section("notes")).getByLabelText("Keep"));
+    expect(
+      screen.getByRole("button", { name: "Create source" })
+    ).toBeDisabled();
+    await user.click(within(section("notes")).getByLabelText("Keep"));
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][1].tables).toEqual([{ key: "sheet:Notes" }]);
+  });
+
+  it("sends a changed header row, and says untyped names follow it", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    const orders = section("orders");
+    expect(within(orders).getByLabelText("Header row")).toHaveValue("Row 1");
+    await pickOption(
+      user,
+      within(orders).getByLabelText("Header row"),
+      "No header"
+    );
+    expect(
+      within(orders).getByText(
+        /Column names you have not typed come from the new header row/
+      )
+    ).toBeInTheDocument();
+    await user.click(within(section("notes")).getByLabelText("Keep"));
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(post.mock.calls[1][1].tables).toEqual([
+      { key: "sheet:Orders", header_row: null },
+    ]);
+  });
+
+  it("adds a renamed table to an existing source", async () => {
+    const user = userEvent.setup();
+    renderAt(`/my/data/${FS_ID}/add`);
+    expect(
+      await screen.findByRole("heading", { name: "Add tables to Q3 sales" })
+    ).toBeInTheDocument();
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    // No name or slug for the source: it exists.
+    expect(screen.queryByLabelText("Slug")).toBeNull();
+    const name = within(section("orders")).getByLabelText("Table name");
+    await user.clear(name);
+    await user.type(name, "orders_2026");
+    await user.click(within(section("notes")).getByLabelText("Keep"));
+    await user.click(screen.getByRole("button", { name: "Add tables" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(`/v1/file-sources/${FS_ID}/tables`, {
+        staging_id: STAGING_ID,
+        tables: [{ key: "sheet:Orders", name: "orders_2026" }],
+      })
+    );
+    expect(await screen.findByText("Source page")).toBeInTheDocument();
+  });
+
+  it("says when to try again while the source is busy", async () => {
+    const user = userEvent.setup();
+    post.mockImplementation(async (url: string) => {
+      if (url === "/v1/file-sources/uploads") return { data: makeStaging() };
+      throw {
+        status: 503,
+        code: "file_source_busy",
+        message: "The file source is busy; retry shortly",
+        retryAfter: 5,
+      };
+    });
+    renderAt(`/my/data/${FS_ID}/add`);
+    await screen.findByRole("heading", { name: "Add tables to Q3 sales" });
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.click(screen.getByRole("button", { name: "Add tables" }));
+    expect(
+      await screen.findByText("The file source is busy; retry shortly")
+    ).toBeInTheDocument();
+    expect(screen.getByText("Try again in 5 seconds.")).toBeInTheDocument();
+    // Still on the preview, to try again.
+    expect(screen.getByRole("button", { name: "Add tables" })).toBeEnabled();
   });
 });

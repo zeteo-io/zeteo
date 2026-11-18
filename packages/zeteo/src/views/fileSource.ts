@@ -13,7 +13,11 @@ export type FileSourceRow = Source & {
  * missing ones (removed, or of a deleted source) flagged, and their columns.
  * Never any cell of its data.
  */
-export const fileSourceView = (row: FileSourceRow, storedBytes: number) => ({
+export const fileSourceView = (
+  row: FileSourceRow,
+  storedBytes: number,
+  shareCount: number
+) => ({
   id: row.id,
   slug: row.slug,
   name: row.name,
@@ -22,9 +26,12 @@ export const fileSourceView = (row: FileSourceRow, storedBytes: number) => ({
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
   stored_bytes: storedBytes,
+  /** The people and groups its tables are shared with, the owner's own grants not counted. */
+  share_count: shareCount,
   tables: row.tables.map((t) => ({
     id: t.id,
     name: t.name,
+    description: t.description,
     row_count: t.rowCount ?? 0,
     last_synced_at: t.lastSyncedAt?.toISOString() ?? null,
     missing: t.missingSince !== null,

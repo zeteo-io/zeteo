@@ -30,6 +30,8 @@ interface RelationFormProps {
   tables: Table[];
   onDeclared: () => void;
   onClose: () => void;
+  /** How a table is named in the pickers: `schema.name` unless given. */
+  getTableLabel?: (table: Table) => string;
 }
 
 const hasDuplicate = (values: string[]) =>
@@ -40,6 +42,7 @@ export const RelationForm = ({
   tables,
   onDeclared,
   onClose,
+  getTableLabel = tableLabel,
 }: RelationFormProps) => {
   const declare = useDeclareRelation(sourceId);
   const [name, setName] = useState("");
@@ -157,7 +160,7 @@ export const RelationForm = ({
                 placeholder="Search tables"
                 value={tables.find((t) => t.id === fromTableId) ?? null}
                 options={tables}
-                getOptionLabel={tableLabel}
+                getOptionLabel={getTableLabel}
                 getOptionKey={(t) => t.id}
                 longDropDown
                 onSelect={(t) => chooseFromTable(t.id)}
@@ -172,7 +175,7 @@ export const RelationForm = ({
                 placeholder="Search tables"
                 value={tables.find((t) => t.id === toTableId) ?? null}
                 options={tables}
-                getOptionLabel={tableLabel}
+                getOptionLabel={getTableLabel}
                 getOptionKey={(t) => t.id}
                 longDropDown
                 onSelect={(t) => chooseToTable(t.id)}

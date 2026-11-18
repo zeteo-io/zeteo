@@ -1,5 +1,4 @@
 import { allowOwnerOr } from "../../../../../middleware/fileSourceOwner.js";
-import { requirePermission } from "../../../../../middleware/auth.js";
 import { declareRelation, listRelations } from "./controllers.js";
 import { sourceOfParams } from "../middleware.js";
 import relationRouter from "./relation/index.js";
@@ -15,7 +14,11 @@ const json64k = express.json({ limit: "64kb" });
 
 relationsRouter.use("/:relationId", relationRouter);
 
-relationsRouter.get("/", requirePermission(SOURCES_READ), listRelations);
+relationsRouter.get(
+  "/",
+  allowOwnerOr(SOURCES_READ, sourceOfParams),
+  listRelations
+);
 relationsRouter.post(
   "/",
   allowOwnerOr(SOURCES_WRITE, sourceOfParams),

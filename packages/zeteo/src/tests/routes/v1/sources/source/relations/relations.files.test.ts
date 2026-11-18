@@ -96,6 +96,32 @@ describe("/v1/sources/:sourceId/relations (file sources)", () => {
     expect((await call("DELETE", path, owner)).status).toBe(204);
   });
 
+  it("lets the owner list their source's relations", async () => {
+    const made = await call(
+      "POST",
+      `/${own.id}/relations`,
+      owner,
+      declare(own, "listed")
+    );
+    expect(made.status).toBe(201);
+    const res = await call("GET", `/${own.id}/relations`, owner);
+    expect(res.status).toBe(200);
+    expect((res.body.data as { name: string }[]).map((r) => r.name)).toContain(
+      "listed"
+    );
+    await call("DELETE", `/${own.id}/relations/${made.body.id}`, owner);
+  });
+
+  it("refuses the owner the relations of another source with the very 403 of anyone", async () => {
+    for (const id of [databaseSourceId, others.id, randomUUID()]) {
+      const res = await call("GET", `/${id}/relations`, owner);
+      expect(res.status, id).toBe(403);
+      expect(bodyOf(res)).toEqual(
+        bodyOf(await call("GET", `/${id}/relations`, nobody))
+      );
+    }
+  });
+
   it("keeps a relation within one source", async () => {
     const res = await call("POST", `/${own.id}/relations`, owner, {
       ...declare(own),

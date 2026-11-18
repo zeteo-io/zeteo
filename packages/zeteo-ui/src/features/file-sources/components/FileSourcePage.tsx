@@ -1,10 +1,10 @@
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { RenameDialog, TransferDialog } from "./FileSourceDialogs";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { formatRelative } from "@/utils/formatRelative";
 import { PrincipalLabel } from "@/features/principals";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { RelationsSection } from "./RelationsSection";
 import { ColumnTypeDialog } from "./ColumnTypeDialog";
 import { PageHeader } from "@/components/PageHeader";
 import { EditButton } from "@/components/EditButton";
@@ -17,6 +17,11 @@ import { useAuth } from "@tereo-io/react";
 import type { Me } from "@/lib/auth";
 import { useState } from "react";
 import "./styles.css";
+import {
+  RenameDialog,
+  TableDescriptionDialog,
+  TransferDialog,
+} from "./FileSourceDialogs";
 import {
   useDeleteFileSource,
   useFileSource,
@@ -44,6 +49,7 @@ import {
 
 const TABS = [
   { id: "tables", label: "Tables" },
+  { id: "relations", label: "Relations" },
   { id: "sharing", label: "Shared with" },
 ] as const;
 type Tab = (typeof TABS)[number]["id"];
@@ -83,6 +89,7 @@ interface TableSectionProps {
   table: FileSourceTable;
   canManage: boolean;
   onEditColumn: (column: FileSourceColumn) => void;
+  onDescribe: () => void;
 }
 
 const TableSection = ({
@@ -90,6 +97,7 @@ const TableSection = ({
   table,
   canManage,
   onEditColumn,
+  onDescribe,
 }: TableSectionProps) => {
   const navigate = useNavigate();
   const remove = useRemoveTable(source.id);
@@ -135,6 +143,22 @@ const TableSection = ({
         <span>
           Loaded <When iso={table.last_synced_at} never="never" />
         </span>
+      </p>
+      <p className="z-fs-table-description">
+        {table.description ? (
+          <span>{table.description}</span>
+        ) : (
+          !canManage && <span className="z-muted">No description.</span>
+        )}
+        {canManage && (
+          <button
+            type="button"
+            className="z-fs-add-description"
+            onClick={onDescribe}
+          >
+            {table.description ? "Edit description" : "Add description"}
+          </button>
+        )}
       </p>
       <div className={canManage ? "z-actions-last" : undefined}>
         <Table<FileSourceColumn>
@@ -196,13 +220,14 @@ type Dialog =
   | { kind: "rename" }
   | { kind: "transfer" }
   | { kind: "column"; tableId: string; column: FileSourceColumn }
+  | { kind: "describe"; table: FileSourceTable }
   | null;
 
 const FileSourceView = ({ source }: { source: FileSource }) => {
   const { user, hasPermission } = useAuth<Me>();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const tab: Tab = params.get("tab") === "sharing" ? "sharing" : "tables";
+  const tab: Tab = TABS.find((t) => t.id === params.get("tab"))?.id ?? "tables";
   const remove = useDeleteFileSource();
   const [dialog, setDialog] = useState<Dialog>(null);
   const close = () => setDialog(null);
@@ -326,14 +351,25 @@ const FileSourceView = ({ source }: { source: FileSource }) => {
               onEditColumn={(column) =>
                 setDialog({ kind: "column", tableId: t.id, column })
               }
+              onDescribe={() => setDialog({ kind: "describe", table: t })}
             />
           ))}
         </div>
+      )}
+      {tab === "relations" && (
+        <RelationsSection source={source} canManage={canManage} />
       )}
       {tab === "sharing" && (
         <GrantsSection source={source} canManage={canManage} />
       )}
 
+      {dialog?.kind === "describe" && (
+        <TableDescriptionDialog
+          source={source}
+          table={dialog.table}
+          onClose={close}
+        />
+      )}
       {dialog?.kind === "rename" && (
         <RenameDialog source={source} onClose={close} />
       )}

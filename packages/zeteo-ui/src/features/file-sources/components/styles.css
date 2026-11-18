@@ -75,3 +75,11 @@
   color: var(--k-primary-color);
   text-decoration: underline;
 }
+
+.z-fs-table-description {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin: 0 0 0.75rem;
+}

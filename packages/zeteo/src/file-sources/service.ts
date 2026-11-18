@@ -134,6 +134,28 @@ const withTables = {
   },
 };
 
+/**
+ * Per source, how many people and groups its tables are shared with: the
+ * distinct principals of its grants, the owner grants left out.
+ */
+const shareCounts = async (ids: string[]): Promise<Map<string, number>> => {
+  const grants = await prisma.grant.findMany({
+    where: { table: { sourceId: { in: ids } }, ownerGrant: false },
+    select: {
+      principalType: true,
+      principalId: true,
+      table: { select: { sourceId: true } },
+    },
+  });
+  const principals = new Map<string, Set<string>>();
+  for (const g of grants) {
+    const set = principals.get(g.table.sourceId) ?? new Set<string>();
+    set.add(`${g.principalType}:${g.principalId}`);
+    principals.set(g.table.sourceId, set);
+  }
+  return new Map([...principals].map(([id, set]) => [id, set.size]));
+};
+
 const viewOf = async (id: string): Promise<FileSourceView> => {
   const row = await prisma.source.findUniqueOrThrow({
     where: { id },
@@ -142,7 +164,8 @@ const viewOf = async (id: string): Promise<FileSourceView> => {
   const bytes = row.archivedAt
     ? 0
     : ((await sourceStoredBytes([id])).get(id) ?? 0);
-  return fileSourceView(row, bytes);
+  const shares = await shareCounts([id]);
+  return fileSourceView(row, bytes, shares.get(id) ?? 0);
 };
 
 /** A slug from a name: lowercase letters, digits and hyphens, starting with a letter. */
@@ -383,8 +406,14 @@ export const listFileSources = async (
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     include: withTables,
   });
-  const bytes = await sourceStoredBytes(rows.map((r) => r.id));
-  return rows.map((r) => fileSourceView(r, bytes.get(r.id) ?? 0));
+  const ids = rows.map((r) => r.id);
+  const [bytes, shares] = await Promise.all([
+    sourceStoredBytes(ids),
+    shareCounts(ids),
+  ]);
+  return rows.map((r) =>
+    fileSourceView(r, bytes.get(r.id) ?? 0, shares.get(r.id) ?? 0)
+  );
 };
 
 export const getFileSource = async (

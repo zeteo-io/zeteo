@@ -113,15 +113,17 @@ page and no sections.
   `GET /v1/me/principals`. A run of a saved query that was refused shows "Query withheld".
   The UI has no button that runs a saved query; running and exporting are the API's and MCP's.
   With `zeteo.file_sources.write`, while File Sources are on, My Zeteo has a **My data** tab: the
-  person's own file sources (tables, last load, size; Delete). **Add data** (`/my/data/new`)
+  person's own file sources (tables, last load, how many people and groups it is shared with,
+  size; Delete). **Add data** (`/my/data/new`)
   uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
   keep, their names, the header row, and each column's name and type with sample values and the
   parse warnings; a value that does not fit its type names the column and rows. A file source's
   page (`/my/data/<id>`, also reached by admins from Sources) lists its tables (rows, when last
-  loaded, columns with type and description) with **Re-upload** and remove per table and a
-  column dialog to rename, retype (warning that saved queries using it may stop working) or
-  describe it; **Add tables**, **Rename**, **Transfer** and **Delete** in its header; and a
-  **Shared with** tab listing every grant on its tables, the owner's own marked and locked, where
+  loaded, description, columns with type and description) with **Re-upload**, remove and the
+  table's description per table and a column dialog to rename, retype (warning that saved
+  queries using it may stop working) or describe it; **Add tables**, **Rename**, **Transfer**
+  and **Delete** in its header; a **Relations** tab to declare, rename and remove the relations
+  between its tables; and a **Shared with** tab listing every grant on its tables, the owner's own marked and locked, where
   **Share** grants a table (all columns or chosen ones) to a person or group.
 
 - **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
@@ -222,7 +224,7 @@ is added when `PUBLIC_URL` is https.
 |------|------------|---------|
 | `GET /v1/me` | any signed-in caller | `{ id, type: "user" \| "service", name, email, permissions }`: the `zeteo.*` permissions held, sorted (plus a bare `admin`, which covers them all). `name` and `email` are `null` when Tereo does not answer within two seconds, so the permissions always come back |
 | `GET /v1/principals?type=user\|group&q=&limit=` | `zeteo.grants.read` | `{ data: Principal[] }`: principals whose name (a user's email too) contains `q` |
-| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
+| `POST /v1/principals/lookup` | `zeteo.grants.read` or `zeteo.runs.read`, or `zeteo.file_sources.write` with `zeteo.data.read` | `{ data: Principal[] }` for `{ principals: [{ type, id }] }` (1 to 100), in order; an id Tereo does not know comes back `status: "orphaned"` with `null` names |
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 

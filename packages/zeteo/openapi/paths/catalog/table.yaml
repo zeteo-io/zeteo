@@ -11,7 +11,7 @@
       accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
       delete it through `/v1/file-sources`.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
       **Errors:** `404 not_found` for an unknown table or one of another source.
     operationId: getTable
@@ -39,7 +39,7 @@
       most 2000 characters; `null` clears it. A refresh never changes a description. An audit
       entry `zeteo.source.updated` records the table and what changed.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
       **Errors:** `400 invalid_request` (a description too long, a column the table does not
       have, an empty body), `404 not_found`, `409 source_archived`.

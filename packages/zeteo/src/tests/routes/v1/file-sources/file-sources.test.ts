@@ -93,6 +93,7 @@ describe("POST /v1/file-sources", () => {
       {
         id: expect.any(String),
         name: "my_orders",
+        description: null,
         row_count: 2,
         last_synced_at: expect.any(String),
         missing: false,
@@ -367,6 +368,26 @@ describe("GET /v1/file-sources", () => {
       created.body.id,
     ]);
     expect(mine.body.data[0].stored_bytes).toBeGreaterThan(0);
+    // Only the owner's own grant: shared with nobody.
+    expect(mine.body.data[0].share_count).toBe(0);
+
+    // A user and a group on its table, the user twice over: two principals.
+    const tableId = created.body.tables[0].id;
+    const reader = randomUUID();
+    const team = randomUUID();
+    await prisma.grant.createMany({
+      data: [
+        { principalType: "user" as const, principalId: reader, tableId },
+        { principalType: "group" as const, principalId: team, tableId },
+      ].map((g) => ({ ...g, allColumns: true, createdBy: otherId })),
+    });
+    const shared = await call("GET", "", other, undefined);
+    expect(shared.body.data[0].share_count).toBe(2);
+    const one = await call("GET", `/${created.body.id}`, other, undefined);
+    expect(one.body.share_count).toBe(2);
+    await prisma.grant.deleteMany({
+      where: { tableId, principalId: { in: [reader, team] } },
+    });
 
     const all = await call("GET", "?scope=all", admin, undefined);
     expect(all.status).toBe(200);

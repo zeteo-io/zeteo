@@ -133,6 +133,15 @@ export const FileSourcesPanel = () => {
                 },
               },
               {
+                title: "Shared with",
+                cellElement: (s) =>
+                  s.share_count > 0 ? (
+                    s.share_count.toLocaleString()
+                  ) : (
+                    <span className="z-muted">Not shared</span>
+                  ),
+              },
+              {
                 title: "Size",
                 cellElement: (s) => formatBytes(s.stored_bytes),
               },

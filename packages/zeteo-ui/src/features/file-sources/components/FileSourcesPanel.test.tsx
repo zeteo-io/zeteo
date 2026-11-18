@@ -43,6 +43,7 @@ describe("My data", () => {
                   id: "f9999999-1c7a-4a53-9d0e-6a3b1f2c4d09",
                   slug: "budget",
                   name: "Budget 2027",
+                  share_count: 0,
                   tables: [],
                 }),
               ],
@@ -90,6 +91,11 @@ describe("My data", () => {
     const row = link.closest("tr")!;
     expect(row).toHaveTextContent("orders");
     expect(row).toHaveTextContent("2.4 MB");
+    // Shared with two people or groups; the other source with nobody.
+    expect(row.querySelectorAll("td")[3]).toHaveTextContent("2");
+    expect(screen.getByText("Budget 2027").closest("tr")).toHaveTextContent(
+      "Not shared"
+    );
     expect(row.querySelector("time")).toHaveAttribute(
       "dateTime",
       "2026-11-15T09:30:00.000Z"

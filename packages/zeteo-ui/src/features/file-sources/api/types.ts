@@ -25,6 +25,7 @@ export interface FileSourceColumn {
 export interface FileSourceTable {
   id: string;
   name: string;
+  description: string | null;
   row_count: number;
   last_synced_at: string | null;
   missing: boolean;
@@ -40,6 +41,8 @@ export interface FileSource {
   created_at: string;
   archived_at: string | null;
   stored_bytes: number;
+  /** People and groups its tables are shared with, the owner's own grants not counted. */
+  share_count: number;
   tables: FileSourceTable[];
 }
 

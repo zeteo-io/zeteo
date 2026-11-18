@@ -11,7 +11,7 @@
       accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
       delete it through `/v1/file-sources`.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
     operationId: listRelations
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -40,7 +40,7 @@
       the from table, whether the other relation is discovered or declared. An audit entry
       `zeteo.relation.declared` is written.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
       **Errors:** `404 not_found` (the source), `409 relation_name_taken`, `409 source_archived`,
       `422 invalid_relation`.

@@ -7,8 +7,9 @@
       once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
       the search limit.
 
-      **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read` (`403 forbidden` without
-      either).
+      **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read`, or
+      `zeteo.file_sources.write` with `zeteo.data.read` (a file source owner naming who their
+      tables are shared with) (`403 forbidden` without).
 
       **Errors:** `400 invalid_request` (not 1 to 100 principals, an id that is no UUID),
       `502 tereo_unreachable`.

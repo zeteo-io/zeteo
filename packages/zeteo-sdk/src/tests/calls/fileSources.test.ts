@@ -14,6 +14,7 @@ const source: FileSource = {
   created_at: "2026-11-17T10:00:00.000Z",
   archived_at: null,
   stored_bytes: 10,
+  share_count: 0,
   tables: [],
 };
 

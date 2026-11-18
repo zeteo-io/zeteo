@@ -1,10 +1,15 @@
 import { PeoplePicker } from "@/features/saved-queries/components/PeoplePicker";
-import { useRenameFileSource, useTransferFileSource } from "../api/fileSources";
-import { Button, Checkbox, Input, Modal } from "@kosmeo-ui/react";
+import { Button, Checkbox, Input, Modal, TextArea } from "@kosmeo-ui/react";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { Principal } from "@/features/principals";
+import type { FileSourceTable } from "../api/types";
 import type { FileSource } from "../api/types";
 import { useState } from "react";
+import {
+  useDescribeTable,
+  useRenameFileSource,
+  useTransferFileSource,
+} from "../api/fileSources";
 
 interface DialogProps {
   source: FileSource;
@@ -123,6 +128,50 @@ export const TransferDialog = ({ source, onClose, onDone }: DialogProps) => {
           counts towards their storage.
         </p>
         <ErrorNotice error={transfer.error} />
+      </div>
+    </Modal>
+  );
+};
+
+/** A table's description; emptied, it is cleared. */
+export const TableDescriptionDialog = ({
+  source,
+  table,
+  onClose,
+}: {
+  source: FileSource;
+  table: FileSourceTable;
+  onClose: () => void;
+}) => {
+  const describe = useDescribeTable(source.id, table.id);
+  const [text, setText] = useState(table.description ?? "");
+  const next = text.trim() === "" ? null : text.trim();
+  return (
+    <Modal
+      show
+      title={`Describe ${table.name}`}
+      onClose={onClose}
+      dismissible={!describe.isPending}
+      footerButtons={footer(
+        describe.isPending,
+        next === table.description,
+        "Save description",
+        onClose,
+        () => describe.mutate(next, { onSuccess: onClose })
+      )}
+    >
+      <div className="z-fs-dialog">
+        <TextArea
+          label="Description"
+          value={text}
+          rows={4}
+          onChange={(e) => setText(e.target.value)}
+        />
+        <p className="z-note">
+          People it is shared with see it, and so does an AI assistant choosing
+          what to query.
+        </p>
+        <ErrorNotice error={describe.error} />
       </div>
     </Modal>
   );

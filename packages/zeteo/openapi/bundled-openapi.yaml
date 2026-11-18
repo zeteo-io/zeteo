@@ -522,7 +522,7 @@ paths:
         Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
         (`missing_since` set) are left out unless `include_missing=true`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
       operationId: listTables
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -568,7 +568,7 @@ paths:
         accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
         delete it through `/v1/file-sources`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `404 not_found` for an unknown table or one of another source.
       operationId: getTable
@@ -603,7 +603,7 @@ paths:
         most 2000 characters; `null` clears it. A refresh never changes a description. An audit
         entry `zeteo.source.updated` records the table and what changed.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `400 invalid_request` (a description too long, a column the table does not
         have, an empty body), `404 not_found`, `409 source_archived`.
@@ -654,7 +654,7 @@ paths:
         accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
         delete it through `/v1/file-sources`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
       operationId: listRelations
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -690,7 +690,7 @@ paths:
         the from table, whether the other relation is discovered or declared. An audit entry
         `zeteo.relation.declared` is written.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `404 not_found` (the source), `409 relation_name_taken`, `409 source_archived`,
         `422 invalid_relation`.
@@ -749,7 +749,7 @@ paths:
         accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
         delete it through `/v1/file-sources`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `400 invalid_request`, `404 not_found` (also a relation of another source),
         `409 relation_name_taken`, `409 source_archived`.
@@ -794,7 +794,7 @@ paths:
         Removes a declared relation. A discovered relation comes from a foreign key and cannot be
         removed. An audit entry `zeteo.relation.removed` is written.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `404 not_found` (also a relation of another source), `409 relation_discovered`,
         `409 source_archived`.
@@ -1325,8 +1325,9 @@ paths:
         once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
         the search limit.
 
-        **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read` (`403 forbidden` without
-        either).
+        **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read`, or
+        `zeteo.file_sources.write` with `zeteo.data.read` (a file source owner naming who their
+        tables are shared with) (`403 forbidden` without).
 
         **Errors:** `400 invalid_request` (not 1 to 100 principals, an id that is no UUID),
         `502 tereo_unreachable`.
@@ -6530,6 +6531,7 @@ components:
       required:
         - id
         - name
+        - description
         - row_count
         - last_synced_at
         - missing
@@ -6540,6 +6542,11 @@ components:
           format: uuid
         name:
           type: string
+        description:
+          type:
+            - string
+            - 'null'
+          description: Changed with `PATCH /v1/sources/{sourceId}/tables/{tableId}`
         row_count:
           type: integer
           minimum: 0
@@ -6568,6 +6575,7 @@ components:
         - created_at
         - archived_at
         - stored_bytes
+        - share_count
         - tables
       properties:
         id:
@@ -6596,6 +6604,10 @@ components:
           type: integer
           minimum: 0
           description: What the source stores, counted against the owner's quota
+        share_count:
+          type: integer
+          minimum: 0
+          description: How many people and groups its tables are shared with (distinct principals of its grants, the owner grants not counted)
         tables:
           type: array
           items:

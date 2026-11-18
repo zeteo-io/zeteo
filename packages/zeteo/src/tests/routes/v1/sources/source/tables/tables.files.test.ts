@@ -39,7 +39,7 @@ const bodyOf = (res: { body: Record<string, unknown> }) => {
   return rest;
 };
 
-describe("PATCH /v1/sources/:sourceId/tables/:tableId (file sources)", () => {
+describe("/v1/sources/:sourceId/tables (file sources)", () => {
   let app: Awaited<ReturnType<typeof startV1Routes>>;
   let own: Awaited<ReturnType<typeof seedUploadSource>>;
   let others: Awaited<ReturnType<typeof seedUploadSource>>;
@@ -47,6 +47,8 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId (file sources)", () => {
 
   const patch = (path: string, token: string, body: unknown) =>
     fetchJson("PATCH", `${app.url}/v1/sources${path}`, token, body);
+  const get = (path: string, token: string) =>
+    fetchJson("GET", `${app.url}/v1/sources${path}`, token);
 
   beforeAll(async () => {
     app = await startV1Routes();
@@ -61,6 +63,38 @@ describe("PATCH /v1/sources/:sourceId/tables/:tableId (file sources)", () => {
     await removeUploadSources([own.id, others.id]);
     await removeSources([databaseSourceId]);
     await app.close();
+  });
+
+  it("lets the owner list and read their source's tables", async () => {
+    const list = await get(`/${own.id}/tables`, owner);
+    expect(list.status).toBe(200);
+    expect((list.body.data as { name: string }[]).map((t) => t.name)).toEqual([
+      "customers",
+    ]);
+    const one = await get(
+      `/${own.id}/tables/${own.tables.customers!.id}`,
+      owner
+    );
+    expect(one.status).toBe(200);
+    expect(one.body.name).toBe("customers");
+  });
+
+  it("refuses the owner the tables of another source with the very 403 of anyone", async () => {
+    const dbTable = await prisma.sourceTable.findFirstOrThrow({
+      where: { sourceId: databaseSourceId, name: "customers" },
+    });
+    for (const path of [
+      `/${databaseSourceId}/tables`,
+      `/${others.id}/tables`,
+      `/${randomUUID()}/tables`,
+      `/${databaseSourceId}/tables/${dbTable.id}`,
+      `/${others.id}/tables/${others.tables.customers!.id}`,
+      `/${databaseSourceId}/tables/${own.tables.customers!.id}`,
+    ]) {
+      const res = await get(path, owner);
+      expect(res.status, path).toBe(403);
+      expect(bodyOf(res)).toEqual(bodyOf(await get(path, nobody)));
+    }
   });
 
   it("lets the owner describe their table and its columns", async () => {

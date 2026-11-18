@@ -149,10 +149,11 @@ FileSourceColumn:
 
 FileSourceTable:
   type: object
-  required: [id, name, row_count, last_synced_at, missing, columns]
+  required: [id, name, description, row_count, last_synced_at, missing, columns]
   properties:
     id: { type: string, format: uuid }
     name: { type: string }
+    description: { type: [string, 'null'], description: 'Changed with `PATCH /v1/sources/{sourceId}/tables/{tableId}`' }
     row_count: { type: integer, minimum: 0 }
     last_synced_at: { type: [string, 'null'], format: date-time, description: When the table was last loaded }
     missing: { type: boolean, description: 'The table was removed, or its source deleted' }
@@ -163,7 +164,7 @@ FileSourceTable:
 FileSource:
   type: object
   description: A file source as its owner and admins see it. Never carries any cell of its data.
-  required: [id, slug, name, type, owner_id, created_at, archived_at, stored_bytes, tables]
+  required: [id, slug, name, type, owner_id, created_at, archived_at, stored_bytes, share_count, tables]
   properties:
     id: { type: string, format: uuid }
     slug: { type: string }
@@ -173,6 +174,7 @@ FileSource:
     created_at: { type: string, format: date-time }
     archived_at: { type: [string, 'null'], format: date-time }
     stored_bytes: { type: integer, minimum: 0, description: 'What the source stores, counted against the owner''s quota' }
+    share_count: { type: integer, minimum: 0, description: 'How many people and groups its tables are shared with (distinct principals of its grants, the owner grants not counted)' }
     tables:
       type: array
       items: { $ref: '#/FileSourceTable' }

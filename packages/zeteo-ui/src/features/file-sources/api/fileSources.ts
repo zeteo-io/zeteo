@@ -143,3 +143,24 @@ export const useRemoveTable = (id: string) =>
 
 export const useDeleteFileSource = () =>
   useRemoval<string>((api, id) => api.delete(`/v1/file-sources/${id}`));
+
+/** A table's description, through the catalogue's route (which admits the owner); null clears it. */
+export const useDescribeTable = (id: string, tableId: string) => {
+  const api = useZeteoApi();
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, string | null>({
+    mutationFn: async (description) => {
+      try {
+        await api.patch(`/v1/sources/${id}/tables/${tableId}`, {
+          description,
+        });
+      } catch (err) {
+        throw toApiError(err);
+      }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: KEY });
+      void queryClient.invalidateQueries({ queryKey: ["sources", id] });
+    },
+  });
+};

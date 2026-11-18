@@ -16,10 +16,12 @@ export const makeFileSource = (over: Partial<FileSource> = {}): FileSource => ({
   created_at: "2026-11-10T10:00:00.000Z",
   archived_at: null,
   stored_bytes: 2_500_000,
+  share_count: 2,
   tables: [
     {
       id: TABLE_ID,
       name: "orders",
+      description: "Orders of the quarter",
       row_count: 1234,
       last_synced_at: "2026-11-15T09:30:00.000Z",
       missing: false,

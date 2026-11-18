@@ -6,7 +6,7 @@
       Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
       (`missing_since` set) are left out unless `include_missing=true`.
 
-      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+      **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
     operationId: listTables
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
