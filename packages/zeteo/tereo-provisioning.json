@@ -177,6 +177,11 @@
         "readPermission": "zeteo.sources.read"
       },
       {
+        "eventType": "zeteo.connection.updated",
+        "description": "The Google service-account key was set or replaced",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
         "eventType": "zeteo.relation.declared",
         "description": "A relation was declared between two tables",
         "readPermission": "zeteo.sources.read"

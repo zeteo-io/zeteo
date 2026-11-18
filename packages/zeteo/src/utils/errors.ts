@@ -786,3 +786,47 @@ export const errorHandler = (
 
   writeError(res, response, req.requestId);
 };
+
+/** No Google service-account key has been set yet. */
+export class GoogleNotConfiguredError extends AppError {
+  constructor() {
+    super(
+      404,
+      "google_not_configured",
+      "Google is not connected. An admin can add a service-account key under Admin → Connections."
+    );
+    this.name = "GoogleNotConfiguredError";
+  }
+}
+
+/** Google refused a service-account key at sign-in; says nothing of why beyond that. */
+export class GoogleKeyRejectedError extends AppError {
+  constructor() {
+    super(
+      422,
+      "google_key_rejected",
+      "Google did not accept this service-account key. Check that it is the whole JSON key and that the account is enabled."
+    );
+    this.name = "GoogleKeyRejectedError";
+  }
+}
+
+/** Google could not be reached or answered something unexpected. */
+export class GoogleUnavailableError extends AppError {
+  constructor() {
+    super(502, "google_unavailable", "Google could not be reached");
+    this.name = "GoogleUnavailableError";
+  }
+}
+
+/** Google refused the stored key at sign-in while reading a sheet. */
+export class GoogleSignInFailedError extends AppError {
+  constructor() {
+    super(
+      502,
+      "google_sign_in_failed",
+      "Zeteo can't sign in to Google. An admin should check the service-account key under Admin → Connections."
+    );
+    this.name = "GoogleSignInFailedError";
+  }
+}

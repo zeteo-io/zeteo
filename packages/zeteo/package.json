@@ -29,6 +29,9 @@
     "db:studio": "prisma studio"
   },
   "dependencies": {
+    "@dianemo/backend-redis": "^2.0.2",
+    "@dianemo/core": "^2.1.1",
+    "@dianemo/plugin-google": "^2.1.0",
     "@prisma/adapter-pg": "^7.10.0",
     "@prisma/client": "^7.10.0",
     "@tereo-io/mcp": "^0.1.1",
