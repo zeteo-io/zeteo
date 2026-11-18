@@ -1,10 +1,11 @@
 // @module-tag unit
 // @module-tag platform
 
-import { cellText, type SheetCell } from "../../google/cells.js";
+import type { CellData, NumberFormat } from "@dianemo/plugin-google";
+import { cellText } from "../../google/cells.js";
 import { describe, expect, it } from "vitest";
 
-const num = (numberValue: number, type?: string): SheetCell => ({
+const num = (numberValue: number, type?: NumberFormat["type"]): CellData => ({
   effectiveValue: { numberValue },
   ...(type ? { effectiveFormat: { numberFormat: { type } } } : {}),
 });
@@ -122,7 +123,10 @@ describe("cellText", () => {
 
   it("error and empty are null", () => {
     expect(
-      cellText({ effectiveValue: { errorValue: { type: "DIV_ZERO" } } }, "UTC")
+      cellText(
+        { effectiveValue: { errorValue: { type: "DIVIDE_BY_ZERO" } } },
+        "UTC"
+      )
     ).toBeNull();
     expect(cellText({ effectiveValue: { stringValue: "" } }, "UTC")).toBeNull();
     expect(cellText({}, "UTC")).toBeNull();
@@ -135,7 +139,7 @@ describe("cellText", () => {
         {
           effectiveValue: { numberValue: 6 },
           formattedValue: "=1+5",
-        } as SheetCell,
+        } as CellData,
         "UTC"
       )
     ).toBe("6");

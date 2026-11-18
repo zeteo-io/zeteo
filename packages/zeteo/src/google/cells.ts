@@ -1,13 +1,4 @@
-/** The part of the Sheets API's `CellData` that `cellText` reads. */
-export type SheetCell = {
-  effectiveValue?: {
-    numberValue?: number;
-    stringValue?: string;
-    boolValue?: boolean;
-    errorValue?: { type: string; message?: string };
-  };
-  effectiveFormat?: { numberFormat?: { type: string } };
-};
+import type { CellData } from "@dianemo/plugin-google";
 
 const DAY_MS = 86_400_000;
 // Sheets serial numbers count days from 1899-12-30.
@@ -55,7 +46,7 @@ function instantOf(wallMs: number, timeZone: string): number {
   return candidates.length > 0 ? Math.min(...candidates) : wallMs - before;
 }
 
-function render(cell: SheetCell | undefined, timeZone: string): string | null {
+function render(cell: CellData | undefined, timeZone: string): string | null {
   const value = cell?.effectiveValue;
   if (!value) return null;
   if (value.stringValue !== undefined) {
@@ -94,7 +85,7 @@ function render(cell: SheetCell | undefined, timeZone: string): string | null {
  * `String(n)`; an error, an empty cell and no cell are null. Formulas arrive as their value.
  */
 export function cellText(
-  cell: SheetCell | undefined,
+  cell: CellData | undefined,
   timeZone: string
 ): string | null {
   return render(cell, timeZone);
