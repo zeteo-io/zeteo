@@ -185,7 +185,7 @@ Both are visible to the card's app only (`visibility: ["app"]`), need `zeteo.mcp
 `zeteo.data.read`, and say they are not for answering questions. `preview_panel`,
 `get_saved_panel`, `create_saved_panel` and `update_saved_panel` link to the panel card;
 `get_dashboard`, `update_dashboard`, `add_panel`, `update_panel`, `remove_panel`,
-`link_saved_panel` and `detach_panel` to the dashboard card. Their text results are unchanged.
+`link_saved_panel` and `detach_panel` to the dashboard card. Their text results are unchanged; their descriptions, and the instructions, tell the model that the person sees the card under the call, so it neither redraws the chart nor says it cannot be shown.
 
 The card edits nothing and runs everything as the viewer with their own grants. Its runs are
 recorded like any other: in `query_runs` (entry point `mcp` for `card_panel_rows`, `dashboard`

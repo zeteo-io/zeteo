@@ -9,6 +9,21 @@ export const DASHBOARD_CARD_URI = "ui://zeteo/dashboard-card.html";
 
 const CARD_MIME_TYPE = "text/html;profile=mcp-app";
 
+/** What a tool linked to a card adds to its description, so the model knows the card is shown. */
+export const CARD_NOTES = {
+  panel:
+    "In clients that show MCP Apps, the person sees the panel drawn as a card under this call: do not draw it again or say it cannot be shown.",
+  dashboard:
+    "In clients that show MCP Apps, the person sees the dashboard drawn as a card under this call: do not draw it again or say it cannot be shown.",
+} as const;
+
+/** `description` with the card's note when the cards are served, as is otherwise. */
+export const withCardNote = (
+  cards: boolean,
+  card: keyof typeof CARD_NOTES,
+  description: string
+): string => (cards ? `${description} ${CARD_NOTES[card]}` : description);
+
 /** The card page, once per mode. */
 export interface Cards {
   panel: string;

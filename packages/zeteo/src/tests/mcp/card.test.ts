@@ -4,6 +4,7 @@ import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { createTestClient, startStubCore } from "@tereo-io/mcp/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Client } from "@modelcontextprotocol/client";
+import { CARD_NOTES } from "../../mcp/card.js";
 import { mcpToken } from "../support/mcp.js";
 import path from "path";
 
@@ -142,6 +143,27 @@ describe("MCP preview cards", () => {
     }
   });
 
+  it("tells the model in each linked tool's description that the card is shown", async () => {
+    const { client, close } = await connect(FIXTURE);
+    try {
+      const { tools } = await client.listTools();
+      const noted = (note: string) =>
+        tools
+          .filter((t) => t.description?.endsWith(` ${note}`))
+          .map((t) => t.name)
+          .sort();
+      const isCardTool = (name: string) => name.startsWith("card_");
+      expect(noted(CARD_NOTES.panel)).toEqual(
+        PANEL_TOOLS.filter((t) => !isCardTool(t))
+      );
+      expect(noted(CARD_NOTES.dashboard)).toEqual(
+        DASHBOARD_TOOLS.filter((t) => !isCardTool(t))
+      );
+    } finally {
+      await close();
+    }
+  });
+
   it("serves no card, no link and no card tools when MCP_CARD_PATH names no file, and warns once", async () => {
     const { logger } = await import("../../utils/logger.js");
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
@@ -158,6 +180,10 @@ describe("MCP preview cards", () => {
           expect(tool._meta?.ui, tool.name).toBeUndefined();
           expect(tool._meta?.["ui/resourceUri"], tool.name).toBeUndefined();
           expect(tool.name, tool.name).not.toMatch(/^card_/);
+          expect(tool.description, tool.name).not.toContain(CARD_NOTES.panel);
+          expect(tool.description, tool.name).not.toContain(
+            CARD_NOTES.dashboard
+          );
         }
       } finally {
         await close();

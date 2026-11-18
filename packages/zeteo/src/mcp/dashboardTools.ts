@@ -1,10 +1,10 @@
 import { SavedQueryNotAccessibleError } from "../utils/errors.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
+import { DASHBOARD_CARD_URI, withCardNote } from "./card.js";
 import type { DashboardView } from "../views/dashboard.js";
 import { chartSchema } from "../dashboards/chart.js";
 import { NotFoundError } from "../utils/errors.js";
 import { CHART_SUMMARY } from "./reference.js";
-import { DASHBOARD_CARD_URI } from "./card.js";
 import type { TereoMcp } from "@tereo-io/mcp";
 import { requireDataRead } from "./caller.js";
 import { db } from "../utils/db/index.js";
@@ -80,8 +80,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "get_dashboard",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Get a dashboard",
-    description:
-      "Read one dashboard by id, with its panels: each with its id, place, title, state and, when you can run it, its chart, time_column and saved_query_id (or saved_panel_id). A panel whose state is not ok carries none of those, and a message that says what to do. Includes url when the dashboard has one.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Read one dashboard by id, with its panels: each with its id, place, title, state and, when you can run it, its chart, time_column and saved_query_id (or saved_panel_id). A panel whose state is not ok carries none of those, and a message that says what to do. Includes url when the dashboard has one."
+    ),
     permission: MCP_USE,
     readOnly: true,
     input: z.strictObject({ id: Id("The dashboard's id") }),
@@ -118,8 +121,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "update_dashboard",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Change a dashboard",
-    description:
-      "Change the settings of a dashboard you own: name, description, time_range, refresh_seconds, theme. Only what you give changes; panels are changed with add_panel, update_panel and remove_panel.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Change the settings of a dashboard you own: name, description, time_range, refresh_seconds, theme. Only what you give changes; panels are changed with add_panel, update_panel and remove_panel."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -168,7 +174,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "add_panel",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Add a panel",
-    description: `Add a panel to a dashboard you own: a saved query shown as a chart. Requires dashboard_id, saved_query_id and chart. ${CHART_SUMMARY} time_column, a date or timestamp column path, makes the panel follow the dashboard's time range. Check the chart with preview_panel first. Leave x, y, w and h out to place it in the first free cell at its chart's default size. Returns the panel; what is wrong with the chart or time_column is told as problems. Call query_guide for chart and placement rules.`,
+    description: withCardNote(
+      cards,
+      "dashboard",
+      `Add a panel to a dashboard you own: a saved query shown as a chart. Requires dashboard_id, saved_query_id and chart. ${CHART_SUMMARY} time_column, a date or timestamp column path, makes the panel follow the dashboard's time range. Check the chart with preview_panel first. Leave x, y, w and h out to place it in the first free cell at its chart's default size. Returns the panel; what is wrong with the chart or time_column is told as problems. Call query_guide for chart and placement rules.`
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -205,8 +215,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "update_panel",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Change a panel",
-    description:
-      "Change an own panel of a dashboard you own: its chart, time_column, title or place. Only what you give changes. A linked panel has no chart of its own: change the saved panel, or detach_panel first.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Change an own panel of a dashboard you own: its chart, time_column, title or place. Only what you give changes. A linked panel has no chart of its own: change the saved panel, or detach_panel first."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -244,7 +257,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "remove_panel",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Remove a panel",
-    description: "Remove a panel from a dashboard you own.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Remove a panel from a dashboard you own."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: true,
@@ -265,8 +282,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "link_saved_panel",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Add a saved panel to a dashboard",
-    description:
-      "Add a saved panel you own or that is shared with you to a dashboard you own, as a linked panel: a later change of the saved panel shows on the dashboard. Leave x, y, w and h out to place it in the first free cell.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Add a saved panel you own or that is shared with you to a dashboard you own, as a linked panel: a later change of the saved panel shows on the dashboard. Leave x, y, w and h out to place it in the first free cell."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -297,8 +317,11 @@ export const defineDashboardTools = (mcp: TereoMcp, cards: boolean): void => {
     name: "detach_panel",
     ...(cards && { ui: { resourceUri: DASHBOARD_CARD_URI } }),
     title: "Detach a linked panel",
-    description:
-      "Turn a linked panel of a dashboard you own into an own panel with a copy of the saved panel's saved query, chart and time column, keeping its place and title.",
+    description: withCardNote(
+      cards,
+      "dashboard",
+      "Turn a linked panel of a dashboard you own into an own panel with a copy of the saved panel's saved query, chart and time column, keeping its place and title."
+    ),
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
