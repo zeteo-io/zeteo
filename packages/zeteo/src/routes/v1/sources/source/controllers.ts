@@ -1,10 +1,10 @@
 import { validateBody, validateParams } from "../../../../utils/validateReq.js";
 import { SOURCES_WRITE } from "../../../../definitions/tereoDeclaration.js";
-import { NotFoundError, NotSyncedError } from "../../../../utils/errors.js";
 import { SourceParamsSchema, UpdateSourceSchema } from "./schemas.js";
 import { refreshAfterChange } from "../../../../catalog/refresh.js";
 import { hasPermission } from "../../../../utils/permissions.js";
 import { isUploadSource } from "../../../../sources/types.js";
+import { NotFoundError } from "../../../../utils/errors.js";
 import { lacking } from "../../../../uploads/ownership.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { db } from "../../../../utils/db/index.js";
@@ -28,9 +28,10 @@ export const getSource = async (req: Request, res: Response) => {
 };
 
 /**
- * An admin changes any source. An upload source's owner may only rename it
- * or change its description (as may an admin, recorded as a change of the
- * upload source); its limits are an admin's.
+ * An admin changes any source. An upload source's owner may only rename it,
+ * change its description or (a Sheets source) its sync interval, as may an
+ * admin, recorded as a change of the upload source; its limits are an
+ * admin's, and an admin may change them with the interval in one request.
  */
 export const updateSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
@@ -60,8 +61,9 @@ export const updateSource = async (req: Request, res: Response) => {
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {
     throw lacking(SOURCES_WRITE);
   }
-  if (syncInterval !== undefined) throw new NotSyncedError();
-  const updated = await update(sourceId, rest, caller.userId);
+  // A Sheets source's interval is changed with its limits, in one entry;
+  // any other source answers `not_synced`.
+  const updated = await update(sourceId, body, caller.userId);
   // New settings or schemas describe another target: the catalogue follows now,
   // not at the next daily refresh. The change stands whether or not this works.
   if (body.settings === undefined && body.schemas === undefined) {

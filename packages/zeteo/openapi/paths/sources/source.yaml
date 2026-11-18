@@ -44,8 +44,8 @@
       need `zeteo.sources.write`.
 
       On a Google Sheets source `sync_interval_minutes` (15 to 1440) sets the minutes between
-      syncs; its owner may send it with `name` and `description`. On any other source it is
-      `422 not_synced`.
+      syncs; its owner may send it with `name` and `description`, and an admin also with the
+      limit fields, recorded as one change. On any other source it is `422 not_synced`.
 
       **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload or Sheets source its owner may send `name`, `description` and (Sheets) `sync_interval_minutes` alone; anyone else gets the same 403.
 

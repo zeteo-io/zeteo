@@ -15,6 +15,12 @@ import {
   SOURCES_WRITE,
 } from "../../../../../definitions/tereoDeclaration.js";
 import {
+  auditRows,
+  removeSources,
+  sourceBody,
+  sourceSettings,
+} from "../../../../support/sources.js";
+import {
   createUploadSource,
   csvOf,
   removeUploadSourcesOf,
@@ -34,6 +40,8 @@ const admin = tokenFor({
   permissions: [DATA_READ, SOURCES_READ, SOURCES_WRITE],
 });
 
+const databaseSources: string[] = [];
+
 let app: Awaited<ReturnType<typeof startV1Routes>>;
 const call = (method: string, path: string, token: string, body?: unknown) =>
   sourcesCall(app.url, method, path, token, body);
@@ -44,6 +52,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await removeRunsOf([ownerId, granteeId, adminId]);
   await removeUploadSourcesOf([ownerId, granteeId, adminId]);
+  await removeSources(databaseSources);
   await app.close();
 });
 
@@ -93,6 +102,49 @@ describe("PATCH /v1/sources/:id sync_interval_minutes", () => {
     );
     const res = await call("PATCH", `/${file.id}`, owner, {
       sync_interval_minutes: 15,
+    });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("not_synced");
+  });
+});
+
+describe("PATCH /v1/sources/:id by an admin, with limits and sync_interval_minutes", () => {
+  it("on a Sheets source applies both, in one audit entry", async () => {
+    const { source } = await makeSheets();
+    const before = (await auditRows(source.id)).length;
+    const res = await call("PATCH", `/${source.id}`, admin, {
+      row_cap: 500,
+      sync_interval_minutes: 30,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.row_cap).toBe(500);
+    expect(res.body.sync.interval_minutes).toBe(30);
+    const row = await prisma.source.findUniqueOrThrow({
+      where: { id: source.id },
+    });
+    expect(row).toMatchObject({ rowCap: 500, syncIntervalMinutes: 30 });
+    const entries = (await auditRows(source.id)).slice(before);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.payload).toMatchObject({
+      metadata: {
+        event: "zeteo.source.updated",
+        changed: expect.arrayContaining(["row_cap", "sync_interval_minutes"]),
+      },
+    });
+  });
+
+  it("on a database source is 422 not_synced", async () => {
+    const created = await fetchJson(
+      "POST",
+      `${app.url}/v1/sources`,
+      admin,
+      sourceBody(sourceSettings("ro"))
+    );
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    databaseSources.push(created.body.id);
+    const res = await call("PATCH", `/${created.body.id}`, admin, {
+      row_cap: 500,
+      sync_interval_minutes: 30,
     });
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("not_synced");
