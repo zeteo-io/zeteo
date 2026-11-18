@@ -1,5 +1,4 @@
 import { SavedQueryPagingFields } from "../routes/v1/saved-queries/saved-query/schemas.js";
-import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import type { SavedQueryView } from "../views/savedQuery.js";
 import { NotFoundError } from "../utils/errors.js";
@@ -21,6 +20,11 @@ import {
   savedQueryToRun,
   updateSavedQuery,
 } from "../saved-queries/service.js";
+import {
+  QUERY_LANGUAGE_SUMMARY,
+  QUERY_TOOL_TIMEOUT_MS,
+  QueryInput,
+} from "./queryTool.js";
 
 /** The most one list returns; `truncated` says when it stopped there. */
 const LIST_LIMIT = 100;
@@ -106,8 +110,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "create_saved_query",
     title: "Save a query",
-    description:
-      "Save a query under a name, for you to run again. Call it only when the user asks to save a query. The query is the same JSON the query tool takes, and is checked against your own access.",
+    description: `Save a query under a name, for you to run again. Call it only when the user asks to save a query. The query is the same JSON the query tool takes, and is checked against your own access. ${QUERY_LANGUAGE_SUMMARY}`,
     permission: MCP_USE,
     readOnly: false,
     destructive: false,
@@ -132,8 +135,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "update_saved_query",
     title: "Change a saved query",
-    description:
-      "Change the name, description or query of a saved query you own. Only what you give changes.",
+    description: `Change the name, description or query of a saved query you own. Only what you give changes. ${QUERY_LANGUAGE_SUMMARY}`,
     permission: MCP_USE,
     readOnly: false,
     destructive: false,

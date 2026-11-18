@@ -1,13 +1,27 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag security
-import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { TEST_MCP_CLIENT, TEST_MCP_ORIGIN } from "../setup/testEnv.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { BASE_URL, fetchJson } from "../support/http.js";
 import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "crypto";
 import type { Server } from "http";
+import {
+  DASHBOARDS_READ,
+  DASHBOARDS_WRITE,
+  DATA_EXPORT,
+  DATA_READ,
+  GRANTS_READ,
+  GRANTS_WRITE,
+  MCP_USE,
+  RUNS_READ,
+  SAVED_QUERIES_READ,
+  SAVED_QUERIES_WRITE,
+  SOURCES_READ,
+  SOURCES_WRITE,
+  UPLOADS_WRITE,
+} from "../../definitions/tereoDeclaration.js";
 import {
   callTool,
   connectMcp,
@@ -29,6 +43,7 @@ const READ_TOOLS = [
   "list_tables",
   "preview_panel",
   "query",
+  "query_guide",
   "run_saved_query",
 ];
 const WRITE_TOOLS = [
@@ -168,7 +183,10 @@ describe("MCP endpoint", () => {
           chart: { type: "table", version: 1 },
         },
       };
-      for (const name of TOOLS) {
+      // The guide is a reference, not data: it answers without zeteo.data.read.
+      const guide = await callTool(session.client, "query_guide");
+      expect(guide.isError).toBe(false);
+      for (const name of TOOLS.filter((t) => t !== "query_guide")) {
         const call = await callTool(session.client, name, args[name]);
         expect(call.isError).toBe(true);
         expect(call.json).toEqual({
@@ -176,6 +194,46 @@ describe("MCP endpoint", () => {
           error_description: "Requires the zeteo.data.read permission",
           request_id: expect.any(String),
         });
+      }
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("keeps every tool description within 1500 characters", async () => {
+    const session = await connectMcp(
+      mcpToken([
+        DASHBOARDS_READ,
+        DASHBOARDS_WRITE,
+        DATA_EXPORT,
+        DATA_READ,
+        GRANTS_READ,
+        GRANTS_WRITE,
+        MCP_USE,
+        RUNS_READ,
+        SAVED_QUERIES_READ,
+        SAVED_QUERIES_WRITE,
+        SOURCES_READ,
+        SOURCES_WRITE,
+        UPLOADS_WRITE,
+      ])
+    );
+    try {
+      const { tools } = await session.client.listTools();
+      expect(tools.map((t) => t.name).sort()).toEqual(TOOLS);
+      for (const tool of tools) {
+        expect(tool.description?.length, tool.name).toBeLessThanOrEqual(1500);
+      }
+      // The tools that take the query language or a chart point to the guide.
+      for (const name of [
+        "query",
+        "create_saved_query",
+        "update_saved_query",
+        "preview_panel",
+        "add_panel",
+      ]) {
+        const tool = tools.find((t) => t.name === name);
+        expect(tool?.description, name).toContain("query_guide");
       }
     } finally {
       await session.close();

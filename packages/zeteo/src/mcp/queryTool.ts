@@ -50,13 +50,19 @@ export const QueryInput = z.looseObject({
   offset: z.int().optional(),
 });
 
+/**
+ * The query language in brief, for the tools that take a query; `query_guide`
+ * has the rest.
+ */
+export const QUERY_LANGUAGE_SUMMARY =
+  'A query is one JSON object, no raw SQL: "source" (a slug from list_sources), "from" (a table from list_tables), "join" (relation names from describe_table), "select" (column paths such as "customers.region", aggregates such as { "sum": "total", "as": "revenue" }, date buckets such as { "bucket": "month", "column": "created_at" }, calculations { "calc": expression, "as": name }), "where", "groupBy", "having", "orderBy", "limit", "offset", "distinct". Filter operators: eq, ne, gt, gte, lt, lte, between, in, notIn, contains, startsWith, isNull; combine filters with and, or, not. Example: {"source":"sales-db","from":"orders","join":["customers"],"select":["customers.region",{"sum":"total","as":"revenue"}],"where":{"status":{"eq":"paid"}},"groupBy":["customers.region"]}. Call query_guide for the full language: expressions, relative dates, grouping rules, limits and errors.';
+
 /** The `query` tool: `POST /v1/query`'s engine, with MCP's row and size limits. */
 export const defineQueryTool = (mcp: TereoMcp): void => {
   mcp.define({
     name: "query",
     title: "Query a source",
-    description:
-      'Run a read-only query on a source, written in its JSON query language: "source", "from", "join", "select" (columns, aggregates, date buckets, and calculations written as { calc, as }), "where", "groupBy", "having", "orderBy", "limit", "offset". Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }.',
+    description: `Run a read-only query on a source. Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }. ${QUERY_LANGUAGE_SUMMARY}`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
