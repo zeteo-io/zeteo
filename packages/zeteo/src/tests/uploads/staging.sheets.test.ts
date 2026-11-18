@@ -87,12 +87,30 @@ describe("stageSheets", () => {
     env.UPLOAD_MAX_STAGINGS = 1;
     try {
       await stageSheets({ ownerId: owner, spreadsheet: sheet() });
+      const before = (await listStagingTables()).sort();
       await expect(
         stageSheets({ ownerId: owner, spreadsheet: sheet() })
       ).rejects.toMatchObject({ code: "too_many_stagings" });
+      // The refused staging's tables were made before recordStaging refused it.
+      expect((await listStagingTables()).sort()).toEqual(before);
     } finally {
       env.UPLOAD_MAX_STAGINGS = max;
     }
+  });
+
+  it("gives two tabs whose titles normalise alike distinct table names", async () => {
+    const result = await stageSheets({
+      ownerId: owner,
+      spreadsheet: {
+        id: `sheet-${randomUUID()}`,
+        title: "T",
+        tabs: [
+          tab(1, "Costs", [["a"], ["1"]]),
+          tab(2, "costs", [["a"], ["2"]]),
+        ],
+      },
+    });
+    expect(result.tables.map((t) => t.name)).toEqual(["costs", "costs_2"]);
   });
 
   it("drops its staging tables when a tab fails", async () => {

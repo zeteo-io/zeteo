@@ -425,6 +425,18 @@ export class NotAFileUploadError extends AppError {
   }
 }
 
+/** Tabs requested from the spreadsheet of a source that has none. */
+export class NotASheetsSourceError extends AppError {
+  constructor() {
+    super(
+      409,
+      "not_a_sheets_source",
+      "Only a Google Sheets source has a spreadsheet to read."
+    );
+    this.name = "NotASheetsSourceError";
+  }
+}
+
 /** A sync setting on a source that does not sync. */
 export class NotSyncedError extends AppError {
   constructor() {
@@ -808,6 +820,18 @@ export class GoogleKeyRejectedError extends AppError {
       "Google did not accept this service-account key. Check that it is the whole JSON key and that the account is enabled."
     );
     this.name = "GoogleKeyRejectedError";
+  }
+}
+
+/** The service account cannot read a spreadsheet: not shared with it, or it does not exist. */
+export class SheetNotAccessibleError extends AppError {
+  constructor(serviceAccountEmail: string) {
+    super(
+      422,
+      "sheet_not_accessible",
+      `Zeteo can't read this spreadsheet. Share it with ${serviceAccountEmail} as a Viewer.`
+    );
+    this.name = "SheetNotAccessibleError";
   }
 }
 

@@ -474,7 +474,7 @@ const recordStaging = async ({
   now,
 }: {
   ownerId: string;
-  kind: string;
+  kind: "csv" | "xlsx" | "google-sheets";
   vendorFileId?: string;
   tables: { preview: PreviewTable; staged: StagedTable }[];
   now: Date;
@@ -551,7 +551,9 @@ export const stageSheets = async ({
 
 /**
  * Throws `SheetInUseError` when an unarchived source already reads this
- * spreadsheet; never says whose it is.
+ * spreadsheet; never says whose it is. A friendly pre-check, not a guard: two
+ * callers can both pass it, and the partial unique index `sources_vendor_file_key`
+ * is what stops the second source at create time.
  */
 export const assertSheetUnclaimed = async (
   spreadsheetId: string,
