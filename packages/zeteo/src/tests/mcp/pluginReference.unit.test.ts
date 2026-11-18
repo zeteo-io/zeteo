@@ -51,6 +51,7 @@ describe("the zeteo Claude Code plugin", () => {
   it(".mcp.json names no fixed host", () => {
     const plugin = readJson("plugins/zeteo/.claude-plugin/plugin.json");
     expect(plugin.userConfig.mcp_url.type).toBe("string");
+    expect(plugin.userConfig.mcp_url.required).toBe(true);
     expect(readJson("plugins/zeteo/.mcp.json")).toEqual({
       mcpServers: {
         zeteo: { type: "http", url: "${user_config.mcp_url}" },

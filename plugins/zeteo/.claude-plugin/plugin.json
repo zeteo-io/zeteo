@@ -6,6 +6,7 @@
   "userConfig": {
     "mcp_url": {
       "type": "string",
+      "required": true,
       "title": "Zeteo MCP URL",
       "description": "The address of your zeteo's MCP endpoint, https://<your zeteo>/mcp"
     }
