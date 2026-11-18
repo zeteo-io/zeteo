@@ -74,6 +74,26 @@ export interface Source {
   share_count: number;
   created_at: string;
   archived_at: string | null;
+  /** A Google Sheets source's spreadsheet; absent on any other type. */
+  sheet?: SourceSheet;
+  /** A Google Sheets source's sync state; absent on any other type. */
+  sync?: SourceSync;
+}
+
+export interface SourceSheet {
+  spreadsheet_id: string;
+  url: string;
+}
+
+export interface SourceSync {
+  /** 15 to 1440. */
+  interval_minutes: number;
+  /** The last sync tried, good or not. */
+  last_attempt_at: string | null;
+  /** Why the last sync failed; null after a good one. */
+  last_error: { code: string; message: string } | null;
+  /** The last sync failed and the last good one is over 24 hours old or never happened. */
+  stale: boolean;
 }
 
 interface CreateSourceFields {
@@ -125,6 +145,8 @@ export interface UpdateSourceRequest {
   export_row_cap?: number;
   query_concurrency?: number;
   export_concurrency?: number;
+  /** A Google Sheets source only (15 to 1440); `422 not_synced` on any other. */
+  sync_interval_minutes?: number;
 }
 
 export interface TestSourceResponse {
@@ -145,6 +167,12 @@ export interface RefreshSummary {
   relations: RefreshCounts;
 }
 
+/** What a sync of a Google Sheets source did. */
+export interface SyncSummary {
+  synced_at: string;
+  tables: { id: string; name: string; row_count: number; missing: boolean }[];
+}
+
 export interface Table {
   id: string;
   source_id: string;
@@ -160,7 +188,7 @@ export interface Table {
    * null for a view or a table the database has no estimate for.
    */
   row_count: number | null;
-  /** An upload source's table: when it was last loaded; null for a database source's. */
+  /** An upload or Sheets source's table: when it was last loaded (a Sheets table's last good sync); null for a database source's. */
   last_loaded_at: string | null;
 }
 

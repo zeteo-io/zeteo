@@ -2,6 +2,7 @@ import type { ListOptions, Page } from "../types/common.js";
 import { send, type CallContext } from "../send.js";
 import type {
   AddTablesRequest,
+  CreateSheetsSourceRequest,
   CreateUploadSourceRequest,
   ReuploadTableRequest,
   TransferSourceRequest,
@@ -15,6 +16,7 @@ import type {
   ListTablesOptions,
   PatchTableRequest,
   RefreshSummary,
+  SyncSummary,
   Relation,
   Source,
   Table,
@@ -28,9 +30,12 @@ export const sourcesCalls = (ctx: CallContext) => ({
     send(ctx, { op: "listSources", query: { ...options } }),
   get: (sourceId: string): Promise<Source | null> =>
     send(ctx, { op: "getSource", params: { sourceId }, nullOn404: true }),
-  /** A database, or (`type: "upload"`) an upload source from the caller's staging. */
+  /** A database, or (`type: "upload"` or `"google-sheets"`) a source from the caller's staging. */
   create: (
-    body: CreateSourceRequest | CreateUploadSourceRequest
+    body:
+      | CreateSourceRequest
+      | CreateUploadSourceRequest
+      | CreateSheetsSourceRequest
   ): Promise<Source> => send(ctx, { op: "createSource", body, once: true }),
   update: (sourceId: string, body: UpdateSourceRequest): Promise<Source> =>
     send(ctx, {
@@ -102,7 +107,8 @@ export const sourcesCalls = (ctx: CallContext) => ({
     }),
   test: (sourceId: string): Promise<TestSourceResponse> =>
     send(ctx, { op: "testSource", params: { sourceId }, once: true }),
-  refresh: (sourceId: string): Promise<RefreshSummary> =>
+  /** A Google Sheets source is synced instead (Sync now) and answers a `SyncSummary`. */
+  refresh: (sourceId: string): Promise<RefreshSummary | SyncSummary> =>
     send(ctx, { op: "refreshSource", params: { sourceId }, once: true }),
   tables: {
     list: (

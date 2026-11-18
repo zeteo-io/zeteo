@@ -16,7 +16,7 @@ export type ColumnType =
 
 export type PrincipalType = "user" | "group";
 
-export type SourceType = "postgres" | "azure-sql" | "upload";
+export type SourceType = "postgres" | "azure-sql" | "upload" | "google-sheets";
 
 export interface HealthStatus {
   status: "ok" | "degraded";

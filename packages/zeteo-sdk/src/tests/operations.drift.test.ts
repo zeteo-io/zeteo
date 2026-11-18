@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 81 operations as the description", () => {
+  it("lists the same 84 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(81);
-    expect(Object.keys(found)).toHaveLength(81);
+    expect(blocks).toBe(84);
+    expect(Object.keys(found)).toHaveLength(84);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -190,6 +190,12 @@ describe("operations against the API description", () => {
         (c) => c.uploads.create(new Blob(["a,b\n1,2\n"]), "a.csv"),
       ],
       ["uploads.discard", (c) => c.uploads.discard(ID)],
+      ["uploads.fromLink", (c) => c.uploads.fromLink({ url: "abc" })],
+      ["connections.google.get", (c) => c.connections.google.get()],
+      [
+        "connections.google.put",
+        (c) => c.connections.google.put({ service_account_key: "{}" }),
+      ],
       ["sources.list", (c) => c.sources.list()],
       [
         "sources.create",

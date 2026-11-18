@@ -83,3 +83,40 @@ export interface TransferSourceRequest {
   /** The previous owner keeps an ordinary all-columns grant; the API's default is true. */
   keep_access?: boolean;
 }
+
+/** A spreadsheet's tabs, staged like a file's. */
+export interface SheetsUploadResponse extends UploadResponse {
+  spreadsheet: { id: string; title: string };
+}
+
+/** The spreadsheet to stage: its link or id, or a Sheets source whose spreadsheet to read again. */
+export type LinkRequest = { url: string } | { source_id: string };
+
+/** A Google Sheets source, made from the caller's staging of a spreadsheet. */
+export interface CreateSheetsSourceRequest {
+  type: "google-sheets";
+  staging_id: string;
+  name: string;
+  /** What the source holds, at most 500 characters; trimmed. */
+  description?: string;
+  /** Generated from the name when omitted. */
+  slug?: string;
+  /** 15 to 1440; the API's default is 60. */
+  sync_interval_minutes?: number;
+  /** 1 to 100 staged tabs, with any corrections. */
+  tables: TableCorrection[];
+}
+
+/** Who Zeteo signs in to Google as; never the key. */
+export interface GoogleConnection {
+  provider: "google";
+  /** The address to share a spreadsheet with, as a Viewer. */
+  service_account_email: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface PutGoogleConnectionRequest {
+  /** The service account's JSON key, as the object or as the text of the downloaded file. */
+  service_account_key: Record<string, unknown> | string;
+}

@@ -102,4 +102,72 @@ describe("upload sources", () => {
       path: `/v1/sources/${ID}/tables/${USER}`,
     });
   });
+
+  it("uploads.fromLink posts to /v1/uploads/links", async () => {
+    t.stub.respond(() => ({
+      status: 201,
+      body: {
+        staging_id: ID,
+        expires_at: "x",
+        tables: [],
+        spreadsheet: { id: "abc", title: "Sheet" },
+      },
+    }));
+    const out = await t.client.uploads.fromLink({ url: "https://x/abc" });
+    expect(out.spreadsheet).toEqual({ id: "abc", title: "Sheet" });
+    expect(t.stub.requests.at(-1)).toMatchObject({
+      method: "POST",
+      path: "/v1/uploads/links",
+      body: { url: "https://x/abc" },
+    });
+    await t.client.uploads.fromLink({ source_id: ID });
+    expect(t.stub.requests.at(-1)?.body).toEqual({ source_id: ID });
+  });
+
+  it("connections.google.get and put use /v1/connections/google", async () => {
+    const connection = {
+      provider: "google",
+      service_account_email: "z@p.iam.gserviceaccount.com",
+      updated_at: "2026-11-18T10:00:00.000Z",
+      updated_by: USER,
+    };
+    t.stub.respond(() => ({ body: connection }));
+    expect(await t.client.connections.google.get()).toEqual(connection);
+    expect(t.stub.requests.at(-1)).toMatchObject({
+      method: "GET",
+      path: "/v1/connections/google",
+    });
+    expect(
+      await t.client.connections.google.put({
+        service_account_key: { client_email: "z@p" },
+      })
+    ).toEqual(connection);
+    expect(t.stub.requests.at(-1)).toMatchObject({
+      method: "PUT",
+      path: "/v1/connections/google",
+      body: { service_account_key: { client_email: "z@p" } },
+    });
+  });
+
+  it("sources.create takes a Sheets source and refresh returns a sync summary", async () => {
+    t.stub.respond(() => ({ status: 201, body: source }));
+    await t.client.sources.create({
+      type: "google-sheets",
+      staging_id: ID,
+      name: "Budget",
+      tables: [{ key: "sheet:Q1" }],
+      sync_interval_minutes: 30,
+    });
+    expect(t.stub.requests.at(-1)?.body).toMatchObject({
+      type: "google-sheets",
+      sync_interval_minutes: 30,
+    });
+    const summary = {
+      synced_at: "2026-11-18T10:00:00.000Z",
+      tables: [{ id: ID, name: "q1", row_count: 3, missing: false }],
+    };
+    t.stub.respond(() => ({ body: summary }));
+    const out = await t.client.sources.refresh(ID);
+    expect("synced_at" in out && out.synced_at).toBe(summary.synced_at);
+  });
 });
