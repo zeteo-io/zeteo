@@ -881,7 +881,11 @@ export const reuploadTable = async (
   return viewOf(id);
 };
 
-/** Drops a table and marks it and its columns missing; grants keep their references. */
+/**
+ * Drops a table and marks it and its columns missing; grants keep their
+ * references. A Sheets table's locator is marked `removed`, so a sync leaves
+ * it missing (its tab can be added again as a new table).
+ */
 export const removeTable = async (
   caller: Caller,
   id: string,
@@ -898,9 +902,19 @@ export const removeTable = async (
       if (!table) throw new NotFoundError("Table not found");
       const now = new Date();
       await dropStoredTable(tx, id, table.name);
+      // A Sheets table's locator is marked removed so a sync never brings
+      // it back as it does a table whose tab was deleted in Sheets.
+      const locator = table.vendorLocator;
       await tx.sourceTable.update({
         where: { id: tableId },
-        data: { missingSince: now },
+        data: {
+          missingSince: now,
+          ...(locator !== null &&
+            typeof locator === "object" &&
+            !Array.isArray(locator) && {
+              vendorLocator: { ...locator, removed: true },
+            }),
+        },
       });
       await tx.sourceColumn.updateMany({
         where: { tableId, missingSince: null },

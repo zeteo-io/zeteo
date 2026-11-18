@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag platform
 import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
-import { changeColumn, createUploadSource } from "../../uploads/service.js";
 import { postQuery, removeRunsOf } from "../support/queries.js";
 import { presentSourceById } from "../../sources/present.js";
 import { syncSheetsSource } from "../../uploads/sync.js";
+import { LOAD_LOCKING } from "../../uploads/loading.js";
 import type { Caller } from "../../middleware/auth.js";
 import { schemaFor } from "../../uploads/storage.js";
 import { storedTables } from "../support/uploads.js";
@@ -21,6 +21,12 @@ import {
   serveSheets,
   stageFakeSheet,
 } from "../support/googleSheets.js";
+import {
+  addTables,
+  changeColumn,
+  createUploadSource,
+  removeTable,
+} from "../../uploads/service.js";
 import {
   afterAll,
   afterEach,
@@ -255,6 +261,79 @@ describe("syncSheetsSource", () => {
     );
     expect(res.status, JSON.stringify(res.body)).toBe(200);
     expect(res.body.rows).toEqual([["hello"], ["again"]]);
+  });
+
+  it("a table removed by the owner stays removed after sync", async () => {
+    const { id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const notes = await tableNamed(id, "notes");
+    await prisma.grant.create({
+      data: {
+        principalType: "user",
+        principalId: granteeId,
+        tableId: notes.id,
+        allColumns: true,
+        createdBy: ownerId,
+      },
+    });
+    await removeTable(owner, id, notes.id);
+
+    const summary = await syncSheetsSource(id, ownerId);
+
+    expect(summary.tables.map((t) => t.name)).toEqual(["costs"]);
+    expect((await tableNamed(id, "notes")).missing).toBe(true);
+    expect(await storedTables(id)).toEqual(["costs"]);
+    const { slug } = await prisma.source.findUniqueOrThrow({ where: { id } });
+    const res = await postQuery(
+      tokenFor({ userId: granteeId, permissions: [DATA_READ] }),
+      { source: slug, from: "notes", select: ["note"] },
+      app.url
+    );
+    // Missing, as the grantee is told of any granted table that is gone.
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe("missing_in_source");
+  });
+
+  it("a tab whose table the owner removed can be added again, under a new name", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const notes = await tableNamed(id, "notes");
+    await removeTable(owner, id, notes.id);
+
+    const staged = await stageFakeSheet(ownerId, sheet);
+    await addTables(owner, id, {
+      staging_id: staged.stagingId,
+      tables: [{ key: "sheet:2", name: "notes_again" }],
+    });
+    sheet.tab(2).rows.push(["again"]);
+    await syncSheetsSource(id, ownerId);
+
+    const again = await tableNamed(id, "notes_again");
+    expect(again).toMatchObject({ missing: false, row_count: 2 });
+    expect((await tableNamed(id, "notes")).missing).toBe(true);
+    expect(await storedTables(id)).toEqual(["costs", "notes_again"]);
+  });
+
+  it("a sync refused as busy records no sync failure", async () => {
+    const { sheet, id } = await makeSource();
+    const before = await prisma.source.findUniqueOrThrow({ where: { id } });
+    sheet.tab(1).rows.push(["food", "300"]);
+    const timeout = LOAD_LOCKING.swapTimeoutMs;
+    LOAD_LOCKING.swapTimeoutMs = 1;
+    try {
+      await expect(syncSheetsSource(id, ownerId)).rejects.toMatchObject({
+        code: "upload_source_busy",
+      });
+    } finally {
+      LOAD_LOCKING.swapTimeoutMs = timeout;
+    }
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastSyncError).toBeNull();
+    expect(row.lastSyncAttemptAt).toEqual(before.lastSyncAttemptAt);
   });
 
   it("a new header column is added; a removed one is marked missing", async () => {

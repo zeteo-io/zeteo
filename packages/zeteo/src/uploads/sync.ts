@@ -134,16 +134,23 @@ interface TableSync {
 
 type CatalogTable = SourceTable & { columns: SourceColumn[] };
 
-/** The sheetId a missing table's locator names, or null for none (never thrown). */
+/**
+ * The sheetId a missing table's locator names, or null for none (never
+ * thrown) and for a table its owner removed, which a sync never brings back.
+ */
 const missingSheetId = (table: SourceTable): number | null => {
-  const sheetId = (table.vendorLocator as { sheetId?: unknown } | null)
-    ?.sheetId;
-  return typeof sheetId === "number" ? sheetId : null;
+  const locator = table.vendorLocator as {
+    sheetId?: unknown;
+    removed?: unknown;
+  } | null;
+  if (locator?.removed === true) return null;
+  return typeof locator?.sheetId === "number" ? locator.sheetId : null;
 };
 
 /**
  * The missing tables a sync may bring back: those whose locator names a tab
- * no live table reads, the most recently missing one per tab. (Sheets keeps a
+ * no live table reads (never one the owner removed), the most recently
+ * missing one per tab. (Sheets keeps a
  * tab's sheetId when a deletion is undone.)
  */
 const revivable = (live: CatalogTable[], missing: CatalogTable[]) => {
@@ -366,7 +373,11 @@ export const syncSheetsSource = async (
     try {
       return await sync(sourceId, row.vendorFileId!, actorId);
     } catch (err) {
-      await recordFailure(sourceId, err);
+      // Busy (a swap kept waiting) is not a failure of the sync: nothing was
+      // read wrong, and the next sync will do.
+      if (!(err instanceof UploadSourceBusyError)) {
+        await recordFailure(sourceId, err);
+      }
       throw err;
     }
   });
