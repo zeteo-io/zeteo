@@ -55,6 +55,34 @@ describe("cellText", () => {
     expect(cellText(num(1e12, "DATE_TIME"), "UTC")).toBe("1000000000000");
   });
 
+  it("serials at the edge of years 0001-9999 render, and just outside stay numbers", () => {
+    expect(cellText(num(-693593, "DATE"), "UTC")).toBe("0001-01-01");
+    expect(cellText(num(2958465, "DATE"), "UTC")).toBe("9999-12-31");
+    expect(cellText(num(-693594, "DATE"), "UTC")).toBe("-693594");
+    expect(cellText(num(2958466, "DATE"), "UTC")).toBe("2958466");
+    expect(cellText(num(-693593, "DATE_TIME"), "UTC")).toBe(
+      "0001-01-01T00:00:00.000Z"
+    );
+    expect(cellText(num(2958465.5, "DATE_TIME"), "UTC")).toBe(
+      "9999-12-31T12:00:00.000Z"
+    );
+    expect(cellText(num(-693593.5, "DATE_TIME"), "UTC")).toBe("-693593.5");
+    expect(cellText(num(2958466, "DATE_TIME"), "UTC")).toBe("2958466");
+  });
+
+  it("far out-of-range and non-finite serials stay numbers", () => {
+    expect(cellText(num(3000000, "DATE"), "UTC")).toBe("3000000");
+    expect(cellText(num(-700000, "DATE"), "UTC")).toBe("-700000");
+    expect(cellText(num(100025569, "DATE_TIME"), "UTC")).toBe("100025569");
+    expect(cellText(num(-99974430, "DATE_TIME"), "UTC")).toBe("-99974430");
+  });
+
+  it("an edge serial pushed outside year 9999 by the zone stays a number", () => {
+    expect(cellText(num(2958465.99, "DATE_TIME"), "America/Chicago")).toBe(
+      "2958465.99"
+    );
+  });
+
   it("DATE_TIME east of UTC", () => {
     expect(cellText(num(45292.5, "DATE_TIME"), "Asia/Kolkata")).toBe(
       "2024-01-01T06:30:00.000Z"

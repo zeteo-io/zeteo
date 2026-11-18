@@ -12,6 +12,11 @@ export type SheetCell = {
 const DAY_MS = 86_400_000;
 // Sheets serial numbers count days from 1899-12-30.
 const EPOCH_MS = Date.UTC(1899, 11, 30);
+// 0001-01-01 and 9999-12-31 as serials, and the instants bounding years 0001-9999.
+const FIRST_SERIAL = -693593;
+const LAST_SERIAL = 2958465;
+const MIN_MS = -62_135_596_800_000;
+const MAX_MS = 253_402_300_799_999;
 
 /** How far `timeZone` is ahead of UTC at the instant `utcMs`, in ms. Throws a RangeError for an unknown zone. */
 function offsetAt(utcMs: number, timeZone: string): number {
@@ -27,14 +32,11 @@ function offsetAt(utcMs: number, timeZone: string): number {
   }).formatToParts(new Date(utcMs));
   const get = (type: string): number =>
     Number(parts.find((p) => p.type === type)!.value);
-  const wall = Date.UTC(
-    get("year"),
-    get("month") - 1,
-    get("day"),
-    get("hour"),
-    get("minute"),
-    get("second")
-  );
+  // `Date.UTC` reads years 0-99 as 1900-1999, so the year is set apart.
+  const date = new Date(0);
+  date.setUTCFullYear(get("year"), get("month") - 1, get("day"));
+  date.setUTCHours(get("hour"), get("minute"), get("second"));
+  const wall = date.getTime();
   return wall - Math.floor(utcMs / 1000) * 1000;
 }
 
@@ -63,22 +65,22 @@ function render(cell: SheetCell | undefined, timeZone: string): string | null {
   if (value.numberValue !== undefined) {
     const n = value.numberValue;
     const type = cell?.effectiveFormat?.numberFormat?.type;
-    // A serial outside what a Date holds is kept as its number, so no data is lost.
-    if (type === "DATE") {
-      const date = new Date(EPOCH_MS + Math.floor(n) * DAY_MS);
-      return Number.isNaN(date.getTime())
-        ? String(n)
-        : date.toISOString().slice(0, 10);
-    }
-    if (type === "DATE_TIME") {
-      const wall = EPOCH_MS + Math.round(n * DAY_MS);
-      if (Number.isNaN(new Date(wall).getTime())) return String(n);
-      const instant = new Date(instantOf(wall, timeZone));
-      // Unlike xlsx.ts, which cannot tell a date from a timestamp and collapses midnight UTC to a
-      // date, Sheets names the type: a DATE_TIME stays a timestamp even at midnight UTC.
-      return Number.isNaN(instant.getTime())
-        ? String(n)
-        : instant.toISOString();
+    if (type === "DATE" || type === "DATE_TIME") {
+      // A serial outside years 0001-9999 (or not finite) is kept as its number, so no data is lost.
+      if (!(n >= FIRST_SERIAL && n < LAST_SERIAL + 1)) return String(n);
+      if (type === "DATE") {
+        return new Date(EPOCH_MS + Math.floor(n) * DAY_MS)
+          .toISOString()
+          .slice(0, 10);
+      }
+      // Rounded to the millisecond. Unlike xlsx.ts, which cannot tell a date from a timestamp and
+      // collapses midnight UTC to a date, Sheets names the type: a DATE_TIME stays a timestamp
+      // even at midnight UTC.
+      const instant = instantOf(EPOCH_MS + Math.round(n * DAY_MS), timeZone);
+      // The zone's offset can push an edge serial just outside years 0001-9999.
+      return instant >= MIN_MS && instant <= MAX_MS
+        ? new Date(instant).toISOString()
+        : String(n);
     }
     return String(n);
   }
