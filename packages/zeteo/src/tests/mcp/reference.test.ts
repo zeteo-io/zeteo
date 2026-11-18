@@ -2,11 +2,11 @@
 // @module-tag platform
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { removeDashboardsOf } from "../support/panelDecisions.js";
-import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { describeEachEngine } from "../support/engines.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
+import { QUERY_GUIDE } from "../../mcp/reference.js";
 import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "crypto";
 import {
@@ -25,7 +25,7 @@ import {
 
 // The examples name an illustrative source, `sales-db`, whose `orders` and
 // `customers` have the fixture's names; only the slug is swapped to run them.
-describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
+describeEachEngine("the query guide", (engine) => {
   let source: SeededSource;
   let session: McpSession;
   const userId = randomUUID();
@@ -45,12 +45,8 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
     await removeSources([source.id]);
   });
 
-  it("are sent to the client at initialize", () => {
-    expect(session.client.getInstructions()).toBe(MCP_INSTRUCTIONS);
-  });
-
   it("hold worked examples that each run through the query tool, as over /v1/query", async () => {
-    const examples = jsonBlocks(MCP_INSTRUCTIONS) as Record<string, unknown>[];
+    const examples = jsonBlocks(QUERY_GUIDE) as Record<string, unknown>[];
     // The two calculation examples use the order_lines and products tables of
     // the examples' schema, which the fixture has under other names; the
     // instructions unit test checks they parse.
@@ -72,7 +68,7 @@ describeEachEngine("MCP_INSTRUCTIONS", (engine) => {
   });
 
   it("hold an add_panel example that adds its panel once its ids are filled in", async () => {
-    const example = jsonBlocks(MCP_INSTRUCTIONS)[6] as Record<string, unknown>;
+    const example = jsonBlocks(QUERY_GUIDE)[6] as Record<string, unknown>;
     const query = await callTool(session.client, "create_saved_query", {
       name: `doc ${randomUUID()}`.slice(0, 60),
       query: {
