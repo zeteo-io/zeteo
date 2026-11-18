@@ -4,7 +4,9 @@ import { postQuery, removeRunsOf } from "../../../../../support/queries.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startV1Routes } from "../../../../../support/v1App.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import { auditRows } from "../../../../../support/sources.js";
 import { tokenFor } from "../../../../../support/tokens.js";
+import env from "../../../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
@@ -153,6 +155,54 @@ describe("POST /v1/file-sources/:sourceId/transfer", () => {
       (await prisma.source.findUniqueOrThrow({ where: { id: source.id } }))
         .ownerId
     ).toBe(from.id);
+  });
+
+  it("answers 409 quota_exceeded when the recipient would pass their quota, changing nothing", async () => {
+    const from = await user();
+    const to = await user();
+    const theirs = await createFileSource(app.url, to.token, to.id, CSV);
+    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const quota = env.FILE_SOURCE_QUOTA_BYTES;
+    // Room for what the recipient has, not for one more.
+    env.FILE_SOURCE_QUOTA_BYTES = theirs.stored_bytes + 1;
+    try {
+      const res = await call("POST", `/${source.id}/transfer`, admin, {
+        user_id: to.id,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("quota_exceeded");
+    } finally {
+      env.FILE_SOURCE_QUOTA_BYTES = quota;
+    }
+    expect(
+      (await prisma.source.findUniqueOrThrow({ where: { id: source.id } }))
+        .ownerId
+    ).toBe(from.id);
+    expect(
+      (await grantsOn(source.tables[0]!.id)).map((g) => [
+        g.principalId,
+        g.ownerGrant,
+      ])
+    ).toEqual([[from.id, true]]);
+  });
+
+  it("records the owner grant moved and the grants removed", async () => {
+    const from = await user();
+    const to = await user();
+    const source = await createFileSource(app.url, from.token, from.id, CSV);
+    const tableId = source.tables[0]!.id;
+    const [old] = await grantsOn(tableId);
+    const res = await call("POST", `/${source.id}/transfer`, from.token, {
+      user_id: to.id,
+      keep_access: false,
+    });
+    expect(res.status).toBe(200);
+    const entry = (await auditRows(source.id)).at(-1)!.payload;
+    expect(entry.metadata).toMatchObject({
+      event: "zeteo.file_source.transferred",
+      owner_grant: { user_id: to.id, table_ids: [tableId] },
+      grants_removed: [old!.id],
+    });
   });
 
   it("answers 404 to someone else", async () => {

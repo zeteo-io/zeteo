@@ -334,7 +334,16 @@ export const createFileSource = async (
           resourceType: "file_source",
           resourceId: id,
           actorId: caller.userId,
-          metadata: { slug, name: input.name, owner_id: caller.userId, tables },
+          metadata: {
+            slug,
+            name: input.name,
+            owner_id: caller.userId,
+            tables,
+            owner_grant: {
+              user_id: caller.userId,
+              table_ids: tables.map((t) => t.id),
+            },
+          },
         });
       });
     } catch (err) {
@@ -502,7 +511,15 @@ export const addTables = async (
         resourceType: "file_source",
         resourceId: id,
         actorId: caller.userId,
-        metadata: { slug: row.slug, changed: ["tables"], tables_added: tables },
+        metadata: {
+          slug: row.slug,
+          changed: ["tables"],
+          tables_added: tables,
+          owner_grant: {
+            user_id: row.ownerId,
+            table_ids: tables.map((t) => t.id),
+          },
+        },
       });
     });
   });
@@ -831,19 +848,25 @@ export const transferFileSource = async (
         where: { tableId: { in: tableIds }, ownerGrant: true },
         data: { ownerGrant: false },
       });
-      if (!keepAccess) {
-        await tx.grant.deleteMany({
-          where: {
-            tableId: { in: tableIds },
-            principalType: "user",
-            principalId: row.ownerId,
-          },
-        });
-      }
+      const removed = keepAccess
+        ? []
+        : await tx.grant.findMany({
+            where: {
+              tableId: { in: tableIds },
+              principalType: "user",
+              principalId: row.ownerId,
+            },
+            select: { id: true },
+          });
+      await tx.grant.deleteMany({
+        where: { id: { in: removed.map((g) => g.id) } },
+      });
       for (const tableId of tableIds) {
         await giveOwnerGrant(tx, tableId, userId, caller.userId);
       }
       await tx.source.update({ where: { id }, data: { ownerId: userId } });
+      // The source now counts against the new owner's quota.
+      await checkQuota(tx, userId);
       audit({
         action: AUDIT_EVENTS.fileSourceTransferred,
         resourceType: "file_source",
@@ -854,6 +877,8 @@ export const transferFileSource = async (
           from: row.ownerId,
           to: userId,
           keep_access: keepAccess,
+          owner_grant: { user_id: userId, table_ids: tableIds },
+          grants_removed: removed.map((g) => g.id),
         },
       });
     });

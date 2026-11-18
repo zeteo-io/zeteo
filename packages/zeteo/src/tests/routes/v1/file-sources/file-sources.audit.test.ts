@@ -116,10 +116,20 @@ describe("/v1/file-sources audit", () => {
       ["DELETE", "zeteo.file_source.deleted"],
     ]);
     expect(entries.at(-1)!.userId).toBe(nextId);
+    expect(entries[0]!.metadata.owner_grant).toEqual({
+      user_id: ownerId,
+      table_ids: [table.id],
+    });
+    expect(entries[2]!.metadata.owner_grant).toEqual({
+      user_id: ownerId,
+      table_ids: [more.id],
+    });
     expect(entries[6]!.metadata).toMatchObject({
       from: ownerId,
       to: nextId,
       keep_access: true,
+      owner_grant: { user_id: nextId },
+      grants_removed: [],
     });
     expect(JSON.stringify(entries)).not.toContain(SECRET);
     expect(JSON.stringify(entries)).not.toContain("Not data");

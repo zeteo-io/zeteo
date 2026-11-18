@@ -347,11 +347,19 @@ export const loadTables = async (
   return loaded;
 };
 
-/** Refuses (`quota_exceeded`) when the owner's stored file-source data, as `tx` sees it, is over the quota. */
+/**
+ * Refuses (`quota_exceeded`) when the owner's stored file-source data, as `tx`
+ * sees it, is over the quota. It first takes the owner's quota lock, a
+ * transaction-scoped advisory lock: the check and the commit of every change
+ * that adds to an owner's data (whatever the source, whoever acts) take turns,
+ * so two changes cannot each pass on the other's uncommitted bytes. Its wait
+ * is bounded by the transaction's `lock_timeout`.
+ */
 export const checkQuota = async (
   tx: Prisma.TransactionClient,
   ownerId: string
 ): Promise<void> => {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:file-quota:${ownerId}`}, 0))`;
   if ((await storedBytes(ownerId, tx)) > env.FILE_SOURCE_QUOTA_BYTES) {
     throw new QuotaExceededError(env.FILE_SOURCE_QUOTA_BYTES);
   }

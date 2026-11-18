@@ -236,6 +236,26 @@ describe("PUT /v1/file-sources/:sourceId/tables/:tableId", () => {
     expect((await call("GET", `/${source.id}`, owner)).body).toEqual(source);
   });
 
+  it("answers 503 file_source_busy when the swap runs out of time, and changes nothing", async () => {
+    const source = await createFileSource(app.url, owner, ownerId, FIRST);
+    const timeout = LOAD_LOCKING.swapTimeoutMs;
+    LOAD_LOCKING.swapTimeoutMs = 1;
+    try {
+      const res = await call(
+        "PUT",
+        `/${source.id}/tables/${source.tables[0]!.id}`,
+        owner,
+        { staging_id: (await stageFile(ownerId, SECOND)).stagingId, key: "csv" }
+      );
+      expect(res.status).toBe(503);
+      expect(res.body.error).toBe("file_source_busy");
+    } finally {
+      LOAD_LOCKING.swapTimeoutMs = timeout;
+    }
+    expect(await storedTables(source.id)).toEqual(["data"]);
+    expect((await call("GET", `/${source.id}`, owner)).body).toEqual(source);
+  });
+
   it("answers 404 to someone else, and for a table of another source", async () => {
     const source = await createFileSource(app.url, owner, ownerId, FIRST);
     const staged = await stageFile(otherId, SECOND);
