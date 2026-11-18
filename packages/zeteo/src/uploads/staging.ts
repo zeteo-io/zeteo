@@ -257,6 +257,19 @@ const toUnreadable = (err: unknown): unknown =>
     ? new FileUnreadableError(err.code, err.message, err.row)
     : err;
 
+/** What `stageTable` needs to know of a table besides its rows. */
+export interface StageMeta {
+  key: string;
+  fallbackName: string;
+  kind: PreviewTable["kind"];
+  /**
+   * Keep only the columns up to the last that holds a value, and nothing for a
+   * table of empty cells: a Google Sheets tab arrives as wide as its grid.
+   * A file's tables are as wide as their data already.
+   */
+  trimUnusedColumns?: boolean;
+}
+
 /**
  * A table's rows into a new staging table (all of them, the header row
  * included) while keeping what the preview needs. Returns null for a table
@@ -264,7 +277,7 @@ const toUnreadable = (err: unknown): unknown =>
  */
 export const stageTable = async (
   rows: AsyncIterable<Row> | Row[],
-  meta: { key: string; fallbackName: string; kind: PreviewTable["kind"] },
+  meta: StageMeta,
   takenTableNames: Set<string>,
   created: string[]
 ): Promise<{ preview: PreviewTable; staged: StagedTable } | null> => {
@@ -273,7 +286,7 @@ export const stageTable = async (
   let width = 0;
   let total = 0;
   let batch: Row[] = [];
-  // A Sheets tab arrives as wide as its grid: the columns that hold a value.
+  // With `trimUnusedColumns`: the columns up to the last that holds a value.
   let used = 0;
   // Types over every row, and over the rows below the first.
   let all: TypeInferrer[] = [];
@@ -301,7 +314,7 @@ export const stageTable = async (
             ...row.slice(0, width),
             ...Array(Math.max(0, width - row.length)).fill(null),
           ];
-    if (meta.kind === "sheet") {
+    if (meta.trimUnusedColumns) {
       for (let c = width - 1; c >= used; c--) {
         const v = padded[c];
         if (v !== null && v !== undefined && v !== "") {
@@ -320,14 +333,14 @@ export const stageTable = async (
     if (batch.length >= BATCH_ROWS) await flush();
   }
   if (stagingTable === null || total === 0) return null;
-  if (meta.kind === "sheet" && used === 0) {
+  if (meta.trimUnusedColumns && used === 0) {
     // Nothing but empty cells: no table.
     await dropStagingTable(stagingTable);
     created.splice(created.indexOf(stagingTable), 1);
     return null;
   }
   await flush();
-  if (meta.kind === "sheet") {
+  if (meta.trimUnusedColumns) {
     width = used;
     for (let i = 0; i < head.length; i++) head[i] = head[i]!.slice(0, used);
   }
@@ -547,6 +560,7 @@ export const stageSheets = async ({
           key: `sheet:${tab.sheetId}`,
           fallbackName: tab.name,
           kind: "sheet",
+          trimUnusedColumns: true,
         },
         taken,
         created
