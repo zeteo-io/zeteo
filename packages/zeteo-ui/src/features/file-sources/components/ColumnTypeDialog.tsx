@@ -123,7 +123,7 @@ export const ColumnTypeDialog = ({
           rows={3}
           onChange={(e) => setDescription(e.target.value)}
         />
-        <LoadFailure error={update.error} />
+        <LoadFailure error={update.error} rowsOf="table" />
       </div>
     </Modal>
   );

@@ -1,6 +1,7 @@
 import { AMOUNT_ID, FS_ID, TABLE_ID, makeFileSource } from "../testFixtures";
 import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSource } from "@/features/sources/testFixtures";
 import { makeGrant } from "@/features/grants/testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
@@ -36,6 +37,9 @@ const shared = makeGrant({
   all_columns: false,
   columns: [{ id: AMOUNT_ID, name: "amount", missing: false }],
 });
+
+/** Someone other than the signed-in user. */
+const OTHER_OWNER = "c9999999-1c7a-4a53-9d0e-6a3b1f2c4d09";
 
 const renderAt = (route = `/my/data/${FS_ID}`) =>
   renderWithProviders(
@@ -134,7 +138,7 @@ describe("FileSourcePage", () => {
     );
     expect(
       await within(dialog).findByText(/has values that do not fit its type/)
-    ).toHaveTextContent("row 2 of the file");
+    ).toHaveTextContent("data row 2 of the table");
   });
 
   it("lists who it is shared with, the owner's grant locked", async () => {
@@ -234,6 +238,156 @@ describe("FileSourcePage", () => {
     expect(screen.getByRole("link", { name: /Sources/ })).toHaveAttribute(
       "href",
       "/sources"
+    );
+  });
+
+  it("lets an admin with zeteo.sources.write change the limits, through PATCH /v1/sources/:id", async () => {
+    const user = userEvent.setup();
+    held.permissions = ["zeteo.data.read", "zeteo.sources.write"];
+    const stored = makeSource({
+      id: FS_ID,
+      slug: "q3-sales",
+      type: "upload" as never,
+      export_enabled: false,
+      row_cap: 50000,
+    });
+    get.mockImplementation(async (url: string) =>
+      url === `/v1/sources/${FS_ID}`
+        ? { data: stored }
+        : { data: makeFileSource({ owner_id: OTHER_OWNER }) }
+    );
+    patch.mockResolvedValue({ data: { ...stored, export_enabled: true } });
+    renderAt();
+    await user.click(await screen.findByRole("button", { name: "Limits" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByLabelText("Row cap")).toHaveValue(
+      "50000"
+    );
+    expect(
+      within(dialog).getByText("People can't export from this source.")
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByLabelText("Allow exports"));
+    const cap = within(dialog).getByLabelText("Export row cap");
+    await user.clear(cap);
+    await user.type(cap, "10000");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Save limits" })
+    );
+    await waitFor(() =>
+      expect(patch).toHaveBeenCalledWith(`/v1/sources/${FS_ID}`, {
+        export_enabled: true,
+        export_row_cap: 10000,
+      })
+    );
+  });
+
+  it("refuses an out-of-range limit before sending it", async () => {
+    const user = userEvent.setup();
+    held.permissions = ["zeteo.data.read", "zeteo.sources.write"];
+    get.mockImplementation(async (url: string) =>
+      url === `/v1/sources/${FS_ID}`
+        ? { data: makeSource({ id: FS_ID }) }
+        : { data: makeFileSource() }
+    );
+    renderAt();
+    await user.click(await screen.findByRole("button", { name: "Limits" }));
+    const dialog = await screen.findByRole("dialog");
+    const cap = await within(dialog).findByLabelText("Row cap");
+    await user.clear(cap);
+    await user.type(cap, "999999");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Save limits" })
+    );
+    expect(
+      await within(dialog).findByText("Row cap is 1 to 50000.")
+    ).toBeInTheDocument();
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("shows no Limits to an owner without zeteo.sources.write", async () => {
+    renderAt();
+    await screen.findByRole("button", { name: "Rename" });
+    expect(screen.queryByRole("button", { name: "Limits" })).toBeNull();
+  });
+
+  it("hides Shared with from a sources admin who may not read grants", async () => {
+    held.permissions = ["zeteo.data.read", "zeteo.sources.write"];
+    get.mockResolvedValue({
+      data: makeFileSource({ owner_id: OTHER_OWNER }),
+    });
+    renderAt(`/my/data/${FS_ID}?tab=sharing`);
+    await screen.findByRole("button", { name: "Rename" });
+    expect(screen.queryByRole("link", { name: "Shared with" })).toBeNull();
+    // The tables show instead, and no grants were asked for.
+    expect(screen.getByRole("heading", { name: "orders" })).toBeInTheDocument();
+    expect(get).not.toHaveBeenCalledWith("/v1/grants", expect.anything());
+  });
+
+  it("lists grants read-only for an admin who may read but not change them", async () => {
+    held.permissions = [
+      "zeteo.data.read",
+      "zeteo.sources.write",
+      "zeteo.grants.read",
+    ];
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/grants"
+        ? { data: { data: [ownerGrant, shared], next_cursor: null } }
+        : { data: makeFileSource({ owner_id: OTHER_OWNER }) }
+    );
+    renderAt(`/my/data/${FS_ID}?tab=sharing`);
+    const other = (await screen.findByText("amount")).closest("tr")!;
+    expect(within(other).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(
+      within(other).queryByRole("button", { name: "Stop sharing" })
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+  });
+
+  it("lets a grants admin share and change grants on someone else's source", async () => {
+    held.permissions = ["zeteo.data.read", "zeteo.grants.write"];
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/grants"
+        ? { data: { data: [ownerGrant, shared], next_cursor: null } }
+        : { data: makeFileSource({ owner_id: OTHER_OWNER }) }
+    );
+    renderAt(`/my/data/${FS_ID}?tab=sharing`);
+    const other = (await screen.findByText("amount")).closest("tr")!;
+    expect(
+      within(other).getByRole("button", { name: "Edit" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Share" })).toBeInTheDocument();
+    // Not a sources admin: the source itself is not theirs to change.
+    expect(screen.queryByRole("button", { name: "Rename" })).toBeNull();
+  });
+
+  it("lets a grants admin remove the former owner grant of a deleted source, and nothing else", async () => {
+    const user = userEvent.setup();
+    held.permissions = ["zeteo.data.read", "zeteo.grants.write"];
+    const former = { ...ownerGrant, owner_grant: false };
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/grants"
+        ? { data: { data: [former], next_cursor: null } }
+        : {
+            data: makeFileSource({
+              owner_id: OTHER_OWNER,
+              archived_at: "2026-11-16T10:00:00.000Z",
+            }),
+          }
+    );
+    renderAt(`/my/data/${FS_ID}?tab=sharing`);
+    const row = (
+      await screen.findByText("orders", { selector: "td *, td" })
+    ).closest("tr")!;
+    expect(within(row).queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Share" })).toBeNull();
+    await user.click(within(row).getByRole("button", { name: "Stop sharing" }));
+    await user.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: "Stop sharing",
+      })
+    );
+    await waitFor(() =>
+      expect(del).toHaveBeenCalledWith(`/v1/grants/${former.id}`)
     );
   });
 });

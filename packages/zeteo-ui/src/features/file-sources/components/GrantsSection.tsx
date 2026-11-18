@@ -223,12 +223,18 @@ const DeleteGrant = ({ grant }: { grant: Grant }) => {
 
 interface GrantsSectionProps {
   source: FileSource;
-  /** Owners and admins with `zeteo.sources.write` change who it is shared with. */
-  canManage: boolean;
+  /** Shares and changes grants: the owner, or an admin with `zeteo.grants.write`. */
+  canShare: boolean;
+  /** Removes grants: as `canShare`, or a grants admin once the source is deleted. */
+  canRemove: boolean;
 }
 
 /** "Shared with": every grant on the source's tables, the owner's own included. */
-export const GrantsSection = ({ source, canManage }: GrantsSectionProps) => {
+export const GrantsSection = ({
+  source,
+  canShare,
+  canRemove,
+}: GrantsSectionProps) => {
   const { items, isLoading, error, hasMore, loadMore } = useGrants({
     source_id: source.id,
   });
@@ -238,7 +244,7 @@ export const GrantsSection = ({ source, canManage }: GrantsSectionProps) => {
     <div className="z-my-narrow">
       <div className="z-list-toolbar">
         <div className="z-list-toolbar-filters" />
-        {canManage && (
+        {canShare && (
           <Button
             size="sm"
             fullWidth={false}
@@ -253,7 +259,7 @@ export const GrantsSection = ({ source, canManage }: GrantsSectionProps) => {
       {isLoading ? (
         <Spinner size="md" />
       ) : (
-        <div className={canManage ? "z-actions-last" : undefined}>
+        <div className={canRemove ? "z-actions-last" : undefined}>
           <Table<Grant>
             rowKey={(g) => g.id}
             rows={items}
@@ -300,16 +306,18 @@ export const GrantsSection = ({ source, canManage }: GrantsSectionProps) => {
                 ),
               },
               { title: "Columns", cellElement: columnsText },
-              ...(canManage
+              ...(canRemove
                 ? [
                     {
                       title: "",
                       cellElement: (g: Grant) =>
                         g.owner_grant ? null : (
                           <RowActions align="end">
-                            <EditButton
-                              onClick={() => setDialog({ grant: g })}
-                            />
+                            {canShare && (
+                              <EditButton
+                                onClick={() => setDialog({ grant: g })}
+                              />
+                            )}
                             <DeleteGrant grant={g} />
                           </RowActions>
                         ),

@@ -46,7 +46,8 @@ const slugify = (name: string) =>
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
-interface NumberField {
+/** A source's numeric limit as a form field: its key, label and range. */
+export interface NumberField {
   key:
     | "timeout_ms"
     | "row_cap"
@@ -59,7 +60,8 @@ interface NumberField {
   default: number;
 }
 
-const NUMBER_FIELDS: NumberField[] = [
+/** The limits a source form edits; the file-source limits dialog uses them too. */
+export const NUMBER_FIELDS: NumberField[] = [
   {
     key: "timeout_ms",
     label: "Time limit (ms)",

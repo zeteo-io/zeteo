@@ -13,6 +13,7 @@ import "@/features/sources/components/styles.css";
 import { NotFound } from "@/components/NotFound";
 import { formatDate } from "@/utils/formatDate";
 import { GrantsSection } from "./GrantsSection";
+import { LimitsDialog } from "./LimitsDialog";
 import { useAuth } from "@tereo-io/react";
 import type { Me } from "@/lib/auth";
 import { useState } from "react";
@@ -218,6 +219,7 @@ const TableSection = ({
 
 type Dialog =
   | { kind: "rename" }
+  | { kind: "limits" }
   | { kind: "transfer" }
   | { kind: "column"; tableId: string; column: FileSourceColumn }
   | { kind: "describe"; table: FileSourceTable }
@@ -227,59 +229,88 @@ const FileSourceView = ({ source }: { source: FileSource }) => {
   const { user, hasPermission } = useAuth<Me>();
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  const tab: Tab = TABS.find((t) => t.id === params.get("tab"))?.id ?? "tables";
   const remove = useDeleteFileSource();
   const [dialog, setDialog] = useState<Dialog>(null);
   const close = () => setDialog(null);
 
   const isOwner = !!user && source.owner_id === user.id;
   const archived = !!source.archived_at;
-  // The owner while they hold the permission, or an admin who changes sources.
-  const canManage =
-    !archived &&
-    ((isOwner && hasPermission("zeteo.file_sources.write")) ||
-      hasPermission("zeteo.sources.write"));
+  // The owner acts as the owner while they hold the permission; anyone else
+  // needs the admin permission each action's route asks for.
+  const asOwner = isOwner && hasPermission("zeteo.file_sources.write");
+  const isSourcesAdmin = hasPermission("zeteo.sources.write");
+  // Tables, renaming, transfer and deletion: the owner, or a sources admin.
+  const canManage = !archived && (asOwner || isSourcesAdmin);
+  // Limits are an admin's only, as for a database source.
+  const canSetLimits = !archived && isSourcesAdmin;
+  const grantsAdmin = hasPermission("zeteo.grants.write");
+  // Who it is shared with: the owner, or whoever may read grants.
+  const canSeeSharing =
+    asOwner || grantsAdmin || hasPermission("zeteo.grants.read");
+  // Sharing and changing grants: the owner, or a grants admin. Once the
+  // source is deleted, a grants admin may still remove grants, the former
+  // owner grants included.
+  const canShare = !archived && (asOwner || grantsAdmin);
+  const canRemoveGrants = canShare || (archived && grantsAdmin);
+  const tabs = TABS.filter((t) => t.id !== "sharing" || canSeeSharing);
+  const tab: Tab = tabs.find((t) => t.id === params.get("tab"))?.id ?? "tables";
   const tables = source.tables.filter((t) => !t.missing);
   const back = isOwner ? MY_DATA_HREF : "/sources";
 
-  const actions = canManage && (
+  const actions = (canManage || canSetLimits) && (
     <div className="z-header-actions">
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={() => navigate(`${fileSourceHref(source.id)}/add`)}
-      >
-        Add tables
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={() => setDialog({ kind: "rename" })}
-      >
-        Rename
-      </Button>
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={() => setDialog({ kind: "transfer" })}
-      >
-        Transfer
-      </Button>
-      <ConfirmButton
-        label="Delete"
-        size="sm"
-        danger
-        confirmTitle="Delete source"
-        confirmText={`Delete "${source.name}" and all its data? Zeteo holds the only copy, so it cannot be recovered. Saved queries and dashboards using it stop working.`}
-        confirmLabel="Delete source"
-        onConfirm={async () => {
-          await remove.mutateAsync(source.id);
-          navigate(back);
-        }}
-      />
+      {canManage && (
+        <>
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            onClick={() => navigate(`${fileSourceHref(source.id)}/add`)}
+          >
+            Add tables
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            onClick={() => setDialog({ kind: "rename" })}
+          >
+            Rename
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            fullWidth={false}
+            onClick={() => setDialog({ kind: "transfer" })}
+          >
+            Transfer
+          </Button>
+        </>
+      )}
+      {canSetLimits && (
+        <Button
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onClick={() => setDialog({ kind: "limits" })}
+        >
+          Limits
+        </Button>
+      )}
+      {canManage && (
+        <ConfirmButton
+          label="Delete"
+          size="sm"
+          danger
+          confirmTitle="Delete source"
+          confirmText={`Delete "${source.name}" and all its data? Zeteo holds the only copy, so it cannot be recovered. Saved queries and dashboards using it stop working.`}
+          confirmLabel="Delete source"
+          onConfirm={async () => {
+            await remove.mutateAsync(source.id);
+            navigate(back);
+          }}
+        />
+      )}
     </div>
   );
 
@@ -321,7 +352,7 @@ const FileSourceView = ({ source }: { source: FileSource }) => {
         </span>
       </p>
       <nav className="z-source-tabs" aria-label="File source">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <Link
             key={t.id}
             to={
@@ -360,7 +391,11 @@ const FileSourceView = ({ source }: { source: FileSource }) => {
         <RelationsSection source={source} canManage={canManage} />
       )}
       {tab === "sharing" && (
-        <GrantsSection source={source} canManage={canManage} />
+        <GrantsSection
+          source={source}
+          canShare={canShare}
+          canRemove={canRemoveGrants}
+        />
       )}
 
       {dialog?.kind === "describe" && (
@@ -369,6 +404,9 @@ const FileSourceView = ({ source }: { source: FileSource }) => {
           table={dialog.table}
           onClose={close}
         />
+      )}
+      {dialog?.kind === "limits" && (
+        <LimitsDialog source={source} onClose={close} />
       )}
       {dialog?.kind === "rename" && (
         <RenameDialog source={source} onClose={close} />

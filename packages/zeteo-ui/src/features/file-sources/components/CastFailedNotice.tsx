@@ -6,9 +6,17 @@ import { listRows } from "./labels";
 /**
  * A failed load or retype. A `cast_failed` names the column and the rows whose
  * values do not fit its type (the uploader's own data); any other failure is
- * the usual notice.
+ * the usual notice. A load from an upload numbers rows of the file, its header
+ * counted (`rowsOf="file"`); a retype reloads the stored table and numbers its
+ * data rows (`rowsOf="table"`).
  */
-export const LoadFailure = ({ error }: { error: ApiError | null }) => {
+export const LoadFailure = ({
+  error,
+  rowsOf = "file",
+}: {
+  error: ApiError | null;
+  rowsOf?: "file" | "table";
+}) => {
   if (error?.code !== "cast_failed" || !error.cast) {
     return <ErrorNotice error={error} />;
   }
@@ -27,7 +35,9 @@ export const LoadFailure = ({ error }: { error: ApiError | null }) => {
         {rows.length > 0 && (
           <>
             {" "}
-            (row{rows.length > 1 ? "s" : ""} {listRows(rows)} of the file)
+            {rowsOf === "file"
+              ? `(row${rows.length > 1 ? "s" : ""} ${listRows(rows)} of the file)`
+              : `(data row${rows.length > 1 ? "s" : ""} ${listRows(rows)} of the table)`}
           </>
         )}
         .
