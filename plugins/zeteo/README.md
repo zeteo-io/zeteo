@@ -13,7 +13,8 @@ is for before calling a tool.
 ```
 
 Claude Code asks for the **Zeteo MCP URL** at install: `https://<your zeteo>/mcp`
-(change it later with `claude plugin configure zeteo`). Zeteo's MCP endpoint must
+(change it later with
+`echo '{"mcp_url":"https://<your zeteo>/mcp"}' | claude plugin configure zeteo --values-stdin`). Zeteo's MCP endpoint must
 be on (`MCP_ALLOWED_CLIENTS`), and you sign in through tereo when the server
 first connects.
 

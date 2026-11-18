@@ -108,8 +108,10 @@ and changes write audit entries to tereo's outbox.
 - **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves these tools to an AI signed in through
   tereo: `list_sources`, `list_tables` and `describe_table` to discover what it may
   query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
-  5,000 or 1 MB), and tools for saved queries, dashboards and saved panels, with
-  instructions that teach the model the language. A user sees them only with
+  5,000 or 1 MB), `query_guide` (the full query and dashboard reference), and tools for saved
+  queries, dashboards and saved panels, with short instructions that say what zeteo is for.
+  A Claude Code plugin in `plugins/zeteo/` adds the MCP server and querying and dashboard skills
+  ([docs/mcp.md](packages/zeteo/docs/mcp.md#the-claude-code-plugin)). A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
 Not there yet: row filters on grants.
