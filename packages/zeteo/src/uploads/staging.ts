@@ -252,7 +252,8 @@ const peek = async (iterator: AsyncIterator<Buffer | string>) => {
   return { chunks, head: Buffer.concat(chunks) };
 };
 
-const toUnreadable = (err: unknown): unknown =>
+/** A parse failure as the 422 the caller gets; anything else as it is. */
+export const toUnreadable = (err: unknown): unknown =>
   err instanceof FileParseError
     ? new FileUnreadableError(err.code, err.message, err.row)
     : err;
@@ -487,8 +488,8 @@ export const stageUpload = async ({
   }
 };
 
-/** Drops staging tables made by a staging that failed; a failed drop is logged, not thrown. */
-const dropStagingTables = async (created: string[]): Promise<void> => {
+/** Drops staging tables no staging row will name; a failed drop is logged, not thrown. */
+export const dropStagingTables = async (created: string[]): Promise<void> => {
   for (const table of created) {
     await dropStagingTable(table).catch((dropErr: unknown) => {
       logger.error({ err: dropErr, table }, "dropping a staging table failed");

@@ -95,9 +95,9 @@ describe("MCP discovery tools", () => {
     });
     expect(
       listed.json.tables.map(
-        (t: { name: string; last_synced_at: string | null }) => [
+        (t: { name: string; last_loaded_at: string | null }) => [
           t.name,
-          t.last_synced_at,
+          t.last_loaded_at,
         ]
       )
     ).toEqual([
@@ -108,7 +108,7 @@ describe("MCP discovery tools", () => {
       source: source.slug,
       table: "customers",
     });
-    expect(described.json.table.last_synced_at).toBe(at.toISOString());
+    expect(described.json.table.last_loaded_at).toBe(at.toISOString());
     await prisma.sourceTable.update({
       where: { id: source.tables.customers!.id },
       data: { lastSyncedAt: null },
@@ -129,7 +129,7 @@ describe("MCP discovery tools", () => {
           kind: "table",
           description: null,
           missing: false,
-          last_synced_at: null,
+          last_loaded_at: null,
           columns: 2,
         },
         {
@@ -138,7 +138,7 @@ describe("MCP discovery tools", () => {
           kind: "table",
           description: null,
           missing: false,
-          last_synced_at: null,
+          last_loaded_at: null,
           columns: 3,
         },
       ],
@@ -159,7 +159,7 @@ describe("MCP discovery tools", () => {
         kind: "table",
         description: null,
         missing: false,
-        last_synced_at: null,
+        last_loaded_at: null,
         columns: [
           {
             name: "id",

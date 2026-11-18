@@ -1,7 +1,9 @@
 // @module-tag int
 // @module-tag job
 // @module-tag platform
+import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
+import { createUploadSource } from "../../uploads/service.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import * as refresh from "../../catalog/refresh.js";
@@ -10,10 +12,19 @@ import { db } from "../../utils/db/index.js";
 import { redis } from "../../utils/redis.js";
 import { randomUUID } from "crypto";
 import {
+  DATA_READ,
+  UPLOADS_WRITE,
+} from "../../definitions/tereoDeclaration.js";
+import {
   REFRESH_CHECK_INTERVAL_MS,
   refreshStaleSources,
   startRefreshJob,
 } from "../../jobs/refreshSources.js";
+import {
+  FakeSpreadsheet,
+  serveSheets,
+  stageFakeSheet,
+} from "../support/googleSheets.js";
 import {
   removeSources,
   sourceSettings,
@@ -23,11 +34,25 @@ import {
   afterAll,
   afterEach,
   beforeAll,
+  beforeEach,
   describe,
   expect,
   it,
   vi,
 } from "vitest";
+
+const google = vi.hoisted(() => ({
+  getSpreadsheet: vi.fn(),
+  googleClient: vi.fn(),
+}));
+
+vi.mock("../../google/handler.js", () => ({
+  googleClient: () => google.googleClient(),
+  sheetsApi: {
+    getSpreadsheet: (...args: unknown[]) => google.getSpreadsheet(...args),
+  },
+  stopGoogleHandler: vi.fn(),
+}));
 
 const HOUR = 3_600_000;
 const NOW = new Date("2026-11-12T12:00:00.000Z");
@@ -185,7 +210,7 @@ describe("refreshStaleSources", () => {
       where: { id },
       data: { lastRefreshedAt: new Date(NOW.getTime() - HOUR) },
     });
-    vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([listed]);
+    vi.spyOn(db.sources, "listDue").mockResolvedValue([listed]);
     const spy = vi.spyOn(refresh, "refreshSource");
     await refreshStaleSources(NOW);
     expect(spy).not.toHaveBeenCalled();
@@ -199,10 +224,152 @@ describe("refreshStaleSources", () => {
       where: { id },
       data: { archivedAt: new Date() },
     });
-    vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([listed]);
+    vi.spyOn(db.sources, "listDue").mockResolvedValue([listed]);
     const spy = vi.spyOn(refresh, "refreshSource");
     await refreshStaleSources(NOW);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshStaleSources of Google Sheets sources", () => {
+  const MINUTE = 60_000;
+  const ownerId = randomUUID();
+  const owner = {
+    userId: ownerId,
+    organizationId: null,
+    permissions: [DATA_READ, UPLOADS_WRITE],
+    isServiceAccount: false,
+  };
+  const sheets = new Map<string, FakeSpreadsheet>();
+  const made: string[] = [];
+
+  /** A Sheets source (interval 60 min) whose last sync attempt was `minutesAgo` before `now`. */
+  const makeSheets = async (minutesAgo: number, now: Date) => {
+    const sheet = new FakeSpreadsheet(`sheet-${randomUUID()}`, [
+      {
+        sheetId: 1,
+        title: "Costs",
+        rows: [
+          ["item", "amount"],
+          ["rent", "1200"],
+        ],
+      },
+    ]);
+    sheets.set(sheet.id, sheet);
+    const staged = await stageFakeSheet(ownerId, sheet);
+    const view = await createUploadSource(owner, {
+      type: "google-sheets",
+      staging_id: staged.stagingId,
+      name: "Book",
+      tables: [{ key: "sheet:1" }],
+    });
+    made.push(view.id);
+    await setAttempt(view.id, new Date(now.getTime() - minutesAgo * MINUTE));
+    return { sheet, id: view.id };
+  };
+
+  const setAttempt = (id: string, at: Date) =>
+    prisma.source.update({
+      where: { id },
+      data: { lastSyncAttemptAt: at, lastRefreshedAt: at },
+    });
+
+  const rowCount = async (id: string) =>
+    (await uploadTablesOf(id))[0]!.row_count;
+
+  beforeAll(async () => {
+    await initializeTereo();
+  });
+  beforeEach(() => {
+    serveSheets(google, sheets);
+  });
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    for (const id of made.splice(0)) await redis.del(`zeteo:refresh:${id}`);
+    sheets.clear();
+    await removeUploadSourcesOf([ownerId]);
+  });
+  afterAll(async () => {
+    await prisma.source.deleteMany({ where: { createdBy: ownerId } });
+    await stopTereo();
+  });
+
+  it("syncs a Sheets source whose interval has passed", async () => {
+    const now = new Date();
+    const { sheet, id } = await makeSheets(61, now);
+    sheet.tab(1).rows.push(["food", "300"]);
+    await refreshStaleSources(now);
+    expect(await rowCount(id)).toBe(2);
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastSyncError).toBeNull();
+    expect(row.lastSyncAttemptAt!.getTime()).toBeGreaterThanOrEqual(
+      now.getTime()
+    );
+  });
+
+  it("skips one synced within its interval", async () => {
+    const now = new Date();
+    const { sheet, id } = await makeSheets(30, now);
+    sheet.tab(1).rows.push(["food", "300"]);
+    const spy = vi.spyOn(refresh, "refreshSource");
+    await refreshStaleSources(now);
+    expect(spy.mock.calls.map(([called]) => called)).not.toContain(id);
+    expect(await rowCount(id)).toBe(1);
+  });
+
+  it("retries a failing source only after its interval", async () => {
+    const now = new Date();
+    const { sheet, id } = await makeSheets(61, now);
+    const healthy = await makeSheets(61, now);
+    sheet.failWith = "GGL_0009";
+    healthy.sheet.tab(1).rows.push(["food", "300"]);
+
+    // The failure is recorded, and the sweep goes on to the next source.
+    await refreshStaleSources(now);
+    const failed = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(failed.lastSyncError).toMatchObject({
+      code: "sheet_not_accessible",
+    });
+    expect(await rowCount(healthy.id)).toBe(2);
+
+    const spy = vi.spyOn(refresh, "refreshSource");
+    const attempt = failed.lastSyncAttemptAt!.getTime();
+    await refreshStaleSources(new Date(attempt + 30 * MINUTE));
+    expect(spy.mock.calls.map(([called]) => called)).not.toContain(id);
+    await refreshStaleSources(new Date(attempt + 61 * MINUTE));
+    expect(spy.mock.calls.map(([called]) => called)).toContain(id);
+  });
+
+  it("still refreshes database sources after 24h", async () => {
+    const now = new Date();
+    await makeSheets(30, now);
+    const ids = [randomUUID(), randomUUID()];
+    for (const [i, id] of ids.entries()) {
+      made.push(id);
+      await prisma.source.create({
+        data: {
+          id,
+          slug: uniqueSlug("job"),
+          name: "Job test",
+          type: "postgres",
+          sealedSettings: sealSettings(sourceSettings("ro"), id) as object,
+          schemas: ["sales"],
+          createdBy: ownerId,
+          // 25 hours and 2 hours ago: only the first is due.
+          lastRefreshedAt: new Date(now.getTime() - (i === 0 ? 25 : 2) * HOUR),
+        },
+      });
+    }
+    const spy = vi.spyOn(refresh, "refreshSource");
+    try {
+      await refreshStaleSources(now);
+      const called = spy.mock.calls.map(([id]) => id);
+      expect(called).toContain(ids[0]);
+      expect(called).not.toContain(ids[1]);
+    } finally {
+      await closeAllSourcePools();
+      await removeSources(ids);
+    }
   });
 });
 
@@ -217,10 +384,11 @@ describe("startRefreshJob", () => {
       toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
     });
     vi.spyOn(Math, "random").mockReturnValue(0.5);
-    return vi.spyOn(db.sources, "listDueForRefresh").mockResolvedValue([]);
+    return vi.spyOn(db.sources, "listDue").mockResolvedValue([]);
   };
 
-  it("sweeps 30 seconds plus jitter after start, then every hour, and not after stop", async () => {
+  it("sweeps 30 seconds plus jitter after start, then every five minutes, and not after stop", async () => {
+    expect(REFRESH_CHECK_INTERVAL_MS).toBe(5 * 60_000);
     const sweeps = fakeJob();
     const stop = startRefreshJob();
     await vi.advanceTimersByTimeAsync(29_999);

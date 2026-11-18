@@ -1,6 +1,7 @@
+import { isSheetsSource, isUploadSource, typeOf } from "../sources/types.js";
+import { syncSheetsSource, type SyncSummary } from "../uploads/sync.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
-import { isUploadSource, typeOf } from "../sources/types.js";
 import { withSourceConnection } from "../sources/pools.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { withAudit } from "../utils/transaction.js";
@@ -646,7 +647,23 @@ const applySnapshot = async (
 };
 
 /**
- * Reads the source's schema and brings the catalogue up to date with it.
+ * Refreshes a source: a database source's catalogue is read again
+ * (`refreshDatabaseSource`); a Google Sheets source is synced
+ * (`syncSheetsSource`). A file upload source has nothing to read
+ * (`not_a_database_source`).
+ */
+export const refreshSource = async (
+  sourceId: string,
+  actorId: string
+): Promise<RefreshSummary | SyncSummary> => {
+  const row = await db.sources.findById(sourceId);
+  if (row && isSheetsSource(row)) return syncSheetsSource(sourceId, actorId);
+  return refreshDatabaseSource(sourceId, actorId);
+};
+
+/**
+ * Reads a database source's schema and brings the catalogue up to date with
+ * it; an upload source is `not_a_database_source`.
  *
  * The snapshot is read before any transaction, so no database connection is
  * held while the source answers. The write then takes an advisory lock keyed
@@ -660,7 +677,7 @@ const applySnapshot = async (
  * the size of the source's tables, kept with the source, and each table's
  * estimated rows, kept with the table (null when the source would not tell).
  */
-export const refreshSource = async (
+export const refreshDatabaseSource = async (
   sourceId: string,
   actorId: string
 ): Promise<RefreshSummary> => {
@@ -734,7 +751,7 @@ export const refreshAfterChange = async (
   actorId: string
 ): Promise<void> => {
   try {
-    await refreshSource(sourceId, actorId);
+    await refreshDatabaseSource(sourceId, actorId);
   } catch (err) {
     const expected =
       err instanceof SourceUnreachableError ||

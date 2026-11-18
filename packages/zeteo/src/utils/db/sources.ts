@@ -34,12 +34,33 @@ export const listPage = async (options: {
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
 
-/** Unarchived sources never refreshed or last refreshed before `olderThan`, the longest-waiting first. */
-export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
-  prisma.source.findMany({
+/**
+ * Whether a Google Sheets source is due a sync at `now`: it has an interval,
+ * and no attempt (good or failed) within it. A failing source is so retried
+ * once per interval.
+ */
+export const syncIsDue = (
+  row: Pick<Source, "syncIntervalMinutes" | "lastSyncAttemptAt">,
+  now: Date
+): boolean =>
+  row.syncIntervalMinutes !== null &&
+  (row.lastSyncAttemptAt === null ||
+    row.lastSyncAttemptAt.getTime() <
+      now.getTime() - row.syncIntervalMinutes * 60_000);
+
+/**
+ * The unarchived sources due for the scheduled check, the longest-waiting
+ * first: database sources never refreshed or last refreshed before
+ * `olderThan`, then Google Sheets sources whose sync interval has passed at
+ * `now` (`syncIsDue`). File upload sources never are: their uploads keep them.
+ */
+export const listDue = async (
+  olderThan: Date,
+  now: Date
+): Promise<Source[]> => {
+  const databases = await prisma.source.findMany({
     where: {
       archivedAt: null,
-      // Upload sources (files and Sheets) are not refreshed here: their uploads keep the catalogue.
       type: { notIn: ["upload", "google_sheets"] },
       OR: [{ lastRefreshedAt: null }, { lastRefreshedAt: { lt: olderThan } }],
     },
@@ -48,6 +69,23 @@ export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
       { id: "asc" },
     ],
   });
+  // The interval is per source, which Prisma's filters cannot compare with.
+  // Timestamps are stored as UTC without a zone.
+  const due = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "zeteo"."sources"
+    WHERE "type" = 'google-sheets' AND "archived_at" IS NULL
+      AND "sync_interval_minutes" IS NOT NULL
+      AND ("last_sync_attempt_at" IS NULL
+        OR "last_sync_attempt_at" < (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC') - make_interval(mins => "sync_interval_minutes"))`;
+  const sheets = await prisma.source.findMany({
+    where: { id: { in: due.map((d) => d.id) } },
+    orderBy: [
+      { lastSyncAttemptAt: { sort: "asc", nulls: "first" } },
+      { id: "asc" },
+    ],
+  });
+  return [...databases, ...sheets];
+};
 
 /** The slugs of the unarchived sources among `ids`. */
 export const listSlugs = async (ids: Iterable<string>): Promise<string[]> =>

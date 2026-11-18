@@ -70,7 +70,7 @@ export const visibleCatalogView = (
       kind: table.kind,
       description: table.description,
       missing: table.missing,
-      last_synced_at: table.lastSyncedAt?.toISOString() ?? null,
+      last_loaded_at: table.lastSyncedAt?.toISOString() ?? null,
       columns: table.columns.map((c) => ({
         name: c.name,
         type: c.type,

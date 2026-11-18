@@ -104,7 +104,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
             kind: table.kind,
             description: table.description,
             missing: table.missing,
-            last_synced_at: table.last_synced_at,
+            last_loaded_at: table.last_loaded_at,
             columns: table.columns.length,
           })),
         };
@@ -116,7 +116,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "describe_table",
     title: "Describe a table",
     description:
-      "Show one table of a source: the columns you can query, with their types and descriptions, and its relations to other tables you can see. An upload source's table has last_synced_at: the data is as of that time.",
+      "Show one table of a source: the columns you can query, with their types and descriptions, and its relations to other tables you can see. An upload source's table has last_loaded_at: the data is as of that time.",
     permission: MCP_USE,
     readOnly: true,
     input: TableInput,

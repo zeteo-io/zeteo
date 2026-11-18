@@ -133,8 +133,8 @@ describe("PUT /v1/sources/:sourceId/tables/:tableId", () => {
     expect(after.added).toEqual([expect.any(String), "boolean", false]);
     expect(tables[0]!.id).toBe(table.id);
     expect(tables[0]!.row_count).toBe(3);
-    expect(Date.parse(tables[0]!.last_synced_at!)).toBeGreaterThan(
-      Date.parse(table.last_synced_at!) - 1
+    expect(Date.parse(tables[0]!.last_loaded_at!)).toBeGreaterThan(
+      Date.parse(table.last_loaded_at!) - 1
     );
     expect(await storedTables(source.id)).toEqual(["data"]);
 

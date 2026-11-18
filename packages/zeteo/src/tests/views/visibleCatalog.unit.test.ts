@@ -71,7 +71,7 @@ describe("visibleCatalogView", () => {
 });
 
 describe("visibleCatalogView upload sources", () => {
-  it("shows last_synced_at for an upload table, null for a database table, and the source kind", () => {
+  it("shows last_loaded_at for an upload table, null for a database table, and the source kind", () => {
     const at = new Date("2026-11-17T10:00:00.000Z");
     const upload = visibleCatalogView(
       catalog({
@@ -82,10 +82,10 @@ describe("visibleCatalogView upload sources", () => {
       {}
     );
     expect(upload.kind).toBe("upload");
-    expect(upload.tables[0]?.last_synced_at).toBe(at.toISOString());
+    expect(upload.tables[0]?.last_loaded_at).toBe(at.toISOString());
     const db = visibleCatalogView(catalog(), {});
     expect(db.kind).toBe("database");
-    expect(db.tables.every((t) => t.last_synced_at === null)).toBe(true);
+    expect(db.tables.every((t) => t.last_loaded_at === null)).toBe(true);
   });
 });
 

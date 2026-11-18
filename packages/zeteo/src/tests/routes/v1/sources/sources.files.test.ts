@@ -101,7 +101,7 @@ describe("POST /v1/sources (upload)", () => {
         name: "my_orders",
         description: null,
         row_count: 2,
-        last_synced_at: expect.any(String),
+        last_loaded_at: expect.any(String),
         missing: false,
         columns: [
           ["order_id", "Order ID", "number"],

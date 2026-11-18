@@ -1,6 +1,5 @@
 import { assertSheetUnclaimed, discardStaging, getStaging } from "./staging.js";
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
-import type { Source } from "../../prisma/generated/client/index.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { presentSourceById } from "../sources/present.js";
@@ -9,10 +8,15 @@ import { closeSourcePool } from "../sources/pools.js";
 import type { SourceView } from "../views/source.js";
 import type { Caller } from "../middleware/auth.js";
 import type { UploadColumnType } from "./types.js";
+import { normalizeName } from "./parse/names.js";
 import { logger } from "../utils/logger.js";
 import { lacking } from "./ownership.js";
 import { randomUUID } from "crypto";
 import env from "../env.js";
+import type {
+  Source,
+  SourceColumn,
+} from "../../prisma/generated/client/index.js";
 import {
   AUDIT_EVENTS,
   UPLOADS_WRITE,
@@ -51,6 +55,7 @@ import {
   planTable,
   withLoadLock,
   type Loaded,
+  type PlannedColumn,
   type PlannedTable,
   type TableCorrection,
 } from "./loading.js";
@@ -677,6 +682,119 @@ const findTable = async (sourceId: string, tableId: string) => {
   return table;
 };
 
+/** A catalogue column as `matchColumns` reads it. */
+type CatalogColumn = Pick<
+  SourceColumn,
+  "id" | "name" | "originalName" | "type" | "missingSince"
+>;
+
+/** The catalogue column each planned column is matched to (undefined: a new one), and the live ones matched by none. */
+export interface ColumnMatches<C extends CatalogColumn = CatalogColumn> {
+  matched: (C | undefined)[];
+  gone: C[];
+}
+
+/**
+ * Matches a load's planned columns to a table's catalogue columns (missing
+ * ones included, so a column back again is restored): by `name`, or, for a
+ * sync, by the header it was read from (`original_name`), falling back to the
+ * name, so a column renamed in Zeteo still matches its sheet header. A
+ * matched planned column takes the column's name and, unless the caller set
+ * a type, its type (`typeGiven` then holds). A new column whose name a
+ * catalogue column already has gets the next free one (`_2`...). Changes
+ * `planned` in place.
+ */
+export const matchColumns = <C extends CatalogColumn>(
+  existing: C[],
+  planned: PlannedColumn[],
+  by: "name" | "original_name"
+): ColumnMatches<C> => {
+  // Live columns are matched before missing ones.
+  const free = [
+    ...existing.filter((c) => c.missingSince === null),
+    ...existing.filter((c) => c.missingSince !== null),
+  ];
+  const take = (test: (c: C) => boolean): C | undefined => {
+    const i = free.findIndex(test);
+    return i === -1 ? undefined : free.splice(i, 1)[0];
+  };
+  const matched: (C | undefined)[] = planned.map(() => undefined);
+  const pass = (test: (c: C, p: PlannedColumn) => boolean) =>
+    planned.forEach((p, i) => {
+      matched[i] ??= take((c) => test(c, p));
+    });
+  if (by === "original_name") {
+    pass((c, p) => c.originalName === p.originalName && c.name === p.name);
+    pass(
+      (c, p) => c.originalName !== null && c.originalName === p.originalName
+    );
+  }
+  pass((c, p) => c.name === p.name);
+
+  const taken = new Set(existing.map((c) => c.name));
+  for (const [i, p] of planned.entries()) {
+    const match = matched[i];
+    if (!match) continue;
+    p.name = match.name;
+    if (!p.typeGiven && isUploadColumnType(match.type)) {
+      p.type = match.type;
+      p.typeGiven = true;
+    }
+  }
+  for (const [i, p] of planned.entries()) {
+    if (matched[i]) continue;
+    if (taken.has(p.name)) p.name = normalizeName(p.name, taken, p.index);
+    else taken.add(p.name);
+  }
+  return { matched, gone: free.filter((c) => c.missingSince === null) };
+};
+
+/**
+ * Writes a loaded table's columns to the catalogue: each matched column
+ * updated in place (its id, name and grants kept, restored if missing), each
+ * new one created, and the live ones no longer loaded marked missing. Returns
+ * how many were added and marked missing.
+ */
+export const writeColumns = async (
+  tx: Prisma.TransactionClient,
+  tableId: string,
+  planned: PlannedColumn[],
+  { matched, gone }: ColumnMatches,
+  now: Date
+): Promise<{ added: number; missing: number }> => {
+  let added = 0;
+  for (const [i, c] of planned.entries()) {
+    const data = {
+      type: c.type,
+      nativeType: NATIVE_TYPE[c.type],
+      position: i + 1,
+      originalName: c.originalName,
+      missingSince: null,
+    };
+    const match = matched[i];
+    if (match) {
+      await tx.sourceColumn.update({ where: { id: match.id }, data });
+    } else {
+      await tx.sourceColumn.create({
+        data: {
+          ...data,
+          tableId,
+          name: c.name,
+          nullable: true,
+          isPrimaryKey: false,
+          description: c.originalName || null,
+        },
+      });
+      added += 1;
+    }
+  }
+  await tx.sourceColumn.updateMany({
+    where: { id: { in: gone.map((c) => c.id) } },
+    data: { missingSince: now },
+  });
+  return { added, missing: gone.length };
+};
+
 /**
  * Replaces a table's data from a staging. Columns are matched by name:
  * matched ones keep their id and grants and, unless the caller set a type,
@@ -699,12 +817,7 @@ export const reuploadTable = async (
     "",
     table.name
   );
-  const current = new Map(table.columns.map((c) => [c.name, c]));
-  for (const c of planned.columns) {
-    const match = current.get(c.name);
-    if (!c.typeGiven && match && isUploadColumnType(match.type))
-      c.type = match.type;
-  }
+  matchColumns(table.columns, planned.columns, "name");
 
   await withLoadLock(id, async () => {
     const [loaded] = await loadTables(id, [planned]);
@@ -720,39 +833,13 @@ export const reuploadTable = async (
         throw new NotFoundError("Table not found");
       }
       await swapIn(tx, id, planned.name, loaded!.physicalName);
-      const byName = new Map(fresh.columns.map((c) => [c.name, c]));
-      let added = 0;
-      for (const [i, c] of planned.columns.entries()) {
-        const data = {
-          type: c.type,
-          nativeType: NATIVE_TYPE[c.type],
-          position: i + 1,
-          originalName: c.originalName,
-          missingSince: null,
-        };
-        const match = byName.get(c.name);
-        if (match) {
-          await tx.sourceColumn.update({ where: { id: match.id }, data });
-          byName.delete(c.name);
-        } else {
-          await tx.sourceColumn.create({
-            data: {
-              ...data,
-              tableId,
-              name: c.name,
-              nullable: true,
-              isPrimaryKey: false,
-              description: c.originalName || null,
-            },
-          });
-          added += 1;
-        }
-      }
-      const gone = [...byName.values()].filter((c) => c.missingSince === null);
-      await tx.sourceColumn.updateMany({
-        where: { id: { in: gone.map((c) => c.id) } },
-        data: { missingSince: now },
-      });
+      const { added, missing } = await writeColumns(
+        tx,
+        tableId,
+        planned.columns,
+        matchColumns(fresh.columns, planned.columns, "name"),
+        now
+      );
       await tx.sourceTable.update({
         where: { id: tableId },
         data: {
@@ -776,7 +863,7 @@ export const reuploadTable = async (
             row_count: loaded!.rowCount,
           },
           columns_added: added,
-          columns_missing: gone.length,
+          columns_missing: missing,
         },
       });
     });
