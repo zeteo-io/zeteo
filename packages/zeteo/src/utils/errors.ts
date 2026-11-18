@@ -381,6 +381,18 @@ export class InvalidSheetLinkError extends AppError {
   }
 }
 
+/** A spreadsheet an unarchived source already reads; says nothing of whose it is. */
+export class SheetInUseError extends AppError {
+  constructor() {
+    super(
+      409,
+      "sheet_in_use",
+      "This spreadsheet is already a Zeteo source. Ask an admin if it should be yours."
+    );
+    this.name = "SheetInUseError";
+  }
+}
+
 /** A staging that does not exist, has expired or is another user's: one answer for all. */
 export class StagingNotFoundError extends AppError {
   constructor() {

@@ -1,4 +1,3 @@
-import { FileParseError, type ParseLimits, type Row } from "./parse/types.js";
 import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { emptyColumnsWarning } from "./warnings.js";
@@ -15,10 +14,17 @@ import {
   EmptyFileError,
   FileTooLargeError,
   FileUnreadableError,
+  SheetInUseError,
   StagingNotFoundError,
   TooManyRequestsError,
   UnsupportedFileTypeError,
 } from "../utils/errors.js";
+import {
+  FileParseError,
+  type ParsedSheet,
+  type ParseLimits,
+  type Row,
+} from "./parse/types.js";
 import {
   appendStagingRows,
   createStagingTable,
@@ -92,6 +98,8 @@ export interface StagedTable {
   /** Rows in the staging table, the header row included. */
   rowCount: number;
   columnCount: number;
+  /** Where a Google Sheets tab lives in its spreadsheet; absent for a file's tables. */
+  locator?: { sheetId: number };
 }
 
 export interface StagingResult {
@@ -254,7 +262,7 @@ const toUnreadable = (err: unknown): unknown =>
  * included) while keeping what the preview needs. Returns null for a table
  * with no rows or no columns.
  */
-const stageTable = async (
+export const stageTable = async (
   rows: AsyncIterable<Row> | Row[],
   meta: { key: string; fallbackName: string; kind: PreviewTable["kind"] },
   takenTableNames: Set<string>,
@@ -431,36 +439,133 @@ export const stageUpload = async ({
     }
     if (tables.length === 0) throw new EmptyFileError();
 
-    const preview = tables.map((t) => t.preview);
-    // Uploads of one owner record their stagings one at a time, each
-    // counting the others first.
-    const row = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:upload-stagings:${ownerId}`}, 0))`;
-      await checkStagingRoom(ownerId, new Date(), tx);
-      return tx.uploadStaging.create({
-        data: {
-          ownerId,
-          kind: type === "csv" ? "csv" : "xlsx",
-          preview: preview as unknown as object,
-          tables: tables.map((t) => t.staged) as unknown as object,
-          expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
-        },
-      });
+    return await recordStaging({
+      ownerId,
+      kind: type === "csv" ? "csv" : "xlsx",
+      tables,
+      now,
     });
-    return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
   } catch (err) {
-    for (const table of created) {
-      await dropStagingTable(table).catch((dropErr: unknown) => {
-        logger.error(
-          { err: dropErr, table },
-          "dropping a staging table failed"
-        );
-      });
-    }
+    await dropStagingTables(created);
     // Stop reading the upload; this destroys the stream.
     await iterator.return?.().catch(() => undefined);
     throw err;
   }
+};
+
+/** Drops staging tables made by a staging that failed; a failed drop is logged, not thrown. */
+const dropStagingTables = async (created: string[]): Promise<void> => {
+  for (const table of created) {
+    await dropStagingTable(table).catch((dropErr: unknown) => {
+      logger.error({ err: dropErr, table }, "dropping a staging table failed");
+    });
+  }
+};
+
+/**
+ * Records a staging row for staged tables. Stagings of one owner are
+ * recorded one at a time, each counting the others first.
+ */
+const recordStaging = async ({
+  ownerId,
+  kind,
+  vendorFileId,
+  tables,
+  now,
+}: {
+  ownerId: string;
+  kind: string;
+  vendorFileId?: string;
+  tables: { preview: PreviewTable; staged: StagedTable }[];
+  now: Date;
+}): Promise<StagingResult> => {
+  const preview = tables.map((t) => t.preview);
+  const row = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:upload-stagings:${ownerId}`}, 0))`;
+    await checkStagingRoom(ownerId, new Date(), tx);
+    return tx.uploadStaging.create({
+      data: {
+        ownerId,
+        kind,
+        vendorFileId,
+        preview: preview as unknown as object,
+        tables: tables.map((t) => t.staged) as unknown as object,
+        expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
+      },
+    });
+  });
+  return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
+};
+
+/**
+ * Stages the tabs of an already-read spreadsheet for `ownerId` like an
+ * upload's tables, keyed `sheet:<sheetId>`, and records the staging with the
+ * spreadsheet's id. On any failure the staging tables made so far are dropped.
+ */
+export const stageSheets = async ({
+  ownerId,
+  spreadsheet,
+  now = new Date(),
+}: {
+  ownerId: string;
+  spreadsheet: {
+    id: string;
+    title: string;
+    tabs: (ParsedSheet & { sheetId: number })[];
+  };
+  now?: Date;
+}): Promise<StagingResult> => {
+  const created: string[] = [];
+  try {
+    const tables: { preview: PreviewTable; staged: StagedTable }[] = [];
+    const taken = new Set<string>();
+    for (const tab of spreadsheet.tabs) {
+      const result = await stageTable(
+        tab.rows,
+        {
+          key: `sheet:${tab.sheetId}`,
+          fallbackName: tab.name,
+          kind: "sheet",
+        },
+        taken,
+        created
+      );
+      if (result) {
+        result.staged.locator = { sheetId: tab.sheetId };
+        tables.push(result);
+      }
+    }
+    if (tables.length === 0) throw new EmptyFileError();
+    return await recordStaging({
+      ownerId,
+      kind: "google-sheets",
+      vendorFileId: spreadsheet.id,
+      tables,
+      now,
+    });
+  } catch (err) {
+    await dropStagingTables(created);
+    throw err;
+  }
+};
+
+/**
+ * Throws `SheetInUseError` when an unarchived source already reads this
+ * spreadsheet; never says whose it is.
+ */
+export const assertSheetUnclaimed = async (
+  spreadsheetId: string,
+  db: Prisma.TransactionClient = prisma
+): Promise<void> => {
+  const claimed = await db.source.findFirst({
+    where: {
+      type: "google_sheets",
+      vendorFileId: spreadsheetId,
+      archivedAt: null,
+    },
+    select: { id: true },
+  });
+  if (claimed) throw new SheetInUseError();
 };
 
 /**
