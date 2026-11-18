@@ -109,7 +109,8 @@ async function recreateFixtureDatabase(databaseUrl: string) {
  * Creates the File Sources reader role `readerUrl` signs in as, or resets its
  * password. Roles belong to the whole server, which other worktrees' test
  * databases may share, so the role is kept, never dropped. It gets no
- * privileges here: storage grants it what it may read.
+ * privileges here: storage grants it what it may read. The test database's
+ * PUBLIC loses TEMP, as an operator's does (docker/postgres/files-reader.sql).
  */
 async function ensureReaderRole(databaseUrl: string, readerUrl: string) {
   const { Client } = await import("pg");
@@ -129,6 +130,11 @@ async function ensureReaderRole(databaseUrl: string, readerUrl: string) {
     await client.query(
       `ALTER ROLE ${quoteIdent(user)} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS PASSWORD ${quoteLiteral(password)}`
     );
+    // PUBLIC may create temporary tables by default; the reader must not
+    // (checkReaderRole), so only Zeteo's own login keeps TEMP.
+    const db = quoteIdent(new URL(databaseUrl).pathname.slice(1));
+    await client.query(`REVOKE TEMP ON DATABASE ${db} FROM PUBLIC`);
+    await client.query(`GRANT TEMP ON DATABASE ${db} TO CURRENT_USER`);
   } finally {
     await client.end();
   }

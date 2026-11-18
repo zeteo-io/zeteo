@@ -2,8 +2,8 @@ import type { PrismaClient } from "../../prisma/generated/client/index.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import type { FileColumnType } from "./types.js";
 import { readerRoleName } from "./readerRole.js";
+import { createHash, randomBytes } from "crypto";
 import { AppError } from "../utils/errors.js";
-import { randomBytes } from "crypto";
 
 export { checkReaderRole } from "./readerRole.js";
 
@@ -37,6 +37,20 @@ const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 const checkedName = (name: string): string => {
   if (!NAME.test(name)) throw new Error(`Not a normalized name: ${name}`);
+  return name;
+};
+
+/** A loaded table not yet swapped in: `<prefix>__load_<12 hex>`. */
+const LOADED = /^[a-z][a-z0-9_]{0,43}__load_[0-9a-f]{12}$/;
+
+/**
+ * A table's name: normalized, and never shaped like a loaded table, which
+ * the stale-load cleanup would take for one and drop.
+ */
+const checkedTableName = (name: string): string => {
+  if (LOADED.test(checkedName(name))) {
+    throw new Error(`A table cannot be named like a load: ${name}`);
+  }
   return name;
 };
 
@@ -235,11 +249,77 @@ export const dropSourceSchema = async (
 };
 
 /**
+ * The part of a table's loads before `__load_`: the name itself when it fits
+ * in 44 bytes, else 35 of its bytes and 8 hex of its hash, so two names never
+ * share a prefix.
+ */
+const loadPrefix = (name: string): string =>
+  name.length <= 44
+    ? name
+    : `${name.slice(0, 35)}${createHash("sha256").update(name).digest("hex").slice(0, 8)}`;
+
+/** The source's loaded tables not yet swapped in, those of `name` only when given. */
+const loadsIn = async (
+  sourceId: string,
+  name: string | null,
+  db: Db
+): Promise<string[]> => {
+  const rows = await db.$queryRaw<Array<{ tablename: string }>>`
+    SELECT tablename FROM pg_tables WHERE schemaname = ${schemaFor(sourceId)}`;
+  return rows
+    .map((r) => r.tablename)
+    .filter(
+      (t) =>
+        LOADED.test(t) &&
+        (name === null || t.startsWith(`${loadPrefix(name)}__load_`))
+    );
+};
+
+/**
+ * Drops a table `loadTypedTable` built that will not be swapped in: the
+ * caller's way out when its swap fails. Only a loaded table's name is taken.
+ */
+export const dropLoadedTable = async (
+  sourceId: string,
+  physicalName: string,
+  db: Db = prisma
+): Promise<void> => {
+  if (!LOADED.test(physicalName)) {
+    throw new Error(`Not a loaded table: ${physicalName}`);
+  }
+  await db.$executeRawUnsafe(
+    `DROP TABLE IF EXISTS ${qualified(sourceId, physicalName)}`
+  );
+};
+
+/**
+ * Drops every loaded table of the source left by a load that never swapped
+ * in (a crash, a timed-out swap). Call it at the start of a source's loads,
+ * under the Redis lock that serializes them: no load of that source is then
+ * in flight.
+ */
+export const dropStaleLoads = async (
+  sourceId: string,
+  db: Db = prisma
+): Promise<void> => {
+  for (const t of await loadsIn(sourceId, null, db)) {
+    await dropLoadedTable(sourceId, t, db);
+  }
+};
+
+/**
  * Builds a staged table's typed copy, `<name>__load_<random>`, in the
  * source's schema, ready for `swapIn`. Every value is checked before anything
  * is created: the first column (in row order) with a value that will not
  * cast throws `CastFailedError` with its first failing rows, and nothing is
  * left behind.
+ *
+ * It first drops this table's earlier loads that were never swapped in (they
+ * would count against the owner's quota forever). That is safe because the
+ * caller serializes a source's loads under a Redis lock; it leaves the loads
+ * of the source's other tables alone, which one upload may be holding for a
+ * swap of several tables in one transaction. If the swap fails, the caller
+ * drops the load with `dropLoadedTable`.
  */
 export const loadTypedTable = async (
   sourceId: string,
@@ -263,11 +343,15 @@ export const loadTypedTable = async (
     throw new Error(`Not a header row: ${spec.headerRow}`);
   }
   // Room for the suffix within Postgres's 63 bytes; names are ASCII.
-  const physicalName = `${checkedName(spec.name).slice(0, 44)}__load_${randomBytes(6).toString("hex")}`;
+  const physicalName = `${loadPrefix(checkedTableName(spec.name))}__load_${randomBytes(6).toString("hex")}`;
   const firstDataRow = spec.headerRow === null ? 0 : spec.headerRow + 1;
   const typed = columns.flatMap((c) =>
     c.type === "text" ? [] : [{ ...c, type: c.type }]
   );
+
+  for (const stale of await loadsIn(sourceId, spec.name, prisma)) {
+    await dropLoadedTable(sourceId, stale);
+  }
 
   return prisma.$transaction(
     async (tx) => {
@@ -336,8 +420,11 @@ export const swapIn = async (
   tableName: string,
   physicalName: string
 ): Promise<void> => {
-  const name = checkedName(tableName);
-  const loaded = checkedName(physicalName);
+  const name = checkedTableName(tableName);
+  if (!LOADED.test(physicalName)) {
+    throw new Error(`Not a loaded table: ${physicalName}`);
+  }
+  const loaded = physicalName;
   await tx.$executeRawUnsafe(
     `DROP TABLE IF EXISTS ${qualified(sourceId, name)}`
   );

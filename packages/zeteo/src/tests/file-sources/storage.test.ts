@@ -11,6 +11,8 @@ import {
   CastFailedError,
   checkReaderRole,
   createStagingTable,
+  dropLoadedTable,
+  dropStaleLoads,
   dropSourceSchema,
   dropStagingTable,
   ensureSourceSchema,
@@ -30,6 +32,18 @@ const readerUrl = () => {
     throw new Error("the test environment sets FILE_SOURCES_READER_URL");
   }
   return env.FILE_SOURCES_READER_URL;
+};
+
+/** The reader's role, as the URL names it. */
+const readerRole = () => decodeURIComponent(new URL(readerUrl()).username);
+
+/** Runs SQL as Zeteo's own login, a superuser in the test stack. */
+const asAdmin = (sql: string) => prisma.$executeRawUnsafe(sql);
+
+const testDatabase = async (): Promise<string> => {
+  const [{ db }] = await prisma.$queryRaw<Array<{ db: string }>>`
+    SELECT current_database() AS db`;
+  return db;
 };
 
 const readers: pg.Client[] = [];
@@ -250,6 +264,8 @@ describe("the reader role", () => {
       `SELECT 1 FROM "zeteo"."file_stagings" LIMIT 1`,
       `SELECT 1 FROM "core"."core_outbox" LIMIT 1`,
       `SELECT * FROM "${STAGING_SCHEMA}"."${staging}"`,
+      // PUBLIC's TEMP is revoked: no temporary tables either.
+      `CREATE TEMP TABLE scratch (x int)`,
     ]) {
       await expect(client.query(sql), sql).rejects.toMatchObject({
         code: PERMISSION_DENIED,
@@ -267,9 +283,110 @@ describe("the reader role", () => {
     await expect(checkReaderRole(other.toString())).rejects.toThrow(/database/);
   });
 
-  it("checkReaderRole rejects a role that can read zeteo's own schema", async () => {
+  it("checkReaderRole rejects another role than the one granted to", async () => {
     // Zeteo's own login reads everything.
-    await expect(checkReaderRole(env.DATABASE_URL)).rejects.toThrow(/must not/);
+    await expect(checkReaderRole(env.DATABASE_URL)).rejects.toThrow(
+      /must sign in as/
+    );
+    const other = `zeteo_files_other_${randomUUID().slice(0, 8)}`;
+    await asAdmin(`CREATE ROLE "${other}" LOGIN PASSWORD 'other-test-only'`);
+    try {
+      const url = new URL(readerUrl());
+      url.username = other;
+      url.password = "other-test-only";
+      await expect(checkReaderRole(url.toString())).rejects.toThrow(
+        /must sign in as/
+      );
+    } finally {
+      await asAdmin(`DROP ROLE "${other}"`);
+    }
+  });
+
+  it("checkReaderRole rejects a reader that is a member of a role", async () => {
+    const group = `zeteo_files_group_${randomUUID().slice(0, 8)}`;
+    await asAdmin(`CREATE ROLE "${group}"`);
+    await asAdmin(`GRANT "${group}" TO "${readerRole()}"`);
+    try {
+      await expect(checkReaderRole()).rejects.toThrow(
+        new RegExp(`member of any role \\(${group}\\)`)
+      );
+    } finally {
+      await asAdmin(`REVOKE "${group}" FROM "${readerRole()}"`);
+      await asAdmin(`DROP ROLE "${group}"`);
+    }
+  });
+
+  it("checkReaderRole rejects a reader with TEMP on the database", async () => {
+    const db = await testDatabase();
+    await asAdmin(`GRANT TEMP ON DATABASE "${db}" TO "${readerRole()}"`);
+    try {
+      await expect(checkReaderRole()).rejects.toThrow(/TEMP or CREATE/);
+    } finally {
+      await asAdmin(`REVOKE TEMP ON DATABASE "${db}" FROM "${readerRole()}"`);
+    }
+  });
+
+  it("checkReaderRole rejects a reader that can use zeteo's schema", async () => {
+    await asAdmin(`GRANT USAGE ON SCHEMA "zeteo" TO "${readerRole()}"`);
+    try {
+      await expect(checkReaderRole()).rejects.toThrow(
+        /must not use the schemas zeteo/
+      );
+    } finally {
+      await asAdmin(`REVOKE USAGE ON SCHEMA "zeteo" FROM "${readerRole()}"`);
+    }
+  });
+});
+
+describe("loads never swapped in", () => {
+  const letters = (name: string): LoadSpec => ({
+    name,
+    headerRow: null,
+    columns: [{ index: 0, name: "letter", type: "text" }],
+  });
+
+  it("dropLoadedTable drops a load and nothing but a load", async () => {
+    const staging = await stage([["a"]]);
+    const loaded = await loadTypedTable(sourceId, staging, letters("letters"));
+    await dropLoadedTable(sourceId, loaded.physicalName);
+    expect(await tablesIn(schemaFor(sourceId))).toEqual([]);
+    await expect(dropLoadedTable(sourceId, "letters")).rejects.toThrow(
+      /Not a loaded table/
+    );
+  });
+
+  it("a new load of a table drops that table's stale loads only", async () => {
+    const staging = await stage([["a"]]);
+    const stranded = await loadTypedTable(
+      sourceId,
+      staging,
+      letters("letters")
+    );
+    const other = await loadTypedTable(sourceId, staging, letters("others"));
+    const fresh = await loadTypedTable(sourceId, staging, letters("letters"));
+    expect(await tablesIn(schemaFor(sourceId))).toEqual(
+      [fresh.physicalName, other.physicalName].sort()
+    );
+    expect(fresh.physicalName).not.toBe(stranded.physicalName);
+  });
+
+  it("dropStaleLoads drops every load and keeps swapped-in tables", async () => {
+    const staging = await stage([["a"]]);
+    const kept = await loadTypedTable(sourceId, staging, letters("letters"));
+    await prisma.$transaction((tx) =>
+      swapIn(tx, sourceId, "letters", kept.physicalName)
+    );
+    await loadTypedTable(sourceId, staging, letters("others"));
+    await loadTypedTable(sourceId, staging, letters("letters"));
+    await dropStaleLoads(sourceId);
+    expect(await tablesIn(schemaFor(sourceId))).toEqual(["letters"]);
+  });
+
+  it("refuses a table named like a load", async () => {
+    const staging = await stage([["a"]]);
+    await expect(
+      loadTypedTable(sourceId, staging, letters("x__load_0123456789ab"))
+    ).rejects.toThrow(/named like a load/);
   });
 });
 
