@@ -340,6 +340,23 @@ describe("/v1/sources/:sourceId", () => {
     });
   });
 
+  it("GET shows the size the refresh after creating measured", async () => {
+    const posted = await call(
+      "POST",
+      "",
+      sourceBody(sourceSettings("ro"), { schemas: ["sales"] })
+    );
+    const source = posted.body as { id: string };
+    created.push(source.id);
+    const res = await call("GET", `/${source.id}`);
+    expect(res.status).toBe(200);
+    expect(res.body.size_bytes).toEqual(expect.any(Number));
+    expect(res.body.size_bytes).toBeGreaterThan(0);
+    expect(new Date(res.body.size_measured_at).toISOString()).toBe(
+      res.body.size_measured_at
+    );
+  });
+
   describe("a file source", () => {
     const ownerId = randomUUID();
     let fileId: string;
@@ -360,9 +377,63 @@ describe("/v1/sources/:sourceId", () => {
       });
     });
 
+    it("GET shows a file source's stored bytes as its size, never measured", async () => {
+      const res = await call("GET", `/${fileId}`);
+      expect(res.body).toMatchObject({
+        size_bytes: 0,
+        size_measured_at: null,
+        share_count: 0,
+      });
+    });
+
     it("GET shows owner_id null for a database source", async () => {
       const source = await create();
       expect((await call("GET", `/${source.id}`)).body.owner_id).toBeNull();
+    });
+
+    it("GET shows a database source's share_count: the people and groups its tables are granted to", async () => {
+      const posted = await call(
+        "POST",
+        "",
+        sourceBody(sourceSettings("ro"), { schemas: ["sales"] })
+      );
+      const source = posted.body as { id: string };
+      created.push(source.id);
+      const tables = await prisma.sourceTable.findMany({
+        where: { sourceId: source.id },
+        take: 2,
+      });
+      expect(tables).toHaveLength(2);
+      expect((await call("GET", `/${source.id}`)).body.share_count).toBe(0);
+      const user = randomUUID();
+      const group = randomUUID();
+      // The user on two tables, the group on one: two principals.
+      await prisma.grant.createMany({
+        data: [
+          {
+            principalType: "user" as const,
+            principalId: user,
+            tableId: tables[0]!.id,
+          },
+          {
+            principalType: "user" as const,
+            principalId: user,
+            tableId: tables[1]!.id,
+          },
+          {
+            principalType: "group" as const,
+            principalId: group,
+            tableId: tables[0]!.id,
+          },
+        ].map((g) => ({ ...g, allColumns: true, createdBy: user })),
+      });
+      try {
+        expect((await call("GET", `/${source.id}`)).body.share_count).toBe(2);
+      } finally {
+        await prisma.grant.deleteMany({
+          where: { principalId: { in: [user, group] } },
+        });
+      }
     });
 
     it("PATCH changes only its limits, and records the change", async () => {
@@ -386,31 +457,28 @@ describe("/v1/sources/:sourceId", () => {
     });
 
     it.each([
-      ["name", { name: "Renamed", row_cap: 5 }],
       ["schemas", { schemas: ["public"] }],
       ["settings", { settings: { host: "x" } }],
-    ])(
-      "PATCH with %s answers 409 file_source_managed_elsewhere",
-      async (_, body) => {
-        const res = await call("PATCH", `/${fileId}`, body);
-        expect(res.status).toBe(409);
-        expect(res.body.error).toBe("file_source_managed_elsewhere");
-      }
-    );
+      ["settings and a name", { name: "Renamed", settings: { host: "x" } }],
+    ])("PATCH with %s answers 409 not_a_database_source", async (_, body) => {
+      const res = await call("PATCH", `/${fileId}`, body);
+      expect(res.status).toBe(409);
+      expect(res.body.error).toBe("not_a_database_source");
+    });
 
     it.each([
-      ["PATCH", "", { name: "Renamed" }],
+      ["PATCH", "", { schemas: ["public"] }],
       ["POST", "/test", undefined],
       ["POST", "/archive", undefined],
     ])(
-      "%s %s answers 409 file_source_managed_elsewhere and changes nothing",
+      "%s %s answers 409 not_a_database_source and changes nothing",
       async (method, path, body) => {
         const before = await prisma.source.findUniqueOrThrow({
           where: { id: fileId },
         });
         const res = await call(method, `/${fileId}${path}`, body);
         expect(res.status).toBe(409);
-        expect(res.body.error).toBe("file_source_managed_elsewhere");
+        expect(res.body.error).toBe("not_a_database_source");
         expect(
           await prisma.source.findUniqueOrThrow({ where: { id: fileId } })
         ).toEqual(before);

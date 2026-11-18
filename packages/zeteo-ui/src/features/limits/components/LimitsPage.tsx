@@ -1,31 +1,34 @@
-import { faTrash, faUser } from "@fortawesome/free-solid-svg-icons";
 import type { LimitFilters, PrincipalLimit } from "../api/types";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useDeleteLimit } from "../api/useDeleteLimit";
 import { PageHeader } from "@/components/PageHeader";
 import { EditButton } from "@/components/EditButton";
+import { useEffect, useMemo, useState } from "react";
+import { FilterChip } from "@/components/FilterChip";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useLimits } from "../api/useLimits";
-import { useEffect, useState } from "react";
 import { useAuth } from "@tereo-io/react";
 import { LimitForm } from "./LimitForm";
 import "./styles.css";
 import {
   PrincipalCell,
   PrincipalLabel,
-  PrincipalPicker,
+  parseWho,
+  useDirectory,
   usePrincipalNames,
+  whoFilter,
+  whoId,
   type PrincipalRef,
 } from "@/features/principals";
 import {
   Button,
   EmptyState,
-  Modal,
   RowActions,
   Spinner,
   Table,
+  TableFilters,
 } from "@kosmeo-ui/react";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -70,7 +73,7 @@ export const LimitsPage = () => {
     filtersOf
   );
   const { items, isLoading, error, hasMore, loadMore } = useLimits(filters);
-  const [pickingPrincipal, setPickingPrincipal] = useState(false);
+  const directory = useDirectory("admin");
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PrincipalLimit | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -89,32 +92,43 @@ export const LimitsPage = () => {
         : { principal_type: undefined, principal_id: undefined }
     );
 
+  const selectedWho = principal ? whoId(principal.type, principal.id) : "";
+  // TableFilters starts over when its definitions change: they change only
+  // with the directory and the choice, and it waits for the directory.
+  const filterDefs = useMemo(
+    () =>
+      directory.data
+        ? [whoFilter(directory.data.data, { selected: selectedWho })]
+        : [],
+    [directory.data, selectedWho]
+  );
+  const onFiltersChange = (params: Record<string, string>) => {
+    const who = parseWho(params);
+    if (who.principal_id !== filters.principal_id) {
+      filterTo(
+        who.principal_type && who.principal_id
+          ? { type: who.principal_type, id: who.principal_id }
+          : null
+      );
+    }
+  };
+
   return (
     <>
       <PageHeader title="Limits" divider={false} />
-      <div className="z-list-toolbar">
+      <div className="z-list-toolbar z-list-toolbar-top">
         <div className="z-list-toolbar-filters z-limits-toolbar">
-          {principal ? (
-            <span className="z-filter-chip">
-              <PrincipalLabel refValue={principal} />
-              <button
-                type="button"
-                className="z-chip-clear"
-                aria-label="Clear person or group"
-                onClick={() => filterTo(null)}
-              >
-                ×
-              </button>
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPickingPrincipal(true)}
+          {directory.data && (
+            <TableFilters filters={filterDefs} onChange={onFiltersChange} />
+          )}
+          {/* Without the directory, a principal from the address is a chip. */}
+          {principal && directory.isError && (
+            <FilterChip
+              clearLabel="Clear person or group"
+              onClear={() => filterTo(null)}
             >
-              <FontAwesomeIcon icon={faUser} /> Person or group
-            </Button>
+              <PrincipalLabel refValue={principal} />
+            </FilterChip>
           )}
         </div>
         {canWrite && (
@@ -123,19 +137,7 @@ export const LimitsPage = () => {
           </Button>
         )}
       </div>
-      <Modal
-        show={pickingPrincipal}
-        title="Show the limit of a person or group"
-        onClose={() => setPickingPrincipal(false)}
-      >
-        <PrincipalPicker
-          value={principal}
-          onChange={(p) => {
-            filterTo(p);
-            setPickingPrincipal(false);
-          }}
-        />
-      </Modal>
+      <ErrorNotice error={directory.error} />
       <ErrorNotice error={error} />
       {isLoading ? (
         <Spinner size="lg" />

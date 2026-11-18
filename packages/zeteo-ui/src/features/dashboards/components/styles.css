@@ -260,8 +260,9 @@
   flex-shrink: 0;
 }
 
-.z-db-preview {
-  height: 14rem;
+/* A saved panel's preview dialog: the chart at a readable size. */
+.z-db-preview-dialog {
+  height: 26rem;
 }
 
 .z-db-sections {
@@ -300,4 +301,9 @@
   gap: 1rem;
   justify-items: center;
   text-align: center;
+}
+
+/* A card's last line, kept at the bottom however short the card's text. */
+.z-db-card > .z-db-bottom {
+  margin-top: auto;
 }

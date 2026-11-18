@@ -1,8 +1,8 @@
 import { faUser, faUserGroup } from "@fortawesome/free-solid-svg-icons";
-import { PrincipalLabel, PrincipalLabelView } from "./PrincipalLabel";
 import { principalSearchQuery } from "../api/usePrincipalSearch";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { PrincipalLabelView } from "./PrincipalLabel";
 import { useMemo, useState } from "react";
 import type { ApiError } from "@/lib/api";
 import {
@@ -26,8 +26,6 @@ interface PrincipalPickerProps {
   onChange: (value: PrincipalRef) => void;
   /** The kinds that can be chosen; with one, there is no switch. */
   types?: PrincipalRef["type"][];
-  /** False hides the name search (it needs zeteo.grants.read), leaving the paste-an-id path. */
-  search?: boolean;
 }
 
 // Own component so the lookup runs only once there is an id to look up.
@@ -82,7 +80,6 @@ export const PrincipalPicker = ({
   value,
   onChange,
   types = ["user", "group"],
-  search: searchable = true,
 }: PrincipalPickerProps) => {
   const [chosenType, setType] = useState<"user" | "group">(types[0]);
   const type = types.includes(chosenType) ? chosenType : types[0];
@@ -99,16 +96,11 @@ export const PrincipalPicker = ({
   );
   const pastedId = pasted.trim().toLowerCase();
   // Pasting an id is the way to pick a service account; it stays out of
-  // the way unless asked for, or unless there is no name search.
-  const [pasting, setPasting] = useState(!searchable);
+  // the way unless asked for.
+  const [pasting, setPasting] = useState(false);
 
   return (
     <div className="z-picker">
-      {value && !searchable && (
-        <p className="z-picker-selected">
-          Selected: <PrincipalLabel refValue={value} />
-        </p>
-      )}
       {types.length > 1 && (
         <div
           className="z-segmented"
@@ -130,51 +122,47 @@ export const PrincipalPicker = ({
         </div>
       )}
 
-      {searchable && (
-        <SearchList<Principal>
-          key={type}
-          label={
-            type === "user" ? "Search by name or email" : "Search by group name"
-          }
-          placeholder={
-            type === "user"
-              ? "Type 3 or more letters of a name or email"
-              : "Type 3 or more letters of a group name"
-          }
-          queryFn={searchQuery}
-          searchKey="q"
-          labelKey="name"
-          max={10}
-          longDropDown
-          value={
-            value && value.type === type ? (chosen.get(value) ?? null) : null
-          }
-          renderOption={(p) => ({
-            label: p.name ?? p.id,
-            node: (
-              <span className="z-picker-option">
-                <FontAwesomeIcon
-                  className="z-principal-icon"
-                  icon={p.type === "group" ? faUserGroup : faUser}
-                />
-                <span>{p.name ?? p.id}</span>
-                {p.email && (
-                  <span className="z-principal-email">{p.email}</span>
-                )}
-                {p.status === "inactive" && (
-                  <Badge size="sm" variant="secondary">
-                    Inactive
-                  </Badge>
-                )}
-              </span>
-            ),
-          })}
-          onSelect={(p) => p && onChange({ type: p.type, id: p.id })}
-        />
-      )}
-      {searchable && <ErrorNotice error={searchError} />}
+      <SearchList<Principal>
+        key={type}
+        label={
+          type === "user" ? "Search by name or email" : "Search by group name"
+        }
+        placeholder={
+          type === "user"
+            ? "Type 3 or more letters of a name or email"
+            : "Type 3 or more letters of a group name"
+        }
+        queryFn={searchQuery}
+        searchKey="q"
+        labelKey="name"
+        max={10}
+        longDropDown
+        value={
+          value && value.type === type ? (chosen.get(value) ?? null) : null
+        }
+        renderOption={(p) => ({
+          label: p.name ?? p.id,
+          node: (
+            <span className="z-picker-option">
+              <FontAwesomeIcon
+                className="z-principal-icon"
+                icon={p.type === "group" ? faUserGroup : faUser}
+              />
+              <span>{p.name ?? p.id}</span>
+              {p.email && <span className="z-principal-email">{p.email}</span>}
+              {p.status === "inactive" && (
+                <Badge size="sm" variant="secondary">
+                  Inactive
+                </Badge>
+              )}
+            </span>
+          ),
+        })}
+        onSelect={(p) => p && onChange({ type: p.type, id: p.id })}
+      />
+      <ErrorNotice error={searchError} />
 
-      {searchable && !pasting ? (
+      {!pasting ? (
         <Button
           size="sm"
           variant="link"

@@ -86,15 +86,11 @@ export type {
   UploadResponse,
   ColumnCorrection,
   TableCorrection,
-  CreateFileSourceRequest,
+  CreateUploadSourceRequest,
   AddTablesRequest,
   ReuploadTableRequest,
   UpdateFileColumnRequest,
-  TransferFileSourceRequest,
-  FileSourceColumn,
-  FileSourceTable,
-  FileSource,
-  ListFileSourcesOptions,
+  TransferSourceRequest,
 } from "./types/fileSources.js";
 export type {
   PrincipalStatus,
@@ -111,6 +107,7 @@ export type {
 } from "./types/principalLimits.js";
 export type {
   Me,
+  AllPrincipals,
   Principal,
   PrincipalRef,
   DirectoryPrincipalStatus,

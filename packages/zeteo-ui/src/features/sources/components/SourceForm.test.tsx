@@ -93,12 +93,12 @@ describe("SourceForm", () => {
     it("swaps the connection fields and the default port with the type", async () => {
       const user = userEvent.setup();
       renderCreate();
-      expect(field("Port")).toHaveValue("5432");
+      expect(field("Port")).toHaveValue(5432);
       expect(field("CA certificate (optional)")).toBeInTheDocument();
 
       await chooseDatabase(user, "Azure SQL");
 
-      expect(field("Port")).toHaveValue("1433");
+      expect(field("Port")).toHaveValue(1433);
       expect(maybeField("CA certificate (optional)")).not.toBeInTheDocument();
       await user.click(field("TLS"));
       await waitFor(() =>
@@ -530,16 +530,19 @@ describe("SourceForm", () => {
       expect(await screen.findByText("Bad tls mode")).toBeInTheDocument();
     });
 
-    it("reports a non-numeric number as 'Enter a number' and sends nothing", async () => {
+    it("takes numbers in number fields, and names a number's range when it is out of it", async () => {
       const user = userEvent.setup();
       renderCreate();
       await fillBasics(user);
-      await type(user, inSection("Querying", "Row cap"), "12abc");
+      expect(field("Port")).toHaveAttribute("type", "number");
+      const rowCap = inSection("Querying", "Row cap");
+      expect(rowCap).toHaveAttribute("type", "number");
+      await type(user, rowCap, "999999");
       await user.click(screen.getByRole("button", { name: "Create source" }));
-      expect(await screen.findByText("Enter a number.")).toBeInTheDocument();
+      expect(
+        await screen.findByText("Row cap is 1 to 50000.")
+      ).toBeInTheDocument();
       expect(post).not.toHaveBeenCalled();
-      await type(user, inSection("Querying", "Row cap"), "12");
-      expect(screen.queryByText("Enter a number.")).not.toBeInTheDocument();
     });
 
     it("clears the server's notice once a field is edited", async () => {

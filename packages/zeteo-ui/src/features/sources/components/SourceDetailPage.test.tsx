@@ -1,5 +1,5 @@
+import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen, waitFor } from "@testing-library/react";
 import { makeSource, SOURCE_ID } from "../testFixtures";
 import { SourceDetailPage } from "./SourceDetailPage";
 import { renderWithProviders } from "@/test/render";
@@ -9,11 +9,12 @@ import { SourceLayout } from "./SourceLayout";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
+const patch = vi.hoisted(() => vi.fn());
 const held = vi.hoisted(() => ({ permissions: ["zeteo.sources.write"] }));
 vi.mock("@tereo-io/react", async () =>
   (await import("@/test/authMock")).mockTereo({
     permissions: () => held.permissions,
-    api: { get, post },
+    api: { get, post, patch },
   })
 );
 
@@ -26,7 +27,6 @@ const renderDetail = () =>
         <Route index element={<SourceDetailPage />} />
         <Route path="tables" element={<p>tables page</p>} />
       </Route>
-      <Route path="/sources/:sourceId/edit" element={<p>edit page</p>} />
     </Routes>,
     { route: `/sources/${SOURCE_ID}` }
   );
@@ -36,6 +36,7 @@ describe("SourceDetailPage", () => {
     held.permissions = ["zeteo.sources.write"];
     get.mockReset().mockResolvedValue({ data: makeSource() });
     post.mockReset();
+    patch.mockReset().mockResolvedValue({ data: makeSource() });
   });
 
   it("shows the source, its tabs and its settings as returned", async () => {
@@ -276,11 +277,27 @@ describe("SourceDetailPage", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("Edit goes to the edit form", async () => {
+  it("shows the size of its schemas' tables", async () => {
+    renderDetail();
+    expect(await screen.findByText("4.8 MB")).toBeInTheDocument();
+  });
+
+  it("says Unknown when the size could not be read", async () => {
+    get.mockResolvedValue({ data: makeSource({ size_bytes: null }) });
+    renderDetail();
+    await screen.findByRole("heading", { name: "Orders DB" });
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+  });
+
+  it("Edit opens the source's settings in a dialog", async () => {
     const user = userEvent.setup();
     renderDetail();
     await user.click(await screen.findByRole("button", { name: "Edit" }));
-    expect(await screen.findByText("edit page")).toBeInTheDocument();
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Connection")).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/^Name/)).toHaveValue("Orders DB");
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   });
 
   it("shows a missing source's error", async () => {

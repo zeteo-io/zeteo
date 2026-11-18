@@ -66,6 +66,27 @@ describe("principals.search", () => {
   });
 });
 
+describe("principals.all", () => {
+  const t = useStubbedClient();
+
+  it("sends GET /v1/principals/all with no query and returns data and truncated", async () => {
+    const all = { ...found, truncated: false };
+    t.stub.respond(() => ({ body: all }));
+    expect(await t.client.principals.all()).toEqual(all);
+    const [request] = t.stub.requests;
+    expect(request.method).toBe("GET");
+    expect(request.path).toBe("/v1/principals/all");
+    expect(request.query).toEqual({});
+    expect(request.body).toBeUndefined();
+  });
+
+  it("sends the person's token under withToken", async () => {
+    t.stub.respond(() => ({ body: { data: [], truncated: true } }));
+    await t.client.withToken("p-1").principals.all();
+    expect(t.stub.requests[0].headers.authorization).toBe("Bearer p-1");
+  });
+});
+
 describe("principals.lookup", () => {
   const t = useStubbedClient();
   const refs = [
@@ -130,6 +151,7 @@ describe("principals when tereo is unreachable", () => {
       (c: typeof t.client) => c.principals.search({ type: "user", q: "ad" }),
     ],
     ["lookup", (c: typeof t.client) => c.principals.lookup(refs)],
+    ["all", (c: typeof t.client) => c.principals.all()],
   ] as const;
 
   it.each(calls)(

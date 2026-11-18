@@ -71,11 +71,40 @@ describe("RelationsPage", () => {
               name: "retired",
               missing_since: "2026-11-05T10:00:00.000Z",
             }),
+            // A second schema, so tables are named with theirs.
+            makeTable({
+              id: "a4444444-1c7a-4a53-9d0e-6a3b1f2c4d04",
+              schema_name: "archive",
+              name: "orders",
+            }),
           ],
           next_cursor: null,
         },
       };
     });
+  });
+
+  it("names tables without their schema when the source reads only one", async () => {
+    get.mockImplementation(async (url: string) => {
+      if (url === `/v1/sources/${SOURCE_ID}`) return { data: makeSource() };
+      if (url.endsWith("/relations")) {
+        return { data: { data: [discovered], next_cursor: null } };
+      }
+      return {
+        data: {
+          data: [
+            makeTable(),
+            makeTable({ id: CUSTOMERS_ID, name: "customers" }),
+          ],
+          next_cursor: null,
+        },
+      };
+    });
+    renderPage();
+    const row = (await screen.findByText("fk_orders_customers")).closest("tr")!;
+    expect(row).toHaveTextContent("orders");
+    expect(row).toHaveTextContent("customers");
+    expect(row).not.toHaveTextContent("public.");
   });
 
   it("lists each relation with resolved table names, columns, what it returns and origin", async () => {
@@ -282,7 +311,11 @@ describe("RelationsPage", () => {
     // Missing tables are not offered.
     await user.click(within(dialog).getByLabelText(/^From table/));
     await waitFor(() =>
-      expect(optionTexts()).toEqual(["public.orders", "public.customers"])
+      expect(optionTexts()).toEqual([
+        "public.orders",
+        "public.customers",
+        "archive.orders",
+      ])
     );
   });
 

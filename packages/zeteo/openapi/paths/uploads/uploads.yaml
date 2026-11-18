@@ -1,0 +1,74 @@
+/v1/uploads:
+  post:
+    tags: [Uploads]
+    summary: Upload a CSV or xlsx file to staging
+    description: |
+      Sends one file as `multipart/form-data` in the field `file`. Zeteo parses it once into a
+      staging area and returns a preview (tables, header row, inferred column types and samples) to
+      confirm or correct when creating an upload source (`POST /v1/sources` with `type: upload`) or
+      loading a table into one. A staging expires one hour
+      after creation and belongs to the uploader. Nothing is stored in a source until a staging is
+      used, or discarded with `DELETE /v1/uploads/{uploadId}`. A CSV is UTF-8 (with or without BOM) or UTF-16 LE/BE with a BOM; the delimiter is
+      detected among `,` `;` tab and `|`. A refused upload is answered at once and the connection is
+      closed.
+
+      Uploads are bounded per user: one who already holds `FILE_SOURCE_MAX_STAGINGS` (default 5)
+      unexpired stagings is refused with `429 too_many_stagings` (`retry_after` is when the oldest
+      expires), and one with `FILE_SOURCE_MAX_UPLOADS` (default 2) uploads in flight with `429
+      too_many_uploads`; both before the body is read. An xlsx workbook, read whole into memory,
+      waits for one of `FILE_SOURCE_XLSX_CONCURRENCY` (default 2) reading slots of the process; one
+      that waits over 30 seconds is `503 temporarily_unavailable`.
+
+      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+    operationId: createUpload
+    requestBody:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file: { type: string, format: binary }
+    responses:
+      '201':
+        description: The staged upload and its preview
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/file-sources/schemas.yaml#/UploadResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413':
+        description: Payload too large - `file_too_large`, over `FILE_SOURCE_MAX_BYTES` (`max_bytes`), or an xlsx whose content inflates past twice that (`max_uncompressed_bytes` too); nothing is left behind
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '415':
+        description: Unsupported - `unsupported_file_type` (only CSV and xlsx)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '422':
+        description: Unprocessable - `unsupported_encoding`, `invalid_character` (a NUL in a CSV cell; `row` names it), `row_too_long`, `too_many_rows`, `too_many_columns`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '429':
+        description: Too many requests - `too_many_stagings` or `too_many_uploads`, with `retry_after` and the `Retry-After` header
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

@@ -1,6 +1,11 @@
 import { IdSchema } from "../../../../../../utils/idSchema.js";
 import { noNul } from "../../../../../../utils/text.js";
 import { z } from "zod";
+import {
+  ColumnCorrectionSchema,
+  HeaderRowSchema,
+  TableKeySchema,
+} from "../../../schemas.js";
 
 export const TableParamsSchema = z.object({
   sourceId: IdSchema,
@@ -33,3 +38,11 @@ export const PatchTableSchema = z
   .refine((body) => Object.keys(body).length > 0, {
     message: "Give a description or columns to change",
   });
+
+/** An upload source's table, loaded again from a staging. */
+export const ReuploadTableSchema = z.strictObject({
+  staging_id: IdSchema,
+  key: TableKeySchema,
+  header_row: HeaderRowSchema.optional(),
+  columns: z.array(ColumnCorrectionSchema).max(1600).optional(),
+});

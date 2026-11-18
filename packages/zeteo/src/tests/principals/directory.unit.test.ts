@@ -11,7 +11,9 @@ import {
   groupCacheKey,
   groupOrganizationFromTereo,
   isServiceAccountFromTereo,
+  listAllFromTereo,
   lookupFromTereo,
+  MAX_DIRECTORY,
   MAX_USER_IDS_PER_REQUEST,
   searchFromTereo,
 } from "../../principals/directory.js";
@@ -419,6 +421,115 @@ describe("searchFromTereo", () => {
       await expect(searchFromTereo("user", "a", 1)).rejects.toThrow(
         /withAudit transaction/
       );
+    });
+  });
+});
+
+describe("listAllFromTereo", () => {
+  const C = "01a1d7a8-0000-7000-8000-00000000000c";
+  const G2 = "01a1d7a8-0000-7000-8000-0000000000a2";
+  const usersPage = (data: unknown[], nextCursor: string | null = null) => ({
+    data: { data, hasMore: nextCursor !== null, nextCursor, limit: 200 },
+  });
+  const groupsPage = (data: unknown[], nextCursor: string | null = null) => ({
+    data,
+    hasMore: nextCursor !== null,
+    nextCursor,
+    limit: 100,
+  });
+
+  it("reads users and groups page by page to the end, sorted by name with no name last", async () => {
+    expect(MAX_DIRECTORY).toBe(5000);
+    sdk.handleRequest
+      .mockResolvedValueOnce(
+        usersPage([user(A, { name: "zoe" }), user(B, { name: null })], "u2")
+      )
+      .mockResolvedValueOnce(usersPage([user(C, { name: "Bea" })]));
+    sdk.listGroups
+      .mockResolvedValueOnce(groupsPage([group(G, { name: "analysts" })], "g2"))
+      .mockResolvedValueOnce(groupsPage([group(G2, { name: "Ops" })]));
+    const out = await listAllFromTereo();
+    expect(out.truncated).toBe(false);
+    expect(out.principals.map((p) => p.id)).toEqual([G, C, G2, A, B]);
+    expect(sdk.handleRequest.mock.calls.map(([c]) => c.params)).toEqual([
+      { limit: 200 },
+      { limit: 200, cursor: "u2" },
+    ]);
+    expect(sdk.handleRequest.mock.calls[0]![0]).toMatchObject({
+      method: "GET",
+      url: "/v1/admin/users",
+    });
+    expect(sdk.listGroups.mock.calls.map(([q]) => q)).toEqual([
+      { limit: 100 },
+      { limit: 100, cursor: "g2" },
+    ]);
+  });
+
+  it("stops at the cap per type and says truncated", async () => {
+    sdk.handleRequest.mockResolvedValueOnce(
+      usersPage([user(A), user(B)], "u2")
+    );
+    sdk.listGroups.mockResolvedValueOnce(groupsPage([group(G)]));
+    const out = await listAllFromTereo(undefined, 2);
+    expect(out.truncated).toBe(true);
+    expect(sdk.handleRequest).toHaveBeenCalledTimes(1);
+    expect(sdk.handleRequest.mock.calls[0]![0].params).toEqual({ limit: 2 });
+    expect(out.principals.filter((p) => p.type === "user")).toHaveLength(2);
+
+    sdk.handleRequest.mockResolvedValueOnce(usersPage([user(A)]));
+    sdk.listGroups.mockResolvedValueOnce(
+      groupsPage([group(G), group(G2)], "g2")
+    );
+    expect((await listAllFromTereo(undefined, 2)).truncated).toBe(true);
+
+    sdk.handleRequest.mockResolvedValueOnce(usersPage([user(A), user(B)]));
+    sdk.listGroups.mockResolvedValueOnce(groupsPage([group(G)]));
+    expect((await listAllFromTereo(undefined, 2)).truncated).toBe(false);
+  });
+
+  it("with a scope, asks for human users only and the global and organization's groups, de-duplicated", async () => {
+    sdk.handleRequest.mockResolvedValueOnce(usersPage([user(A)]));
+    sdk.listGroups
+      .mockResolvedValueOnce(groupsPage([group(G)]))
+      .mockResolvedValueOnce(groupsPage([group(G), group(G2, { name: "B" })]));
+    const out = await listAllFromTereo({ organizationId: "org-1" });
+    expect(sdk.handleRequest.mock.calls[0]![0].params).toEqual({
+      limit: 200,
+      "filter[userType]": "human",
+    });
+    expect(sdk.listGroups.mock.calls.map(([q]) => q)).toEqual([
+      { limit: 100, organizationId: "global" },
+      { limit: 100, organizationId: "org-1" },
+    ]);
+    expect(out.principals.map((p) => p.id)).toEqual([A, G, G2]);
+
+    sdk.handleRequest.mockResolvedValueOnce(usersPage([]));
+    sdk.listGroups.mockResolvedValueOnce(groupsPage([]));
+    await listAllFromTereo({ organizationId: null });
+    expect(sdk.listGroups.mock.calls.at(-1)![0]).toEqual({
+      limit: 100,
+      organizationId: "global",
+    });
+  });
+
+  it("a failed page is tereo_unreachable, with nothing personal logged", async () => {
+    const error = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    sdk.handleRequest
+      .mockResolvedValueOnce(usersPage([user(A)], "u2"))
+      .mockRejectedValueOnce(axiosError(500));
+    sdk.listGroups.mockResolvedValue(groupsPage([]));
+    await expect(listAllFromTereo()).rejects.toBeInstanceOf(
+      TereoUnreachableError
+    );
+    const logged = JSON.stringify(error.mock.calls, (_, v) =>
+      v instanceof Error ? v.message : v
+    );
+    expect(logged).not.toContain("example.com");
+  });
+
+  it("is refused inside a transaction", async () => {
+    await runInTransactionScope(async () => {
+      await expect(listAllFromTereo()).rejects.toThrow(/withAudit transaction/);
     });
   });
 });

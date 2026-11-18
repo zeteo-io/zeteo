@@ -7,42 +7,66 @@ through the same query language, planner, limits, saved queries and exports as a
 under grants. Only uploads exist; a source never refreshes by itself, and changes only when its
 owner uploads again. Nothing else (Google Sheets, SharePoint, syncing) exists yet.
 
-File Sources are **off** until `FILE_SOURCES_READER_URL` is set. While it is unset every route
-under `/v1/file-sources` answers `404 file_sources_not_configured`, and the UI hides the tab.
+File Sources are **off** until `FILE_SOURCES_READER_URL` is set. While it is unset `/v1/uploads`,
+`POST /v1/sources` with `type: "upload"` and the upload-only routes on an upload source answer
+`404 file_sources_not_configured`, and the UI hides the tab.
+
+There is one sources API: an upload source is read, listed, renamed, granted and described through
+`/v1/sources` like a database source ([sources.md](sources.md), [catalog.md](catalog.md)), and a
+few routes there apply to upload sources only. Only the staging of a file has routes of its own,
+`/v1/uploads`.
 
 ## Permissions
 
 | Who | Can |
 |-----|-----|
-| `zeteo.file_sources.write` (with `zeteo.data.read`, which every file-source route needs) | upload, create file sources, and manage, grant and describe the ones they own; not organization-assignable; in `zeteo_admin` |
-| `zeteo.sources.read` | list every file source (`?scope=all`, with its owner) |
-| `zeteo.sources.write` | change, transfer and delete any file source |
+| `zeteo.file_sources.write` (with `zeteo.data.read`, which an owner always needs) | upload, create upload sources, list their own (`GET /v1/sources?owner_id=me`), and manage, grant and describe the ones they own; not organization-assignable; in `zeteo_admin` |
+| `zeteo.sources.read` | list and read every source, upload sources included (`GET /v1/sources`, with `type` and `owner_id` filters) |
+| `zeteo.sources.write` | change, transfer and delete any upload source, and change its limits |
 | `zeteo.grants.write` | grant on any of them, as on any table |
 
 ## The API
 
-| Route | Result |
-|-------|--------|
-| `POST /v1/file-sources/uploads` (multipart, field `file`, one file) | `201 { staging_id, expires_at, tables }`: the preview |
-| `POST /v1/file-sources` `{ staging_id, name, slug?, tables: [{ key, name?, header_row?, columns? }] }` | `201`, the file source |
-| `GET /v1/file-sources` (`scope=mine\|all`) | the file sources |
-| `GET`, `PATCH` (`name`), `DELETE /v1/file-sources/:id` | the file source; `DELETE` drops its data |
-| `POST /v1/file-sources/:id/tables` | add tables from a staging |
-| `PUT`, `DELETE /v1/file-sources/:id/tables/:tableId` | re-upload a table from a staging; remove a table |
-| `PATCH /v1/file-sources/:id/tables/:tableId/columns/:columnId` (`type`, `name`, `description`) | change a column |
-| `POST /v1/file-sources/:id/transfer` `{ user_id, keep_access? }` | transfer ownership |
+| Route | Who | Result |
+|-------|-----|--------|
+| `POST /v1/uploads` (multipart, field `file`, one file) | `zeteo.file_sources.write` | `201 { staging_id, expires_at, tables }`: the preview |
+| `DELETE /v1/uploads/:uploadId` | whoever staged it | `204`; the staging's tables are dropped and its place under the cap freed. Anyone else's, an expired or an unknown id is `404 staging_not_found` |
+| `POST /v1/sources` `{ type: "upload", staging_id, name, slug?, tables: [{ key, name?, header_row?, columns? }] }` | `zeteo.file_sources.write` | `201`, the source |
+| `GET /v1/sources?owner_id=me` (also `type=upload`) | the owner, or `zeteo.sources.read` | the caller's own sources |
+| `GET`, `PATCH` (`name`), `DELETE /v1/sources/:id` | the owner, or `zeteo.sources.read` / `.write` | the source; `DELETE` drops its data |
+| `POST /v1/sources/:id/transfer` `{ user_id, keep_access? }` | the owner, or `zeteo.sources.write` | transfer ownership |
+| `POST /v1/sources/:id/tables` `{ staging_id, tables }` | the owner, or `zeteo.sources.write` | `201`; add tables from a staging |
+| `PUT /v1/sources/:id/tables/:tableId` `{ staging_id, key, header_row?, columns? }`, `DELETE` | the owner, or `zeteo.sources.write` | re-upload a table from a staging; remove a table |
+| `PATCH /v1/sources/:id/tables/:tableId/columns/:columnId` (`type`, `name`, `description`) | the owner, or `zeteo.sources.write` | change a column |
 
-The reference is `openapi/openapi.yaml`; the SDK has the same calls.
+Each change answers with the source (`DELETE`s with `204`); its tables and columns are read through
+`GET /v1/sources/:id/tables` and `…/tables/:tableId`, where an upload source's table carries
+`row_count` (the rows loaded) and `last_loaded_at` and its columns `original_name` (`last_loaded_at`
+and `original_name` null on a database source, whose `row_count` is the database's estimate at the
+last refresh: [catalog.md](catalog.md)).
+On an upload source the source's `size_bytes` is what it stores now (0 once deleted, never
+measured: `size_measured_at` is null), and `share_count` is how many people and groups its tables
+are granted to, the owner grants not counted.
+
+The owner is the source's `owner_id`, holding `zeteo.file_sources.write` and `zeteo.data.read`.
+Anyone who is neither the owner nor holds the admin permission a route needs gets the very `403
+forbidden` of a caller without it, whether the source exists or not. On a database source the
+upload-only routes (`DELETE`, `transfer`, adding, re-uploading and removing tables, changing a
+column) answer `409 not_an_upload_source`; on an upload source the database-only ones (`archive`,
+`test`, `refresh`, and `PATCH` with `settings` or `schemas`) answer `409 not_a_database_source`.
+
+The reference is `openapi/openapi.yaml`; the SDK has the same calls (`client.sources`, and
+`client.uploads.create` and `.discard`).
 
 ## The upload flow
 
-1. **Stage.** `POST /uploads` streams the file (never held whole in memory, except an `.xlsx`, see
+1. **Stage.** `POST /v1/uploads` streams the file (never held whole in memory, except an `.xlsx`, see
    below) into a staging table in `zeteo_file_staging`, a schema the reader role cannot read. The
    answer is a preview: one table for a CSV, one per worksheet and per named Excel table for an
    `.xlsx`. Each has its detected header row, a proposed name, row count, parse warnings, and per
    column its normalized name, original header, inferred type and up to 10 sample values. The file
    is judged by its content, not its extension (`415 unsupported_file_type`).
-2. **Confirm.** `POST /v1/file-sources` (or add tables, or re-upload) names the staging and any
+2. **Confirm.** `POST /v1/sources` with `type: "upload"` (or add tables, or re-upload) names the staging and any
    corrections: which tables to keep, table and column names, the header row (a number, or no
    header), column types. Zeteo builds the typed table from staging with SQL casts. A value that
    does not cast fails with `cast_failed` naming the table, column and the first rows (`rows`,
@@ -50,7 +74,8 @@ The reference is `openapi/openapi.yaml`; the SDK has the same calls.
    created.
 
 A staging belongs to the person who uploaded it, and expires **one hour** after creation (another
-person's or an expired id is `404 staging_not_found`). The housekeeping job
+person's or an expired id is `404 staging_not_found`); its uploader may discard it sooner with
+`DELETE /v1/uploads/:uploadId`, which frees its place under `FILE_SOURCE_MAX_STAGINGS`. The housekeeping job
 ([retention and housekeeping](querying.md#retention-and-housekeeping)) deletes expired stagings with their tables, and sweeps
 staging tables that have no row.
 
@@ -145,7 +170,8 @@ usual `saved_query_not_accessible`.
   grant, including one an admin made first, cannot be removed or narrowed while it is flagged.
 - An owner lists, creates, changes and removes grants on their own tables, and declares and removes
   relations between tables of the source and writes table and column descriptions, with the
-  endpoints an admin uses ([grants.md](grants.md), [catalog.md](catalog.md)). Another person's file
+  endpoints an admin uses ([grants.md](grants.md), [catalog.md](catalog.md)), and reads the source
+  itself at `GET /v1/sources/:sourceId` ([sources.md](sources.md)). Another person's file
   source, or a database source, is `403 forbidden` with no hint the table exists.
 - Groups an owner grants to must be global or of their signed-in organization: otherwise `422
   group_not_allowed`. (Saved queries' sharing answers the same rule as `400 invalid_share`.)
@@ -160,8 +186,9 @@ usual `saved_query_not_accessible`.
   the ordinary no-access behaviour. The owner grants lose their `owner_grant` flag in the same
   transaction, so an admin with `zeteo.grants.write` can remove them like any other grant.
 - **Limits** (time limit, row caps, concurrency, whether exports are allowed) are an admin's, as
-  for a database source: `PATCH /v1/sources/:id` with `zeteo.sources.write` takes those fields for
-  a file source (anything else is `409 file_source_managed_elsewhere`); the admin UI shows a
+  for a database source: `PATCH /v1/sources/:id` with `zeteo.sources.write` takes those fields and
+  `name` for a file source (`settings` or `schemas` is `409 not_a_database_source`; an owner
+  sending a limit is `403 forbidden`); the admin UI shows a
   Limits dialog on the file source's page. A file source starts with exports off.
 
 Changes are audited (`zeteo.file_source.created`, `.updated`, `.reuploaded`, `.transferred`,
@@ -202,8 +229,8 @@ Be aware that by default `PUBLIC` holds `CONNECT` on every database of the serve
 can sign in to the others (it still sees nothing there that `PUBLIC` cannot). If another database
 holds anything `PUBLIC` can read, `REVOKE CONNECT ON DATABASE <other> FROM PUBLIC` there.
 
-**Turning File Sources off.** With `FILE_SOURCES_READER_URL` unset, the `/v1/file-sources` routes
-answer `404 file_sources_not_configured`, and so does a query, export or MCP query of an `upload`
+**Turning File Sources off.** With `FILE_SOURCES_READER_URL` unset, `/v1/uploads`, an upload
+source's create and its upload-only changes answer `404 file_sources_not_configured`, and so does a query, export or MCP query of an `upload`
 source that still exists; nothing else changes. Should the URL become unusable at run time (an
 unsupported `sslmode`, which start-up refuses), those calls answer `503 file_sources_misconfigured`
 and the detail is logged.

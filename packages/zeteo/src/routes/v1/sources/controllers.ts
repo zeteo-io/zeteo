@@ -1,19 +1,45 @@
+import { mayActAsOwner, lacking } from "../../../file-sources/ownership.js";
 import { validateBody, validateQuery } from "../../../utils/validateReq.js";
+import { presentSource, presentSources } from "../../../sources/present.js";
 import { encodeCursor, parseCursor } from "../../../utils/cursor.js";
 import { createSource as create } from "../../../sources/service.js";
 import { refreshAfterChange } from "../../../catalog/refresh.js";
+import { hasPermission } from "../../../utils/permissions.js";
+import { storedType } from "../../../sources/types.js";
 import { callerOf } from "../../../middleware/auth.js";
-import { sourceView } from "../../../views/source.js";
 import type { Request, Response } from "express";
 import { db } from "../../../utils/db/index.js";
 import {
+  DATA_READ,
+  FILE_SOURCES_WRITE,
+  SOURCES_READ,
+  SOURCES_WRITE,
+} from "../../../definitions/tereoDeclaration.js";
+import {
+  assertFileSourcesOn,
+  createFileSource,
+} from "../../../file-sources/service.js";
+import {
   CreateSourceSchema,
+  CreateUploadSourceSchema,
   ListSourcesQuerySchema,
   SourceCursorSchema,
 } from "./schemas.js";
 
+/**
+ * Every source for `zeteo.sources.read`; with `owner_id=me`, also an owner
+ * holding `zeteo.file_sources.write` (and `zeteo.data.read`), who sees only
+ * their own.
+ */
 export const listSources = async (req: Request, res: Response) => {
   const query = validateQuery(ListSourcesQuerySchema, req);
+  const caller = callerOf(req);
+  if (
+    !hasPermission(caller.permissions, SOURCES_READ) &&
+    !(query.owner_id === "me" && mayActAsOwner(caller))
+  ) {
+    throw lacking(SOURCES_READ);
+  }
   let after: { createdAt: Date; id: string } | undefined;
   if (query.cursor !== undefined) {
     const [createdAt, id] = parseCursor(query.cursor, SourceCursorSchema);
@@ -23,10 +49,12 @@ export const listSources = async (req: Request, res: Response) => {
     includeArchived: query.include_archived,
     limit: query.limit,
     after,
+    type: query.type === undefined ? undefined : storedType(query.type),
+    ownerId: query.owner_id === "me" ? caller.userId : query.owner_id,
   });
   const last = page.rows.at(-1);
   res.status(200).json({
-    data: page.rows.map(sourceView),
+    data: await presentSources(page.rows),
     next_cursor:
       page.hasMore && last
         ? encodeCursor([last.createdAt.toISOString(), last.id])
@@ -34,11 +62,35 @@ export const listSources = async (req: Request, res: Response) => {
   });
 };
 
+const isUpload = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  (body as { type?: unknown }).type === "upload";
+
+/**
+ * A database source for `zeteo.sources.write`; an upload source (`type:
+ * "upload"`, from the caller's staging) for `zeteo.file_sources.write` with
+ * `zeteo.data.read`.
+ */
 export const createSource = async (req: Request, res: Response) => {
+  const caller = callerOf(req);
+  if (isUpload(req.body)) {
+    assertFileSourcesOn();
+    for (const permission of [DATA_READ, FILE_SOURCES_WRITE]) {
+      if (!hasPermission(caller.permissions, permission)) {
+        throw lacking(permission);
+      }
+    }
+    const { type: _, ...input } = validateBody(CreateUploadSourceSchema, req);
+    res.status(201).json(await createFileSource(caller, input));
+    return;
+  }
+  if (!hasPermission(caller.permissions, SOURCES_WRITE)) {
+    throw lacking(SOURCES_WRITE);
+  }
   const body = validateBody(CreateSourceSchema, req);
-  const actorId = callerOf(req).userId;
-  const created = await create(body, actorId);
-  await refreshAfterChange(created.id, actorId);
+  const created = await create(body, caller.userId);
+  await refreshAfterChange(created.id, caller.userId);
   const row = (await db.sources.findById(created.id)) ?? created;
-  res.status(201).json(sourceView(row));
+  res.status(201).json(await presentSource(row));
 };

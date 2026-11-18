@@ -1,12 +1,12 @@
-import { fileSourceHref } from "@/features/file-sources/components/labels";
+import { sourceHref, sourceTypeName } from "./sourceLabels";
 import { formatRelative } from "@/utils/formatRelative";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PrincipalLabel } from "@/features/principals";
+import { fromPage, SOURCES_BACK } from "./sourceBack";
 import { useAllSources } from "../api/useAllSources";
 import { PageHeader } from "@/components/PageHeader";
 import { Link, useNavigate } from "react-router-dom";
 import { formatDate } from "@/utils/formatDate";
-import { sourceTypeName } from "./sourceLabels";
 import { SourceStatus } from "./SourceStatus";
 import type { Source } from "../api/types";
 import { useAuth } from "@tereo-io/react";
@@ -101,11 +101,8 @@ export const SourcesPage = () => {
                 <span className="z-sources-name">
                   <TableCellLink
                     as={Link}
-                    to={
-                      source.type === "upload"
-                        ? fileSourceHref(source.id)
-                        : `/sources/${source.id}`
-                    }
+                    to={sourceHref(source.id)}
+                    state={fromPage(SOURCES_BACK)}
                   >
                     {source.name}
                   </TableCellLink>

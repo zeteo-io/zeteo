@@ -88,13 +88,16 @@ describe("LimitForm", () => {
       await user.click(
         screen.getByRole("button", { name: "Choose principal" })
       );
+      // A number field; its range is checked by the form, with a message.
+      expect(screen.getByLabelText("Exports at once")).toHaveAttribute(
+        "type",
+        "number"
+      );
       await user.type(screen.getByLabelText("Queries at once"), "101");
-      await user.type(screen.getByLabelText("Exports at once"), "x");
       await user.click(screen.getByRole("button", { name: "Create limit" }));
       expect(
         screen.getByText("Queries at once is 1 to 100.")
       ).toBeInTheDocument();
-      expect(screen.getByText("Enter a number.")).toBeInTheDocument();
       expect(createCalls()).toHaveLength(0);
     });
 

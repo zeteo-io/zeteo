@@ -10,3 +10,4 @@ export {
   type ColumnChoice,
 } from "./components/ColumnChooser";
 export type { Grant } from "./api/types";
+export { SourceGrants, type ShareableTable } from "./components/SourceGrants";

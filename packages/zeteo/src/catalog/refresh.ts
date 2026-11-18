@@ -1,4 +1,3 @@
-import type { SchemaSnapshot, SnapshotColumn } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { withSourceConnection } from "../sources/pools.js";
@@ -8,6 +7,12 @@ import { withAudit } from "../utils/transaction.js";
 import { db, prisma } from "../utils/db/index.js";
 import { lockSourceCatalog } from "./lock.js";
 import { logger } from "../utils/logger.js";
+import type {
+  SchemaSnapshot,
+  SnapshotColumn,
+  SourceConnection,
+  TableRowCount,
+} from "../adapters/types.js";
 import {
   columnPrefixOf,
   forwardName,
@@ -15,7 +20,7 @@ import {
   uniqueName,
 } from "./relationNames.js";
 import {
-  FileSourceManagedElsewhereError,
+  NotADatabaseSourceError,
   HostNotAllowedError,
   NotFoundError,
   SourceArchivedError,
@@ -75,11 +80,55 @@ const relationKey = (
   toMany: boolean
 ) => `${constraintName}\u0000${keyTableId}\u0000${toMany}`;
 
-const readSnapshot = async (row: Source): Promise<SchemaSnapshot> => {
+/** What one read of a source finds: its schema, and its size and tables' rows when it tells. */
+interface SourceRead {
+  snapshot: SchemaSnapshot;
+  /** Null when the source would not tell; the last measurement is kept then. */
+  size: { bytes: number; measuredAt: Date } | null;
+  /** The estimated rows of its tables; null when the source would not tell, and the last ones are kept. */
+  rowCounts: TableRowCount[] | null;
+}
+
+/** The size, or null: a failure here never fails the refresh. */
+const readSize = async (
+  conn: SourceConnection,
+  row: Source
+): Promise<SourceRead["size"]> => {
   try {
-    return await withSourceConnection(row.id, (conn) =>
-      conn.readSchema(row.schemas)
+    const bytes = await conn.readSize(row.schemas);
+    return bytes === null ? null : { bytes, measuredAt: new Date() };
+  } catch (err) {
+    logger.warn({ err, source_id: row.id }, "reading the source's size failed");
+    return null;
+  }
+};
+
+/** The tables' estimated rows, or null: a failure here never fails the refresh. */
+const readRowCounts = async (
+  conn: SourceConnection,
+  row: Source
+): Promise<SourceRead["rowCounts"]> => {
+  try {
+    return await conn.readRowCounts(row.schemas);
+  } catch (err) {
+    logger.warn(
+      { err, source_id: row.id },
+      "reading the source's row counts failed"
     );
+    return null;
+  }
+};
+
+const readSource = async (row: Source): Promise<SourceRead> => {
+  try {
+    return await withSourceConnection(row.id, async (conn) => {
+      const snapshot = await conn.readSchema(row.schemas);
+      return {
+        snapshot,
+        size: await readSize(conn, row),
+        rowCounts: await readRowCounts(conn, row),
+      };
+    });
   } catch (err) {
     if (
       err instanceof SourceUnreachableError ||
@@ -126,11 +175,16 @@ const columnChanged = (
 /**
  * Writes the snapshot into the catalogue in the caller's transaction and
  * returns what changed. Nothing is deleted, and no id or description changes.
+ * Every table in the snapshot gets its estimated rows from `rowCounts`, or
+ * null when it has none there; a missing table keeps the last estimate it had.
+ * When `rowCounts` is null (the source would not tell), every table keeps
+ * its last estimate: a passing failure does not blank them.
  */
 const applySnapshot = async (
   tx: Prisma.TransactionClient,
   sourceId: string,
-  snapshot: SchemaSnapshot
+  snapshot: SchemaSnapshot,
+  rowCounts: TableRowCount[] | null
 ): Promise<RefreshSummary> => {
   const now = new Date();
   const summary = emptySummary();
@@ -194,6 +248,30 @@ const applySnapshot = async (
   const tableIdByKey = new Map(
     tables.map((t) => [tableKey(t.schemaName, t.name), t.id])
   );
+
+  // --- estimated rows (kept as they were when the source would not tell) ---
+  const rowsByKey = new Map(
+    (rowCounts ?? []).map((c) => [tableKey(c.schemaName, c.name), c.rows])
+  );
+  const counted = (rowCounts === null ? [] : snapshot.tables).map((t) => {
+    const key = tableKey(t.schemaName, t.name);
+    const rows = rowsByKey.get(key);
+    return {
+      id: tableIdByKey.get(key)!,
+      rows: rows === undefined ? null : String(rows),
+    };
+  });
+  for (const rows of chunks(counted)) {
+    await tx.$executeRaw`
+      UPDATE "zeteo"."source_tables" AS t
+         SET "row_count" = v."row_count"::int8
+        FROM unnest(
+               ${rows.map((r) => r.id)}::uuid[],
+               ${rows.map((r) => r.rows)}::text[]
+             ) AS v("id", "row_count")
+       WHERE t."id" = v."id"
+         AND t."row_count" IS DISTINCT FROM v."row_count"::int8`;
+  }
 
   // --- columns ---
   const existingColumns = await tx.sourceColumn.findMany({
@@ -578,7 +656,9 @@ const applySnapshot = async (
  * old target, so after taking the lock the write checks that
  * `last_refreshed_at` and `updated_at` still have the values seen before the
  * read, and reads again when either does not. The catalogue therefore ends
- * matching the newest read of the current settings.
+ * matching the newest read of the current settings. The same read measures
+ * the size of the source's tables, kept with the source, and each table's
+ * estimated rows, kept with the table (null when the source would not tell).
  */
 export const refreshSource = async (
   sourceId: string,
@@ -588,9 +668,9 @@ export const refreshSource = async (
     const row = await db.sources.findById(sourceId);
     if (!row) throw new NotFoundError("Source not found");
     // A file source's catalogue follows its uploads; there is nothing to read.
-    if (isFileSource(row)) throw new FileSourceManagedElsewhereError();
+    if (isFileSource(row)) throw new NotADatabaseSourceError();
     if (row.archivedAt) throw new SourceArchivedError();
-    const snapshot = await readSnapshot(row);
+    const { snapshot, size, rowCounts } = await readSource(row);
     const lastRound = round >= MAX_READ_ROUNDS;
 
     const summary = await withAudit(
@@ -607,14 +687,23 @@ export const refreshSource = async (
         ) {
           return null;
         }
-        const result = await applySnapshot(tx, sourceId, snapshot);
+        const result = await applySnapshot(tx, sourceId, snapshot, rowCounts);
         // Strictly later than the last value, so the check above notices every apply.
         const next = new Date(
           Math.max(Date.now(), (current.lastRefreshedAt?.getTime() ?? 0) + 1)
         );
         await tx.source.update({
           where: { id: sourceId },
-          data: { status: "active", lastRefreshedAt: next },
+          data: {
+            status: "active",
+            lastRefreshedAt: next,
+            // Kept as it was when the source would not tell: the last
+            // measurement stands, dated by when it was taken.
+            ...(size && {
+              sizeBytes: BigInt(size.bytes),
+              sizeMeasuredAt: size.measuredAt,
+            }),
+          },
         });
         audit({
           action: AUDIT_EVENTS.sourceRefreshed,

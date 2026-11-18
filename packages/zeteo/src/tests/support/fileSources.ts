@@ -85,6 +85,7 @@ export const seedUploadSource = async ({
               name: table.name,
               kind: "table",
               lastSyncedAt: new Date(),
+              rowCount: table.rows.length,
               columns: {
                 create: table.columns.map((c, i) => ({
                   name: c.name,
@@ -151,14 +152,23 @@ export const stageFile = async (
 export const csvOf = (header: string[], rows: string[][]): string =>
   [header, ...rows].map((r) => r.join(",")).join("\n");
 
-/** A `/v1/file-sources` call on the app at `baseUrl`. */
-export const fileSourcesCall = (
+/** A `/v1/sources` call on the app at `baseUrl`. */
+export const sourcesCall = (
   baseUrl: string,
   method: string,
   path: string,
   token: string,
   body?: unknown
-) => fetchJson(method, `${baseUrl}/v1/file-sources${path}`, token, body);
+) => fetchJson(method, `${baseUrl}/v1/sources${path}`, token, body);
+
+/** A `/v1/uploads` call on the app at `baseUrl`. */
+export const uploadsCall = (
+  baseUrl: string,
+  method: string,
+  path: string,
+  token: string,
+  body?: unknown
+) => fetchJson(method, `${baseUrl}/v1/uploads${path}`, token, body);
 
 /** Whether the file source's `zf_` schema exists. */
 export const schemaExists = async (sourceId: string): Promise<boolean> => {
@@ -194,9 +204,40 @@ export const removeFileSourcesOf = async (ownerIds: string[]) => {
 };
 
 /**
- * A file source of `ownerId` made through `POST /v1/file-sources` on the app
- * at `baseUrl` from `csv`, keeping its one table as `table`; throws unless
- * it is created.
+ * The tables of a file source as the catalogue holds them, by name, missing
+ * ones included and flagged, with their columns in order: what a test checks
+ * after a change, which answers with the source alone.
+ */
+export const fileTablesOf = async (sourceId: string) => {
+  const tables = await prisma.sourceTable.findMany({
+    where: { sourceId },
+    orderBy: { name: "asc" },
+    include: { columns: { orderBy: { position: "asc" } } },
+  });
+  return tables.map((t) => ({
+    id: t.id,
+    name: t.name,
+    description: t.description,
+    row_count: Number(t.rowCount ?? 0),
+    last_synced_at: t.lastSyncedAt?.toISOString() ?? null,
+    missing: t.missingSince !== null,
+    columns: t.columns.map((c) => ({
+      id: c.id,
+      name: c.name,
+      original_name: c.originalName,
+      type: c.type,
+      description: c.description,
+      missing: c.missingSince !== null,
+    })),
+  }));
+};
+
+export type FileTable = Awaited<ReturnType<typeof fileTablesOf>>[number];
+
+/**
+ * A file source of `ownerId` made through `POST /v1/sources` (`type:
+ * "upload"`) on the app at `baseUrl` from `csv`, keeping its one table as
+ * `table`; throws unless it is created. Its `tables` are `fileTablesOf`'s.
  */
 export const createFileSource = async (
   baseUrl: string,
@@ -209,7 +250,8 @@ export const createFileSource = async (
   }: { name?: string; table?: string } = {}
 ) => {
   const staged = await stageFile(ownerId, csv);
-  const res = await fileSourcesCall(baseUrl, "POST", "", token, {
+  const res = await sourcesCall(baseUrl, "POST", "", token, {
+    type: "upload",
     staging_id: staged.stagingId,
     name,
     tables: [{ key: "csv", name: table }],
@@ -217,29 +259,18 @@ export const createFileSource = async (
   if (res.status !== 201) {
     throw new Error(`file source not created: ${JSON.stringify(res.body)}`);
   }
-  return res.body as FileSourceBody;
+  const body = res.body as UploadSourceBody;
+  return { ...body, tables: await fileTablesOf(body.id) };
 };
 
-export interface FileSourceBody {
+/** The fields of a source's view the file-source tests read. */
+export interface UploadSourceBody {
   id: string;
   slug: string;
   name: string;
+  type: string;
   owner_id: string;
   archived_at: string | null;
-  stored_bytes: number;
-  tables: {
-    id: string;
-    name: string;
-    row_count: number;
-    missing: boolean;
-    last_synced_at: string | null;
-    columns: {
-      id: string;
-      name: string;
-      original_name: string | null;
-      type: string;
-      description: string | null;
-      missing: boolean;
-    }[];
-  }[];
+  size_bytes: number;
+  share_count: number;
 }

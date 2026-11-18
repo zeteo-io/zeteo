@@ -1,0 +1,68 @@
+/v1/sources/{sourceId}/transfer:
+  post:
+    tags: [Sources]
+    summary: Transfer an upload source to another user
+    description: |
+      Makes `user_id` the owner, who is checked as a saved-query transfer target is (a known
+      tereo user, not a service account, not the owner; `400 invalid_transfer`). The owner grants
+      move to them (a grant they had becomes the owner grant), and the previous owner keeps an
+      ordinary `all_columns` grant unless `keep_access` is false. The new owner's quota must fit
+      the source (`409 quota_exceeded`). A `zeteo.file_source.transferred` audit entry is written.
+
+      **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+      `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+      not, gets the same `403 forbidden`.
+
+      **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+      source is `409 source_archived`; `404 file_sources_not_configured` while
+      `FILE_SOURCES_READER_URL` is unset.
+    operationId: transferSource
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/file-sources/schemas.yaml#/TransferSourceRequest'
+    responses:
+      '200':
+        description: The source
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/sources/schemas.yaml#/Source'
+      '400':
+        description: Bad request - `invalid_request`, or `invalid_transfer`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `not_found`, or `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `not_an_upload_source`, `source_archived` (the upload source is deleted), or `quota_exceeded`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503':
+        description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

@@ -7,6 +7,10 @@ import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
+  createThrowawayDb,
+  type ThrowawayDb,
+} from "../../../../../support/throwawayDb.js";
+import {
   auditRows,
   readToken,
   removeSources,
@@ -84,6 +88,9 @@ describe("/v1/sources/:sourceId/tables", () => {
         description: null,
         last_seen_at: expect.any(String),
         missing_since: null,
+        // Never analyzed: the live-row count stands in for an estimate.
+        row_count: 2,
+        last_loaded_at: null,
       });
       expect(
         res.body.data.find((t: { name: string }) => t.name === "paid_orders")
@@ -176,6 +183,7 @@ describe("/v1/sources/:sourceId/tables", () => {
         position: 1,
         is_primary_key: true,
         description: null,
+        original_name: null,
         missing_since: null,
       });
       expect(
@@ -332,6 +340,46 @@ describe("/v1/sources/:sourceId/tables", () => {
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("source_archived");
       expect((await call("GET", `/${id}/tables/${table}`)).status).toBe(200);
+    });
+  });
+
+  describe("row_count on a database source", () => {
+    let fixture: ThrowawayDb;
+    afterAll(async () => {
+      await fixture?.drop();
+    });
+
+    it("is the database's estimate at the last refresh, in the list and the detail; null where it has none", async () => {
+      fixture = await createThrowawayDb();
+      await fixture.run("ANALYZE sales.orders");
+      const res = await call(
+        "POST",
+        "",
+        writeToken(),
+        sourceBody(sourceSettings("ro", { database: fixture.name }), {
+          schemas: ["sales"],
+        })
+      );
+      expect(res.status).toBe(201);
+      created.push(res.body.id);
+      const list = await call("GET", `/${res.body.id}/tables`, readToken());
+      const byName = new Map(
+        (list.body.data as { name: string; row_count: number | null }[]).map(
+          (t) => [t.name, t.row_count]
+        )
+      );
+      expect(byName.get("orders")).toBe(12);
+      // Never analyzed: its live-row count instead of the planner's estimate.
+      expect(byName.get("accounts")).toBe(2);
+      expect(byName.get("paid_orders")).toBeNull();
+      const orders = await tableId(res.body.id, "orders");
+      const one = await call(
+        "GET",
+        `/${res.body.id}/tables/${orders}`,
+        readToken()
+      );
+      expect(one.status).toBe(200);
+      expect(one.body.row_count).toBe(12);
     });
   });
 });

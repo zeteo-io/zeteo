@@ -30,6 +30,12 @@ info:
     relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
     `403 forbidden`, before the body is validated or any source is looked up.
 
+    An upload source (`type: upload`, a file source made from an uploaded CSV or xlsx while File
+    Sources are on) belongs to the user who made it. Its owner, holding `zeteo.file_sources.write`
+    and `zeteo.data.read`, reads, renames, transfers and deletes it, changes its tables and columns
+    and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
+    as a source they may not see does. See `docs/file-sources.md`.
+
     ## Sources
 
     A source's `settings` depend on its `type` and are write-only in part: the response carries
@@ -50,8 +56,8 @@ info:
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
     replacing and removing them needs `zeteo.grants.write`, which includes read. The same
     permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
-    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller)
-    and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
+    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller),
+    `GET /v1/principals/all` lists them all (counted as a search), and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
     both need `zeteo.grants.read`, and the lookup also takes `zeteo.runs.read`. See `docs/grants.md`.
 
     ## Queries
@@ -73,7 +79,8 @@ info:
     not granted what it reads is told `403 saved_query_not_accessible`, one answer for every cause
     that carries nothing about the query, the source or the planner. One the caller may not see at
     all is `404 not_found`. `GET /v1/me/runs` lists the caller's own runs, and
-    `GET /v1/me/principals` searches the users and groups they may share with; both need only
+    `GET /v1/me/principals` searches the users and groups they may share with (`/all` lists them
+    all); these need only
     `zeteo.data.read`. `zeteo.saved_queries.read` lets an administrator see every saved query and its
     shares, and `zeteo.saved_queries.write` change shares, transfer and delete them.
 
@@ -116,8 +123,8 @@ security:
 tags:
   - name: Sources
     description: Databases registered with Zeteo
-  - name: File sources
-    description: Upload CSV and xlsx files into file sources their owners manage and grant
+  - name: Uploads
+    description: CSV and xlsx files staged for upload sources, which their owners manage and grant
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -186,11 +193,14 @@ paths:
         - Sources
       summary: List sources
       description: |
-        Lists sources in creation order (`created_at`, then `id`). Archived sources are left out
-        unless `include_archived=true`. A source whose stored settings cannot be decrypted is
-        listed with `settings: null`.
+        Lists sources in creation order (`created_at`, then `id`), database and upload sources
+        alike. Archived sources (and deleted upload sources) are left out unless
+        `include_archived=true`. A source whose stored settings cannot be decrypted is listed with
+        `settings: null`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes. With
+        `owner_id=me`, a caller holding `zeteo.file_sources.write` and `zeteo.data.read` instead,
+        who sees only their own upload sources. `403 forbidden` otherwise.
       operationId: listSources
       parameters:
         - name: include_archived
@@ -200,6 +210,22 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: type
+          in: query
+          required: false
+          description: Only sources of this type
+          schema:
+            $ref: '#/components/schemas/SourceType'
+        - name: owner_id
+          in: query
+          required: false
+          description: Only the upload sources of this owner; `me` for the caller
+          schema:
+            type: string
+            pattern: ^(me|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$
+          examples:
+            me:
+              value: me
         - $ref: '#/components/parameters/LimitParam'
         - $ref: '#/components/parameters/CursorParam'
       responses:
@@ -222,28 +248,43 @@ paths:
     post:
       tags:
         - Sources
-      summary: Register a source
+      summary: Register a database or create an upload source
       description: |
-        Registers a database. Before anything is stored, Zeteo validates `settings` against the
+        **A database** (`type` `postgres` or `azure-sql`): before anything is stored, Zeteo validates `settings` against the
         type's schema, checks the host against the deploy's network rules, connects with the login
         and inspects its rights. A login that holds rights a read-only login would not is refused
         with `422 writable_login` (the body lists the findings) unless `allow_writable_login`
         is true, in which case the source is stored with `writable_login_allowed: true` and the audit
         entry records the finding codes. Nothing is stored when any step fails. An audit entry
         `zeteo.source.created` is written with the slug, the type and the settings without
-        `password` and `ca`.
+        `password` and `ca`. Needs `zeteo.sources.write`. Errors: `409 slug_taken`,
+        `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        **An upload source** (`type: upload`): loads the chosen tables of the caller's staging (see
+        `POST /v1/uploads`) into a new upload source owned by the caller, who gets an owner grant (an
+        ordinary `all_columns` user grant flagged `owner_grant`) on each table. Column types are the
+        inferred ones unless corrected; forcing a type the values do not fit is `422 cast_failed`
+        (naming the column and the first rows, 1-based rows of the file with its header counted).
+        The new data counts against the owner's `FILE_SOURCE_QUOTA_BYTES` (`409 quota_exceeded`,
+        checked under a per-owner lock). Nothing is left on any failure, and the staging is used up
+        on success. A `zeteo.file_source.created` audit entry is written (never any cell data).
+        Needs `zeteo.file_sources.write` and `zeteo.data.read`. Errors: `404
+        file_sources_not_configured` (`FILE_SOURCES_READER_URL` unset), `404 staging_not_found`
+        (expired, missing or someone else's), `409 name_taken` (the slug is in use; a slug made from
+        the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
+        file_source_busy`.
 
-        **Errors:** `409 slug_taken`, `422 host_not_allowed`, `422 writable_login`,
-        `502 source_unreachable`.
+        **Required permissions:** `zeteo.sources.write` or `zeteo.file_sources.write` to reach the
+        route, then as above for the body's `type` (`403 forbidden` without).
       operationId: createSource
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateSourceRequest'
+              oneOf:
+                - $ref: '#/components/schemas/CreateSourceRequest'
+                - $ref: '#/components/schemas/CreateUploadSourceRequest'
       responses:
         '201':
           description: The source
@@ -257,12 +298,22 @@ paths:
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `file_sources_not_configured` or `staging_not_found` (an upload source)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          $ref: '#/components/responses/ConflictResponse'
+          description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: The destination or login was refused - `host_not_allowed` or `writable_login` (with `findings`)
+          description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source
           content:
             application/json:
               schema:
@@ -276,7 +327,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/sources/{sourceId}:
     get:
       tags:
@@ -286,7 +341,7 @@ paths:
         Returns one source, archived or not. `settings` is redacted, and null when the stored
         settings cannot be decrypted.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without).
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
       operationId: getSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -324,11 +379,15 @@ paths:
         `zeteo.source.updated` lists the names of the fields changed and, when `settings` changed,
         the new settings without `password` and `ca`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+        On an upload source only `name` and the limit fields apply (`409 not_a_database_source`
+        for `settings` or `schemas`). Its owner (holding `zeteo.file_sources.write` and
+        `zeteo.data.read`) may rename it, which writes `zeteo.file_source.updated` (as does an
+        admin's rename alone); its limits need `zeteo.sources.write`.
 
-        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
-        (a file source is changed through its own routes), `422 host_not_allowed`,
-        `422 writable_login`, `502 source_unreachable`.
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name` alone; anyone else gets the same 403.
+
+        **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
+        `422 host_not_allowed`, `422 writable_login`, `502 source_unreachable`.
       operationId: updateSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -373,6 +432,56 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Sources
+      summary: Delete an upload source
+      description: |
+        Archives the upload source and drops its stored data (waiting for queries reading it, up to
+        the swap's lock wait: `503 file_source_busy` past it). Catalogue rows stay, marked missing.
+        Grants stay too, and the owner grants lose their `owner_grant` flag, so an admin with
+        `zeteo.grants.write` may remove them. A `zeteo.file_source.deleted` audit entry is written.
+        A database source is archived instead (`POST /v1/sources/{sourceId}/archive`).
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: deleteSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, or `source_archived` (already deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/sources/{sourceId}/archive:
     post:
       tags:
@@ -385,7 +494,8 @@ paths:
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
         **Errors:** `404 not_found`, `409 source_archived` (already archived),
-        `409 file_source_managed_elsewhere` (a file source is deleted, not archived).
+        `409 not_a_database_source` (an upload source is deleted, not archived:
+        `DELETE /v1/sources/{sourceId}`).
       operationId: archiveSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -418,8 +528,8 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
-        (a file source has no login to test), `422 host_not_allowed`,
+        **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
+        (an upload source has no login to test), `422 host_not_allowed`,
         `502 source_unreachable`.
       operationId: testSource
       parameters:
@@ -457,6 +567,79 @@ paths:
                 $ref: '#/components/schemas/Error'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/transfer:
+    post:
+      tags:
+        - Sources
+      summary: Transfer an upload source to another user
+      description: |
+        Makes `user_id` the owner, who is checked as a saved-query transfer target is (a known
+        tereo user, not a service account, not the owner; `400 invalid_transfer`). The owner grants
+        move to them (a grant they had becomes the owner grant), and the previous owner keeps an
+        ordinary `all_columns` grant unless `keep_access` is false. The new owner's quota must fit
+        the source (`409 quota_exceeded`). A `zeteo.file_source.transferred` audit entry is written.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: transferSource
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferSourceRequest'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          description: Bad request - `invalid_request`, or `invalid_transfer`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived` (the upload source is deleted), or `quota_exceeded`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/sources/{sourceId}/refresh:
     post:
       tags:
@@ -474,7 +657,7 @@ paths:
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
 
-        **Errors:** `404 not_found`, `409 source_archived`, `409 file_source_managed_elsewhere`
+        **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
         (a file source's catalogue follows its uploads), `422 host_not_allowed`,
         `502 source_unreachable`.
       operationId: refreshSource
@@ -522,7 +705,7 @@ paths:
         Lists tables and views in `schema_name`, `name` order. Tables a refresh no longer finds
         (`missing_since` set) are left out unless `include_missing=true`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
       operationId: listTables
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -554,6 +737,74 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Catalogue
+      summary: Add tables to an upload source
+      description: |
+        Loads the chosen tables of the caller's staging into the upload source, each with an owner
+        grant to the source's owner (also when an admin adds it). A table name the source already
+        has is `409 name_taken`; the new data counts against the owner's quota (`409
+        quota_exceeded`). The staging is used up on success. A `zeteo.file_source.updated` audit
+        entry is written.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: addTables
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddTablesRequest'
+      responses:
+        '201':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken` or `quota_exceeded`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `cast_failed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/sources/{sourceId}/tables/{tableId}:
     get:
       tags:
@@ -563,12 +814,10 @@ paths:
         A table with its columns (in position order) and the relations that start at it, including
         declared ones and ones a refresh marked missing.
 
-        **File-source owners:** the owner of a file source is admitted here for its own tables and
-        relations without `zeteo.sources.write`; `PATCH /v1/sources/{sourceId}` on a file source
-        accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
-        delete it through `/v1/file-sources`.
+        **Upload-source owners:** the owner of an upload source is admitted here for its own tables
+        and relations without `zeteo.sources.write`.
 
-        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+        **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `404 not_found` for an unknown table or one of another source.
       operationId: getTable
@@ -603,7 +852,7 @@ paths:
         most 2000 characters; `null` clears it. A refresh never changes a description. An audit
         entry `zeteo.source.updated` records the table and what changed.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
         **Errors:** `400 invalid_request` (a description too long, a column the table does not
         have, an empty body), `404 not_found`, `409 source_archived`.
@@ -640,6 +889,200 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Catalogue
+      summary: Load an upload source's table again
+      description: |
+        Replaces the table's data from a staged table. Columns are matched by normalized name:
+        matched columns keep their id, grants and (unless the request sets one) type; new ones are
+        added; absent ones get `missing_since` (one back again loses it). The swap is one
+        transaction, so a reader sees the old data or the new, never an empty or partial table. A
+        `zeteo.file_source.reuploaded` audit entry is written.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: reuploadTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReuploadTableRequest'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found` (no such source, or table in it), `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived`, or `quota_exceeded`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `cast_failed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      tags:
+        - Catalogue
+      summary: Remove a table from an upload source
+      description: |
+        Drops the table's data; its catalogue row and its columns stay, marked missing, and grants
+        keep their references. A `zeteo.file_source.updated` audit entry is written.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: deleteTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found` (no such source, or table in it), or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, or `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}:
+    patch:
+      tags:
+        - Catalogue
+      summary: Retype, rename or describe an upload source's column
+      description: |
+        Changes a column's type (the table is reloaded from its values; values that do not fit are
+        `422 cast_failed`, naming the column and the first rows, numbered as 1-based data rows of
+        the table, header not counted, in the order of its last load), its name (`409 name_taken`
+        for one the table has), or its description. The column keeps its id and grants. A
+        `zeteo.file_source.updated` audit entry is written.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.file_sources.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
+        source is `409 source_archived`; `404 file_sources_not_configured` while
+        `FILE_SOURCES_READER_URL` is unset.
+      operationId: updateColumn
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+        - name: columnId
+          in: path
+          required: true
+          description: The column's id. A value that is not a UUID is `400 invalid_request`.
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateFileColumnRequest'
+      responses:
+        '200':
+          description: The source
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Source'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found` (no such source, table or column), or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, or `quota_exceeded`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `cast_failed`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `file_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/sources/{sourceId}/relations:
     get:
       tags:
@@ -649,10 +1092,8 @@ paths:
         Lists discovered and declared relations in creation order, including ones a refresh marked
         missing (`missing_since`).
 
-        **File-source owners:** the owner of a file source is admitted here for its own tables and
-        relations without `zeteo.sources.write`; `PATCH /v1/sources/{sourceId}` on a file source
-        accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
-        delete it through `/v1/file-sources`.
+        **Upload-source owners:** the owner of an upload source is admitted here for its own tables
+        and relations without `zeteo.sources.write`.
 
         **Required permissions:** `zeteo.sources.read`, which `zeteo.sources.write` includes (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
       operationId: listRelations
@@ -744,10 +1185,8 @@ paths:
         take the name the naming rules give them at every refresh. An audit entry
         `zeteo.relation.renamed` is written.
 
-        **File-source owners:** the owner of a file source is admitted here for its own tables and
-        relations without `zeteo.sources.write`; `PATCH /v1/sources/{sourceId}` on a file source
-        accepts only limit fields (`409 file_source_managed_elsewhere` for anything else); rename and
-        delete it through `/v1/file-sources`.
+        **Upload-source owners:** the owner of an upload source is admitted here for its own tables
+        and relations without `zeteo.sources.write`.
 
         **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On a file source its owner (holding `zeteo.file_sources.write` and `zeteo.data.read`) may too; anyone else gets the same 403.
 
@@ -1367,6 +1806,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /v1/principals/all:
+    get:
+      tags:
+        - Grants
+      summary: List every user and group
+      description: |
+        Every user (service accounts included) and every live group in tereo, by name (one without
+        a name last), for an admin's "who" filters: at most 5000 users and 5000 groups, with
+        `truncated` true when there were more. Read page by page from tereo on each call and never
+        cached. Counts against the caller's 60 searches a minute, as `GET /v1/principals` does.
+
+        **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (any query parameter), `429 too_many_requests`,
+        `502 tereo_unreachable`.
+      operationId: listAllPrincipals
+      responses:
+        '200':
+          description: The directory, by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAllDirectoryPrincipalsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+          headers:
+            Retry-After:
+              description: Seconds to wait before asking again
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`, tereo did not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /v1/catalog:
     get:
       tags:
@@ -1956,17 +2443,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  /v1/file-sources/uploads:
+  /v1/me/principals/all:
+    get:
+      tags:
+        - Saved queries
+      summary: List every user and group the caller may share with
+      description: |
+        Every human user, and every live group that is global or of the caller's signed-in
+        organization, by name (one without a name last): at most 5000 users and 5000 groups, with
+        `truncated` true when there were more. Read page by page from tereo on each call and never
+        cached. Counts against the caller's 60 searches a minute, as `GET /v1/me/principals` does.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+
+        **Errors:** `400 invalid_request` (any query parameter), `429 too_many_requests`,
+        `502 tereo_unreachable`.
+      operationId: listAllMyPrincipals
+      responses:
+        '200':
+          description: The directory, by name
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListAllDirectoryPrincipalsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '429':
+          description: Too many requests - `too_many_requests`; retry after `Retry-After` seconds
+          headers:
+            Retry-After:
+              description: Seconds to wait before asking again
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`, tereo did not answer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/uploads:
     post:
       tags:
-        - File sources
+        - Uploads
       summary: Upload a CSV or xlsx file to staging
       description: |
         Sends one file as `multipart/form-data` in the field `file`. Zeteo parses it once into a
         staging area and returns a preview (tables, header row, inferred column types and samples) to
-        confirm or correct when creating a file source or loading a table. A staging expires one hour
+        confirm or correct when creating an upload source (`POST /v1/sources` with `type: upload`) or
+        loading a table into one. A staging expires one hour
         after creation and belongs to the uploader. Nothing is stored in a source until a staging is
-        used. A CSV is UTF-8 (with or without BOM) or UTF-16 LE/BE with a BOM; the delimiter is
+        used, or discarded with `DELETE /v1/uploads/{uploadId}`. A CSV is UTF-8 (with or without BOM) or UTF-16 LE/BE with a BOM; the delimiter is
         detected among `,` `;` tab and `|`. A refused upload is answered at once and the connection is
         closed.
 
@@ -1978,7 +2514,7 @@ paths:
         that waits over 30 seconds is `503 temporarily_unavailable`.
 
         **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: uploadFile
+      operationId: createUpload
       requestBody:
         required: true
         content:
@@ -2038,77 +2574,29 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
-  /v1/file-sources:
-    get:
+  /v1/uploads/{uploadId}:
+    delete:
       tags:
-        - File sources
-      summary: List file sources
+        - Uploads
+      summary: Discard a staged upload
       description: |
-        `scope=mine` (the default) lists the caller's own file sources; `scope=all` lists everyone's
-        and needs `zeteo.sources.read` (`403 forbidden` without). Archived (deleted) file sources
-        are left out.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: listFileSources
-      parameters:
-        - name: scope
-          in: query
-          required: false
-          schema:
-            type: string
-            enum:
-              - mine
-              - all
-            default: mine
-      responses:
-        '200':
-          description: The file sources
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListFileSourcesResponse'
-        '400':
-          $ref: '#/components/responses/BadRequestResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_sources_not_configured`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
-    post:
-      tags:
-        - File sources
-      summary: Create a file source from a staged upload
-      description: |
-        Loads the chosen staged tables into a new file source owned by the caller, who gets an
-        owner grant (an ordinary `all_columns` user grant flagged `owner_grant`) on each table.
-        Column types are the inferred ones unless corrected; forcing a type the values do not fit
-        is `422 cast_failed`. An `zeteo.file_source.created` audit entry is written (never any cell
-        data).
+        Drops the staging's tables and deletes it, which frees its place under
+        `FILE_SOURCE_MAX_STAGINGS`. Only the user who uploaded it may; anyone else's, an expired
+        one and an unknown id are all `404 staging_not_found`.
 
         **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: createFileSource
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateFileSourceRequest'
+      operationId: deleteUpload
+      parameters:
+        - name: uploadId
+          in: path
+          required: true
+          description: The staging's id (`staging_id`). A value that is not a UUID is `400 invalid_request`.
+          schema:
+            type: string
+            format: uuid
       responses:
-        '201':
-          description: The new file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
         '400':
           $ref: '#/components/responses/BadRequestResponse'
         '401':
@@ -2116,54 +2604,7 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          description: Not found - `file_sources_not_configured`, or `staging_not_found` (expired, missing or someone else's)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `quota_exceeded` (the owner would store more than `FILE_SOURCE_QUOTA_BYTES`; checked under a per-owner lock) or `name_taken`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: Unprocessable - `cast_failed` (a column's values do not fit the type forced on it; names the column and the first rows, 1-based rows of the file with its header counted)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/file-sources/{sourceId}:
-    parameters:
-      - $ref: '#/components/parameters/SourceIdParam'
-    get:
-      tags:
-        - File sources
-      summary: Get a file source
-      description: |
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). Reading needs the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.read`; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: getFileSource
-      responses:
-        '200':
-          description: The file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+          description: Not found - `staging_not_found`, or `file_sources_not_configured`
           content:
             application/json:
               schema:
@@ -2172,375 +2613,6 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
-    patch:
-      tags:
-        - File sources
-      summary: Rename a file source
-      description: |
-        Changes the name. Its slug, tables and data stay. (To change limits on a file source, use
-        `PATCH /v1/sources/{sourceId}`, which accepts only limit fields for one.) A
-        `zeteo.file_source.updated` audit entry is written.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: updateFileSource
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateFileSourceRequest'
-      responses:
-        '200':
-          description: The file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '400':
-          $ref: '#/components/responses/BadRequestResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
-    delete:
-      tags:
-        - File sources
-      summary: Delete a file source
-      description: |
-        Archives the source and drops its stored data. Catalogue rows stay, marked missing. Grants
-        stay too, and the owner grants lose their `owner_grant` flag, so an admin with
-        `zeteo.grants.write` may remove them. A `zeteo.file_source.deleted` audit entry is written.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: deleteFileSource
-      responses:
-        '204':
-          $ref: '#/components/responses/NoContentResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/file-sources/{sourceId}/tables:
-    parameters:
-      - $ref: '#/components/parameters/SourceIdParam'
-    post:
-      tags:
-        - File sources
-      summary: Add tables from a staged upload
-      description: |
-        Loads more staged tables into the file source, each with an owner grant. A table name the
-        source already has is `409 name_taken`.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: addFileSourceTables
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AddTablesRequest'
-      responses:
-        '201':
-          description: The file source with its new tables
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '400':
-          $ref: '#/components/responses/BadRequestResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted), `name_taken` or `quota_exceeded`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: Unprocessable - `cast_failed`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/file-sources/{sourceId}/tables/{tableId}:
-    parameters:
-      - $ref: '#/components/parameters/SourceIdParam'
-      - $ref: '#/components/parameters/TableIdParam'
-    put:
-      tags:
-        - File sources
-      summary: Re-upload a table's data
-      description: |
-        Replaces the table's data from a staged table. Columns are matched by normalized name:
-        matched columns keep their id and grants, new ones are added, absent ones get
-        `missing_since`. The swap is one transaction, so a reader sees the old data or the new,
-        never an empty or partial table. A `zeteo.file_source.reuploaded` audit entry is written.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: reuploadFileSourceTable
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ReuploadTableRequest'
-      responses:
-        '200':
-          description: The file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '400':
-          $ref: '#/components/responses/BadRequestResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`, or `not_found` (no such table in the source)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted), `quota_exceeded`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: Unprocessable - `cast_failed`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-    delete:
-      tags:
-        - File sources
-      summary: Remove a table from a file source
-      description: |
-        Drops the table's data; its catalogue row stays, marked missing.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: deleteFileSourceTable
-      responses:
-        '204':
-          $ref: '#/components/responses/NoContentResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`, or `not_found` (no such table in the source)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/file-sources/{sourceId}/tables/{tableId}/columns/{columnId}:
-    parameters:
-      - $ref: '#/components/parameters/SourceIdParam'
-      - $ref: '#/components/parameters/TableIdParam'
-      - name: columnId
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-    patch:
-      tags:
-        - File sources
-      summary: Retype, rename or describe a column
-      description: |
-        Changes a column's type (the data is cast; values that do not fit are `422 cast_failed`,
-        naming the column and the first rows, numbered as 1-based data rows of the table, header not
-        counted, in the order of its last load), its name, or its description.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: updateFileSourceColumn
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateFileColumnRequest'
-      responses:
-        '200':
-          description: The file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '400':
-          $ref: '#/components/responses/BadRequestResponse'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`, or `not_found` (no such table or column)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted), `name_taken`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '422':
-          description: Unprocessable - `cast_failed`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-  /v1/file-sources/{sourceId}/transfer:
-    parameters:
-      - $ref: '#/components/parameters/SourceIdParam'
-    post:
-      tags:
-        - File sources
-      summary: Transfer a file source to another user
-      description: |
-        Makes `user_id` the owner, who is checked as a saved-query transfer target is (a known
-        tereo user, not a service account; `400 invalid_transfer`). The previous owner keeps an
-        ordinary `all_columns` grant unless `keep_access` is false. The new owner's quota must fit
-        the source (`409 quota_exceeded`). A `zeteo.file_source.transferred` audit entry is written.
-
-        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-      operationId: transferFileSource
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TransferFileSourceRequest'
-      responses:
-        '200':
-          description: The file source
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/FileSource'
-        '400':
-          description: Bad request - `invalid_request`, or `invalid_transfer`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '401':
-          $ref: '#/components/responses/UnauthorizedResponse'
-        '403':
-          $ref: '#/components/responses/ForbiddenResponse'
-        '404':
-          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '409':
-          description: Conflict - `source_archived` (the file source is deleted), `quota_exceeded`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          $ref: '#/components/responses/ServerErrorResponse'
-        '502':
-          description: Bad gateway - `tereo_unreachable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '503':
-          description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
   /v1/saved-queries:
     get:
       tags:
@@ -4746,7 +4818,7 @@ components:
         - postgres
         - azure-sql
         - upload
-      description: The kind of source. `upload` is a file source, whose data Zeteo stores from uploaded files.
+      description: The kind of source. `upload` is an upload source (a file source), whose data Zeteo stores from uploaded files.
     PostgresSettings:
       type: object
       description: |
@@ -4855,7 +4927,7 @@ components:
           type: string
     Source:
       type: object
-      description: A registered database or a file source. `settings` is the redacted form; it is null for a file source and when the stored settings cannot be decrypted.
+      description: A registered database or an upload source. `settings` is the redacted form; it is null for an upload source and when the stored settings cannot be decrypted.
       required:
         - id
         - slug
@@ -4874,6 +4946,9 @@ components:
         - owner_id
         - status
         - last_refreshed_at
+        - size_bytes
+        - size_measured_at
+        - share_count
         - created_at
         - archived_at
       properties:
@@ -4937,7 +5012,7 @@ components:
             - string
             - 'null'
           format: uuid
-          description: A file source's owner; null for a database source
+          description: An upload source's owner; null for a database source
         status:
           type: string
           enum:
@@ -4948,6 +5023,28 @@ components:
             - string
             - 'null'
           format: date-time
+          description: A database source's last catalogue refresh; an upload source's last load of any of its tables (null before one).
+        size_bytes:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          description: |
+            A database source: bytes on disk of the tables (and, on Postgres, materialized views) in
+            `schemas`, indexes included, measured by the last catalogue refresh, never on read; null
+            until a refresh has measured it (on Azure SQL the login needs `VIEW DATABASE STATE`); a
+            later refresh that cannot read it keeps the last measurement. An upload source: the bytes it stores now, counted against its
+            owner's quota (0 once deleted).
+        size_measured_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: When a database source's `size_bytes` was measured; null when it is null, and always for an upload source
+        share_count:
+          type: integer
+          minimum: 0
+          description: How many people and groups its tables are granted to (distinct principals of its grants; an upload source's owner grants not counted)
         created_at:
           type: string
           format: date-time
@@ -5150,6 +5247,8 @@ components:
         - description
         - last_seen_at
         - missing_since
+        - row_count
+        - last_loaded_at
       properties:
         id:
           type: string
@@ -5180,7 +5279,19 @@ components:
             - string
             - 'null'
           format: date-time
-          description: Set when a refresh no longer finds the table; cleared when it returns
+          description: Set when a refresh no longer finds the table (on an upload source, when it is removed or the source deleted); cleared when it returns
+        row_count:
+          type:
+            - integer
+            - 'null'
+          minimum: 0
+          description: An upload source's table, the rows loaded. A database source's, an estimate from the database's statistics at the last refresh (Postgres `pg_class.reltuples`, or the live-row count for a table never analyzed, a partitioned table the sum of its partitions'; SQL Server `sys.partitions`), not a count; null for a view, a table the database has no estimate for, or when the refresh could not read them
+        last_loaded_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: An upload source's table, when it was last loaded; null for a database source's
     Column:
       type: object
       required:
@@ -5192,6 +5303,7 @@ components:
         - position
         - is_primary_key
         - description
+        - original_name
         - missing_since
       properties:
         id:
@@ -5226,6 +5338,11 @@ components:
             - string
             - 'null'
           maxLength: 2000
+        original_name:
+          type:
+            - string
+            - 'null'
+          description: An upload source's column, its header as written in the file (also its first description); null for a database source's
         missing_since:
           type:
             - string
@@ -5798,6 +5915,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DirectoryPrincipal'
+    ListAllDirectoryPrincipalsResponse:
+      type: object
+      required:
+        - data
+        - truncated
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectoryPrincipal'
+        truncated:
+          type: boolean
+          description: True when tereo had more than 5000 users, or more than 5000 groups, and some are left out
     LookupPrincipalsRequest:
       type: object
       required:
@@ -6420,14 +6550,19 @@ components:
           maxItems: 1600
           items:
             $ref: '#/components/schemas/ColumnCorrection'
-    CreateFileSourceRequest:
+    CreateUploadSourceRequest:
       type: object
+      description: An upload source, made from the caller's staging
       additionalProperties: false
       required:
+        - type
         - staging_id
         - name
         - tables
       properties:
+        type:
+          type: string
+          const: upload
         staging_id:
           type: string
           format: uuid
@@ -6486,16 +6621,6 @@ components:
           maxItems: 1600
           items:
             $ref: '#/components/schemas/ColumnCorrection'
-    UpdateFileSourceRequest:
-      type: object
-      additionalProperties: false
-      required:
-        - name
-      properties:
-        name:
-          type: string
-          minLength: 1
-          maxLength: 255
     UpdateFileColumnRequest:
       type: object
       additionalProperties: false
@@ -6510,7 +6635,7 @@ components:
             - string
             - 'null'
           maxLength: 2000
-    TransferFileSourceRequest:
+    TransferSourceRequest:
       type: object
       additionalProperties: false
       required:
@@ -6524,130 +6649,6 @@ components:
           type: boolean
           default: true
           description: The previous owner keeps an ordinary all-columns grant; false drops it
-    FileSourceColumn:
-      type: object
-      required:
-        - id
-        - name
-        - original_name
-        - type
-        - description
-        - missing
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        original_name:
-          type:
-            - string
-            - 'null'
-          description: The header as written in the file; also the initial description
-        type:
-          $ref: '#/components/schemas/FileColumnType'
-        description:
-          type:
-            - string
-            - 'null'
-        missing:
-          type: boolean
-          description: The column was absent from the latest re-upload; its grants are kept
-    FileSourceTable:
-      type: object
-      required:
-        - id
-        - name
-        - description
-        - row_count
-        - last_synced_at
-        - missing
-        - columns
-      properties:
-        id:
-          type: string
-          format: uuid
-        name:
-          type: string
-        description:
-          type:
-            - string
-            - 'null'
-          description: Changed with `PATCH /v1/sources/{sourceId}/tables/{tableId}`
-        row_count:
-          type: integer
-          minimum: 0
-        last_synced_at:
-          type:
-            - string
-            - 'null'
-          format: date-time
-          description: When the table was last loaded
-        missing:
-          type: boolean
-          description: The table was removed, or its source deleted
-        columns:
-          type: array
-          items:
-            $ref: '#/components/schemas/FileSourceColumn'
-    FileSource:
-      type: object
-      description: A file source as its owner and admins see it. Never carries any cell of its data.
-      required:
-        - id
-        - slug
-        - name
-        - type
-        - owner_id
-        - created_at
-        - archived_at
-        - stored_bytes
-        - share_count
-        - tables
-      properties:
-        id:
-          type: string
-          format: uuid
-        slug:
-          type: string
-        name:
-          type: string
-        type:
-          type: string
-          enum:
-            - upload
-        owner_id:
-          type: string
-          format: uuid
-        created_at:
-          type: string
-          format: date-time
-        archived_at:
-          type:
-            - string
-            - 'null'
-          format: date-time
-        stored_bytes:
-          type: integer
-          minimum: 0
-          description: What the source stores, counted against the owner's quota
-        share_count:
-          type: integer
-          minimum: 0
-          description: How many people and groups its tables are shared with (distinct principals of its grants, the owner grants not counted)
-        tables:
-          type: array
-          items:
-            $ref: '#/components/schemas/FileSourceTable'
-    ListFileSourcesResponse:
-      type: object
-      required:
-        - data
-      properties:
-        data:
-          type: array
-          items:
-            $ref: '#/components/schemas/FileSource'
     SavedQuery:
       type: object
       description: |
@@ -8266,7 +8267,7 @@ x-tagGroups:
   - name: Sources
     tags:
       - Sources
-      - File sources
+      - Uploads
       - Catalogue
   - name: Access
     tags:

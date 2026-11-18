@@ -140,7 +140,7 @@ describe("SourcesPage", () => {
     });
     renderWithProviders(<SourcesPage />);
     const link = await screen.findByRole("link", { name: "Q3 sales" });
-    expect(link).toHaveAttribute("href", `/my/data/${upload.id}`);
+    expect(link).toHaveAttribute("href", `/sources/${upload.id}`);
     const row = link.closest("tr")!;
     expect(row).toHaveTextContent("Upload");
     await waitFor(() => expect(row).toHaveTextContent("Olive Owner"));

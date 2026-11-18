@@ -25,3 +25,6 @@ const count = new Intl.NumberFormat();
 
 /** A whole number with grouping: 50000 → "50,000". */
 export const formatCount = (n: number): string => count.format(n);
+
+/** A source's own page, whatever its type. */
+export const sourceHref = (id: string): string => `/sources/${id}`;

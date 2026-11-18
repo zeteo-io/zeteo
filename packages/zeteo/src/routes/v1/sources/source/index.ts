@@ -1,6 +1,8 @@
-import { requirePermission } from "../../../../middleware/auth.js";
-import { getSource, updateSource } from "./controllers.js";
+import { allowOwnerOr } from "../../../../middleware/fileSourceOwner.js";
+import { deleteSource, getSource, updateSource } from "./controllers.js";
 import relationsRouter from "./relations/index.js";
+import transferRouter from "./transfer/index.js";
+import { sourceOfParams } from "./middleware.js";
 import refreshRouter from "./refresh/index.js";
 import archiveRouter from "./archive/index.js";
 import tablesRouter from "./tables/index.js";
@@ -20,13 +22,20 @@ sourceRouter.use("/refresh", refreshRouter);
 sourceRouter.use("/relations", relationsRouter);
 sourceRouter.use("/tables", tablesRouter);
 sourceRouter.use("/test", testRouter);
+sourceRouter.use("/transfer", transferRouter);
 
-sourceRouter.get("/", requirePermission(SOURCES_READ), getSource);
+// An upload source's owner reads, renames and deletes their own source.
+sourceRouter.get("/", allowOwnerOr(SOURCES_READ, sourceOfParams), getSource);
 sourceRouter.patch(
   "/",
-  requirePermission(SOURCES_WRITE),
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
   json64k,
   updateSource
+);
+sourceRouter.delete(
+  "/",
+  allowOwnerOr(SOURCES_WRITE, sourceOfParams),
+  deleteSource
 );
 
 export default sourceRouter;

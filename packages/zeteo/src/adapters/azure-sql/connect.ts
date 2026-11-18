@@ -1,6 +1,8 @@
 import { sourceBusy, SourceUnreachableError } from "../../utils/errors.js";
 import { type AzureSqlSettings, toMssqlConfig } from "./settings.js";
 import type { ResolvedTarget } from "../../sources/network.js";
+import { isPermissionDenied, readSize } from "./readSize.js";
+import { readRowCounts } from "./readRowCounts.js";
 import { logger } from "../../utils/logger.js";
 import { checkLogin } from "./loginCheck.js";
 import { readSchema } from "./readSchema.js";
@@ -19,6 +21,7 @@ import type {
   RowStream,
   SchemaSnapshot,
   SourceConnection,
+  TableRowCount,
 } from "../types.js";
 
 export class AzureSqlConnection implements SourceConnection {
@@ -30,6 +33,32 @@ export class AzureSqlConnection implements SourceConnection {
 
   readSchema(schemas: string[]): Promise<SchemaSnapshot> {
     return this.guarded((pool) => readSchema(pool, schemas));
+  }
+
+  async readSize(schemas: string[]): Promise<number | null> {
+    try {
+      return await readSize(this.pool, schemas);
+    } catch (err) {
+      // Without VIEW DATABASE STATE the size is simply not known.
+      if (isPermissionDenied(err)) {
+        logger.info(
+          { err },
+          "the login may not read the source's size (VIEW DATABASE STATE)"
+        );
+      } else {
+        logger.warn({ err }, "reading the source's size failed");
+      }
+      return null;
+    }
+  }
+
+  async readRowCounts(schemas: string[]): Promise<TableRowCount[] | null> {
+    try {
+      return await readRowCounts(this.pool, schemas);
+    } catch (err) {
+      logger.warn({ err }, "reading the source's row counts failed");
+      return null;
+    }
   }
 
   openQuery(

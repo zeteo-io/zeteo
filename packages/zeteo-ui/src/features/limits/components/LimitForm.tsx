@@ -171,6 +171,7 @@ export const LimitForm = ({ limit, onClose, onConflict }: LimitFormProps) => {
             <Input
               key={field.key}
               label={field.label}
+              type="number"
               value={values[field.key]}
               error={errors[field.key]}
               helperText={`${field.min}–${field.max}. Empty: the default.`}

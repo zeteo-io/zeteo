@@ -16,7 +16,8 @@ run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming exp
 ([docs/export.md](packages/zeteo/docs/export.md)), saved queries
 ([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md)), dashboards
 ([docs/dashboards.md](packages/zeteo/docs/dashboards.md)), File Sources: uploaded CSV and Excel files
-that their owner queries and grants like a database ([docs/file-sources.md](packages/zeteo/docs/file-sources.md)),
+that their owner queries and grants like a database, managed through the same `/v1/sources` API,
+staged with `/v1/uploads` ([docs/file-sources.md](packages/zeteo/docs/file-sources.md)),
 and the MCP endpoint
 ([docs/mcp.md](packages/zeteo/docs/mcp.md)). The admin UI (`packages/zeteo-ui`) ships in the image
 and is served at `/` once `UI_CLIENT_ID` names its login client in tereo; how to turn it on, what

@@ -72,11 +72,13 @@ TableCorrection:
       maxItems: 1600
       items: { $ref: '#/ColumnCorrection' }
 
-CreateFileSourceRequest:
+CreateUploadSourceRequest:
   type: object
+  description: An upload source, made from the caller's staging
   additionalProperties: false
-  required: [staging_id, name, tables]
+  required: [type, staging_id, name, tables]
   properties:
+    type: { type: string, const: upload }
     staging_id: { type: string, format: uuid }
     name: { type: string, minLength: 1, maxLength: 255 }
     slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$', description: Generated from the name when omitted }
@@ -112,13 +114,6 @@ ReuploadTableRequest:
       maxItems: 1600
       items: { $ref: '#/ColumnCorrection' }
 
-UpdateFileSourceRequest:
-  type: object
-  additionalProperties: false
-  required: [name]
-  properties:
-    name: { type: string, minLength: 1, maxLength: 255 }
-
 UpdateFileColumnRequest:
   type: object
   additionalProperties: false
@@ -128,61 +123,10 @@ UpdateFileColumnRequest:
     name: { $ref: '#/FileColumnName' }
     description: { type: [string, 'null'], maxLength: 2000 }
 
-TransferFileSourceRequest:
+TransferSourceRequest:
   type: object
   additionalProperties: false
   required: [user_id]
   properties:
     user_id: { type: string, format: uuid, description: 'The new owner, a tereo user who is not a service account' }
     keep_access: { type: boolean, default: true, description: The previous owner keeps an ordinary all-columns grant; false drops it }
-
-FileSourceColumn:
-  type: object
-  required: [id, name, original_name, type, description, missing]
-  properties:
-    id: { type: string, format: uuid }
-    name: { type: string }
-    original_name: { type: [string, 'null'], description: The header as written in the file; also the initial description }
-    type: { $ref: '#/FileColumnType' }
-    description: { type: [string, 'null'] }
-    missing: { type: boolean, description: The column was absent from the latest re-upload; its grants are kept }
-
-FileSourceTable:
-  type: object
-  required: [id, name, description, row_count, last_synced_at, missing, columns]
-  properties:
-    id: { type: string, format: uuid }
-    name: { type: string }
-    description: { type: [string, 'null'], description: 'Changed with `PATCH /v1/sources/{sourceId}/tables/{tableId}`' }
-    row_count: { type: integer, minimum: 0 }
-    last_synced_at: { type: [string, 'null'], format: date-time, description: When the table was last loaded }
-    missing: { type: boolean, description: 'The table was removed, or its source deleted' }
-    columns:
-      type: array
-      items: { $ref: '#/FileSourceColumn' }
-
-FileSource:
-  type: object
-  description: A file source as its owner and admins see it. Never carries any cell of its data.
-  required: [id, slug, name, type, owner_id, created_at, archived_at, stored_bytes, share_count, tables]
-  properties:
-    id: { type: string, format: uuid }
-    slug: { type: string }
-    name: { type: string }
-    type: { type: string, enum: [upload] }
-    owner_id: { type: string, format: uuid }
-    created_at: { type: string, format: date-time }
-    archived_at: { type: [string, 'null'], format: date-time }
-    stored_bytes: { type: integer, minimum: 0, description: 'What the source stores, counted against the owner''s quota' }
-    share_count: { type: integer, minimum: 0, description: 'How many people and groups its tables are shared with (distinct principals of its grants, the owner grants not counted)' }
-    tables:
-      type: array
-      items: { $ref: '#/FileSourceTable' }
-
-ListFileSourcesResponse:
-  type: object
-  required: [data]
-  properties:
-    data:
-      type: array
-      items: { $ref: '#/FileSource' }

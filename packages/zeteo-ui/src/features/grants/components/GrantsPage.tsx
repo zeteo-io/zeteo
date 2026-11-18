@@ -1,6 +1,5 @@
-import { faTrash, faUser } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { tableLabel, useAllTables } from "@/features/tables";
+import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -8,16 +7,19 @@ import { FilterChip } from "@/components/FilterChip";
 import { Link, useNavigate } from "react-router-dom";
 import { PageHeader } from "@/components/PageHeader";
 import { EditButton } from "@/components/EditButton";
+import { useEffect, useMemo, useState } from "react";
 import { useUrlFilters } from "@/lib/useUrlFilters";
 import { useAllSources } from "@/features/sources";
 import { useGrants } from "../api/useGrants";
-import { useEffect, useState } from "react";
 import { useAuth } from "@tereo-io/react";
 import "./styles.css";
 import {
   PrincipalCell,
   PrincipalLabel,
-  PrincipalPicker,
+  parseWho,
+  useDirectory,
+  whoFilter,
+  whoId,
   type PrincipalRef,
 } from "@/features/principals";
 import {
@@ -25,7 +27,6 @@ import {
   Badge,
   Button,
   EmptyState,
-  Modal,
   RowActions,
   Spinner,
   Table,
@@ -69,7 +70,8 @@ export const GrantsPage = () => {
   const { items, isLoading, error, hasMore, loadMore } = useGrants(filters);
   const sources = useAllSources(canReadSources);
   const tables = useAllTables(canReadSources ? filters.source_id : undefined);
-  const [pickingPrincipal, setPickingPrincipal] = useState(false);
+  // Who: everyone in the directory, so anyone can be chosen, granted or not.
+  const directory = useDirectory("admin");
 
   const [loadingMore, setLoadingMore] = useState(false);
   useEffect(() => setLoadingMore(false), [items.length, hasMore, error]);
@@ -97,27 +99,37 @@ export const GrantsPage = () => {
         })()
       : null;
 
-  const clearPrincipal = () =>
-    setFilters({
-      ...filters,
-      principal_type: undefined,
-      principal_id: undefined,
-    });
+  // Without the directory, a principal from the address is a chip.
+  const whoAvailable = !!directory.data;
+  const principalChip = principal && directory.isError ? principal : null;
+  const selectedWho = principal ? whoId(principal.type, principal.id) : "";
+  const who = useMemo(
+    () =>
+      directory.data
+        ? [whoFilter(directory.data.data, { selected: selectedWho })]
+        : [],
+    [directory.data, selectedWho]
+  );
 
   // The current choices go into the definitions, so TableFilters, which
   // starts over whenever they change, starts over where it already was.
   const filterDefs: InfiniteScrollMenuFilter[] = [
-    {
-      type: "SELECT",
-      title: "Source",
-      dataKey: "source_id",
-      options: sources.sources.map((s) => ({
-        id: s.id,
-        name: `${s.name}${s.archived_at ? " (archived)" : ""}`,
-        selected: s.id === filters.source_id,
-      })),
-    },
-    ...(filters.source_id
+    ...who,
+    ...(selectsUnavailable
+      ? []
+      : [
+          {
+            type: "SELECT" as const,
+            title: "Source",
+            dataKey: "source_id",
+            options: sources.sources.map((s) => ({
+              id: s.id,
+              name: `${s.name}${s.archived_at ? " (archived)" : ""}`,
+              selected: s.id === filters.source_id,
+            })),
+          },
+        ]),
+    ...(filters.source_id && !selectsUnavailable
       ? [
           {
             type: "SELECT" as const,
@@ -136,29 +148,48 @@ export const GrantsPage = () => {
   // TableFilters reports its choices as soon as it mounts, so it waits for the
   // options that hold the current choices; otherwise it would report them gone.
   const filtersReady =
-    !selectsUnavailable &&
-    !sources.isLoading &&
-    !(filters.source_id && tables.isLoading);
+    !directory.isLoading &&
+    (selectsUnavailable ||
+      (!sources.isLoading && !(filters.source_id && tables.isLoading)));
 
   const onFiltersChange = (params: Record<string, string>) => {
-    const source_id = params["filter[source_id]"] || undefined;
+    // Filters the bar does not show keep what the address says.
+    const source_id = selectsUnavailable
+      ? filters.source_id
+      : params["filter[source_id]"] || undefined;
     // A table belongs to one source: changing the source drops it. Without
     // a source there is no Table filter, so a table from the address stays.
     const table_id =
       source_id !== filters.source_id
         ? undefined
-        : filters.source_id
+        : filters.source_id && !selectsUnavailable
           ? params["filter[table_id]"] || undefined
           : filters.table_id;
-    if (source_id !== filters.source_id || table_id !== filters.table_id) {
-      setFilters({ ...filters, source_id, table_id });
+    const chosen = whoAvailable
+      ? parseWho(params)
+      : {
+          principal_type: filters.principal_type,
+          principal_id: filters.principal_id,
+        };
+    if (
+      source_id !== filters.source_id ||
+      table_id !== filters.table_id ||
+      chosen.principal_id !== filters.principal_id ||
+      chosen.principal_type !== filters.principal_type
+    ) {
+      setFilters({
+        source_id,
+        table_id,
+        principal_type: chosen.principal_type,
+        principal_id: chosen.principal_id,
+      });
     }
   };
 
   return (
     <>
       <PageHeader title="Grants" divider={false} />
-      <div className="z-list-toolbar">
+      <div className="z-list-toolbar z-list-toolbar-top">
         <div className="z-list-toolbar-filters z-grants-toolbar">
           {sourceChip && (
             <FilterChip
@@ -182,22 +213,19 @@ export const GrantsPage = () => {
               Table: {tableChip}
             </FilterChip>
           )}
-          {principal ? (
+          {principalChip && (
             <FilterChip
               clearLabel="Clear person or group"
-              onClear={clearPrincipal}
+              onClear={() =>
+                setFilters({
+                  ...filters,
+                  principal_type: undefined,
+                  principal_id: undefined,
+                })
+              }
             >
-              <PrincipalLabel refValue={principal} />
+              <PrincipalLabel refValue={principalChip} />
             </FilterChip>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              fullWidth={false}
-              onClick={() => setPickingPrincipal(true)}
-            >
-              <FontAwesomeIcon icon={faUser} /> Person or group
-            </Button>
           )}
           {filtersReady && (
             <div className="z-grants-tablefilters">
@@ -223,23 +251,7 @@ export const GrantsPage = () => {
       <ErrorNotice
         error={sources.error?.status === 403 ? null : sources.error}
       />
-      <Modal
-        show={pickingPrincipal}
-        title="Show grants for a person or group"
-        onClose={() => setPickingPrincipal(false)}
-      >
-        <PrincipalPicker
-          value={principal}
-          onChange={(p) => {
-            setFilters({
-              ...filters,
-              principal_type: p.type,
-              principal_id: p.id,
-            });
-            setPickingPrincipal(false);
-          }}
-        />
-      </Modal>
+      <ErrorNotice error={directory.error} />
       <ErrorNotice error={error} />
       {isLoading ? (
         <Spinner size="lg" />

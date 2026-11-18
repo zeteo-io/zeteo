@@ -46,7 +46,7 @@ test("a CSV is uploaded, previewed, created as a file source and queried", async
   await page.getByRole("textbox", { name: "Name", exact: true }).fill(slug);
   await page.getByRole("textbox", { name: "Slug" }).fill(slug);
   await page.getByRole("button", { name: "Create source" }).click();
-  await expect(page).toHaveURL(/\/my\/data\/[0-9a-f-]{36}$/);
+  await expect(page).toHaveURL(/\/sources\/[0-9a-f-]{36}$/);
 
   // Queried as the owner, whose all-columns grant the create made.
   const token = await signIn({

@@ -46,7 +46,9 @@ export interface TableCorrection {
   columns?: ColumnCorrection[];
 }
 
-export interface CreateFileSourceRequest {
+/** An upload source, made from the caller's staging. */
+export interface CreateUploadSourceRequest {
+  type: "upload";
   staging_id: string;
   name: string;
   /** Generated from the name when omitted. */
@@ -74,46 +76,8 @@ export interface UpdateFileColumnRequest {
   description?: string | null;
 }
 
-export interface TransferFileSourceRequest {
+export interface TransferSourceRequest {
   user_id: string;
   /** The previous owner keeps an ordinary all-columns grant; the API's default is true. */
   keep_access?: boolean;
-}
-
-export interface FileSourceColumn {
-  id: string;
-  name: string;
-  original_name: string | null;
-  type: FileColumnType;
-  description: string | null;
-  missing: boolean;
-}
-
-export interface FileSourceTable {
-  id: string;
-  name: string;
-  description: string | null;
-  row_count: number;
-  last_synced_at: string | null;
-  missing: boolean;
-  columns: FileSourceColumn[];
-}
-
-export interface FileSource {
-  id: string;
-  slug: string;
-  name: string;
-  type: "upload";
-  owner_id: string;
-  created_at: string;
-  archived_at: string | null;
-  stored_bytes: number;
-  /** How many people and groups its tables are shared with, the owner grants not counted. */
-  share_count: number;
-  tables: FileSourceTable[];
-}
-
-export interface ListFileSourcesOptions {
-  /** `mine` (the default) or `all`, which needs `zeteo.sources.read`. */
-  scope?: "mine" | "all";
 }

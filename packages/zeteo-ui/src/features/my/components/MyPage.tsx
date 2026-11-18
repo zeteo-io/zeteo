@@ -1,4 +1,4 @@
-import { FILE_SOURCES_WRITE, FileSourcesPanel } from "@/features/file-sources";
+import { FILE_SOURCES_WRITE, MyDataPanel } from "@/features/sources";
 import { BorderedSection, Button, Spinner } from "@kosmeo-ui/react";
 import type { SavedQuery } from "@/features/saved-queries";
 import { RecentSavedQueries } from "./RecentSavedQueries";
@@ -79,7 +79,7 @@ export const MyPage = () => {
   const { user, hasPermission } = useAuth<Me>();
   const fileSources =
     useFileSourcesEnabled() === true && hasPermission(FILE_SOURCES_WRITE);
-  const tabs = TABS.filter((t) => t.id !== "data" || fileSources);
+  const tabs = TABS.filter((t) => t.id !== "sources" || fileSources);
   const raw = params.get("tab");
   const tab: MyTab =
     isTab(raw) && tabs.some((t) => t.id === raw) ? raw : "overview";
@@ -149,7 +149,7 @@ export const MyPage = () => {
           empty="Nothing has been shared with you yet."
         />
       )}
-      {tab === "data" && <FileSourcesPanel />}
+      {tab === "sources" && <MyDataPanel />}
       {tab === "runs" && (
         <div className="z-my-narrow">
           <RunsList />

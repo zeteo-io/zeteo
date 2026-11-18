@@ -13,7 +13,7 @@ import { db } from "../utils/db/index.js";
 import { randomUUID } from "crypto";
 import {
   ConflictError,
-  FileSourceManagedElsewhereError,
+  NotADatabaseSourceError,
   issuesOf,
   NotFoundError,
   SourceArchivedError,
@@ -196,7 +196,7 @@ export const createSource = async (
 
 /** Refuses a file source: its uploads, not these routes, manage it. */
 const refuseFileSource = (row: Pick<Source, "type">): void => {
-  if (isFileSource(row)) throw new FileSourceManagedElsewhereError();
+  if (isFileSource(row)) throw new NotADatabaseSourceError();
 };
 
 /** An unarchived database source. */
@@ -219,15 +219,15 @@ export const updateSource = async (
 ): Promise<Source> => {
   const row = await db.sources.findById(id);
   if (!row) throw new NotFoundError("Source not found");
-  // A file source's limits are an admin's, as a database source's; the rest
-  // of it is managed through its uploads.
+  // An upload source's name and limits are an admin's, as a database
+  // source's; its settings and schemas are managed through its uploads.
   if (
     isFileSource(row) &&
     Object.keys(input).some(
-      (key) => !LIMIT_FIELDS.has(key as keyof SourceFields)
+      (key) => key !== "name" && !LIMIT_FIELDS.has(key as keyof SourceFields)
     )
   ) {
-    throw new FileSourceManagedElsewhereError();
+    throw new NotADatabaseSourceError();
   }
   if (row.archivedAt) throw new SourceArchivedError();
   const type = typeOf(row);

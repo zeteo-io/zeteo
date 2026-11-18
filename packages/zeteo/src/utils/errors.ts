@@ -230,28 +230,29 @@ export class SourceArchivedError extends AppError {
 }
 
 /**
- * A change, test or refresh of a file source through the database sources'
- * routes: its settings, data and catalogue are managed by its uploads.
+ * An archive, test or refresh of an upload source, or a change of its
+ * settings or schemas: its data and catalogue are managed by its uploads.
  */
-export class FileSourceManagedElsewhereError extends AppError {
+export class NotADatabaseSourceError extends AppError {
   constructor() {
     super(
       409,
-      "file_source_managed_elsewhere",
-      "A file source is managed through its uploads, not here"
+      "not_a_database_source",
+      "An upload source is managed through its uploads, not here"
     );
-    this.name = "FileSourceManagedElsewhereError";
+    this.name = "NotADatabaseSourceError";
   }
 }
 
-/**
- * A file source that does not exist, is a database source, or that the caller
- * neither owns nor may manage as an admin: one answer for all.
- */
-export class FileSourceNotFoundError extends AppError {
+/** An upload-only change (delete, transfer, tables, columns) of a database source. */
+export class NotAnUploadSourceError extends AppError {
   constructor() {
-    super(404, "file_source_not_found", "File source not found");
-    this.name = "FileSourceNotFoundError";
+    super(
+      409,
+      "not_an_upload_source",
+      "Only an upload source can be changed this way"
+    );
+    this.name = "NotAnUploadSourceError";
   }
 }
 

@@ -30,6 +30,12 @@ info:
     relation need `zeteo.sources.write`, which includes read. Without the permission the answer is
     `403 forbidden`, before the body is validated or any source is looked up.
 
+    An upload source (`type: upload`, a file source made from an uploaded CSV or xlsx while File
+    Sources are on) belongs to the user who made it. Its owner, holding `zeteo.file_sources.write`
+    and `zeteo.data.read`, reads, renames, transfers and deletes it, changes its tables and columns
+    and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
+    as a source they may not see does. See `docs/file-sources.md`.
+
     ## Sources
 
     A source's `settings` depend on its `type` and are write-only in part: the response carries
@@ -50,8 +56,8 @@ info:
     added later) or a list of columns. Reading grants needs `zeteo.grants.read`; creating,
     replacing and removing them needs `zeteo.grants.write`, which includes read. The same
     permissions govern `/v1/principal-limits`, which gives a user or group its own limits on how
-    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller)
-    and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
+    many queries and exports it runs at once. `GET /v1/principals` searches tereo's users and groups by name (60 searches a minute per caller),
+    `GET /v1/principals/all` lists them all (counted as a search), and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
     both need `zeteo.grants.read`, and the lookup also takes `zeteo.runs.read`. See `docs/grants.md`.
 
     ## Queries
@@ -73,7 +79,8 @@ info:
     not granted what it reads is told `403 saved_query_not_accessible`, one answer for every cause
     that carries nothing about the query, the source or the planner. One the caller may not see at
     all is `404 not_found`. `GET /v1/me/runs` lists the caller's own runs, and
-    `GET /v1/me/principals` searches the users and groups they may share with; both need only
+    `GET /v1/me/principals` searches the users and groups they may share with (`/all` lists them
+    all); these need only
     `zeteo.data.read`. `zeteo.saved_queries.read` lets an administrator see every saved query and its
     shares, and `zeteo.saved_queries.write` change shares, transfer and delete them.
 
@@ -116,8 +123,8 @@ security:
 tags:
   - name: Sources
     description: Databases registered with Zeteo
-  - name: File sources
-    description: Upload CSV and xlsx files into file sources their owners manage and grant
+  - name: Uploads
+    description: CSV and xlsx files staged for upload sources, which their owners manage and grant
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -132,7 +139,7 @@ tags:
     description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
-    tags: [Sources, File sources, Catalogue]
+    tags: [Sources, Uploads, Catalogue]
   - name: Access
     tags: [Grants]
   - name: Querying
@@ -152,12 +159,16 @@ paths:
     $ref: './paths/sources/archive.yaml#/~1v1~1sources~1{sourceId}~1archive'
   /v1/sources/{sourceId}/test:
     $ref: './paths/sources/test.yaml#/~1v1~1sources~1{sourceId}~1test'
+  /v1/sources/{sourceId}/transfer:
+    $ref: './paths/sources/transfer.yaml#/~1v1~1sources~1{sourceId}~1transfer'
   /v1/sources/{sourceId}/refresh:
     $ref: './paths/catalog/refresh.yaml#/~1v1~1sources~1{sourceId}~1refresh'
   /v1/sources/{sourceId}/tables:
     $ref: './paths/catalog/tables.yaml#/~1v1~1sources~1{sourceId}~1tables'
   /v1/sources/{sourceId}/tables/{tableId}:
     $ref: './paths/catalog/table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}'
+  /v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}:
+    $ref: './paths/catalog/column.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}~1columns~1{columnId}'
   /v1/sources/{sourceId}/relations:
     $ref: './paths/catalog/relations.yaml#/~1v1~1sources~1{sourceId}~1relations'
   /v1/sources/{sourceId}/relations/{relationId}:
@@ -174,6 +185,8 @@ paths:
     $ref: './paths/principals/principals.yaml#/~1v1~1principals'
   /v1/principals/lookup:
     $ref: './paths/principals/lookup.yaml#/~1v1~1principals~1lookup'
+  /v1/principals/all:
+    $ref: './paths/principals/all.yaml#/~1v1~1principals~1all'
   /v1/catalog:
     $ref: './paths/queries/catalog.yaml#/~1v1~1catalog'
   /v1/query:
@@ -186,20 +199,12 @@ paths:
     $ref: './paths/queries/my-runs.yaml#/~1v1~1me~1runs'
   /v1/me/principals:
     $ref: './paths/principals/my-principals.yaml#/~1v1~1me~1principals'
-  /v1/file-sources/uploads:
-    $ref: './paths/file-sources/uploads.yaml#/~1v1~1file-sources~1uploads'
-  /v1/file-sources:
-    $ref: './paths/file-sources/file-sources.yaml#/~1v1~1file-sources'
-  /v1/file-sources/{sourceId}:
-    $ref: './paths/file-sources/file-source.yaml#/~1v1~1file-sources~1{sourceId}'
-  /v1/file-sources/{sourceId}/tables:
-    $ref: './paths/file-sources/tables.yaml#/~1v1~1file-sources~1{sourceId}~1tables'
-  /v1/file-sources/{sourceId}/tables/{tableId}:
-    $ref: './paths/file-sources/table.yaml#/~1v1~1file-sources~1{sourceId}~1tables~1{tableId}'
-  /v1/file-sources/{sourceId}/tables/{tableId}/columns/{columnId}:
-    $ref: './paths/file-sources/column.yaml#/~1v1~1file-sources~1{sourceId}~1tables~1{tableId}~1columns~1{columnId}'
-  /v1/file-sources/{sourceId}/transfer:
-    $ref: './paths/file-sources/transfer.yaml#/~1v1~1file-sources~1{sourceId}~1transfer'
+  /v1/me/principals/all:
+    $ref: './paths/principals/my-all-principals.yaml#/~1v1~1me~1principals~1all'
+  /v1/uploads:
+    $ref: './paths/uploads/uploads.yaml#/~1v1~1uploads'
+  /v1/uploads/{uploadId}:
+    $ref: './paths/uploads/upload.yaml#/~1v1~1uploads~1{uploadId}'
   /v1/saved-queries:
     $ref: './paths/saved-queries/saved-queries.yaml#/~1v1~1saved-queries'
   /v1/saved-queries/{savedQueryId}:
@@ -367,6 +372,8 @@ components:
       $ref: './components/principals/schemas.yaml#/DirectoryPrincipal'
     ListDirectoryPrincipalsResponse:
       $ref: './components/principals/schemas.yaml#/ListDirectoryPrincipalsResponse'
+    ListAllDirectoryPrincipalsResponse:
+      $ref: './components/principals/schemas.yaml#/ListAllDirectoryPrincipalsResponse'
     LookupPrincipalsRequest:
       $ref: './components/principals/schemas.yaml#/LookupPrincipalsRequest'
     Query:
@@ -407,26 +414,16 @@ components:
       $ref: './components/file-sources/schemas.yaml#/ColumnCorrection'
     TableCorrection:
       $ref: './components/file-sources/schemas.yaml#/TableCorrection'
-    CreateFileSourceRequest:
-      $ref: './components/file-sources/schemas.yaml#/CreateFileSourceRequest'
+    CreateUploadSourceRequest:
+      $ref: './components/file-sources/schemas.yaml#/CreateUploadSourceRequest'
     AddTablesRequest:
       $ref: './components/file-sources/schemas.yaml#/AddTablesRequest'
     ReuploadTableRequest:
       $ref: './components/file-sources/schemas.yaml#/ReuploadTableRequest'
-    UpdateFileSourceRequest:
-      $ref: './components/file-sources/schemas.yaml#/UpdateFileSourceRequest'
     UpdateFileColumnRequest:
       $ref: './components/file-sources/schemas.yaml#/UpdateFileColumnRequest'
-    TransferFileSourceRequest:
-      $ref: './components/file-sources/schemas.yaml#/TransferFileSourceRequest'
-    FileSourceColumn:
-      $ref: './components/file-sources/schemas.yaml#/FileSourceColumn'
-    FileSourceTable:
-      $ref: './components/file-sources/schemas.yaml#/FileSourceTable'
-    FileSource:
-      $ref: './components/file-sources/schemas.yaml#/FileSource'
-    ListFileSourcesResponse:
-      $ref: './components/file-sources/schemas.yaml#/ListFileSourcesResponse'
+    TransferSourceRequest:
+      $ref: './components/file-sources/schemas.yaml#/TransferSourceRequest'
     SavedQuery:
       $ref: './components/saved-queries/schemas.yaml#/SavedQuery'
     ListSavedQueriesResponse:

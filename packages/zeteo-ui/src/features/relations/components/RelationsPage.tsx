@@ -1,8 +1,10 @@
+import { RenameRelationDialog } from "./RenameRelationDialog";
 import { useDeleteRelation } from "../api/useDeleteRelation";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { useAllRelations } from "../api/useAllRelations";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { EditButton } from "@/components/EditButton";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { RelationForm } from "./RelationForm";
@@ -18,6 +20,7 @@ import {
   Badge,
   Button,
   EmptyState,
+  RowActions,
   Spinner,
   Table as DataTable,
   TableFilters,
@@ -26,8 +29,20 @@ import {
 
 export const RelationsPage = () => {
   const sourceId = useUuidParam("sourceId");
-  return sourceId ? <Relations sourceId={sourceId} /> : <NotFound />;
+  return sourceId ? <DatabaseRelations sourceId={sourceId} /> : <NotFound />;
 };
+
+const DatabaseRelations = ({ sourceId }: { sourceId: string }) => (
+  <RelationsList sourceId={sourceId} canEdit={useCanEditCatalogue(sourceId)} />
+);
+
+export interface RelationsListProps {
+  sourceId: string;
+  /** Whether the caller may declare, rename and delete relations. */
+  canEdit: boolean;
+  /** `upload`: a file source, whose tables are named without their schema. */
+  catalogue?: "database" | "upload";
+}
 
 type FilterParams = Record<string, string>;
 
@@ -35,15 +50,18 @@ const TableName = ({
   table,
   id,
   loading,
+  schema,
 }: {
   table: Table | undefined;
   id: string;
   /** The tables are still loading: a placeholder, not the raw id. */
   loading: boolean;
+  /** Whether to show the schema before the name. */
+  schema: boolean;
 }) =>
   table ? (
     <span className="z-relation-table">
-      <span className="z-muted">{table.schema_name}.</span>
+      {schema && <span className="z-muted">{table.schema_name}.</span>}
       {table.name}
     </span>
   ) : loading ? (
@@ -58,22 +76,33 @@ const keys = (r: Relation) =>
     ? r.from_columns.join(", ")
     : `${r.from_columns.join(", ")} → ${r.to_columns.join(", ")}`;
 
-const Relations = ({ sourceId }: { sourceId: string }) => {
+/** A source's relations: the Relations tab of a database source, and of a file source. */
+export const RelationsList = ({
+  sourceId,
+  canEdit,
+  catalogue = "database",
+}: RelationsListProps) => {
+  const database = catalogue === "database";
   const { relations, isLoading, error } = useAllRelations(sourceId);
   const {
     tables,
     isLoading: tablesLoading,
     error: tablesError,
   } = useAllTables(sourceId);
-  const canEdit = useCanEditCatalogue(sourceId);
   const del = useDeleteRelation(sourceId);
   const [declaring, setDeclaring] = useState(false);
+  const [renaming, setRenaming] = useState<Relation | null>(null);
   const [params, setParams] = useState<FilterParams>({});
 
   const byId = useMemo(() => new Map(tables.map((t) => [t.id, t])), [tables]);
+  // The schema names a table only where it tells tables apart: a database
+  // source reading more than one schema.
+  const showSchema =
+    database && new Set(tables.map((t) => t.schema_name)).size > 1;
   const label = (id: string) => {
     const t = byId.get(id);
-    return t ? `${t.schema_name}.${t.name}` : id;
+    if (!t) return id;
+    return showSchema ? `${t.schema_name}.${t.name}` : t.name;
   };
 
   // Only tables that take part in a relation; a stable key so the filter
@@ -159,8 +188,16 @@ const Relations = ({ sourceId }: { sourceId: string }) => {
         <RelationForm
           sourceId={sourceId}
           tables={tables.filter((t) => !t.missing_since)}
+          {...(!showSchema && { getTableLabel: (t: Table) => t.name })}
           onDeclared={() => setDeclaring(false)}
           onClose={() => setDeclaring(false)}
+        />
+      )}
+      {renaming && (
+        <RenameRelationDialog
+          sourceId={sourceId}
+          relation={renaming}
+          onClose={() => setRenaming(null)}
         />
       )}
       <ErrorNotice error={error} />
@@ -189,6 +226,7 @@ const Relations = ({ sourceId }: { sourceId: string }) => {
                     table={byId.get(r.from_table_id)}
                     id={r.from_table_id}
                     loading={tablesLoading}
+                    schema={showSchema}
                   />
                 ),
               },
@@ -217,6 +255,7 @@ const Relations = ({ sourceId }: { sourceId: string }) => {
                     table={byId.get(r.to_table_id)}
                     id={r.to_table_id}
                     loading={tablesLoading}
+                    schema={showSchema}
                   />
                 ),
               },
@@ -234,16 +273,19 @@ const Relations = ({ sourceId }: { sourceId: string }) => {
                       title: "",
                       cellElement: (r: Relation) =>
                         r.origin === "declared" ? (
-                          <ConfirmButton
-                            danger
-                            size="sm"
-                            icon={faTrash}
-                            label="Delete"
-                            confirmTitle="Delete this relation?"
-                            confirmText={`Queries can no longer join through ${r.name}. Grants are not affected.`}
-                            confirmLabel="Delete relation"
-                            onConfirm={() => del.mutateAsync(r.id)}
-                          />
+                          <RowActions align="end">
+                            <EditButton onClick={() => setRenaming(r)} />
+                            <ConfirmButton
+                              danger
+                              size="sm"
+                              icon={faTrash}
+                              label="Delete"
+                              confirmTitle="Delete this relation?"
+                              confirmText={`Queries can no longer join through ${r.name}. Grants are not affected.`}
+                              confirmLabel="Delete relation"
+                              onConfirm={() => del.mutateAsync(r.id)}
+                            />
+                          </RowActions>
                         ) : null,
                     },
                   ]

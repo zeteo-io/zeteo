@@ -1,5 +1,4 @@
 import { RequirePermission } from "@/components/RequirePermission";
-import { fileSourceRoutes } from "@/features/file-sources/routes";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { sourceRoutes } from "@/features/sources/routes";
 import { DisplaySignedOut } from "@/features/dashboards";
@@ -193,7 +192,6 @@ export const routes = [
       ...sourceRoutes,
       ...grantWriteRoutes,
       ...savedQueryRoutes,
-      ...fileSourceRoutes,
       ...dashboardRoutes,
       { path: "*", element: <NotFound /> },
     ],

@@ -48,11 +48,13 @@ export const SourceFieldsShape = {
   export_concurrency: z.number().int().min(1).max(10),
 };
 
+const SlugSchema = z.string().regex(SLUG_PATTERN, {
+  message:
+    "A slug is lower case letters, digits and hyphens, starting with a letter, 2 to 63 characters",
+});
+
 export const CreateSourceSchema = z.strictObject({
-  slug: z.string().regex(SLUG_PATTERN, {
-    message:
-      "A slug is lower case letters, digits and hyphens, starting with a letter, 2 to 63 characters",
-  }),
+  slug: SlugSchema,
   type: z.enum(["postgres", "azure-sql"]),
   name: SourceFieldsShape.name,
   settings: SourceFieldsShape.settings,
@@ -67,11 +69,69 @@ export const CreateSourceSchema = z.strictObject({
   export_concurrency: SourceFieldsShape.export_concurrency.optional(),
 });
 
+// An upload source's tables, as a staging is turned into them.
+
+const NAME = /^[a-z][a-z0-9_]{0,62}$/;
+const NAME_MESSAGE =
+  "A name is a lowercase letter, then lowercase letters, digits or _, at most 63";
+
+export const ColumnNameSchema = z
+  .string()
+  .regex(NAME, { message: NAME_MESSAGE });
+
+/** A table's name: as a column's, and never containing `__load_`, the mark of a load in progress. */
+export const TableNameSchema = ColumnNameSchema.refine(
+  (name) => !name.includes("__load_"),
+  { message: "A table name cannot contain __load_" }
+);
+
+export const FileColumnTypeSchema = z.enum([
+  "text",
+  "number",
+  "boolean",
+  "date",
+  "timestamp",
+]);
+
+export const ColumnCorrectionSchema = z.strictObject({
+  index: z.number().int().min(0).max(1600),
+  name: ColumnNameSchema.optional(),
+  type: FileColumnTypeSchema.optional(),
+});
+
+/** The 0-based header row, or null for none. */
+export const HeaderRowSchema = z.number().int().min(0).nullable();
+
+export const TableKeySchema = z.string().min(1).max(1024);
+
+export const TableCorrectionSchema = z.strictObject({
+  key: TableKeySchema,
+  name: TableNameSchema.optional(),
+  header_row: HeaderRowSchema.optional(),
+  columns: z.array(ColumnCorrectionSchema).max(1600).optional(),
+});
+
+export const TablesSchema = z.array(TableCorrectionSchema).min(1).max(100);
+
+/** An upload source, made from the caller's staging. */
+export const CreateUploadSourceSchema = z.strictObject({
+  type: z.literal("upload"),
+  staging_id: IdSchema,
+  name: SourceFieldsShape.name,
+  slug: SlugSchema.optional(),
+  tables: TablesSchema,
+});
+
+const TYPES = ["postgres", "azure-sql", "upload"] as const;
+
 export const ListSourcesQuerySchema = z.strictObject({
   include_archived: z
     .enum(["true", "false"])
     .default("false")
     .transform((v) => v === "true"),
+  type: z.enum(TYPES).optional(),
+  /** `me` for the caller, or a user's id. */
+  owner_id: z.union([z.literal("me"), IdSchema]).optional(),
   cursor: z.string().max(512).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });

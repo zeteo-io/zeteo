@@ -45,9 +45,9 @@ export interface Source {
   slug: string;
   name: string;
   type: SourceType;
-  /** A file source's owner; null for a database source. */
+  /** An upload source's owner; null for a database source. */
   owner_id: string | null;
-  /** Redacted; null for a file source or when the stored settings cannot be decrypted. */
+  /** Redacted; null for an upload source or when the stored settings cannot be decrypted. */
   settings: Record<string, unknown> | null;
   schemas: string[];
   timeout_ms: number;
@@ -60,6 +60,16 @@ export interface Source {
   writable_login_allowed: boolean;
   status: "active" | "unreachable";
   last_refreshed_at: string | null;
+  /**
+   * A database source: bytes on disk of the tables in `schemas`, measured by
+   * the last catalogue refresh; null before the first refresh, or when the
+   * source would not tell. An upload source: the bytes it stores now.
+   */
+  size_bytes: number | null;
+  /** When a database source's `size_bytes` was measured; null for an upload source. */
+  size_measured_at: string | null;
+  /** How many people and groups its tables are granted to, an upload source's owner grants not counted. */
+  share_count: number;
   created_at: string;
   archived_at: string | null;
 }
@@ -135,6 +145,14 @@ export interface Table {
   description: string | null;
   last_seen_at: string;
   missing_since: string | null;
+  /**
+   * An upload source's table: the rows loaded. A database source's: an
+   * estimate from the database's statistics at the last refresh, not a count;
+   * null for a view or a table the database has no estimate for.
+   */
+  row_count: number | null;
+  /** An upload source's table: when it was last loaded; null for a database source's. */
+  last_loaded_at: string | null;
 }
 
 export interface Column {
@@ -147,6 +165,8 @@ export interface Column {
   position: number;
   is_primary_key: boolean;
   description: string | null;
+  /** An upload source's column: its header in the file; null for a database source's. */
+  original_name: string | null;
   missing_since: string | null;
 }
 
@@ -190,6 +210,9 @@ export interface RenameRelationRequest {
 
 export interface ListSourcesOptions extends ListOptions {
   include_archived?: boolean;
+  type?: SourceType;
+  /** `me` for the caller's own upload sources (all an owner without `zeteo.sources.read` may list), or a user's id. */
+  owner_id?: string;
 }
 
 export interface ListTablesOptions extends ListOptions {

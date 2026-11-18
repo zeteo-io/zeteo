@@ -1,6 +1,7 @@
 import { FileParseError, type ParseLimits, type Row } from "./parse/types.js";
 import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
+import { emptyColumnsWarning } from "./warnings.js";
 import type { FileColumnType } from "./types.js";
 import { normalizeName } from "./parse/names.js";
 import { withXlsxSlot } from "./uploadLimits.js";
@@ -329,11 +330,12 @@ const stageTable = async (
       samples,
     };
   });
-  for (const column of columns) {
-    if (column.samples.length === 0 && total > dataFrom) {
-      warnings.push(`Column "${column.name}" has no values in its first rows.`);
-    }
-  }
+  const empty = emptyColumnsWarning(
+    total > dataFrom
+      ? columns.filter((c) => c.samples.length === 0).map((c) => c.name)
+      : []
+  );
+  if (empty) warnings.push(empty);
 
   const name = normalizeName(meta.fallbackName, takenTableNames, 0);
   return {
@@ -459,6 +461,19 @@ export const stageUpload = async ({
     await iterator.return?.().catch(() => undefined);
     throw err;
   }
+};
+
+/**
+ * Discards the caller's own staging: drops its tables and deletes its row,
+ * which frees its place under `FILE_SOURCE_MAX_STAGINGS`. Expired, someone
+ * else's and missing all answer `StagingNotFoundError`.
+ */
+export const discardOwnStaging = async (
+  id: string,
+  callerId: string
+): Promise<void> => {
+  await getStaging(id, callerId);
+  await discardStaging(id);
 };
 
 /** Deletes a staging row and drops its tables; a staging already gone is fine. */

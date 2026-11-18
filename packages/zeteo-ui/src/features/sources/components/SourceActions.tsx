@@ -5,9 +5,9 @@ import { useRefreshSource } from "../api/useRefreshSource";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useTestSource } from "../api/useTestSource";
 import { Alert, Button } from "@kosmeo-ui/react";
-import { useNavigate } from "react-router-dom";
 import type { ApiError } from "@/lib/api";
 import { useAuth } from "@tereo-io/react";
+import { SourceForm } from "./SourceForm";
 import { useState } from "react";
 
 const Counts = ({ label, counts }: { label: string; counts: object }) => (
@@ -25,13 +25,13 @@ const Counts = ({ label, counts }: { label: string; counts: object }) => (
  */
 export const useSourceActions = (source: Source) => {
   const { hasPermission } = useAuth();
-  const navigate = useNavigate();
   const test = useTestSource(source.id);
   const refresh = useRefreshSource(source.id);
   const archive = useArchiveSource(source.id);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
   const [summary, setSummary] = useState<RefreshSummary | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+  const [editing, setEditing] = useState(false);
 
   const canWrite = hasPermission("zeteo.sources.write") && !source.archived_at;
   const busy = test.isPending || refresh.isPending || archive.isPending;
@@ -73,11 +73,7 @@ export const useSourceActions = (source: Source) => {
       >
         Refresh catalogue
       </Button>
-      <Button
-        size="sm"
-        fullWidth={false}
-        onClick={() => navigate(`/sources/${source.id}/edit`)}
-      >
+      <Button size="sm" fullWidth={false} onClick={() => setEditing(true)}>
         Edit
       </Button>
       <span className="z-source-actions-gap" />
@@ -128,6 +124,13 @@ export const useSourceActions = (source: Source) => {
             </ul>
           </Alert>
         </div>
+      )}
+      {editing && (
+        <SourceForm
+          source={source}
+          title="Edit source"
+          dialog={{ onDone: () => setEditing(false) }}
+        />
       )}
     </>
   );

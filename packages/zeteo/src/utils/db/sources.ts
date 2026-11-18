@@ -12,11 +12,15 @@ export const listPage = async (options: {
   includeArchived: boolean;
   limit: number;
   after?: { createdAt: Date; id: string };
+  type?: Source["type"];
+  ownerId?: string;
 }): Promise<{ rows: Source[]; hasMore: boolean }> => {
-  const { includeArchived, limit, after } = options;
+  const { includeArchived, limit, after, type, ownerId } = options;
   const rows = await prisma.source.findMany({
     where: {
       ...(includeArchived ? {} : { archivedAt: null }),
+      ...(type !== undefined && { type }),
+      ...(ownerId !== undefined && { ownerId }),
       ...(after && {
         OR: [
           { createdAt: { gt: after.createdAt } },

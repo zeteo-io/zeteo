@@ -1,6 +1,7 @@
 import { useCanEditCatalogue } from "../api/useCanEditCatalogue";
 import { tableLabel, useAllTables } from "../api/useAllTables";
 import type { Relation } from "@/features/relations/api/types";
+import { useMemo, useState, type ReactNode } from "react";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useUpdateTable } from "../api/useUpdateTable";
 import type { Column, PatchTable } from "../api/types";
@@ -8,7 +9,6 @@ import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { useTable } from "../api/useTable";
-import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import "./styles.css";
 import {
@@ -16,6 +16,7 @@ import {
   Button,
   EmptyState,
   Input,
+  RowActions,
   Spinner,
   Table as DataTable,
   TableFilters,
@@ -61,19 +62,61 @@ export const TablePage = () => {
   const sourceId = useUuidParam("sourceId");
   const tableId = useUuidParam("tableId");
   if (!sourceId || !tableId) return <NotFound />;
-  return <TableView key={tableId} sourceId={sourceId} tableId={tableId} />;
+  return <DatabaseTable key={tableId} sourceId={sourceId} tableId={tableId} />;
 };
 
-const TableView = ({
+const DatabaseTable = ({
   sourceId,
   tableId,
 }: {
   sourceId: string;
   tableId: string;
-}) => {
+}) => (
+  <TableView
+    sourceId={sourceId}
+    tableId={tableId}
+    canEdit={useCanEditCatalogue(sourceId)}
+    tablesHref={`/sources/${sourceId}/tables`}
+    relationsHref={`/sources/${sourceId}/relations`}
+  />
+);
+
+export interface TableViewProps {
+  sourceId: string;
+  tableId: string;
+  /** Whether the caller may describe the table and its columns. */
+  canEdit: boolean;
+  /** The source's list of tables, for the back link. */
+  tablesHref: string;
+  /** Where the source's relations are managed. */
+  relationsHref: string;
+  /** `upload`: a file source, whose tables have no schema, database types or nullability to show. */
+  catalogue?: "database" | "upload";
+  /** Actions beside "Edit descriptions", for what only this kind of source has. */
+  headerActions?: ReactNode;
+  /** Shown after a column's name. */
+  columnNote?: (column: Column) => ReactNode;
+  /** A column's row action, when this kind of source has one. */
+  columnAction?: (column: Column) => ReactNode;
+}
+
+/** One table of a source: the table page of a database source, and of a file source. Key it by table, so edit state never carries over. */
+export const TableView = ({
+  sourceId,
+  tableId,
+  canEdit,
+  tablesHref,
+  relationsHref,
+  catalogue = "database",
+  headerActions,
+  columnNote,
+  columnAction,
+}: TableViewProps) => {
+  const database = catalogue === "database";
   const { data: table, error, isLoading } = useTable(sourceId, tableId);
-  const { labelFor } = useAllTables(sourceId);
-  const canEdit = useCanEditCatalogue(sourceId);
+  const { tables: allTables, labelFor } = useAllTables(sourceId);
+  const nameOf = (id: string) =>
+    database ? labelFor(id) : (allTables.find((t) => t.id === id)?.name ?? id);
   const update = useUpdateTable(sourceId, tableId);
 
   const [view, setView] = useState<"columns" | "relations">("columns");
@@ -113,7 +156,7 @@ const TableView = ({
       <>
         <ErrorNotice error={error} />
         <p>
-          <Link to={`/sources/${sourceId}/tables`}>All tables</Link>
+          <Link to={tablesHref}>All tables</Link>
         </p>
       </>
     );
@@ -178,46 +221,52 @@ const TableView = ({
       (column.description ?? "")
     );
 
-  const actions = canEdit ? (
-    <div className="z-header-actions">
-      {editing ? (
-        <>
+  const actions =
+    canEdit || headerActions ? (
+      <div className="z-header-actions">
+        {!canEdit ? null : editing ? (
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              disabled={update.isPending}
+              onClick={() => setEditing(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              fullWidth={false}
+              isLoading={update.isPending}
+              disabled={update.isPending || overLimit}
+              onClick={save}
+            >
+              Save
+            </Button>
+          </>
+        ) : (
           <Button
+            size="sm"
             variant="secondary"
             fullWidth={false}
-            disabled={update.isPending}
-            onClick={() => setEditing(false)}
+            onClick={startEditing}
           >
-            Cancel
+            Edit descriptions
           </Button>
-          <Button
-            fullWidth={false}
-            isLoading={update.isPending}
-            disabled={update.isPending || overLimit}
-            onClick={save}
-          >
-            Save
-          </Button>
-        </>
-      ) : (
-        <Button variant="secondary" fullWidth={false} onClick={startEditing}>
-          Edit descriptions
-        </Button>
-      )}
-    </div>
-  ) : undefined;
+        )}
+        {!editing && headerActions}
+      </div>
+    ) : undefined;
 
   return (
     <>
-      <Link
-        className="z-muted-link z-back-link"
-        to={`/sources/${sourceId}/tables`}
-      >
+      <Link className="z-muted-link z-back-link" to={tablesHref}>
         ← All tables
       </Link>
       <div className="z-source-header z-table-header">
         <PageHeader
-          title={tableLabel(table)}
+          title={database ? tableLabel(table) : table.name}
           badges={
             <span className="z-table-badges">
               <Badge size="sm" variant="secondary">
@@ -290,7 +339,9 @@ const TableView = ({
               <TableFilters filters={columnFilters} onChange={setParams} />
             </div>
           </div>
-          <div className="z-wrap z-columns-list">
+          <div
+            className={`z-wrap z-columns-list${columnAction ? " z-actions-last" : ""}`}
+          >
             <DataTable<Column>
               rowKey={(column) => column.id}
               emptyMessage={
@@ -306,6 +357,7 @@ const TableView = ({
                   cellElement: (column) => (
                     <span className="z-tables-name">
                       {column.name}
+                      {columnNote?.(column)}
                       {column.is_primary_key && (
                         <Badge size="sm" variant="secondary">
                           Primary key
@@ -324,7 +376,7 @@ const TableView = ({
                   cellElement: (column) => (
                     <span className="z-column-type">
                       {column.type}
-                      {column.native_type !== column.type && (
+                      {database && column.native_type !== column.type && (
                         <code className="z-muted" title="Type in the database">
                           {column.native_type}
                         </code>
@@ -332,11 +384,35 @@ const TableView = ({
                     </span>
                   ),
                 },
+                ...(database
+                  ? [
+                      {
+                        title: "Nullable",
+                        cellElement: (column: Column) => (
+                          <YesNo value={column.nullable} />
+                        ),
+                      },
+                    ]
+                  : []),
                 {
-                  title: "Nullable",
-                  cellElement: (column) => <YesNo value={column.nullable} />,
+                  title: "Description",
+                  // A file source's few short columns: the description takes
+                  // the spare width, the type and the action their content's.
+                  ...(!database && { width: "100%" }),
+                  cellElement: columnCells,
                 },
-                { title: "Description", cellElement: columnCells },
+                ...(columnAction && !editing
+                  ? [
+                      {
+                        title: "",
+                        cellElement: (column: Column) => (
+                          <RowActions align="end">
+                            {columnAction(column)}
+                          </RowActions>
+                        ),
+                      },
+                    ]
+                  : []),
               ]}
               rows={shownColumns}
             />
@@ -345,10 +421,7 @@ const TableView = ({
       ) : (
         <>
           <div className="z-list-toolbar z-list-toolbar-end">
-            <Link
-              className="z-muted-link"
-              to={`/sources/${sourceId}/relations`}
-            >
+            <Link className="z-muted-link" to={relationsHref}>
               Manage relations
             </Link>
           </div>
@@ -374,7 +447,7 @@ const TableView = ({
                 },
                 {
                   title: "To table",
-                  cellElement: (relation) => labelFor(relation.to_table_id),
+                  cellElement: (relation) => nameOf(relation.to_table_id),
                 },
                 {
                   title: "Columns",

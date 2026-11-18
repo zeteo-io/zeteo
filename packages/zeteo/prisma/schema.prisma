@@ -112,6 +112,10 @@ model Source {
   writableLoginAllowed Boolean      @default(false) @map("writable_login_allowed")
   status               SourceStatus @default(active)
   lastRefreshedAt      DateTime?    @map("last_refreshed_at") @db.Timestamp(3)
+  // A database source's tables on disk at its last refresh; null for a file
+  // source, or when the source would not tell.
+  sizeBytes            BigInt?      @map("size_bytes")
+  sizeMeasuredAt       DateTime?    @map("size_measured_at") @db.Timestamp(3)
   ownerId              String?      @map("owner_id") @db.Uuid
   createdBy            String       @map("created_by") @db.Uuid
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamp(3)
@@ -138,8 +142,9 @@ model SourceTable {
   lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
   missingSince DateTime? @map("missing_since") @db.Timestamp(3)
   lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamp(3)
-  // A file-source table's rows at its last load; null for a database source.
-  rowCount     Int?      @map("row_count")
+  // An upload source's table: its rows at its last load. A database source's:
+  // the database's estimate at the last refresh, null when it gave none.
+  rowCount     BigInt?   @map("row_count")
 
   source        Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   columns       SourceColumn[]

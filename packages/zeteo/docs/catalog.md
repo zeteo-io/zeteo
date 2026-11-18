@@ -52,6 +52,19 @@ missing in this refresh.
   changed (counted as `changed`), and its position;
 - updates a table's `kind` (table or view), `last_seen_at`, and the columns or target of a
   discovered relation whose foreign key changed under the same constraint name;
+- sets the source's `size_bytes` and `size_measured_at`, read with the schema, outside any
+  transaction ([sources.md](sources.md#the-source)); when the size cannot be read the refresh goes
+  on and keeps the last measurement and its date;
+- sets each table's `row_count` to the database's estimate of its rows, read with the schema from
+  the statistics, not by scanning a table: on Postgres `pg_class.reltuples`, or, for a table
+  never vacuumed or analyzed (autovacuum never analyzes a small table loaded once), the
+  statistics collector's live-row count (a partitioned table the sum of its partitions', and no
+  estimate when any of them has none); on Azure SQL the rows `sys.partitions` keeps for the heap
+  or clustered index, which needs no right beyond seeing the table. A view, a table without an
+  estimate (on Postgres, one never analyzed whose live-row count is 0, as it is on a read
+  replica) gets `null`; when the read fails every table keeps its last estimate, and the refresh
+  goes on. A missing table keeps its last estimate. The estimate is as fresh as the database's
+  statistics (on Postgres, its last `ANALYZE` or autovacuum) at the refresh;
 - sets the source's `status` to `active` and `last_refreshed_at`; a refresh that cannot read the
   source sets `status` to `unreachable`, throws `502 source_unreachable` and changes nothing else.
 

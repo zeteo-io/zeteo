@@ -20,7 +20,17 @@ const settingsView = (row: Source): Record<string, unknown> | null => {
   }
 };
 
-export const sourceView = (row: Source) => ({
+/** What a source's view needs besides its row, loaded by `sources/present.ts`. */
+export interface SourceViewExtras {
+  /** The people and groups its tables are shared with, the owner's own grants not counted. */
+  shareCount: number;
+  /** An upload source's stored bytes now (0 once deleted); unused for a database source. */
+  storedBytes: number;
+  /** An upload source: its latest load, which it reports as its last refresh. */
+  lastLoadedAt?: Date | null;
+}
+
+export const sourceView = (row: Source, extras: SourceViewExtras) => ({
   id: row.id,
   slug: row.slug,
   name: row.name,
@@ -38,7 +48,28 @@ export const sourceView = (row: Source) => ({
   /** A file source's owner; null for a database source. */
   owner_id: row.ownerId,
   status: row.status,
-  last_refreshed_at: row.lastRefreshedAt?.toISOString() ?? null,
+  // A database source's last catalogue refresh; an upload source's last load
+  // (it has no refresh: its data changes when a file is loaded).
+  last_refreshed_at:
+    (extras.lastLoadedAt !== undefined
+      ? extras.lastLoadedAt
+      : row.lastRefreshedAt
+    )?.toISOString() ?? null,
+  /**
+   * A database source: bytes on disk of the tables in `schemas` at the last
+   * refresh, null when the source would not tell. An upload source: the bytes
+   * it stores now.
+   */
+  size_bytes: isFileSource(row)
+    ? extras.storedBytes
+    : row.sizeBytes === null
+      ? null
+      : Number(row.sizeBytes),
+  /** When a database source's size was measured; null for an upload source. */
+  size_measured_at: isFileSource(row)
+    ? null
+    : (row.sizeMeasuredAt?.toISOString() ?? null),
+  share_count: extras.shareCount,
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
 });

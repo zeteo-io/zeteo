@@ -6,7 +6,7 @@ ColumnType:
 Table:
   type: object
   description: A table or view of a source
-  required: [id, source_id, schema_name, name, kind, description, last_seen_at, missing_since]
+  required: [id, source_id, schema_name, name, kind, description, last_seen_at, missing_since, row_count, last_loaded_at]
   properties:
     id: { type: string, format: uuid, description: 'Stable across refreshes' }
     source_id: { type: string, format: uuid }
@@ -18,11 +18,19 @@ Table:
     missing_since:
       type: [string, 'null']
       format: date-time
-      description: Set when a refresh no longer finds the table; cleared when it returns
+      description: Set when a refresh no longer finds the table (on an upload source, when it is removed or the source deleted); cleared when it returns
+    row_count:
+      type: [integer, 'null']
+      minimum: 0
+      description: An upload source's table, the rows loaded. A database source's, an estimate from the database's statistics at the last refresh (Postgres `pg_class.reltuples`, or the live-row count for a table never analyzed, a partitioned table the sum of its partitions'; SQL Server `sys.partitions`), not a count; null for a view, a table the database has no estimate for, or when the refresh could not read them
+    last_loaded_at:
+      type: [string, 'null']
+      format: date-time
+      description: An upload source's table, when it was last loaded; null for a database source's
 
 Column:
   type: object
-  required: [id, name, type, native_type, nullable, position, is_primary_key, description, missing_since]
+  required: [id, name, type, native_type, nullable, position, is_primary_key, description, original_name, missing_since]
   properties:
     id: { type: string, format: uuid, description: 'Stable across refreshes' }
     name: { type: string }
@@ -39,6 +47,9 @@ Column:
     position: { type: integer, minimum: 1 }
     is_primary_key: { type: boolean }
     description: { type: [string, 'null'], maxLength: 2000 }
+    original_name:
+      type: [string, 'null']
+      description: An upload source's column, its header as written in the file (also its first description); null for a database source's
     missing_since: { type: [string, 'null'], format: date-time }
 
 Relation:

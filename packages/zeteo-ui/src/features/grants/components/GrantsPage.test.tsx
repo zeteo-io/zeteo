@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useLocation, useNavigate } from "react-router-dom";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
+import { rowNamed } from "@/test/rowNamed";
 import { GrantsPage } from "./GrantsPage";
 
 const get = vi.hoisted(() => vi.fn());
@@ -65,7 +66,18 @@ const lookupAnswer = async (_url: string, body: { principals: unknown[] }) => ({
   },
 });
 
-// Source and Table are kosmeo TableFilters menus: a button, then a checkbox.
+const NOBODY_ID = "a9999999-1c7a-4a53-9d0e-6a3b1f2c4d77";
+/** `GET /v1/principals/all`: the Who filter's choices. */
+const directory = {
+  data: [
+    { type: "user", id: USER_ID, name: "Ada Lovelace", status: "active" },
+    { type: "group", id: GROUP_ID, name: "Analysts", status: "active" },
+    { type: "user", id: NOBODY_ID, name: "Nina Nobody", status: "active" },
+  ],
+  truncated: false,
+};
+
+// Who, Source and Table are kosmeo TableFilters menus: a button, then a checkbox.
 const chooseFilter = async (
   user: ReturnType<typeof userEvent.setup>,
   title: string,
@@ -97,6 +109,7 @@ describe("GrantsPage", () => {
       if (url.endsWith("/tables")) {
         return { data: { data: [makeTable()], next_cursor: null } };
       }
+      if (url === "/v1/principals/all") return { data: directory };
       throw new Error(`unexpected ${url}`);
     });
   });
@@ -106,7 +119,7 @@ describe("GrantsPage", () => {
     expect(await screen.findByText("Ada Lovelace")).toBeInTheDocument();
     await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
     expect(post.mock.calls[0][1].principals).toHaveLength(2);
-    const row = screen.getByText("Ada Lovelace").closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     expect(row).toHaveTextContent("orders");
     expect(row).toHaveTextContent("public.orders");
     expect(row).toHaveTextContent("All columns");
@@ -209,6 +222,7 @@ describe("GrantsPage", () => {
           },
         };
       }
+      if (url === "/v1/principals/all") return { data: directory };
       return { data: { data: [userGrant], next_cursor: null } };
     });
     renderWithProviders(<GrantsPage />);
@@ -245,14 +259,91 @@ describe("GrantsPage", () => {
     );
   });
 
-  it("clears the principal filter", async () => {
+  it("filters by anyone in the directory, granted or not, through the API and the address", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<GrantsPage />, {
-      route: `/grants?principal_type=user&principal_id=${USER_ID}`,
-    });
+    renderPage();
+    await screen.findByText("Ada Lovelace");
+    await chooseFilter(user, "Who", "Nina Nobody");
+    await waitFor(() =>
+      expect(grantParams().at(-1)).toMatchObject({
+        principal_type: "user",
+        principal_id: NOBODY_ID,
+      })
+    );
+    expect(screen.getByTestId("where")).toHaveTextContent(
+      `?principal_type=user&principal_id=${NOBODY_ID}`
+    );
+    await chooseFilter(user, "Who", "Analysts (group)");
+    await waitFor(() =>
+      expect(grantParams().at(-1)).toMatchObject({
+        principal_type: "group",
+        principal_id: GROUP_ID,
+      })
+    );
+    expect(get).toHaveBeenCalledWith("/v1/principals/all", expect.anything());
+  });
+
+  it("finds a person with the Who filter's own search", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText("Ada Lovelace");
+    await user.click(await screen.findByRole("button", { name: /^Who/ }));
+    await user.type(
+      screen.getByRole("textbox", { name: "Search Who options" }),
+      "nina"
+    );
+    expect(screen.getByRole("checkbox", { name: "Nina Nobody" })).toBeVisible();
+    expect(screen.queryByRole("checkbox", { name: "Ada Lovelace" })).toBeNull();
+  });
+
+  it("preselects the principal of a deep link, and clears it", async () => {
+    const user = userEvent.setup();
+    renderPage(`/grants?principal_type=user&principal_id=${USER_ID}`);
     await screen.findAllByText("Ada Lovelace");
+    await user.click(await screen.findByRole("button", { name: /^Who/ }));
+    const ada = screen.getByRole("checkbox", { name: "Ada Lovelace" });
+    expect(ada).toBeChecked();
+    await user.click(ada);
+    await waitFor(() =>
+      expect(grantParams().at(-1)).not.toHaveProperty("principal_id")
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
+    );
+  });
+
+  it("keeps a deep link to someone the directory does not list", async () => {
+    const user = userEvent.setup();
+    const gone = "a8888888-1c7a-4a53-9d0e-6a3b1f2c4d88";
+    renderPage(`/grants?principal_type=group&principal_id=${gone}`);
+    await screen.findByText("Ada Lovelace");
+    await user.click(await screen.findByRole("button", { name: /^Who/ }));
+    expect(
+      screen.getByRole("checkbox", { name: "Unknown group (group)" })
+    ).toBeChecked();
+    expect(grantParams().at(-1)).toMatchObject({ principal_id: gone });
+    expect(screen.getByTestId("where")).toHaveTextContent(
+      `principal_id=${gone}`
+    );
+  });
+
+  it("shows a deep-linked principal as a chip when the directory is unreachable", async () => {
+    const user = userEvent.setup();
+    const answer = get.getMockImplementation()!;
+    get.mockImplementation(async (url: string, cfg: unknown) => {
+      if (url === "/v1/principals/all") {
+        throw {
+          isAxiosError: true,
+          response: { status: 502, data: { error: "tereo_unreachable" } },
+        };
+      }
+      return answer(url, cfg);
+    });
+    renderPage(`/grants?principal_type=user&principal_id=${USER_ID}`);
+    await screen.findAllByText("Ada Lovelace");
+    expect(screen.queryByRole("button", { name: /^Who/ })).toBeNull();
     await user.click(
-      screen.getByRole("button", { name: "Clear person or group" })
+      await screen.findByRole("button", { name: "Clear person or group" })
     );
     await waitFor(() =>
       expect(grantParams().at(-1)).not.toHaveProperty("principal_id")
@@ -262,7 +353,7 @@ describe("GrantsPage", () => {
   it("offers Edit and Delete rows with zeteo.grants.write, and deletes after confirming", async () => {
     const user = userEvent.setup();
     renderPage();
-    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     expect(
       screen.getByRole("button", { name: "New grant" })
     ).toBeInTheDocument();
@@ -305,7 +396,7 @@ describe("GrantsPage", () => {
   it("names whose grant on which table is removed in the confirmation", async () => {
     const user = userEvent.setup();
     renderPage();
-    const row = (await screen.findByText("Ada Lovelace")).closest("tr")!;
+    const row = await rowNamed("Ada Lovelace");
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     expect(
       screen.getByText(
@@ -379,22 +470,24 @@ describe("GrantsPage", () => {
         `/grants?source_id=${SOURCE_ID}&table_id=${ORDERS_ID}&principal_type=user&principal_id=${USER_ID}`
       );
       await screen.findAllByText("Ada Lovelace");
-      const chip = (name: string) =>
-        screen.getByRole("button", { name }).closest(".z-filter-chip")!;
-      expect(chip("Clear source")).toHaveTextContent("Source: orders");
-      expect(chip("Clear table")).toHaveTextContent("Table: public.orders");
-      await waitFor(() =>
-        expect(chip("Clear person or group")).toHaveTextContent("Ada Lovelace")
+      const chip = async (name: string) =>
+        (await screen.findByRole("button", { name })).closest(
+          ".z-filter-chip"
+        )!;
+      expect(await chip("Clear source")).toHaveTextContent("Source: orders");
+      expect(await chip("Clear table")).toHaveTextContent(
+        "Table: public.orders"
       );
+      expect(screen.queryByRole("button", { name: /^Source/ })).toBeNull();
       await user.click(screen.getByRole("button", { name: "Clear source" }));
       await waitFor(() =>
         expect(screen.getByTestId("where").textContent).not.toMatch(
           /source_id|table_id/
         )
       );
-      await user.click(
-        screen.getByRole("button", { name: "Clear person or group" })
-      );
+      // The person is in the Who filter, which needs no Read sources.
+      await user.click(await screen.findByRole("button", { name: /^Who/ }));
+      await user.click(screen.getByRole("checkbox", { name: "Ada Lovelace" }));
       await waitFor(() =>
         expect(screen.getByTestId("where")).toHaveTextContent(/^$/)
       );

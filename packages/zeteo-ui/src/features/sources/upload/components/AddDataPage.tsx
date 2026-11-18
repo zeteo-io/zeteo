@@ -1,0 +1,363 @@
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { FileColumnType, Staging } from "../api/types";
+import { sourceHref } from "../../components/sourceLabels";
+import { ErrorNotice } from "@/components/ErrorNotice";
+import { PageHeader } from "@/components/PageHeader";
+import { useUuidParam } from "@/lib/useUuidParam";
+import { NotFound } from "@/components/NotFound";
+import { LoadFailure } from "./CastFailedNotice";
+import { useSource } from "../../api/useSource";
+import { useNavigate } from "react-router-dom";
+import type { Source } from "../../api/types";
+import { useTable } from "@/features/tables";
+import { slugify } from "@/utils/slugify";
+import { MY_DATA_HREF } from "./labels";
+import "./styles.css";
+import {
+  BorderedSection,
+  Button,
+  FileDropZone,
+  FormGrid,
+  Input,
+  Spinner,
+} from "@kosmeo-ui/react";
+import {
+  correctionOf,
+  editsValid,
+  initialEdits,
+  PreviewEditor,
+  type Edits,
+} from "./PreviewEditor";
+import {
+  useAddTables,
+  useCreateUploadSource,
+  useDiscardStaging,
+  useReuploadTable,
+  useUploadFile,
+} from "../api/uploads";
+
+const ACCEPT = ".csv,.xlsx";
+const FORM_ID = "z-fs-form";
+
+const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
+
+/** A file's name without its extension: "Q3 sales.xlsx" → "Q3 sales". */
+const baseName = (file: string) => file.replace(/\.[^.]+$/, "");
+
+/** The table a re-upload replaces: its name, and its live columns' types. */
+interface Target {
+  id: string;
+  name: string;
+  columns: { name: string; type: string }[];
+}
+
+type Mode =
+  | { kind: "create" }
+  | { kind: "add"; source: Source }
+  | { kind: "reupload"; source: Source; target: Target };
+
+/** Step one: choose a file; it is staged and its preview comes back. */
+const FilePicker = ({
+  onStaged,
+}: {
+  onStaged: (staging: Staging, fileName: string) => void;
+}) => {
+  const upload = useUploadFile();
+  const [problem, setProblem] = useState<string | null>(null);
+  const send = (files: File[]) => {
+    const file = files[0];
+    if (!file) return;
+    setProblem(null);
+    upload.mutate(file, { onSuccess: (s) => onStaged(s, file.name) });
+  };
+  return (
+    <BorderedSection title="File" as="h2">
+      {upload.isPending ? (
+        <div className="z-fs-reading">
+          <Spinner size="md" />
+          <span>Reading the file…</span>
+        </div>
+      ) : (
+        <FileDropZone
+          accept={ACCEPT}
+          maxFiles={1}
+          label="Drop a CSV or Excel (.xlsx) file here"
+          onFilesSelected={send}
+          onError={setProblem}
+        />
+      )}
+      <p className="z-note">
+        You check the tables, names and types it finds before anything is
+        created.
+      </p>
+      {problem && <p className="z-fs-problem">{problem}</p>}
+      <ErrorNotice error={upload.error} />
+    </BorderedSection>
+  );
+};
+
+/** Upload a file, check its preview, then create a source, add tables or replace one table's data. */
+const AddData = ({ mode }: { mode: Mode }) => {
+  const navigate = useNavigate();
+  const [staging, setStaging] = useState<Staging | null>(null);
+  const [edits, setEdits] = useState<Edits>({});
+  const [name, setName] = useState("");
+  const [slug, setSlug] = useState("");
+  // The slug follows the name until it is edited by hand.
+  const [slugEdited, setSlugEdited] = useState(false);
+  const changeName = (value: string) => {
+    setName(value);
+    if (!slugEdited) setSlug(slugify(value));
+  };
+  const create = useCreateUploadSource();
+  const sourceId = mode.kind === "create" ? "" : mode.source.id;
+  const add = useAddTables(sourceId);
+  const target = mode.kind === "reupload" ? mode.target : undefined;
+  const reupload = useReuploadTable(sourceId, target?.id ?? "");
+  const mutation =
+    mode.kind === "create" ? create : mode.kind === "add" ? add : reupload;
+
+  // A staging the person leaves without using (Cancel, or navigating away)
+  // is discarded, so it stops counting against their space.
+  const discard = useDiscardStaging();
+  const unused = useRef<string | null>(null);
+  useEffect(
+    () => () => {
+      if (unused.current) discard(unused.current);
+    },
+    [discard]
+  );
+
+  const onStaged = (s: Staging, fileName: string) => {
+    setStaging(s);
+    unused.current = s.staging_id;
+    if (mode.kind === "reupload") {
+      // The table of the same name, else the first; columns keep their current types.
+      const only =
+        s.tables.find((t) => t.name === target?.name)?.key ?? s.tables[0]?.key;
+      const types = new Map(
+        (target?.columns ?? []).map(
+          (c) => [c.name, c.type as FileColumnType] as const
+        )
+      );
+      setEdits(initialEdits(s.tables, { only, types }));
+    } else {
+      setEdits(initialEdits(s.tables));
+    }
+    if (mode.kind === "create" && !name) changeName(baseName(fileName));
+  };
+
+  const back =
+    mode.kind === "create" ? MY_DATA_HREF : sourceHref(mode.source.id);
+  const slugProblem =
+    slug && !SLUG.test(slug)
+      ? "Lowercase letters, digits and hyphens, starting with a letter (2 to 63)."
+      : undefined;
+  const ready =
+    !!staging &&
+    editsValid(staging.tables, edits) &&
+    (mode.kind !== "create" || (name.trim() !== "" && !slugProblem));
+
+  const submit = () => {
+    if (!staging || !ready || mutation.isPending) return;
+    const kept = staging.tables
+      .filter((t) => edits[t.key]?.keep)
+      .map((t) => correctionOf(t, edits[t.key]!));
+    const done = (source: Source) => {
+      // The server has used the staging.
+      unused.current = null;
+      navigate(sourceHref(source.id));
+    };
+    if (mode.kind === "create") {
+      create.mutate(
+        {
+          staging_id: staging.staging_id,
+          name: name.trim(),
+          ...(slug && { slug }),
+          tables: kept,
+        },
+        { onSuccess: done }
+      );
+    } else if (mode.kind === "add") {
+      add.mutate(
+        { staging_id: staging.staging_id, tables: kept },
+        { onSuccess: done }
+      );
+    } else {
+      const [table] = kept;
+      if (!table) return;
+      // A re-upload keeps the table's name.
+      const { name: _ignored, ...rest } = table;
+      void _ignored;
+      reupload.mutate(
+        { staging_id: staging.staging_id, ...rest },
+        { onSuccess: done }
+      );
+    }
+  };
+
+  const title =
+    mode.kind === "create"
+      ? "Add data"
+      : mode.kind === "add"
+        ? `Add tables to ${mode.source.name}`
+        : `Re-upload ${target?.name ?? "table"}`;
+  const submitLabel =
+    mode.kind === "create"
+      ? "Create source"
+      : mode.kind === "add"
+        ? "Add tables"
+        : "Replace data";
+
+  return (
+    <div className="z-fs-form-page">
+      <PageHeader
+        title={title}
+        divider={false}
+        actions={
+          <div className="z-header-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              onClick={() => navigate(back)}
+            >
+              Cancel
+            </Button>
+            {staging && (
+              <Button
+                size="sm"
+                type="submit"
+                form={FORM_ID}
+                fullWidth={false}
+                isLoading={mutation.isPending}
+                disabled={!ready || mutation.isPending}
+              >
+                {submitLabel}
+              </Button>
+            )}
+          </div>
+        }
+      />
+      {mode.kind === "reupload" && (
+        <p className="z-note">
+          Columns are matched by name: matched columns keep their grants, new
+          ones are added, and columns no longer in the file are marked missing.
+          Queries see the old data until the new data is in place.
+        </p>
+      )}
+      {!staging ? (
+        <FilePicker onStaged={onStaged} />
+      ) : (
+        <form
+          id={FORM_ID}
+          className="z-fs-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          {mode.kind === "create" && (
+            <BorderedSection title="About" as="h2">
+              <FormGrid columns={2}>
+                <Input
+                  label="Name"
+                  required
+                  value={name}
+                  onChange={(e) => changeName(e.target.value)}
+                />
+                <Input
+                  label="Slug"
+                  value={slug}
+                  error={slugProblem}
+                  helperText="How queries name the source. Made from the name until you change it."
+                  onChange={(e) => {
+                    setSlug(e.target.value);
+                    setSlugEdited(true);
+                  }}
+                />
+              </FormGrid>
+            </BorderedSection>
+          )}
+          <PreviewEditor
+            tables={staging.tables}
+            edits={edits}
+            onChange={setEdits}
+            mode={mode.kind === "reupload" ? "one" : "many"}
+          />
+          <LoadFailure error={mutation.error} />
+        </form>
+      )}
+    </div>
+  );
+};
+
+export const AddDataPage = () => <AddData mode={{ kind: "create" }} />;
+
+/** Loads the source a page adds to or re-uploads into. */
+const WithSource = ({
+  children,
+}: {
+  children: (source: Source) => ReactNode;
+}) => {
+  const id = useUuidParam("sourceId");
+  return id ? <SourceLoader id={id}>{children}</SourceLoader> : <NotFound />;
+};
+
+const SourceLoader = ({
+  id,
+  children,
+}: {
+  id: string;
+  children: (source: Source) => ReactNode;
+}) => {
+  const { data, error, isLoading } = useSource(id);
+  if (isLoading) return <Spinner size="lg" />;
+  if (!data) return <ErrorNotice error={error} />;
+  // Only an upload has tables to add or re-upload.
+  if (data.type !== "upload") return <NotFound />;
+  return <>{children(data)}</>;
+};
+
+export const AddTablesPage = () => (
+  <WithSource>
+    {(source) => <AddData mode={{ kind: "add", source }} />}
+  </WithSource>
+);
+
+/** Loads the table a re-upload replaces, with its live columns. */
+const ReuploadTarget = ({
+  source,
+  tableId,
+}: {
+  source: Source;
+  tableId: string;
+}) => {
+  const { data: table, error, isLoading } = useTable(source.id, tableId);
+  if (isLoading) return <Spinner size="lg" />;
+  if (!table) return error ? <ErrorNotice error={error} /> : <NotFound />;
+  if (table.missing_since) return <NotFound />;
+  const target: Target = {
+    id: table.id,
+    name: table.name,
+    columns: table.columns
+      .filter((c) => !c.missing_since)
+      .map((c) => ({ name: c.name, type: c.type })),
+  };
+  return <AddData mode={{ kind: "reupload", source, target }} />;
+};
+
+export const ReuploadPage = () => {
+  const tableId = useUuidParam("tableId");
+  return (
+    <WithSource>
+      {(source) =>
+        tableId ? (
+          <ReuploadTarget source={source} tableId={tableId} />
+        ) : (
+          <NotFound />
+        )
+      }
+    </WithSource>
+  );
+};

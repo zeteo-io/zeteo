@@ -74,12 +74,12 @@ describe("POST /v1/sources/:sourceId/refresh", () => {
     expect(res.body.error).toBe("source_archived");
   });
 
-  it("answers 409 file_source_managed_elsewhere for a file source, and changes nothing", async () => {
+  it("answers 409 not_a_database_source for a file source, and changes nothing", async () => {
     const file = await seedUploadSource({ ownerId: randomUUID(), tables: [] });
     try {
       const res = await call("POST", `/${file.id}/refresh`);
       expect(res.status).toBe(409);
-      expect(res.body.error).toBe("file_source_managed_elsewhere");
+      expect(res.body.error).toBe("not_a_database_source");
       const row = await prisma.source.findUniqueOrThrow({
         where: { id: file.id },
       });

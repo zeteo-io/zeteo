@@ -114,11 +114,6 @@
   align-self: flex-start;
 }
 
-.z-picker-selected {
-  margin: 0;
-  color: var(--k-text-color-secondary);
-}
-
 .z-segmented {
   display: inline-flex;
   align-self: flex-start;
@@ -217,8 +212,25 @@
   gap: 0.5rem;
 }
 
+/* An icon-only button (no line of text) is as tall as its text neighbours. */
+.z-header-actions > .k-button {
+  align-self: stretch;
+}
+
 .z-picker-option {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+/* A dialog's fields and notes, one under another. */
+.z-dialog-stack {
+  display: grid;
+  gap: 1rem;
+}
+
+/* A toolbar whose filters have no field label above them: its actions line
+   up with the filter buttons' row, not the middle of the chips under it. */
+.z-list-toolbar-top {
+  align-items: flex-start;
 }

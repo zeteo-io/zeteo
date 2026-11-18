@@ -67,6 +67,7 @@ export const ConnectionFields = ({
     />
     <Input
       label="Port"
+      type="number"
       value={value.port}
       error={errorFor("settings.port")}
       onChange={(e) => onChange({ port: e.target.value })}

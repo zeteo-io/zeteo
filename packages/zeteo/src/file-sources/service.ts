@@ -1,27 +1,29 @@
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
-import { fileSourceView, type FileSourceView } from "../views/fileSource.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
+import { presentSourceById } from "../sources/present.js";
 import { discardStaging, getStaging } from "./staging.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
+import type { SourceView } from "../views/source.js";
 import type { Caller } from "../middleware/auth.js";
 import type { FileColumnType } from "./types.js";
 import { logger } from "../utils/logger.js";
+import { lacking } from "./ownership.js";
 import { randomUUID } from "crypto";
+import env from "../env.js";
 import {
   AUDIT_EVENTS,
   FILE_SOURCES_WRITE,
-  SOURCES_READ,
   SOURCES_WRITE,
 } from "../definitions/tereoDeclaration.js";
 import {
   ConflictError,
   FileSourceBusyError,
-  FileSourceNotFoundError,
-  ForbiddenError,
+  FileSourcesNotConfiguredError,
   isDatabaseBusy,
+  NotAnUploadSourceError,
   NotFoundError,
   SourceArchivedError,
 } from "../utils/errors.js";
@@ -42,7 +44,6 @@ import {
   dropStagingTable,
   dropStoredTable,
   schemaFor,
-  sourceStoredBytes,
   stageStoredTable,
   swapIn,
 } from "./storage.js";
@@ -50,13 +51,13 @@ import {
 export { LOAD_LOCKING } from "./loading.js";
 
 /**
- * File sources made from uploads: create one from a staging, list, rename,
- * delete, add, re-upload and remove tables, change a column, transfer. The
- * owner (holding `zeteo.file_sources.write`) manages their own; an admin
- * reads any with `zeteo.sources.read` and changes any with
- * `zeteo.sources.write`; to anyone else a source is `file_source_not_found`.
- * Every change of data runs under the source's load lock; audit entries name
- * tables and columns, never a cell.
+ * Upload sources: create one from a staging, rename, delete, add, re-upload
+ * and remove tables, change a column, transfer. The owner (holding
+ * `zeteo.file_sources.write`) changes their own; an admin changes any with
+ * `zeteo.sources.write`; anyone else gets the 403 of a caller without that
+ * permission (the routes refuse them first). A database source is
+ * `not_an_upload_source`. Every change of data runs under the source's load
+ * lock; audit entries name tables and columns, never a cell.
  */
 
 const NOUN = "file source";
@@ -77,34 +78,42 @@ const columnNameTaken = () =>
     "name_taken"
   );
 
-type Mode = "read" | "write";
+/** 404 `file_sources_not_configured` while `FILE_SOURCES_READER_URL` is unset. */
+export const assertFileSourcesOn = (): void => {
+  if (!env.FILE_SOURCES_READER_URL) throw new FileSourcesNotConfiguredError();
+};
 
-/** Whether the caller may manage the source in `mode`: its owner with `zeteo.file_sources.write`, or an admin. */
-const mayManage = (
-  caller: Caller,
-  row: { ownerId: string | null },
-  mode: Mode
-): boolean =>
+/** Whether the caller may change the source: its owner with `zeteo.file_sources.write`, or an admin. */
+const mayChange = (caller: Caller, row: { ownerId: string | null }): boolean =>
   (row.ownerId === caller.userId &&
     hasPermission(caller.permissions, FILE_SOURCES_WRITE)) ||
-  hasPermission(
-    caller.permissions,
-    mode === "read" ? SOURCES_READ : SOURCES_WRITE
-  );
+  hasPermission(caller.permissions, SOURCES_WRITE);
 
-/** The file source of `id` if the caller may manage it in `mode`; `file_source_not_found` otherwise. */
-const findManaged = async (caller: Caller, id: string, mode: Mode) => {
-  const row = await prisma.source.findUnique({ where: { id } });
-  if (!row || row.type !== "upload" || !mayManage(caller, row, mode)) {
-    throw new FileSourceNotFoundError();
-  }
+/** The checks on a source row an upload-only change makes, in order. */
+const checkChangeable = <
+  T extends { type: string; ownerId: string | null; archivedAt: Date | null },
+>(
+  caller: Caller,
+  row: T | null
+): T => {
+  if (!row) throw new NotFoundError("Source not found");
+  if (row.type !== "upload") throw new NotAnUploadSourceError();
+  if (!mayChange(caller, row)) throw lacking(SOURCES_WRITE);
+  if (row.archivedAt) throw new SourceArchivedError();
   return row;
 };
 
-/** As `findManaged` for a change: also refuses an archived source. */
+/**
+ * The upload source of `id` if the caller may change it: 404 for none, 409
+ * `not_an_upload_source` for a database source, the 403 of a caller without
+ * `zeteo.sources.write` for someone else's, 409 `source_archived` once deleted.
+ */
 const findChangeable = async (caller: Caller, id: string) => {
-  const row = await findManaged(caller, id, "write");
-  if (row.archivedAt) throw new SourceArchivedError();
+  const row = checkChangeable(
+    caller,
+    await prisma.source.findUnique({ where: { id } })
+  );
+  assertFileSourcesOn();
   return row;
 };
 
@@ -119,54 +128,14 @@ const lockChangeable = async (
   id: string
 ) => {
   await tx.$queryRaw`SELECT "id" FROM "zeteo"."sources" WHERE "id" = ${id}::uuid FOR UPDATE`;
-  const row = await tx.source.findUnique({ where: { id } });
-  if (!row || row.type !== "upload" || !mayManage(caller, row, "write")) {
-    throw new FileSourceNotFoundError();
-  }
-  if (row.archivedAt) throw new SourceArchivedError();
+  const row = checkChangeable(
+    caller,
+    await tx.source.findUnique({ where: { id } })
+  );
   return { ...row, ownerId: row.ownerId! };
 };
 
-const withTables = {
-  tables: {
-    orderBy: { name: "asc" as const },
-    include: { columns: { orderBy: { position: "asc" as const } } },
-  },
-};
-
-/**
- * Per source, how many people and groups its tables are shared with: the
- * distinct principals of its grants, the owner grants left out.
- */
-const shareCounts = async (ids: string[]): Promise<Map<string, number>> => {
-  const grants = await prisma.grant.findMany({
-    where: { table: { sourceId: { in: ids } }, ownerGrant: false },
-    select: {
-      principalType: true,
-      principalId: true,
-      table: { select: { sourceId: true } },
-    },
-  });
-  const principals = new Map<string, Set<string>>();
-  for (const g of grants) {
-    const set = principals.get(g.table.sourceId) ?? new Set<string>();
-    set.add(`${g.principalType}:${g.principalId}`);
-    principals.set(g.table.sourceId, set);
-  }
-  return new Map([...principals].map(([id, set]) => [id, set.size]));
-};
-
-const viewOf = async (id: string): Promise<FileSourceView> => {
-  const row = await prisma.source.findUniqueOrThrow({
-    where: { id },
-    include: withTables,
-  });
-  const bytes = row.archivedAt
-    ? 0
-    : ((await sourceStoredBytes([id])).get(id) ?? 0);
-  const shares = await shareCounts([id]);
-  return fileSourceView(row, bytes, shares.get(id) ?? 0);
-};
+const viewOf = (id: string): Promise<SourceView> => presentSourceById(id);
 
 /** A slug from a name: lowercase letters, digits and hyphens, starting with a letter. */
 const slugFrom = (name: string): string => {
@@ -263,12 +232,12 @@ const recordNewTable = async (
 
 /** What an audit entry says of a table: never its data. */
 const tableMetadata = (
-  t: { id: string; name: string; rowCount: number | null },
+  t: { id: string; name: string; rowCount: bigint | null },
   columns: number
 ) => ({
   id: t.id,
   name: t.name,
-  row_count: t.rowCount,
+  row_count: t.rowCount === null ? null : Number(t.rowCount),
   columns,
 });
 
@@ -297,7 +266,8 @@ export interface CreateFileSourceInput {
 export const createFileSource = async (
   caller: Caller,
   input: CreateFileSourceInput
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
+  assertFileSourcesOn();
   const staging = await getStaging(input.staging_id, caller.userId);
   const planned: PlannedTable[] = [];
   for (const [i, t] of input.tables.entries()) {
@@ -389,46 +359,11 @@ const discardQuietly = async (stagingId: string) => {
   });
 };
 
-/** The caller's own file sources (`mine`), or every one for an admin (`all`); archived ones are left out. */
-export const listFileSources = async (
-  caller: Caller,
-  scope: "mine" | "all"
-): Promise<FileSourceView[]> => {
-  if (scope === "all" && !hasPermission(caller.permissions, SOURCES_READ)) {
-    throw new ForbiddenError(`Requires the ${SOURCES_READ} permission`);
-  }
-  const rows = await prisma.source.findMany({
-    where: {
-      type: "upload",
-      archivedAt: null,
-      ...(scope === "mine" && { ownerId: caller.userId }),
-    },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    include: withTables,
-  });
-  const ids = rows.map((r) => r.id);
-  const [bytes, shares] = await Promise.all([
-    sourceStoredBytes(ids),
-    shareCounts(ids),
-  ]);
-  return rows.map((r) =>
-    fileSourceView(r, bytes.get(r.id) ?? 0, shares.get(r.id) ?? 0)
-  );
-};
-
-export const getFileSource = async (
-  caller: Caller,
-  id: string
-): Promise<FileSourceView> => {
-  await findManaged(caller, id, "read");
-  return viewOf(id);
-};
-
 export const renameFileSource = async (
   caller: Caller,
   id: string,
   name: string
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
   await findChangeable(caller, id);
   await withAudit(async (tx, audit) => {
     const row = await lockChangeable(tx, caller, id);
@@ -501,7 +436,7 @@ export const addTables = async (
   caller: Caller,
   id: string,
   input: { staging_id: string; tables: TableCorrection[] }
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
   await findChangeable(caller, id);
   const staging = await getStaging(input.staging_id, caller.userId);
   const planned: PlannedTable[] = [];
@@ -584,7 +519,7 @@ export const reuploadTable = async (
   id: string,
   tableId: string,
   input: { staging_id: string } & Omit<TableCorrection, "name">
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
   await findChangeable(caller, id);
   const table = await findTable(id, tableId);
   const staging = await getStaging(input.staging_id, caller.userId);
@@ -737,7 +672,7 @@ export const changeColumn = async (
   tableId: string,
   columnId: string,
   change: ColumnChange
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
   await findChangeable(caller, id);
   const table = await findTable(id, tableId);
   const column = table.columns.find(
@@ -866,7 +801,7 @@ export const transferFileSource = async (
   caller: Caller,
   id: string,
   { userId, keepAccess }: { userId: string; keepAccess: boolean }
-): Promise<FileSourceView> => {
+): Promise<SourceView> => {
   const found = await findChangeable(caller, id);
   if (found.ownerId === userId) throw alreadyOwnerError(NOUN);
   // Tereo is asked here, before the transaction.
