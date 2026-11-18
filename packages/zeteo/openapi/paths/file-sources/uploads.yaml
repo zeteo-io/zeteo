@@ -11,6 +11,13 @@
       detected among `,` `;` tab and `|`. A refused upload is answered at once and the connection is
       closed.
 
+      Uploads are bounded per user: one who already holds `FILE_SOURCE_MAX_STAGINGS` (default 5)
+      unexpired stagings is refused with `429 too_many_stagings` (`retry_after` is when the oldest
+      expires), and one with `FILE_SOURCE_MAX_UPLOADS` (default 2) uploads in flight with `429
+      too_many_uploads`; both before the body is read. An xlsx workbook, read whole into memory,
+      waits for one of `FILE_SOURCE_XLSX_CONCURRENCY` (default 2) reading slots of the process; one
+      that waits over 30 seconds is `503 temporarily_unavailable`.
+
       **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: uploadFile
     requestBody:
@@ -39,7 +46,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '413':
-        description: Payload too large - `file_too_large` (over `FILE_SOURCE_MAX_BYTES`); nothing is left behind
+        description: Payload too large - `file_too_large`, over `FILE_SOURCE_MAX_BYTES` (`max_bytes`), or an xlsx whose content inflates past twice that (`max_uncompressed_bytes` too); nothing is left behind
         content:
           application/json:
             schema:
@@ -51,7 +58,13 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+        description: Unprocessable - `unsupported_encoding`, `invalid_character` (a NUL in a CSV cell; `row` names it), `row_too_long`, `too_many_rows`, `too_many_columns`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '429':
+        description: Too many requests - `too_many_stagings` or `too_many_uploads`, with `retry_after` and the `Retry-After` header
         content:
           application/json:
             schema:

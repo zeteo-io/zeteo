@@ -124,7 +124,13 @@ page and no sections.
   queries using it may stop working) or describe it; **Add tables**, **Rename**, **Transfer**
   and **Delete** in its header; a **Relations** tab to declare, rename and remove the relations
   between its tables; and a **Shared with** tab listing every grant on its tables, the owner's own marked and locked, where
-  **Share** grants a table (all columns or chosen ones) to a person or group.
+  **Share** grants a table (all columns or chosen ones) to a person or group. A retype's values
+  that do not fit name data rows of the table (an upload's name rows of the file). The owner
+  manages it all; an admin's controls follow their permissions: tables, Rename, Transfer and
+  Delete with `zeteo.sources.write`, plus a **Limits** dialog (time limit, row cap, concurrency,
+  exports) that only `zeteo.sources.write` has; the Shared with tab with `zeteo.grants.read`, and
+  sharing and changing grants with `zeteo.grants.write` (which may still remove grants once the
+  source is deleted, when the owner grants are no longer locked).
 
 - **Dashboards** (`/dashboards`, `zeteo.data.read`), for everyone who may query, after My Zeteo.
   Its tabs list the person's own dashboards and those shared with them, and their saved panels

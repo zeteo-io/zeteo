@@ -11,7 +11,8 @@
     summary: Retype, rename or describe a column
     description: |
       Changes a column's type (the data is cast; values that do not fit are `422 cast_failed`,
-      naming the column and the first rows), its name, or its description.
+      naming the column and the first rows, numbered as 1-based data rows of the table, header not
+      counted, in the order of its last load), its name, or its description.
 
       **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: updateFileSourceColumn

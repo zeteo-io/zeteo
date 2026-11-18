@@ -45,8 +45,9 @@ The reference is `openapi/openapi.yaml`; the SDK has the same calls.
 2. **Confirm.** `POST /v1/file-sources` (or add tables, or re-upload) names the staging and any
    corrections: which tables to keep, table and column names, the header row (a number, or no
    header), column types. Zeteo builds the typed table from staging with SQL casts. A value that
-   does not cast fails with `cast_failed` naming the table, column and the first rows, and nothing
-   is created.
+   does not cast fails with `cast_failed` naming the table, column and the first rows (`rows`,
+   1-based rows of the file, its header counted, as a spreadsheet numbers them), and nothing is
+   created.
 
 A staging belongs to the person who uploaded it, and expires **one hour** after creation (another
 person's or an expired id is `404 staging_not_found`). The housekeeping job
@@ -85,14 +86,27 @@ staging tables that have no row.
 | `FILE_SOURCE_MAX_ROWS` | 1000000 | rows per table |
 | `FILE_SOURCE_MAX_COLUMNS` | 500 | columns per table |
 | `FILE_SOURCE_QUOTA_BYTES` | 1073741824 (1 GB) | stored size across one owner's file sources; `409 quota_exceeded` |
+| `FILE_SOURCE_MAX_STAGINGS` | 5 | unexpired stagings (uploads not yet confirmed) one user holds; `429 too_many_stagings`, whose `retry_after` is when the oldest expires |
+| `FILE_SOURCE_MAX_UPLOADS` | 2 | uploads one user has in flight at once, across replicas (a Redis lease, renewed while it runs, given back when the upload ends or is aborted); `429 too_many_uploads` |
+| `FILE_SOURCE_XLSX_CONCURRENCY` | 2 | `.xlsx` workbooks one process checks, reads and stages at once; others wait their turn, and one that waits over 30 s is `503 temporarily_unavailable` |
 
 A load that would break a limit fails with its own error and changes nothing. The quota counts
 Postgres's stored size of the owner's tables after the load, and is checked under the owner's lock,
 so two loads at once cannot both slip under it.
 
-An `.xlsx` is a ZIP and is read **fully in memory**. It is refused when it would inflate past
-`2 x FILE_SOURCE_MAX_BYTES`, or when an entry over 1 MiB compresses more than 100 to 1. Size
-`FILE_SOURCE_MAX_BYTES` with that in mind for the container's memory.
+Both upload bounds are checked before the body is read, and the staging count again (under a lock
+per user) as the staging is recorded, so concurrent uploads cannot pass it.
+
+An `.xlsx` is a ZIP and is read **fully in memory**. It is refused (`413 file_too_large`, with
+`max_bytes` the upload limit and `max_uncompressed_bytes`, and a message about the workbook's
+uncompressed content) when its entries declare, or really inflate to, more than
+`2 x FILE_SOURCE_MAX_BYTES`; every entry is inflated into a counter before the workbook is read, so
+an archive that understates its sizes is caught. No compression ratio is refused as such: a
+repetitive workbook may compress very well. Size `FILE_SOURCE_MAX_BYTES` and
+`FILE_SOURCE_XLSX_CONCURRENCY` with that in mind for the container's memory.
+
+A CSV cell holding a NUL character (which Postgres text cannot store) is `422 invalid_character`,
+naming the row; a NUL in the first 8 KB is refused earlier, as `415 unsupported_file_type`.
 
 ## Loading and swapping
 
@@ -117,6 +131,9 @@ to that source.
 
 `PATCH` with `type` reloads the table from its stored values (as text) with the new cast; the
 column keeps its id and grants. A value that does not cast is `cast_failed` and nothing changes.
+Its `rows` are **1-based data rows of the table** (no header; row 1 is the first data row), in the
+order of the table's last load, which is the file's order: a value an upload reported as row 3 of
+a file with a header is data row 2 here.
 Saved queries and dashboards are not checked at retype time: one the new type no longer allows (a
 `sum` over a column now `text`) fails when it runs, and for a recipient of a saved query that is the
 usual `saved_query_not_accessible`.
@@ -140,7 +157,12 @@ usual `saved_query_not_accessible`.
   unless `keep_access` is `false`.
 - **Delete** archives the source and **drops its data at once**: Zeteo holds the only copy. The
   catalogue rows stay, marked missing, so grants and saved queries keep their references and get
-  the ordinary no-access behaviour.
+  the ordinary no-access behaviour. The owner grants lose their `owner_grant` flag in the same
+  transaction, so an admin with `zeteo.grants.write` can remove them like any other grant.
+- **Limits** (time limit, row caps, concurrency, whether exports are allowed) are an admin's, as
+  for a database source: `PATCH /v1/sources/:id` with `zeteo.sources.write` takes those fields for
+  a file source (anything else is `409 file_source_managed_elsewhere`); the admin UI shows a
+  Limits dialog on the file source's page. A file source starts with exports off.
 
 Changes are audited (`zeteo.file_source.created`, `.updated`, `.reuploaded`, `.transferred`,
 `.deleted`); audit metadata never carries cell data.
@@ -168,15 +190,23 @@ Zeteo's own role needs `CREATE` on the database (it creates the schemas) and gra
 it a member of no role. `docker/postgres/files-reader.sql` is the local and end-to-end stacks'
 version, safe to run again, with a public password for stacks published on 127.0.0.1 only.
 
-**Start-up checks.** Zeteo refuses to start when the URL's database is not its own; when the role
-in the URL is not the connected one; when it is a superuser or bypasses row security; when it is a
-member of a role; when it can use or read the `zeteo`, `core` or `zeteo_file_staging` schemas; or
-when it has `TEMP` or `CREATE` on the database. A unix-socket URL (a `host` query parameter) is not
-supported: use a TCP host.
+**Start-up checks.** Zeteo refuses to start, with a message naming the problem, when the URL's
+`sslmode` is not `disable`, `require` or `verify-full`; when its database runs a PostgreSQL older
+than 16; when its own role lacks `CREATE` on the database; when the URL's database is not its own;
+when the role in the URL is not the connected one; when it is a superuser or bypasses row
+security; when it is a member of a role; when it can use or read the `zeteo`, `core` or
+`zeteo_file_staging` schemas; or when it has `TEMP` or `CREATE` on the database. A unix-socket URL
+(a `host` query parameter) is not supported: use a TCP host.
 
 Be aware that by default `PUBLIC` holds `CONNECT` on every database of the server, so the reader
 can sign in to the others (it still sees nothing there that `PUBLIC` cannot). If another database
 holds anything `PUBLIC` can read, `REVOKE CONNECT ON DATABASE <other> FROM PUBLIC` there.
+
+**Turning File Sources off.** With `FILE_SOURCES_READER_URL` unset, the `/v1/file-sources` routes
+answer `404 file_sources_not_configured`, and so does a query, export or MCP query of an `upload`
+source that still exists; nothing else changes. Should the URL become unusable at run time (an
+unsupported `sslmode`, which start-up refuses), those calls answer `503 file_sources_misconfigured`
+and the detail is logged.
 
 **Connections.** Each file source has its own pool of connections against Zeteo's database, sized
 like any source's pool (`query_concurrency + export_concurrency + 2` per replica,

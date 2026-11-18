@@ -58,6 +58,12 @@
               $ref: '../../components/responses.yaml#/Error'
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `file_sources_not_configured`, a file source (`upload`) queried while File Sources are turned off (`FILE_SOURCES_READER_URL` unset)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '409':
         description: Conflict - `source_archived`, the source was archived while the query ran
         content:
@@ -104,7 +110,9 @@
       '503':
         description: |
           Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-          pool briefly unavailable (the source busy). Retry, after `Retry-After` when given.
+          pool briefly unavailable (the source busy). Retry, after `Retry-After` when given. Or
+          `file_sources_misconfigured`: a file source while `FILE_SOURCES_READER_URL` cannot be used
+          (the operator's to fix; the detail is logged).
         headers:
           Retry-After:
             description: Seconds to wait before retrying

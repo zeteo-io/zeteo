@@ -68,8 +68,9 @@
     tags: [File sources]
     summary: Delete a file source
     description: |
-      Archives the source and drops its stored data. Catalogue rows stay, marked missing. A
-      `zeteo.file_source.deleted` audit entry is written.
+      Archives the source and drops its stored data. Catalogue rows stay, marked missing. Grants
+      stay too, and the owner grants lose their `owner_grant` flag, so an admin with
+      `zeteo.grants.write` may remove them. A `zeteo.file_source.deleted` audit entry is written.
 
       **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: deleteFileSource
