@@ -61,6 +61,22 @@ describe("SourceDetailPage", () => {
     expect(screen.queryByText(/password/i)).not.toBeInTheDocument();
   });
 
+  it("shows the description under the name when set", async () => {
+    get.mockResolvedValue({
+      data: makeSource({ description: "Orders and invoices." }),
+    });
+    renderDetail();
+    expect(await screen.findByText("Orders and invoices.")).toBeInTheDocument();
+  });
+
+  it("shows no description line when it is empty", async () => {
+    renderDetail();
+    await screen.findByRole("heading", { name: "Orders DB" });
+    expect(
+      document.querySelector(".z-source-description")
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the connection and limits in words", async () => {
     get.mockResolvedValue({
       data: makeSource({

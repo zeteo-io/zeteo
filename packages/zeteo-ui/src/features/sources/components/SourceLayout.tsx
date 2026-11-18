@@ -60,6 +60,7 @@ const Shell = ({ source, access, actions, notices }: ShellProps) => (
   <SourceFrame
     baseHref={sourceHref(source.id)}
     name={source.name}
+    description={source.description}
     slug={source.slug}
     kind={sourceTypeName(source.type)}
     status={<SourceStatus source={source} />}

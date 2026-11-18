@@ -232,3 +232,20 @@
 .z-source-exports-row > :first-child {
   padding-bottom: 0.6rem;
 }
+
+.z-source-description {
+  margin: 0.25rem 0 0;
+  max-width: 48rem;
+  color: var(--k-color-text-secondary, inherit);
+  white-space: pre-wrap;
+}
+
+.z-source-field-note,
+.z-source-field-error {
+  margin: 0.25rem 0 0;
+  font-size: 0.8125rem;
+}
+
+.z-source-field-error {
+  color: var(--k-color-danger, #c0392b);
+}

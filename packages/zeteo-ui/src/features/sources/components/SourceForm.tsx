@@ -26,6 +26,7 @@ import {
   Input,
   Modal,
   Switch,
+  TextArea,
 } from "@kosmeo-ui/react";
 import type {
   CreateSource,
@@ -37,6 +38,7 @@ import type {
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
 
+const MAX_DESCRIPTION = 500;
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
@@ -98,6 +100,7 @@ const shownPaths = (
 ): string[] => [
   ...(creating ? ["slug"] : []),
   "name",
+  "description",
   "schemas",
   ...(connectionOpen
     ? [
@@ -196,6 +199,7 @@ export const SourceForm = ({
   // The slug follows the name until it is edited by hand.
   const [slugEdited, setSlugEdited] = useState(false);
   const [name, setName] = useState(source?.name ?? "");
+  const [description, setDescription] = useState(source?.description ?? "");
   const [type, setType] = useState<DatabaseType>(
     (source?.type as DatabaseType | undefined) ?? "postgres"
   );
@@ -288,6 +292,9 @@ export const SourceForm = ({
         "Use lower case letters, digits and hyphens, starting with a letter (2 to 63 characters).";
     }
     if (!name.trim()) found.name = "A name is required.";
+    if (description.trim().length > MAX_DESCRIPTION) {
+      found.description = `A description is at most ${MAX_DESCRIPTION} characters.`;
+    }
     if (connectionOpen) {
       const port = parseNumberField(conn.port);
       if (!conn.host.trim()) found["settings.host"] = "A host is required.";
@@ -336,6 +343,9 @@ export const SourceForm = ({
     if (upload) {
       // Its owner may change only the name; a sources admin the limits too.
       if (name.trim() !== src.name) body.name = name.trim();
+      if (description.trim() !== src.description) {
+        body.description = description.trim();
+      }
       if (!upload.canSetLimits) return body;
       for (const field of NUMBER_FIELDS) {
         const n = parseNumberField(limits[field.key]);
@@ -346,6 +356,9 @@ export const SourceForm = ({
       return body;
     }
     if (name.trim() !== src.name) body.name = name.trim();
+    if (description.trim() !== src.description) {
+      body.description = description.trim();
+    }
     const list = parseSchemas(schemas);
     if (!sameList(list, src.schemas)) body.schemas = list;
     for (const field of NUMBER_FIELDS) {
@@ -386,6 +399,7 @@ export const SourceForm = ({
     const body: CreateSource = {
       slug,
       name: name.trim(),
+      ...(description.trim() && { description: description.trim() }),
       type,
       settings: buildSettings(type, conn),
       schemas: parseSchemas(schemas),
@@ -495,6 +509,26 @@ export const SourceForm = ({
               </>
             )}
           </FormGrid>
+          <div>
+            <TextArea
+              label="Description"
+              rows={3}
+              value={description}
+              onChange={(e) => {
+                setDescription(e.target.value);
+                edited("description");
+              }}
+            />
+            {errorFor("description") ? (
+              <p className="z-source-field-error" role="alert">
+                {errorFor("description")}
+              </p>
+            ) : (
+              <p className="z-muted z-source-field-note">
+                What this source holds. Shown to people and to Claude.
+              </p>
+            )}
+          </div>
           <div className="z-source-about-row">
             {!source && (
               <div>

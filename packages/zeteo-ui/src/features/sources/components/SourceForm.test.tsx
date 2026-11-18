@@ -369,6 +369,78 @@ describe("SourceForm", () => {
     });
   });
 
+  describe("description", () => {
+    it("sends a description on create", async () => {
+      const user = userEvent.setup();
+      renderCreate();
+      await type(user, "Slug", "orders");
+      await type(user, "Name", "Orders DB");
+      await type(user, "Description", "Orders and invoices.");
+      await fillConnection(user);
+      await type(user, "Schemas", "public");
+      await user.click(screen.getByRole("button", { name: "Create source" }));
+      await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+      expect(post.mock.calls[0][1]).toMatchObject({
+        description: "Orders and invoices.",
+      });
+    });
+
+    it("sends only a changed description on edit", async () => {
+      const user = userEvent.setup();
+      renderEdit(makeSource({ description: "Old text" }));
+      expect(field("Description")).toHaveValue("Old text");
+      await type(user, "Name", "Orders (prod)");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(patch.mock.calls[0][1]).toEqual({ name: "Orders (prod)" });
+    });
+
+    it("sends an empty string when the description is cleared", async () => {
+      const user = userEvent.setup();
+      renderEdit(makeSource({ description: "Old text" }));
+      await user.clear(field("Description"));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(patch.mock.calls[0][1]).toEqual({ description: "" });
+    });
+
+    it("refuses more than 500 characters", async () => {
+      const user = userEvent.setup();
+      renderEdit();
+      await user.click(field("Description"));
+      await user.paste("x".repeat(501));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      expect(
+        await screen.findByText("A description is at most 500 characters.")
+      ).toBeInTheDocument();
+      expect(patch).not.toHaveBeenCalled();
+    });
+
+    it("edits an upload source's description with its name", async () => {
+      const user = userEvent.setup();
+      const source = makeSource({ type: "upload", description: "" });
+      renderWithProviders(
+        <Routes>
+          <Route
+            path="/sources/:sourceId/edit"
+            element={
+              <SourceForm
+                source={source}
+                title="Edit"
+                upload={{ canSetLimits: false }}
+              />
+            }
+          />
+        </Routes>,
+        { route: `/sources/${source.id}/edit` }
+      );
+      await type(user, "Description", "My file");
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+      await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+      expect(patch.mock.calls[0][1]).toEqual({ description: "My file" });
+    });
+  });
+
   describe("create, more", () => {
     const fillBasics = async (user: ReturnType<typeof userEvent.setup>) => {
       await type(user, "Slug", "orders");
