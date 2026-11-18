@@ -138,6 +138,8 @@ model SourceTable {
   lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
   missingSince DateTime? @map("missing_since") @db.Timestamp(3)
   lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamp(3)
+  // A file-source table's rows at its last load; null for a database source.
+  rowCount     Int?      @map("row_count")
 
   source        Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   columns       SourceColumn[]

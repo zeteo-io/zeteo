@@ -53,6 +53,17 @@ export type CreateSourceInput = Pick<
 
 export type UpdateSourceInput = Partial<SourceFields>;
 
+/** The per-source limits: the only fields a change of a file source may set here. */
+const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
+  "timeout_ms",
+  "row_cap",
+  "max_joins",
+  "export_enabled",
+  "export_row_cap",
+  "query_concurrency",
+  "export_concurrency",
+]);
+
 /** Columns for the optional fields a caller gave. */
 const optionalColumns = (input: Partial<SourceFields>) => ({
   ...(input.name !== undefined && { name: input.name }),
@@ -206,7 +217,19 @@ export const updateSource = async (
   input: UpdateSourceInput,
   actorId: string
 ): Promise<Source> => {
-  const row = await requireActive(id);
+  const row = await db.sources.findById(id);
+  if (!row) throw new NotFoundError("Source not found");
+  // A file source's limits are an admin's, as a database source's; the rest
+  // of it is managed through its uploads.
+  if (
+    isFileSource(row) &&
+    Object.keys(input).some(
+      (key) => !LIMIT_FIELDS.has(key as keyof SourceFields)
+    )
+  ) {
+    throw new FileSourceManagedElsewhereError();
+  }
+  if (row.archivedAt) throw new SourceArchivedError();
   const type = typeOf(row);
 
   let settingsChange:

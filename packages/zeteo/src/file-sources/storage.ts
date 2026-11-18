@@ -100,13 +100,17 @@ export class CastFailedError extends AppError {
   constructor(
     public readonly column: string,
     /** The first failing rows, 1-based rows of the file. */
-    public readonly rows: number[]
+    public readonly rows: number[],
+    /** The table, once the caller knows which. */
+    public readonly table?: string
   ) {
     super(
       422,
       "cast_failed",
-      `Column "${column}" has values that are not of its type`,
-      { details: { column, rows } }
+      table === undefined
+        ? `Column "${column}" has values that are not of its type`
+        : `Column "${column}" of table "${table}" has values that are not of its type`,
+      { details: { ...(table !== undefined && { table }), column, rows } }
     );
     this.name = "CastFailedError";
   }
@@ -473,4 +477,95 @@ export const storedBytes = async (
       AND s.type = 'upload'
       AND s.archived_at IS NULL`;
   return Number(bytes);
+};
+
+/**
+ * Copies a stored table into a new staging table, every value as text in the
+ * form a load accepts back (ISO dates, timestamps in UTC with their offset),
+ * `columns` in order as `c0`... and rows numbered from 0 in the table's scan
+ * order: the source of a reload that changes a column's type or name. The
+ * caller drops it with `dropStagingTable`.
+ */
+export const stageStoredTable = async (
+  sourceId: string,
+  tableName: string,
+  columns: string[]
+): Promise<string> => {
+  const table = qualified(sourceId, checkedTableName(tableName));
+  if (columns.length === 0) throw new Error("A table needs a column");
+  const name = await createStagingTable(columns.length);
+  try {
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(`SET LOCAL datestyle = 'ISO, YMD'`);
+        await tx.$executeRawUnsafe(`SET LOCAL timezone = 'UTC'`);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ${stagingTable(name)} ("row_no", ${columns
+            .map((_, i) => stagingColumn(i))
+            .join(", ")})
+           SELECT (row_number() OVER ()) - 1, ${columns
+             .map((c) => `${quote(checkedName(c))}::text`)
+             .join(", ")}
+           FROM ${table}`
+        );
+      },
+      { timeout: LOAD_TIMEOUT_MS }
+    );
+  } catch (err) {
+    await dropStagingTable(name);
+    throw err;
+  }
+  return name;
+};
+
+/**
+ * Up to `limit` staged rows from `fromRow` (0-based `row_no`), each holding
+ * the cells of `indexes` in that order.
+ */
+export const readStagingRows = async (
+  name: string,
+  fromRow: number,
+  limit: number,
+  indexes: number[],
+  db: Db = prisma
+): Promise<(string | null)[][]> => {
+  if (indexes.length === 0) return [];
+  const rows = await db.$queryRawUnsafe<Array<{ cells: (string | null)[] }>>(
+    `SELECT ARRAY[${indexes.map((i) => stagingColumn(i)).join(", ")}]::text[] AS cells
+     FROM ${stagingTable(name)}
+     WHERE "row_no" >= $1 ORDER BY "row_no" LIMIT $2`,
+    fromRow,
+    limit
+  );
+  return rows.map((r) => r.cells);
+};
+
+/** Drops a stored table inside the caller's transaction, waiting for queries reading it to end. */
+export const dropStoredTable = async (
+  tx: Prisma.TransactionClient,
+  sourceId: string,
+  tableName: string
+): Promise<void> => {
+  await tx.$executeRawUnsafe(
+    `DROP TABLE IF EXISTS ${qualified(sourceId, checkedTableName(tableName))}`
+  );
+};
+
+/** Bytes stored for each of these sources (0 for one with no schema), indexes and TOAST included. */
+export const sourceStoredBytes = async (
+  sourceIds: string[],
+  db: Db = prisma
+): Promise<Map<string, number>> => {
+  const bytes = new Map(sourceIds.map((id) => [id, 0]));
+  if (sourceIds.length === 0) return bytes;
+  const schemas = new Map(sourceIds.map((id) => [schemaFor(id), id]));
+  const rows = await db.$queryRaw<Array<{ schema: string; bytes: bigint }>>`
+    SELECT n.nspname AS schema, coalesce(sum(pg_total_relation_size(c.oid)), 0)::bigint AS bytes
+    FROM pg_namespace n
+    JOIN pg_class c ON c.relnamespace = n.oid AND c.relkind = 'r'
+    WHERE n.nspname = ANY(${[...schemas.keys()]}::text[])
+    GROUP BY n.nspname`;
+  for (const row of rows)
+    bytes.set(schemas.get(row.schema)!, Number(row.bytes));
+  return bytes;
 };

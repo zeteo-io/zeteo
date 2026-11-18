@@ -244,6 +244,46 @@ export class FileSourceManagedElsewhereError extends AppError {
   }
 }
 
+/**
+ * A file source that does not exist, is a database source, or that the caller
+ * neither owns nor may manage as an admin: one answer for all.
+ */
+export class FileSourceNotFoundError extends AppError {
+  constructor() {
+    super(404, "file_source_not_found", "File source not found");
+    this.name = "FileSourceNotFoundError";
+  }
+}
+
+/** A load that would take the owner's stored file-source data past `FILE_SOURCE_QUOTA_BYTES`. */
+export class QuotaExceededError extends AppError {
+  constructor(quotaBytes: number) {
+    super(
+      409,
+      "quota_exceeded",
+      `This would store more than the ${quotaBytes} bytes allowed for your file sources`,
+      { details: { quota_bytes: quotaBytes } }
+    );
+    this.name = "QuotaExceededError";
+  }
+}
+
+const FILE_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
+
+/**
+ * A change of a file source's data that could not start or finish in time:
+ * another load of it holds its lock, or queries reading a table kept the swap
+ * waiting past its lock timeout. Nothing changed; retry later.
+ */
+export class FileSourceBusyError extends AppError {
+  constructor() {
+    super(503, "file_source_busy", "The file source is busy; retry shortly", {
+      headers: { "Retry-After": FILE_SOURCE_BUSY_RETRY_AFTER_SECONDS },
+    });
+    this.name = "FileSourceBusyError";
+  }
+}
+
 /** File Sources are off: `FILE_SOURCES_READER_URL` is not set. */
 export class FileSourcesNotConfiguredError extends AppError {
   constructor() {

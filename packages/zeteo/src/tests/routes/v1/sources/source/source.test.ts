@@ -365,6 +365,39 @@ describe("/v1/sources/:sourceId", () => {
       expect((await call("GET", `/${source.id}`)).body.owner_id).toBeNull();
     });
 
+    it("PATCH changes only its limits, and records the change", async () => {
+      const limits = {
+        timeout_ms: 5000,
+        row_cap: 10,
+        max_joins: 2,
+        export_enabled: true,
+        export_row_cap: 100,
+        query_concurrency: 3,
+        export_concurrency: 1,
+      };
+      const res = await call("PATCH", `/${fileId}`, limits);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      expect(res.body).toMatchObject({ ...limits, type: "upload" });
+      const entry = (await auditRows(fileId)).at(-1)?.payload;
+      expect(entry).toMatchObject({
+        metadata: { event: "zeteo.source.updated", limits },
+      });
+      await prisma.$executeRaw`DELETE FROM "core"."core_outbox" WHERE payload->>'entityId' = ${fileId}`;
+    });
+
+    it.each([
+      ["name", { name: "Renamed", row_cap: 5 }],
+      ["schemas", { schemas: ["public"] }],
+      ["settings", { settings: { host: "x" } }],
+    ])(
+      "PATCH with %s answers 409 file_source_managed_elsewhere",
+      async (_, body) => {
+        const res = await call("PATCH", `/${fileId}`, body);
+        expect(res.status).toBe(409);
+        expect(res.body.error).toBe("file_source_managed_elsewhere");
+      }
+    );
+
     it.each([
       ["PATCH", "", { name: "Renamed" }],
       ["POST", "/test", undefined],

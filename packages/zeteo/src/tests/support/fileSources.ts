@@ -1,7 +1,10 @@
 import type { FileColumnType } from "../../file-sources/types.js";
+import { stageUpload } from "../../file-sources/staging.js";
 import { removeSources, uniqueSlug } from "./sources.js";
 import { prisma } from "../../utils/db/prisma.js";
 import type { SeededSource } from "./queries.js";
+import { Readable } from "node:stream";
+import { fetchJson } from "./http.js";
 import { randomUUID } from "crypto";
 import {
   appendStagingRows,
@@ -131,3 +134,112 @@ export const removeUploadSources = async (ids: string[]): Promise<void> => {
   for (const id of ids) await dropSourceSchema(id);
   await removeSources(ids);
 };
+
+/** Stages `content` for `ownerId` as an upload would, and returns the staging id and preview. */
+export const stageFile = async (
+  ownerId: string,
+  content: string | Buffer,
+  filename = "data.csv"
+) =>
+  stageUpload({
+    ownerId,
+    filename,
+    stream: Readable.from([Buffer.from(content)]),
+  });
+
+/** A CSV of `header` and `rows`, comma separated, with no quoting. */
+export const csvOf = (header: string[], rows: string[][]): string =>
+  [header, ...rows].map((r) => r.join(",")).join("\n");
+
+/** A `/v1/file-sources` call on the app at `baseUrl`. */
+export const fileSourcesCall = (
+  baseUrl: string,
+  method: string,
+  path: string,
+  token: string,
+  body?: unknown
+) => fetchJson(method, `${baseUrl}/v1/file-sources${path}`, token, body);
+
+/** Whether the file source's `zf_` schema exists. */
+export const schemaExists = async (sourceId: string): Promise<boolean> => {
+  const rows = await prisma.$queryRaw<Array<{ n: number }>>`
+    SELECT 1 AS n FROM pg_namespace WHERE nspname = ${schemaFor(sourceId)}`;
+  return rows.length > 0;
+};
+
+/** The table names in the file source's schema, sorted. */
+export const storedTables = async (sourceId: string): Promise<string[]> => {
+  const rows = await prisma.$queryRaw<Array<{ tablename: string }>>`
+    SELECT tablename FROM pg_tables WHERE schemaname = ${schemaFor(sourceId)}
+    ORDER BY tablename`;
+  return rows.map((r) => r.tablename);
+};
+
+/** Removes the file sources these owners have, as `removeUploadSources` does, and their stagings. */
+export const removeFileSourcesOf = async (ownerIds: string[]) => {
+  const rows = await prisma.source.findMany({
+    where: { ownerId: { in: ownerIds } },
+    select: { id: true },
+  });
+  await removeUploadSources(rows.map((r) => r.id));
+  const stagings = await prisma.fileStaging.findMany({
+    where: { ownerId: { in: ownerIds } },
+  });
+  for (const s of stagings) {
+    for (const t of s.tables as { stagingTable: string }[]) {
+      await dropStagingTable(t.stagingTable);
+    }
+  }
+  await prisma.fileStaging.deleteMany({ where: { ownerId: { in: ownerIds } } });
+};
+
+/**
+ * A file source of `ownerId` made through `POST /v1/file-sources` on the app
+ * at `baseUrl` from `csv`, keeping its one table as `table`; throws unless
+ * it is created.
+ */
+export const createFileSource = async (
+  baseUrl: string,
+  token: string,
+  ownerId: string,
+  csv: string,
+  {
+    name = "File source",
+    table = "data",
+  }: { name?: string; table?: string } = {}
+) => {
+  const staged = await stageFile(ownerId, csv);
+  const res = await fileSourcesCall(baseUrl, "POST", "", token, {
+    staging_id: staged.stagingId,
+    name,
+    tables: [{ key: "csv", name: table }],
+  });
+  if (res.status !== 201) {
+    throw new Error(`file source not created: ${JSON.stringify(res.body)}`);
+  }
+  return res.body as FileSourceBody;
+};
+
+export interface FileSourceBody {
+  id: string;
+  slug: string;
+  name: string;
+  owner_id: string;
+  archived_at: string | null;
+  stored_bytes: number;
+  tables: {
+    id: string;
+    name: string;
+    row_count: number;
+    missing: boolean;
+    last_synced_at: string | null;
+    columns: {
+      id: string;
+      name: string;
+      original_name: string | null;
+      type: string;
+      description: string | null;
+      missing: boolean;
+    }[];
+  }[];
+}
