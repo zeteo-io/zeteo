@@ -64,3 +64,18 @@ describe("SheetLinkStep", () => {
     expect(screen.queryByLabelText(/Link to the Google Sheet/)).toBeNull();
   });
 });
+
+describe("SheetLinkStep with a source", () => {
+  it("shows the connection's error", async () => {
+    get.mockReset().mockRejectedValue({
+      status: 500,
+      code: "internal",
+      message: "Could not read the Google connection.",
+    });
+    post.mockReset().mockResolvedValue({ data: makeSheetStaging() });
+    renderWithProviders(<SheetLinkStep sourceId="s1" onStaged={vi.fn()} />);
+    expect(
+      await screen.findByText("Could not read the Google connection.")
+    ).toBeInTheDocument();
+  });
+});

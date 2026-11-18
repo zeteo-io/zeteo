@@ -83,6 +83,7 @@ export const SheetLinkStep = ({ sourceId, onStaged }: SheetLinkStepProps) => {
     return (
       <BorderedSection title="Google Sheet" as="h2">
         {share}
+        <ErrorNotice error={connection.error} />
         {stage.isPending || (!error && !stage.isSuccess) ? (
           <div className="z-fs-reading">
             <Spinner size="md" />
