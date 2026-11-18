@@ -6360,6 +6360,7 @@ components:
           type: string
         description:
           type: string
+          maxLength: 500
           description: What the source holds; empty when none was given
         type:
           $ref: '#/components/schemas/SourceType'

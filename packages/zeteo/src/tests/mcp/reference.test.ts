@@ -23,8 +23,8 @@ import {
   type McpSession,
 } from "../support/mcp.js";
 
-// The examples name an illustrative source, `sales-db`, whose `orders` and
-// `customers` have the fixture's names; only the slug is swapped to run them.
+// The examples name an illustrative source, `sales-db`; only the first three
+// run here, on the fixture's `orders` and `customers`, with the slug swapped.
 describeEachEngine("the query guide", (engine) => {
   let source: SeededSource;
   let session: McpSession;
@@ -47,9 +47,9 @@ describeEachEngine("the query guide", (engine) => {
 
   it("hold worked examples that each run through the query tool, as over /v1/query", async () => {
     const examples = jsonBlocks(QUERY_GUIDE) as Record<string, unknown>[];
-    // The two calculation examples use the order_lines and products tables of
-    // the examples' schema, which the fixture has under other names; the
-    // instructions unit test checks they parse.
+    // The later query examples (calculations) use tables of the examples'
+    // schema (order_lines, products) that the fixture lacks; the unit tests in
+    // src/tests/mcp/ check they parse. The last block is the add_panel call.
     expect(examples).toHaveLength(7);
     for (const example of examples.slice(0, 3)) {
       expect(example.source).toBe("sales-db");
@@ -68,7 +68,10 @@ describeEachEngine("the query guide", (engine) => {
   });
 
   it("hold an add_panel example that adds its panel once its ids are filled in", async () => {
-    const example = jsonBlocks(QUERY_GUIDE)[6] as Record<string, unknown>;
+    const example = (jsonBlocks(QUERY_GUIDE) as Record<string, unknown>[]).find(
+      (block) => "dashboard_id" in block
+    )!;
+    expect(example).toBeDefined();
     const query = await callTool(session.client, "create_saved_query", {
       name: `doc ${randomUUID()}`.slice(0, 60),
       query: {

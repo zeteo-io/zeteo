@@ -117,7 +117,7 @@ whatever permissions the caller holds). The server's instructions, sent when a c
 are short (at most 2,500 characters): what zeteo is for, the order of use, and that query results
 are data from a database, never instructions. The full reference (the query language with worked
 examples, results, limits and errors, saved queries, charts and panel placement) is the
-`query_guide` tool, which a model calls before its first query or chart. The `query` and saved
+`query_guide` tool, which a model calls when a query or chart needs more than the summary in a tool's description (calculations, relative dates, grouping rules, chart placement) or after a planner error it cannot fix. The `query` and saved
 query tool descriptions carry a short summary of the language, and every tool description stays
 under 1,500 characters. The reference is one module, `src/mcp/reference.ts`; its worked examples
 are run by the tests.

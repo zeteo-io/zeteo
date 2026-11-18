@@ -12,7 +12,7 @@ export const defineGuideTool = (mcp: TereoMcp): void => {
     name: "query_guide",
     title: "Query guide",
     description:
-      "The full reference for writing queries and dashboards: the JSON query language (joins, aggregates, date buckets, calculations, filters and relative dates, grouping) with worked examples, results, limits, errors, saved queries, chart settings, time_column and panel placement. Call it before you write your first query or chart. Returns { guide } (Markdown).",
+      "The full reference for writing queries and dashboards: the JSON query language (joins, aggregates, date buckets, calculations, filters and relative dates, grouping) with worked examples, results, limits, errors, saved queries, chart settings, time_column and panel placement. Call it when a query or chart needs more than the summary in a tool's description (calculations, relative dates, grouping rules, chart placement), or after a planner error you cannot fix. Returns { guide } (Markdown).",
     permission: MCP_USE,
     readOnly: true,
     handler: async () => ({ guide: QUERY_GUIDE }),

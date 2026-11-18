@@ -12,4 +12,4 @@ Zeteo answers questions from databases the user has been granted access to, thro
 3. If a query is refused, read the error, fix the query and run it again.
 4. To keep or rerun a query, use the saved query tools (`list_saved_queries`, `run_saved_query`, `create_saved_query`).
 
-Read [reference.md](reference.md) for the full query language, results, limits, errors and saved queries.
+Read [reference.md](reference.md) when a query needs more than the basics (calculations, relative dates, grouping rules) or after an error you cannot fix: the full query language, results, limits, errors and saved queries.

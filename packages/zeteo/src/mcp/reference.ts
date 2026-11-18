@@ -85,7 +85,7 @@ A dashboard is panels, each a saved query shown as a chart. To build one: find o
  * `DASHBOARDS_REFERENCE` has the rest.
  */
 export const CHART_SUMMARY =
-  'A chart is { "type", "version": 1, ... } naming result columns (a select item\'s "as", else its path): stat needs value; line and area need x and y (a list); bar needs x and y (a list); pie needs label and value; table takes optional columns.';
+  'A chart is { "type", "version": 1, ... } naming result columns (a select item\'s "as", else its path): stat needs value; line, area and bar need x and y (a list); pie needs label and value; table takes optional columns.';
 
 /** Both references, for the `query_guide` tool and the plugin's skills. */
 export const QUERY_GUIDE = `${QUERYING_REFERENCE}\n${DASHBOARDS_REFERENCE}`;

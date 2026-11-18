@@ -26,7 +26,12 @@ grants as a stream, cached briefly in Redis and recorded once per viewer per que
 saved query's owner makes it available for dashboards), and an MCP endpoint (`/mcp`, on when
 `MCP_ALLOWED_CLIENTS` is set) with three discovery tools (`list_sources`, `list_tables`,
 `describe_table`), the `query` tool, which runs `POST /v1/query`'s engine under MCP's limits, tools
-for saved queries, dashboards and saved panels, `query_guide` (the full query and dashboard reference), and short, purpose-first server instructions. A Claude Code plugin (`plugins/zeteo/`, marketplace in `.claude-plugin/`) gives Claude the MCP server and two skills whose `reference.md` files are generated from `src/mcp/reference.ts` (`npm run plugin:reference` in `packages/zeteo`; commit both together). A source has an optional `description`. Uploads (on when `UPLOADS_READER_URL` is set): a user with
+for saved queries, dashboards and saved panels, `query_guide` (the full query and dashboard reference), and short, purpose-first server instructions.
+A Claude Code plugin (`plugins/zeteo/`, marketplace in `.claude-plugin/`) gives Claude the MCP
+server and two skills whose `reference.md` files are generated from `src/mcp/reference.ts` (`npm
+run plugin:reference` in `packages/zeteo`; commit both together). A source has an optional
+`description`.
+Uploads (on when `UPLOADS_READER_URL` is set): a user with
 `zeteo.uploads.write` stages a CSV or xlsx (`/v1/uploads`), previews and corrects it, and owns
 the `upload` source it creates (`POST /v1/sources` with `type: "upload"`), stored in Zeteo's
 Postgres and read through a read-only role. There is one sources API: upload sources are listed,

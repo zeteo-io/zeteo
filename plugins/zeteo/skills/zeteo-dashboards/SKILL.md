@@ -12,4 +12,4 @@ A dashboard is a set of panels; each panel shows a saved query as a chart, run b
 3. Build with `create_dashboard` and `add_panel`, or keep a reusable chart as a saved panel (`create_saved_panel`) and link it.
 4. Change only the user's own dashboards and panels.
 
-Read [reference.md](reference.md) for the chart settings, time ranges, layout and rules.
+Read [reference.md](reference.md) when a chart needs more than the basics or after an error you cannot fix: the chart settings, time ranges, layout and rules.

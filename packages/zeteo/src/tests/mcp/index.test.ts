@@ -223,6 +223,9 @@ describe("MCP endpoint", () => {
       expect(tools.map((t) => t.name).sort()).toEqual(TOOLS);
       for (const tool of tools) {
         expect(tool.description?.length, tool.name).toBeLessThanOrEqual(1500);
+        expect(tool.description?.toLowerCase(), tool.name).not.toContain(
+          "export"
+        );
       }
       // The tools that take the query language or a chart point to the guide.
       for (const name of [
