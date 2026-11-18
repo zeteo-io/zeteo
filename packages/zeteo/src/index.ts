@@ -6,6 +6,7 @@ import { startRunsHousekeepingJob } from "./jobs/runsHousekeeping.js";
 import { checkUploadsSetup } from "./uploads/readerRole.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
+import { stopGoogleHandler } from "./google/handler.js";
 import { stopSourcePools } from "./sources/pools.js";
 import { abortExports } from "./engine/export.js";
 import { createServer, type Server } from "http";
@@ -136,6 +137,7 @@ export function createAppServer(
           stopHousekeepingJob = null;
         });
         await step("source pools", () => stopSourcePools(SOURCE_POOL_DRAIN_MS));
+        await step("google", stopGoogleHandler);
         await step("tereo", stopTereo);
         await step("redis", closeRedisConnection);
         await step("database", disconnectDatabase);

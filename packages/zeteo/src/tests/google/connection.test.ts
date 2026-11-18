@@ -61,7 +61,6 @@ describe("the Google connection", () => {
       where: { provider: "google" },
     });
     const stored = JSON.stringify(row.sealedSettings);
-    expect(stored).not.toContain("sa@proj");
     expect(stored).not.toContain("secretsecret");
     expect(await readGoogleConnection()).toMatchObject({
       serviceAccountEmail: "sa@proj.iam.gserviceaccount.com",

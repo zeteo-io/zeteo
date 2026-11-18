@@ -6,6 +6,10 @@ const addTemplateClient = vi.fn(async () => undefined);
 const removeTemplateClient = vi.fn(async () => undefined);
 const getSpreadsheet = vi.fn();
 const readGoogleConnection = vi.fn();
+const readGoogleStamp = vi.fn();
+const start = vi.fn(async () => undefined);
+const stop = vi.fn(async () => undefined);
+const getLoadedClients = vi.fn(() => [] as Array<{ name: string }>);
 
 vi.mock("@dianemo/core", () => ({
   default: class {
@@ -14,6 +18,9 @@ vi.mock("@dianemo/core", () => ({
     }
     addTemplateClient = addTemplateClient;
     removeTemplateClient = removeTemplateClient;
+    start = start;
+    stop = stop;
+    getLoadedClients = getLoadedClients;
   },
   buildClientName: (_: string, o: { instanceId: string }) =>
     `google:_:${o.instanceId}`,
@@ -21,9 +28,12 @@ vi.mock("@dianemo/core", () => ({
 vi.mock("@dianemo/backend-redis", () => ({ redisBackend: () => ({}) }));
 vi.mock("@dianemo/plugin-google", () => ({ default: {} }));
 vi.mock("../../utils/redis.js", () => ({ redis: {} }));
-vi.mock("../../google/connection.js", () => ({ readGoogleConnection }));
+vi.mock("../../google/connectionStore.js", () => ({
+  readGoogleConnection,
+  readGoogleStamp,
+}));
 
-const { googleClient, checkServiceAccountKey } =
+const { googleClient, checkServiceAccountKey, stopGoogleHandler } =
   await import("../../google/handler.js");
 
 const connection = (updatedAt: Date) => ({
@@ -35,15 +45,25 @@ const connection = (updatedAt: Date) => ({
 
 const failure = (code: string) => Object.assign(new Error("x"), { code });
 
+/** The connection as stored at `updatedAt`: the stamp and the full row agree. */
+const setConnection = (updatedAt: Date | null) => {
+  readGoogleStamp.mockResolvedValue(updatedAt);
+  readGoogleConnection.mockResolvedValue(updatedAt && connection(updatedAt));
+};
+
 describe("googleClient", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(async () => {
+    await stopGoogleHandler();
+    vi.clearAllMocks();
+  });
 
   it("re-registers the template after the connection changes, and not before", async () => {
-    readGoogleConnection.mockResolvedValue(connection(new Date(1000)));
+    setConnection(new Date(1000));
     const first = await googleClient();
     await googleClient();
     expect(addTemplateClient).toHaveBeenCalledTimes(1);
-    readGoogleConnection.mockResolvedValue(connection(new Date(2000)));
+    expect(readGoogleConnection).toHaveBeenCalledTimes(1);
+    setConnection(new Date(2000));
     const second = await googleClient();
     expect(addTemplateClient).toHaveBeenCalledTimes(2);
     expect(second).toBe(first);
@@ -56,12 +76,60 @@ describe("googleClient", () => {
     );
   });
 
+  it("registers once for calls that arrive together", async () => {
+    setConnection(new Date(1000));
+    await Promise.all([googleClient(), googleClient(), googleClient()]);
+    expect(addTemplateClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not register again for an older stamp", async () => {
+    setConnection(new Date(2000));
+    await googleClient();
+    readGoogleStamp.mockResolvedValue(new Date(1000));
+    await googleClient();
+    expect(addTemplateClient).toHaveBeenCalledTimes(1);
+  });
+
   it("throws google_not_configured without a connection", async () => {
-    readGoogleConnection.mockResolvedValue(null);
+    setConnection(null);
     await expect(googleClient()).rejects.toMatchObject({
       statusCode: 404,
       code: "google_not_configured",
     });
+  });
+
+  it("sweeps leftover key-check clients when it starts, and no other client", async () => {
+    getLoadedClients.mockReturnValueOnce([
+      { name: "google:_:validate-abc" },
+      { name: "google:_:main" },
+    ]);
+    setConnection(new Date(1000));
+    await googleClient();
+    expect(removeTemplateClient).toHaveBeenCalledTimes(1);
+    expect(removeTemplateClient).toHaveBeenCalledWith("google", "validate-abc");
+  });
+});
+
+describe("stopGoogleHandler", () => {
+  beforeEach(async () => {
+    await stopGoogleHandler();
+    vi.clearAllMocks();
+  });
+
+  it("is a no-op when the handler never started", async () => {
+    await expect(stopGoogleHandler()).resolves.toBeUndefined();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it("stops a started handler once and lets the next use start a new one", async () => {
+    setConnection(new Date(1000));
+    await googleClient();
+    await stopGoogleHandler();
+    await stopGoogleHandler();
+    expect(stop).toHaveBeenCalledTimes(1);
+    await googleClient();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(addTemplateClient).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -70,7 +138,10 @@ describe("checkServiceAccountKey", () => {
     client_email: "sa@proj.iam.gserviceaccount.com",
     private_key: "k",
   };
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(async () => {
+    await stopGoogleHandler();
+    vi.clearAllMocks();
+  });
 
   it("accepts a key whose sign-in succeeded and whose probe Google answered 403/404", async () => {
     getSpreadsheet.mockRejectedValue(failure("GGL_0009"));
@@ -92,6 +163,12 @@ describe("checkServiceAccountKey", () => {
     await expect(checkServiceAccountKey(key)).rejects.toMatchObject({
       code: "google_key_rejected",
     });
+  });
+
+  it("still answers when the probe client cannot be removed", async () => {
+    getSpreadsheet.mockRejectedValue(failure("GGL_0009"));
+    removeTemplateClient.mockRejectedValueOnce(new Error("redis down"));
+    await expect(checkServiceAccountKey(key)).resolves.toBeUndefined();
   });
 
   it("answers 502 google_unavailable for any other failure", async () => {

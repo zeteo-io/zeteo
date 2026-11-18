@@ -1,8 +1,9 @@
+import { readGoogleConnection, readGoogleStamp } from "./connectionStore.js";
 import google, { type getSpreadsheet } from "@dianemo/plugin-google";
 import RequestHandler, { buildClientName } from "@dianemo/core";
-import { readGoogleConnection } from "./connection.js";
 import { redisBackend } from "@dianemo/backend-redis";
 import { hkdfSync, randomUUID } from "node:crypto";
+import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
 import env from "../env.js";
 import {
@@ -30,6 +31,9 @@ const build = () => {
 let started: ReturnType<typeof build> | undefined;
 /** The `updatedAt` of the connection this process last registered. */
 let registeredAt: number | undefined;
+let startPromise: Promise<ReturnType<typeof build>> | undefined;
+/** The registration under way, shared by every caller that finds the connection newer. */
+let registering: Promise<void> | undefined;
 
 /** The handler's key: 32 bytes derived from the master key, so no second secret is kept. */
 const handlerKey = (): string => {
@@ -47,38 +51,87 @@ const handlerKey = (): string => {
 
 const ensureHandler = () => (started ??= build());
 
+const INSTANCE_PREFIX_PROBE = "validate-";
+
+/**
+ * Starts the handler once. The start loads every stored client, so a probe
+ * client a dead process left behind (`validate-*`, holding a candidate key)
+ * is among the loaded ones: dianemo lists no stored templates, only the
+ * clients this replica loaded, and those are what is swept.
+ */
+const ensureStarted = (): Promise<ReturnType<typeof build>> =>
+  (startPromise ??= (async () => {
+    const built = ensureHandler();
+    await built.handler.start();
+    for (const { name } of built.handler.getLoadedClients()) {
+      const instanceId = name.split(":")[2];
+      if (instanceId?.startsWith(INSTANCE_PREFIX_PROBE)) {
+        await built.handler
+          .removeTemplateClient("google", instanceId)
+          .catch((err: unknown) =>
+            logger.warn(
+              { code: codeOf(err), instanceId },
+              "Could not remove a leftover Google key-check client"
+            )
+          );
+      }
+    }
+    return built;
+  })().catch((err: unknown) => {
+    startPromise = undefined;
+    throw err;
+  }));
+
 const codeOf = (err: unknown): string | undefined =>
   typeof err === "object" && err !== null
     ? (err as { code?: unknown }).code?.toString()
     : undefined;
 
+const register = async (): Promise<void> => {
+  const { handler } = await ensureStarted();
+  const connection = await readGoogleConnection();
+  if (!connection) throw new GoogleNotConfiguredError();
+  await handler.addTemplateClient("google", {
+    instanceId: INSTANCE_ID,
+    baseUrl: BASE_URL,
+    serviceAccountEmail: connection.serviceAccountEmail,
+    privateKey: connection.privateKey,
+    scopes: SCOPES,
+  });
+  registeredAt = connection.updatedAt.getTime();
+};
+
 /**
  * The dianemo client name for the current connection. A connection changed
  * by another process has a newer `updatedAt`; this one then registers it
- * again, so a rotated key reaches every process.
+ * again (once, however many calls are waiting), so a rotated key reaches
+ * every process. The key is opened only then.
  */
 export const googleClient = async (): Promise<string> => {
-  const connection = await readGoogleConnection();
-  if (!connection) throw new GoogleNotConfiguredError();
-  const { handler } = ensureHandler();
-  const at = connection.updatedAt.getTime();
-  if (registeredAt !== at) {
-    await handler.addTemplateClient("google", {
-      instanceId: INSTANCE_ID,
-      baseUrl: BASE_URL,
-      serviceAccountEmail: connection.serviceAccountEmail,
-      privateKey: connection.privateKey,
-      scopes: SCOPES,
-    });
-    registeredAt = at;
+  const stamp = await readGoogleStamp();
+  if (!stamp) throw new GoogleNotConfiguredError();
+  while (registeredAt === undefined || stamp.getTime() > registeredAt) {
+    await (registering ??= register().finally(() => {
+      registering = undefined;
+    }));
   }
   return buildClientName("google", { instanceId: INSTANCE_ID });
 };
 
+/** Stops the handler (its Redis listener, heartbeat and signal hooks); a no-op when it never started. */
+export const stopGoogleHandler = async (): Promise<void> => {
+  const current = started;
+  started = undefined;
+  startPromise = undefined;
+  registering = undefined;
+  registeredAt = undefined;
+  await current?.handler.stop();
+};
+
 /** The plugin's Sheets calls: the one module tests mock. */
 export const sheetsApi = {
-  getSpreadsheet: (...args: Parameters<typeof getSpreadsheet>) =>
-    ensureHandler().requests.google.getSpreadsheet(...args),
+  getSpreadsheet: async (...args: Parameters<typeof getSpreadsheet>) =>
+    (await ensureStarted()).requests.google.getSpreadsheet(...args),
 };
 
 /**
@@ -92,8 +145,8 @@ export const checkServiceAccountKey = async (key: {
   client_email: string;
   private_key: string;
 }): Promise<void> => {
-  const { handler } = ensureHandler();
-  const instanceId = `validate-${randomUUID()}`;
+  const { handler } = await ensureStarted();
+  const instanceId = `${INSTANCE_PREFIX_PROBE}${randomUUID()}`;
   try {
     try {
       await handler.addTemplateClient("google", {
@@ -119,8 +172,13 @@ export const checkServiceAccountKey = async (key: {
       throw new GoogleUnavailableError();
     }
   } finally {
-    await handler.removeTemplateClient("google", instanceId).catch(() => {
-      // The throwaway client holds a key Google already judged; leaving it is harmless.
+    // The probe client holds the candidate key, encrypted, in Redis; if it
+    // stays (this fails, or the process dies) the next start sweeps it.
+    await handler.removeTemplateClient("google", instanceId).catch((err) => {
+      logger.warn(
+        { code: codeOf(err), instanceId },
+        "Could not remove the Google key-check client; the next start sweeps it"
+      );
     });
   }
 };

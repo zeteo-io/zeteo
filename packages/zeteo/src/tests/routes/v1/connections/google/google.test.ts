@@ -84,8 +84,12 @@ describe("/v1/connections/google", () => {
       where: { provider: "google" },
     });
     const stored = JSON.stringify(row.sealedSettings);
-    expect(stored).not.toContain(EMAIL);
     expect(stored).not.toContain("secretsecret");
+    // The email sits beside the seal in the clear, never inside it.
+    expect(row.sealedSettings).toMatchObject({ service_account_email: EMAIL });
+    expect(
+      JSON.stringify((row.sealedSettings as { sealed: unknown }).sealed)
+    ).not.toContain(EMAIL);
     const got = await call("GET", admin());
     expect(got.status).toBe(200);
     expect(got.body.service_account_email).toBe(EMAIL);
@@ -106,6 +110,48 @@ describe("/v1/connections/google", () => {
     expect(res.body.error).toBe("google_key_rejected");
     expect(JSON.stringify(res.body)).not.toContain("secretsecret");
     expect(await prisma.connection.count()).toBe(0);
+  });
+
+  it("a refused key leaves the existing connection unchanged", async () => {
+    await call("PUT", admin(), { service_account_key: goodKey() });
+    const before = await prisma.connection.findUniqueOrThrow({
+      where: { provider: "google" },
+    });
+    checkServiceAccountKey.mockRejectedValueOnce(new GoogleKeyRejectedError());
+    const res = await call("PUT", admin(), {
+      service_account_key: {
+        ...goodKey(),
+        client_email: "other@proj.iam.gserviceaccount.com",
+      },
+    });
+    expect(res.status).toBe(422);
+    const after = await prisma.connection.findUniqueOrThrow({
+      where: { provider: "google" },
+    });
+    expect(after.sealedSettings).toEqual(before.sealedSettings);
+    expect(after.updatedAt).toEqual(before.updatedAt);
+    expect((await call("GET", admin())).body.service_account_email).toBe(EMAIL);
+  });
+
+  it("GET does not open the key: a corrupt seal does not fail it, a corrupt row reads as not configured", async () => {
+    await call("PUT", admin(), { service_account_key: goodKey() });
+    await prisma.connection.update({
+      where: { provider: "google" },
+      data: {
+        sealedSettings: {
+          sealed: { v: 1, garbage: true },
+          service_account_email: EMAIL,
+        },
+      },
+    });
+    expect((await call("GET", admin())).status).toBe(200);
+    await prisma.connection.update({
+      where: { provider: "google" },
+      data: { sealedSettings: { nonsense: true } },
+    });
+    const res = await call("GET", admin());
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe("google_not_configured");
   });
 
   it.each([

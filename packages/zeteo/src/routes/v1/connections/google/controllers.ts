@@ -1,11 +1,12 @@
+import { readGoogleConnectionView } from "../../../../google/connectionStore.js";
 import { invalidRequest, validateBody } from "../../../../utils/validateReq.js";
+import { connectionView } from "../../../../views/connection.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import { PutGoogleConnectionSchema } from "./schemas.js";
 import type { Request, Response } from "express";
 import {
   ServiceAccountKeySchema,
   putGoogleConnection,
-  readGoogleConnectionView,
 } from "../../../../google/connection.js";
 import {
   ValidationError,
@@ -13,9 +14,9 @@ import {
 } from "../../../../utils/errors.js";
 
 export const getGoogleConnection = async (_req: Request, res: Response) => {
-  const view = await readGoogleConnectionView();
-  if (!view) throw new GoogleNotConfiguredError();
-  res.status(200).json(view);
+  const row = await readGoogleConnectionView();
+  if (!row) throw new GoogleNotConfiguredError();
+  res.status(200).json(connectionView(row));
 };
 
 export const putGoogle = async (req: Request, res: Response) => {
