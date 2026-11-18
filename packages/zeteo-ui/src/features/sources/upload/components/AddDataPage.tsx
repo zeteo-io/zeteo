@@ -1,7 +1,7 @@
 import type { FileColumnType, SheetStaging, Staging } from "../api/types";
 import { isUploadType, sourceHref } from "../../components/sourceLabels";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { parseNumberField } from "@/utils/parseNumberField";
+import { syncIntervalProblem } from "@/utils/syncInterval";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
@@ -48,21 +48,8 @@ const FORM_ID = "z-fs-form";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
 
-/** How often a Google Sheet is synced: zeteo's default, and its bounds in minutes. */
+/** How often a Google Sheet is synced: zeteo's default, in minutes. */
 const DEFAULT_INTERVAL = "60";
-const MIN_INTERVAL = 15;
-const MAX_INTERVAL = 1440;
-
-/** The problem with a "Sync every" value, or undefined when it is fine. */
-const intervalProblem = (text: string): string | undefined => {
-  const n = parseNumberField(text);
-  return n === undefined ||
-    Number.isNaN(n) ||
-    n < MIN_INTERVAL ||
-    n > MAX_INTERVAL
-    ? `Sync every is ${MIN_INTERVAL} to ${MAX_INTERVAL} minutes.`
-    : undefined;
-};
 
 /** A file's name without its extension: "Q3 sales.xlsx" → "Q3 sales". */
 const baseName = (file: string) => file.replace(/\.[^.]+$/, "");
@@ -222,7 +209,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
     editsValid(staging.tables, edits) &&
     (mode.kind !== "create" || (name.trim() !== "" && !slugProblem)) &&
     (!(mode.kind === "create" && origin === "sheet") ||
-      !intervalProblem(syncEvery));
+      !syncIntervalProblem(syncEvery));
   const descriptionError = descriptionProblem(description);
 
   const submit = () => {
@@ -379,7 +366,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
                 label="Sync every"
                 type="number"
                 value={syncEvery}
-                error={intervalProblem(syncEvery)}
+                error={syncIntervalProblem(syncEvery)}
                 helperText="Minutes between syncs, 15 to 1440. Zeteo reads the sheet again at this pace."
                 onChange={(e) => setSyncEvery(e.target.value)}
               />
@@ -390,6 +377,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
             edits={edits}
             onChange={setEdits}
             mode={mode.kind === "reupload" ? "one" : "many"}
+            origin={origin ?? undefined}
           />
           <LoadFailure error={mutation.error} />
         </form>

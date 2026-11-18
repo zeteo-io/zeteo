@@ -136,6 +136,8 @@ interface PreviewEditorProps {
   onChange: (edits: Edits) => void;
   /** `one`: exactly one table is chosen (a re-upload), and its name is the existing table's. */
   mode?: "many" | "one";
+  /** Where the tables come from: a Google Sheet's tabs are not an Excel file's sheets. */
+  origin?: "file" | "sheet";
 }
 
 /** The staged tables of an upload, to keep or leave out and correct before anything is created. */
@@ -144,6 +146,7 @@ export const PreviewEditor = ({
   edits,
   onChange,
   mode = "many",
+  origin = "file",
 }: PreviewEditorProps) => {
   const set = (key: string, edit: TableEdit) =>
     onChange({ ...edits, [key]: edit });
@@ -235,7 +238,9 @@ export const PreviewEditor = ({
             >
               <p className="z-fs-preview-meta">
                 <Badge size="sm" variant="secondary">
-                  {KIND_NAMES[table.kind]}
+                  {origin === "sheet" && table.kind === "sheet"
+                    ? "Tab"
+                    : KIND_NAMES[table.kind]}
                 </Badge>
                 <span>{table.row_count.toLocaleString()} rows</span>
               </p>

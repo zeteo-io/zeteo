@@ -121,6 +121,12 @@ export interface TestResult {
   truncated?: true;
 }
 
+/** What a refresh answers for a Google Sheets source: what it synced. */
+export interface SyncSummary {
+  synced_at: string;
+  tables: { id: string; name: string; row_count: number; missing: boolean }[];
+}
+
 export interface RefreshSummary {
   tables: { added: number; missing: number; restored: number };
   columns: {

@@ -38,7 +38,6 @@ export const useSetGoogleKey = () => {
   return useMutation<GoogleConnection, ApiError, string>({
     // The body is the key: keep nothing once the dialog is gone.
     gcTime: 0,
-    // The body is the key: keep nothing once the dialog is gone.
     mutationFn: async (key) => {
       try {
         return (

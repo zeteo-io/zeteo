@@ -1,5 +1,6 @@
 import { descriptionProblem, DescriptionField } from "./DescriptionField";
 import { parseNumberField } from "@/utils/parseNumberField";
+import { syncIntervalProblem } from "@/utils/syncInterval";
 import { useCreateSource } from "../api/useCreateSource";
 import { useUpdateSource } from "../api/useUpdateSource";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -37,10 +38,6 @@ import type {
 } from "../api/types";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
-
-/** A Google Sheets source's "Sync every", in minutes. */
-const MIN_INTERVAL = 15;
-const MAX_INTERVAL = 1440;
 
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
@@ -335,15 +332,8 @@ export const SourceForm = ({
       found.schemas = `A schema name is at most ${MAX_SCHEMA_BYTES} bytes.`;
     }
     if (syncs) {
-      const n = parseNumberField(syncEvery);
-      if (
-        n === undefined ||
-        Number.isNaN(n) ||
-        n < MIN_INTERVAL ||
-        n > MAX_INTERVAL
-      ) {
-        found.sync_interval_minutes = `Sync every is ${MIN_INTERVAL} to ${MAX_INTERVAL} minutes.`;
-      }
+      const problem = syncIntervalProblem(syncEvery);
+      if (problem) found.sync_interval_minutes = problem;
     }
     for (const field of NUMBER_FIELDS) {
       const n = parseNumberField(limits[field.key]);
