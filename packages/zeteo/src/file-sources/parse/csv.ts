@@ -152,6 +152,15 @@ export async function* parseCsv(
           );
         }
       }
+      // Postgres text cannot hold NUL. One in the sniffed head was refused
+      // as binary; one further on is refused here, with its row.
+      if (record.some((v) => v.includes("\0"))) {
+        throw new FileParseError(
+          "invalid_character",
+          `Row ${rowNumber} holds a NUL character, which text cannot hold.`,
+          rowNumber
+        );
+      }
       const row: Row = record.map((v) => (v === "" ? null : v));
       while (row.length < width) row.push(null);
       yield row;

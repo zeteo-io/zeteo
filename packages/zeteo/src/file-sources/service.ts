@@ -456,7 +456,8 @@ const inDrop = <T>(
 /**
  * Deletes a file source: archives it, drops its schema (waiting for queries
  * reading it, up to the swap's lock timeout) and marks its tables and columns
- * missing. Grants and saved queries keep their references.
+ * missing. Grants and saved queries keep their references; the owner grants
+ * lose their `owner_grant` flag, so an admin may remove them.
  */
 export const deleteFileSource = async (
   caller: Caller,
@@ -475,6 +476,12 @@ export const deleteFileSource = async (
       await tx.sourceColumn.updateMany({
         where: { table: { sourceId: id }, missingSince: null },
         data: { missingSince: now },
+      });
+      // Owner grants are locked only while the source lives: once it is
+      // deleted they are ordinary grants, which an admin may remove.
+      await tx.grant.updateMany({
+        where: { table: { sourceId: id }, ownerGrant: true },
+        data: { ownerGrant: false },
       });
       await dropSourceSchema(id, tx);
       audit({

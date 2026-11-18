@@ -86,6 +86,9 @@ export function loadTestEnv(): Record<string, string> {
     DATABASE_URL: databaseUrl,
     // The test database's reader, never `.env`'s, which names the dev one.
     FILE_SOURCES_READER_URL: readerUrlFor(databaseUrl),
+    // Tests stage many files per user within the hour; the cap's own tests
+    // lower it.
+    FILE_SOURCE_MAX_STAGINGS: "1000",
     REDIS_URL:
       process.env.TEST_REDIS_URL ?? env.TEST_REDIS_URL ?? redis.toString(),
     // The SQL Server of the Azure SQL tests: docker-compose.yml's `mssql`.

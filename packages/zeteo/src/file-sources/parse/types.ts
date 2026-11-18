@@ -2,6 +2,7 @@ export type ParseLimits = { maxRows: number; maxColumns: number };
 
 export type FileParseErrorCode =
   | "unsupported_encoding"
+  | "invalid_character"
   | "row_too_long"
   | "too_many_columns"
   | "too_many_rows"

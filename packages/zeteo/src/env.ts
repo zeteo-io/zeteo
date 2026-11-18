@@ -167,6 +167,12 @@ const EnvFields = z
     FILE_SOURCE_MAX_ROWS: int(1, Number.MAX_SAFE_INTEGER, 1_000_000),
     FILE_SOURCE_MAX_COLUMNS: int(1, Number.MAX_SAFE_INTEGER, 500),
     FILE_SOURCE_QUOTA_BYTES: int(1, Number.MAX_SAFE_INTEGER, 1_073_741_824),
+    // Uploads not yet confirmed (unexpired stagings) one user may hold, uploads
+    // one user may have in flight at once (across replicas), and workbooks one
+    // process reads at once (an xlsx is read whole into memory).
+    FILE_SOURCE_MAX_STAGINGS: int(1, 1000, 5),
+    FILE_SOURCE_MAX_UPLOADS: int(1, 100, 2),
+    FILE_SOURCE_XLSX_CONCURRENCY: int(1, 100, 2),
     DB_POOL_MAX: int(1, 1000, 10),
     DB_POOL_MIN: int(0, 1000, 0),
     // How long a query waits for a free connection before it fails.

@@ -124,6 +124,27 @@ describe("PATCH /v1/file-sources/:sourceId/tables/:tableId/columns/:columnId", (
     expect(await storedTables(source.id)).toEqual(["data"]);
   });
 
+  it("numbers a retype's failing rows as 1-based data rows of the table, the header not counted", async () => {
+    const source = await createFileSource(
+      app.url,
+      owner,
+      ownerId,
+      csvOf(["code"], [["5"], ["x"], ["7"], ["y"]])
+    );
+    // "x" and "y", the second and fourth data rows (rows 3 and 5 of the
+    // file), are not numbers.
+    const res = await call("PATCH", columnPath(source, "code"), owner, {
+      type: "number",
+    });
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({
+      error: "cast_failed",
+      table: "data",
+      column: "code",
+      rows: [2, 4],
+    });
+  });
+
   it("renames a column keeping its id and grants, and sets a description", async () => {
     const source = await createFileSource(app.url, owner, ownerId, CSV);
     const path = columnPath(source, "note");

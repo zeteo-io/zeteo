@@ -62,12 +62,23 @@ describe("fileReaderSettings", () => {
     "refuses sslmode=%s",
     (sslmode) => {
       env.FILE_SOURCES_READER_URL = `postgresql://r:p@h/zeteo?sslmode=${sslmode}`;
-      expect(() => fileReaderSettings()).toThrow(/sslmode/);
+      expect(() => fileReaderSettings()).toThrow(
+        expect.objectContaining({
+          statusCode: 503,
+          code: "file_sources_misconfigured",
+          problem: expect.stringMatching(/sslmode/),
+        })
+      );
     }
   );
 
-  it("throws when File Sources are off", () => {
+  it("throws 404 file_sources_not_configured when File Sources are off", () => {
     env.FILE_SOURCES_READER_URL = undefined;
-    expect(() => fileReaderSettings()).toThrow(/not configured/);
+    expect(() => fileReaderSettings()).toThrow(
+      expect.objectContaining({
+        statusCode: 404,
+        code: "file_sources_not_configured",
+      })
+    );
   });
 });

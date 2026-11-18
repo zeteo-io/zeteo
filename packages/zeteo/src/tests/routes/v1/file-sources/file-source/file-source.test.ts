@@ -5,10 +5,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startV1Routes } from "../../../../support/v1App.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../../support/tokens.js";
+import { fetchJson } from "../../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
   FILE_SOURCES_WRITE,
+  GRANTS_READ,
+  GRANTS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
 } from "../../../../../definitions/tereoDeclaration.js";
@@ -167,6 +170,39 @@ describe("/v1/file-sources/:sourceId", () => {
     expect(list.body.data.map((s: { id: string }) => s.id)).not.toContain(
       source.id
     );
+  });
+
+  it("DELETE clears the owner grants' flag, so an admin can remove them", async () => {
+    const source = await make();
+    const tableId = source.tables[0]!.id;
+    const grant = await prisma.grant.findFirstOrThrow({
+      where: { tableId, ownerGrant: true },
+    });
+    const grantsAdmin = tokenFor({
+      userId: adminId,
+      permissions: [DATA_READ, GRANTS_READ, GRANTS_WRITE],
+    });
+    const locked = await fetchJson(
+      "DELETE",
+      `${app.url}/v1/grants/${grant.id}`,
+      grantsAdmin
+    );
+    expect([locked.status, locked.body.error]).toEqual([
+      409,
+      "owner_grant_locked",
+    ]);
+
+    expect((await call("DELETE", `/${source.id}`, owner)).status).toBe(204);
+    expect(
+      await prisma.grant.findUniqueOrThrow({ where: { id: grant.id } })
+    ).toMatchObject({ ownerGrant: false });
+    const removed = await fetchJson(
+      "DELETE",
+      `${app.url}/v1/grants/${grant.id}`,
+      grantsAdmin
+    );
+    expect(removed.status, JSON.stringify(removed.body)).toBe(204);
+    expect(await prisma.grant.count({ where: { tableId } })).toBe(0);
   });
 
   it("DELETE by an admin works on anyone's source", async () => {

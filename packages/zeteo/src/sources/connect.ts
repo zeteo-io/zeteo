@@ -9,6 +9,10 @@ import type {
   SourceAdapter,
   SourceConnection,
 } from "../adapters/types.js";
+import {
+  FileSourcesMisconfiguredError,
+  FileSourcesNotConfiguredError,
+} from "../utils/errors.js";
 
 export const CONNECT_TIMEOUT_MS = 5000;
 export const QUERY_TIMEOUT_MS = 15_000;
@@ -62,20 +66,24 @@ const READER_TLS: Record<string, PostgresSettings["tls"]> = {
 /**
  * The File Sources reader's connection settings, from
  * `FILE_SOURCES_READER_URL`: the role that may only read `zf_*` schemas.
- * `sslmode` is `disable` (the default), `require` or `verify-full`; any other
- * value throws, as does an unset URL.
+ * `sslmode` is `disable` (the default), `require` or `verify-full`. An unset
+ * URL (File Sources turned off while `upload` sources remain) is
+ * `FileSourcesNotConfiguredError` (404); another `sslmode` is
+ * `FileSourcesMisconfiguredError` (503), whose `problem` says what is wrong
+ * and is logged, never answered. Start-up refuses both
+ * (`checkFileSourcesSetup`), so at run time they mean the environment changed.
  */
 export const fileReaderSettings = (): PostgresSettings => {
   if (!env.FILE_SOURCES_READER_URL) {
-    throw new Error("File Sources are not configured");
+    throw new FileSourcesNotConfiguredError();
   }
   const url = new URL(env.FILE_SOURCES_READER_URL);
   const sslmode = url.searchParams.get("sslmode") ?? "disable";
   const tls = READER_TLS[sslmode];
   if (!tls) {
-    throw new Error(
-      `FILE_SOURCES_READER_URL's sslmode must be disable, require or verify-full, not "${sslmode}"`
-    );
+    const problem = `FILE_SOURCES_READER_URL's sslmode must be disable, require or verify-full, not "${sslmode}"`;
+    logger.error({ problem }, "File Sources reader misconfigured");
+    throw new FileSourcesMisconfiguredError(problem);
   }
   return {
     host: url.hostname.replace(/^\[(.*)\]$/, "$1"),

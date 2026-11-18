@@ -1,6 +1,11 @@
+import { fileReaderSettings } from "../sources/connect.js";
 import { prisma } from "../utils/db/prisma.js";
 import env from "../env.js";
 import pg from "pg";
+import {
+  FileSourcesMisconfiguredError,
+  FileSourcesNotConfiguredError,
+} from "../utils/errors.js";
 
 /** The schemas the reader role must never use: Zeteo's own and staging's. */
 const FORBIDDEN_SCHEMAS = ["zeteo", "core", "zeteo_file_staging"] as const;
@@ -15,7 +20,7 @@ const CONNECT_TIMEOUT_MS = 10_000;
  */
 export const readerRoleName = (): string => {
   if (!env.FILE_SOURCES_READER_URL) {
-    throw new Error("File Sources are not configured");
+    throw new FileSourcesNotConfiguredError();
   }
   const name = decodeURIComponent(
     new URL(env.FILE_SOURCES_READER_URL).username
@@ -114,4 +119,64 @@ export const checkReaderRole = async (
   } finally {
     await client.end();
   }
+};
+
+/** `server_version_num` of PostgreSQL 16: loads use `pg_input_is_valid`. */
+export const MIN_SERVER_VERSION_NUM = 160_000;
+
+/**
+ * What is wrong with Zeteo's own database for File Sources, or null: it must
+ * be PostgreSQL 16 or later (`pg_input_is_valid`), and Zeteo's own role must
+ * hold `CREATE` on it (each file source gets its own `zf_` schema).
+ */
+export const ownDatabaseProblem = ({
+  database,
+  versionNum,
+  canCreate,
+}: {
+  database: string;
+  versionNum: number;
+  canCreate: boolean;
+}): string | null => {
+  if (versionNum < MIN_SERVER_VERSION_NUM) {
+    return `File Sources need PostgreSQL 16 or later; the database "${database}" runs server_version_num ${versionNum}`;
+  }
+  if (!canCreate) {
+    return `File Sources need CREATE on the database "${database}" for Zeteo's own role, which creates a schema per file source (GRANT CREATE ON DATABASE)`;
+  }
+  return null;
+};
+
+/**
+ * The start-up check of File Sources, run when `FILE_SOURCES_READER_URL` is
+ * set: the URL's `sslmode` is one Zeteo supports, Zeteo's own database fits
+ * (`ownDatabaseProblem`), and the reader role holds no more than it should
+ * (`checkReaderRole`). Each failure throws an error that says what to fix, so
+ * a misconfiguration stops the start instead of failing queries later.
+ */
+export const checkFileSourcesSetup = async (): Promise<void> => {
+  try {
+    fileReaderSettings();
+  } catch (err) {
+    if (err instanceof FileSourcesMisconfiguredError) {
+      throw new Error(err.problem, { cause: err });
+    }
+    if (err instanceof FileSourcesNotConfiguredError) {
+      throw new Error("FILE_SOURCES_READER_URL is not set", { cause: err });
+    }
+    throw err;
+  }
+  const [own] = await prisma.$queryRaw<
+    Array<{ database: string; version_num: number; can_create: boolean }>
+  >`
+    SELECT current_database() AS database,
+           current_setting('server_version_num')::int AS version_num,
+           has_database_privilege(current_database(), 'CREATE') AS can_create`;
+  const problem = ownDatabaseProblem({
+    database: own.database,
+    versionNum: own.version_num,
+    canCreate: own.can_create,
+  });
+  if (problem) throw new Error(problem);
+  await checkReaderRole();
 };

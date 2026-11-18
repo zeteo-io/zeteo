@@ -1,9 +1,11 @@
+import { acquireUploadSlot } from "../../../../file-sources/uploadLimits.js";
 import { ValidationError } from "../../../../utils/errors.js";
 import { callerOf } from "../../../../middleware/auth.js";
 import type { Request, Response } from "express";
 import type { Readable } from "node:stream";
 import busboy from "busboy";
 import {
+  checkStagingRoom,
   discardStaging,
   stageUpload,
 } from "../../../../file-sources/staging.js";
@@ -19,9 +21,45 @@ type Staged = Awaited<ReturnType<typeof stageUpload>>;
  * tables. A refused upload (too large, wrong type, unreadable, a second file)
  * is answered at once with `Connection: close` and the request is cut, not
  * read to its end.
+ *
+ * Before reading anything, the caller must hold fewer than
+ * `FILE_SOURCE_MAX_STAGINGS` unconfirmed uploads (429 `too_many_stagings`)
+ * and get one of their `FILE_SOURCE_MAX_UPLOADS` upload slots (429
+ * `too_many_uploads`), held until the staging has ended, an aborted one
+ * included.
  */
 export const postUpload = async (req: Request, res: Response) => {
   const ownerId = callerOf(req).userId;
+  let release: () => Promise<void>;
+  try {
+    await checkStagingRoom(ownerId);
+    release = await acquireUploadSlot(ownerId);
+  } catch (err) {
+    // Refused before the body is read: answer, then cut the request.
+    res.setHeader("Connection", "close");
+    if (!req.complete) res.once("finish", () => req.destroy());
+    throw err;
+  }
+  let staging: Promise<unknown> | null = null;
+  try {
+    await receive(req, res, ownerId, (started) => {
+      staging = started;
+    });
+  } finally {
+    // An aborted request returns while its staging is still ending: the slot
+    // is given back once it has.
+    void Promise.resolve(staging as Promise<unknown> | null)
+      .catch(() => undefined)
+      .finally(() => release());
+  }
+};
+
+const receive = async (
+  req: Request,
+  res: Response,
+  ownerId: string,
+  onStaging: (staging: Promise<unknown>) => void
+) => {
   let parser: busboy.Busboy;
   try {
     parser = busboy({ headers: req.headers, limits: { files: 1, fields: 5 } });
@@ -84,6 +122,7 @@ export const postUpload = async (req: Request, res: Response) => {
           filename: info.filename ?? "",
           stream: file,
         });
+        onStaging(staged);
         // A failure ends the request at once; success waits for the close.
         staged.catch((err: unknown) => reject(err));
       });

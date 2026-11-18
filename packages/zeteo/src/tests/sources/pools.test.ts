@@ -484,6 +484,59 @@ describe("withSourceConnection", () => {
     }
   });
 
+  it("answers 404 file_sources_not_configured for a file source while File Sources are off, and 503 file_sources_misconfigured for a bad sslmode", async () => {
+    const file = await seedUploadSource({
+      ownerId: randomUUID(),
+      tables: [
+        {
+          name: "items",
+          columns: [{ name: "n", type: "number" }],
+          rows: [["1"]],
+        },
+      ],
+    });
+    const readerUrl = env.FILE_SOURCES_READER_URL;
+    try {
+      env.FILE_SOURCES_READER_URL = undefined;
+      await expect(
+        withSourceConnection(file.id, (c) => c.checkLogin())
+      ).rejects.toMatchObject({
+        statusCode: 404,
+        code: "file_sources_not_configured",
+      });
+      const off = await fetchJson(
+        "GET",
+        `${probeApp.url}/v1/use/${file.id}`,
+        null
+      );
+      expect(off.status).toBe(404);
+      expect(off.body.error).toBe("file_sources_not_configured");
+
+      const url = new URL(readerUrl!);
+      url.searchParams.set("sslmode", "prefer");
+      env.FILE_SOURCES_READER_URL = url.toString();
+      await expect(
+        withSourceConnection(file.id, (c) => c.checkLogin())
+      ).rejects.toMatchObject({
+        statusCode: 503,
+        code: "file_sources_misconfigured",
+      });
+      const bad = await fetchJson(
+        "GET",
+        `${probeApp.url}/v1/use/${file.id}`,
+        null
+      );
+      expect(bad.status).toBe(503);
+      // The problem goes to the log, not to the caller.
+      expect(bad.body.error_description).not.toMatch(/sslmode/);
+      expect(isSourcePoolOpen(file.id)).toBe(false);
+    } finally {
+      env.FILE_SOURCES_READER_URL = readerUrl;
+      await closeSourcePool(file.id);
+      await removeUploadSources([file.id]);
+    }
+  });
+
   it("fails as a generic internal error when the settings cannot be opened", async () => {
     const source = await newSource(undefined, unreadable);
     await expect(

@@ -129,6 +129,18 @@ describe("parseCsv", () => {
     ]);
   });
 
+  it("refuses a NUL past the sniffed head as invalid_character, with its row", async () => {
+    // Far enough in that the type sniff and the encoding check never see it.
+    const body = Array.from({ length: 5000 }, (_, i) => `${i},row ${i}`);
+    body[4000] = "4000,bad\0value";
+    const err = await collect(`id,name\n${body.join("\n")}\n`, {
+      maxRows: 10_000,
+      maxColumns: 10,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(FileParseError);
+    expect(err).toMatchObject({ code: "invalid_character", row: 4002 });
+  });
+
   it("reports malformed quoting as a parse error", async () => {
     await expect(collect('a,b\n"x,2\n1"z,3\n')).rejects.toBeInstanceOf(
       FileParseError

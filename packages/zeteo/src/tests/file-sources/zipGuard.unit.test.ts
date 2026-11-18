@@ -48,17 +48,31 @@ describe("checkZipBounds", () => {
     await expect(checkZipBounds(zip, 500_000)).resolves.toBeUndefined();
   });
 
-  it("refuses an entry compressing over 100 to 1", async () => {
-    const zip = await zipOf({ "bomb.bin": Buffer.alloc(8 * 1024 * 1024) });
+  it("lets an entry compress as much as it likes within the limit", async () => {
+    // 8 MiB of zeros deflates over 1000 to 1: repetitive, not a bomb.
+    const zip = await zipOf({ "a.xml": Buffer.alloc(8 * 1024 * 1024) });
     expect(zip.length).toBeLessThan(100_000);
-    await expect(checkZipBounds(zip, 1_000_000_000)).rejects.toMatchObject({
+    await expect(checkZipBounds(zip, 10_000_000)).resolves.toBeUndefined();
+    await expect(checkZipBounds(zip, 8_000_000)).rejects.toMatchObject({
       code: "file_too_large",
     });
   });
 
-  it("lets a small entry compress as much as it likes", async () => {
-    const zip = await zipOf({ "a.xml": Buffer.alloc(100_000) });
-    await expect(checkZipBounds(zip, 1_000_000)).resolves.toBeUndefined();
+  it("speaks of the workbook's uncompressed content and reports the upload limit", async () => {
+    const zip = await zipOf({ "a.xml": text(300_000) });
+    await expect(checkZipBounds(zip, 200_000, 100_000)).rejects.toMatchObject({
+      statusCode: 413,
+      code: "file_too_large",
+      message:
+        "The workbook's content is larger than 200000 bytes once uncompressed (uploads are limited to 100000 bytes, and a workbook's content to twice that)",
+      details: { max_bytes: 100_000, max_uncompressed_bytes: 200_000 },
+    });
+    await expect(
+      checkZipBounds(await understatedBomb(), 2_000_000, 1_000_000)
+    ).rejects.toMatchObject({
+      code: "file_too_large",
+      details: { max_bytes: 1_000_000, max_uncompressed_bytes: 2_000_000 },
+    });
   });
 
   it("refuses an entry that inflates past the size its directory declares", async () => {

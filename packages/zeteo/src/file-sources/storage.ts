@@ -5,7 +5,7 @@ import { readerRoleName } from "./readerRole.js";
 import { createHash, randomBytes } from "crypto";
 import { AppError } from "../utils/errors.js";
 
-export { checkReaderRole } from "./readerRole.js";
+export { checkFileSourcesSetup, checkReaderRole } from "./readerRole.js";
 
 /**
  * Where a file source's data lives: one `zf_<32 hex>` schema per source, in
@@ -99,7 +99,12 @@ const stagingColumn = (index: number) => quote(`c${index}`);
 export class CastFailedError extends AppError {
   constructor(
     public readonly column: string,
-    /** The first failing rows, 1-based rows of the file. */
+    /**
+     * The first failing rows, 1-based: rows of the file (its header counted)
+     * for a load from an upload; data rows of the table (no header), in the
+     * order they were loaded, for a retype or rename, which reloads the
+     * stored table.
+     */
     public readonly rows: number[],
     /** The table, once the caller knows which. */
     public readonly table?: string
@@ -483,8 +488,10 @@ export const storedBytes = async (
  * Copies a stored table into a new staging table, every value as text in the
  * form a load accepts back (ISO dates, timestamps in UTC with their offset),
  * `columns` in order as `c0`... and rows numbered from 0 in the table's scan
- * order: the source of a reload that changes a column's type or name. The
- * caller drops it with `dropStagingTable`.
+ * order, which is the order of its last load (a load inserts in file order
+ * and stored tables are never updated): the source of a reload that changes a
+ * column's type or name, loaded with no header, so a `cast_failed` names
+ * 1-based data rows. The caller drops it with `dropStagingTable`.
  */
 export const stageStoredTable = async (
   sourceId: string,

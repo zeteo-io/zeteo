@@ -2,8 +2,10 @@
 // @module-tag platform
 import { STAGING_SCHEMA } from "../../../../../file-sources/storage.js";
 import { startV1Routes } from "../../../../support/v1App.js";
+import { leaseKey } from "../../../../../engine/leases.js";
 import { prisma } from "../../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../../support/tokens.js";
+import { redis } from "../../../../../utils/redis.js";
 import env from "../../../../../env.js";
 import { randomUUID } from "crypto";
 import ExcelJS from "exceljs";
@@ -379,7 +381,7 @@ describe("POST /v1/file-sources/uploads", () => {
     expect(res.body.error).toBe("file_too_large");
   });
 
-  it("refuses a zip bomb as file_too_large", async () => {
+  it("refuses a zip bomb as file_too_large, speaking of its uncompressed content", async () => {
     const zip = new JSZip();
     zip.file("xl/bomb.bin", Buffer.alloc(8 * 1024 * 1024));
     const bomb = await zip.generateAsync({
@@ -387,9 +389,108 @@ describe("POST /v1/file-sources/uploads", () => {
       compression: "DEFLATE",
     });
     expect(bomb.length).toBeLessThan(100_000);
-    const res = await upload(ownerToken, bomb, "bomb.xlsx");
-    expect(res.status).toBe(413);
-    expect(res.body.error).toBe("file_too_large");
+    const max = env.FILE_SOURCE_MAX_BYTES;
+    env.FILE_SOURCE_MAX_BYTES = 1_000_000;
+    try {
+      const res = await upload(ownerToken, bomb, "bomb.xlsx");
+      expect(res.status).toBe(413);
+      expect(res.body).toMatchObject({
+        error: "file_too_large",
+        error_description: expect.stringMatching(
+          /^The workbook's content is larger than 2000000 bytes once uncompressed/
+        ),
+        max_bytes: 1_000_000,
+        max_uncompressed_bytes: 2_000_000,
+      });
+    } finally {
+      env.FILE_SOURCE_MAX_BYTES = max;
+    }
+  });
+
+  it("refuses a NUL byte past the sniffed head as 422 invalid_character, with its row", async () => {
+    const before = await stagingTables();
+    // Some 400 KB in: past what the type sniff and the encoding check read.
+    const lines = Array.from({ length: 30_000 }, (_, i) => `${i},value ${i}`);
+    lines[25_000] = "25000,bad\0value";
+    const res = await upload(ownerToken, `id,name\n${lines.join("\n")}\n`);
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({ error: "invalid_character", row: 25_002 });
+    expect((await stagingTables()).sort()).toEqual(before.sort());
+  });
+
+  it("answers 429 too_many_stagings once the caller holds FILE_SOURCE_MAX_STAGINGS unconfirmed uploads", async () => {
+    const max = env.FILE_SOURCE_MAX_STAGINGS;
+    env.FILE_SOURCE_MAX_STAGINGS = 2;
+    try {
+      expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
+      expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
+      const third = await upload(ownerToken, "a,b\n1,2\n");
+      expect(third.status).toBe(429);
+      expect(third.body).toMatchObject({ error: "too_many_stagings" });
+      expect(third.body.retry_after).toBeGreaterThan(
+        STAGING_TTL_MS / 1000 - 60
+      );
+      // An expired staging no longer counts.
+      await prisma.fileStaging.updateMany({
+        where: { ownerId: owner },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+      expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
+    } finally {
+      env.FILE_SOURCE_MAX_STAGINGS = max;
+    }
+  });
+
+  it("answers 429 too_many_uploads past FILE_SOURCE_MAX_UPLOADS in flight, and frees the slot when one is aborted", async () => {
+    const max = env.FILE_SOURCE_MAX_UPLOADS;
+    env.FILE_SOURCE_MAX_UPLOADS = 1;
+    const boundary = "----zeteoslot";
+    const slow = http.request(`${app.url}/v1/file-sources/uploads`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${ownerToken}`,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": String(10_000_000),
+      },
+    });
+    slow.on("error", () => undefined);
+    try {
+      slow.write(
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.csv"\r\n` +
+          `Content-Type: text/csv\r\n\r\na,b\n1,2\n`
+      );
+      // The slow upload holds the one slot before the next one asks.
+      await vi.waitFor(
+        async () => {
+          expect(await redis.zcard(leaseKey(`file-upload:user:${owner}`))).toBe(
+            1
+          );
+        },
+        { timeout: 5_000, interval: 50 }
+      );
+      await vi.waitFor(
+        async () => {
+          const second = await upload(ownerToken, "a,b\n1,2\n");
+          expect(second.status).toBe(429);
+          expect(second.body).toMatchObject({
+            error: "too_many_uploads",
+            retry_after: expect.any(Number),
+          });
+          expect(second.connection).toBe("close");
+        },
+        { timeout: 5_000, interval: 100 }
+      );
+      slow.destroy();
+      await vi.waitFor(
+        async () => {
+          expect((await upload(ownerToken, "a,b\n1,2\n")).status).toBe(201);
+        },
+        { timeout: 10_000, interval: 200 }
+      );
+    } finally {
+      slow.destroy();
+      env.FILE_SOURCE_MAX_UPLOADS = max;
+    }
   });
 });
 

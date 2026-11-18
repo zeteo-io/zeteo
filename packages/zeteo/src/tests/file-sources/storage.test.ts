@@ -9,6 +9,7 @@ import pg from "pg";
 import {
   appendStagingRows,
   CastFailedError,
+  checkFileSourcesSetup,
   checkReaderRole,
   createStagingTable,
   dropLoadedTable,
@@ -27,12 +28,15 @@ import {
 /** Postgres refused for lack of a privilege. */
 const PERMISSION_DENIED = "42501";
 
-const readerUrl = () => {
-  if (!env.FILE_SOURCES_READER_URL) {
-    throw new Error("the test environment sets FILE_SOURCES_READER_URL");
-  }
-  return env.FILE_SOURCES_READER_URL;
-};
+const readerUrl = Object.assign(
+  () => {
+    if (!env.FILE_SOURCES_READER_URL) {
+      throw new Error("the test environment sets FILE_SOURCES_READER_URL");
+    }
+    return env.FILE_SOURCES_READER_URL;
+  },
+  { original: env.FILE_SOURCES_READER_URL }
+);
 
 /** The reader's role, as the URL names it. */
 const readerRole = () => decodeURIComponent(new URL(readerUrl()).username);
@@ -270,6 +274,23 @@ describe("the reader role", () => {
       await expect(client.query(sql), sql).rejects.toMatchObject({
         code: PERMISSION_DENIED,
       });
+    }
+  });
+
+  it("checkFileSourcesSetup accepts the test stack's setup", async () => {
+    await expect(checkFileSourcesSetup()).resolves.toBeUndefined();
+  });
+
+  it("checkFileSourcesSetup refuses an sslmode Zeteo cannot use, saying so", async () => {
+    const url = new URL(readerUrl());
+    url.searchParams.set("sslmode", "verify-ca");
+    env.FILE_SOURCES_READER_URL = url.toString();
+    try {
+      await expect(checkFileSourcesSetup()).rejects.toThrow(
+        /sslmode must be disable, require or verify-full, not "verify-ca"/
+      );
+    } finally {
+      env.FILE_SOURCES_READER_URL = readerUrl.original;
     }
   });
 

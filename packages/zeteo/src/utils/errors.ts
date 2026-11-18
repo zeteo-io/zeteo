@@ -292,12 +292,43 @@ export class FileSourcesNotConfiguredError extends AppError {
   }
 }
 
-/** An upload over `FILE_SOURCE_MAX_BYTES`. */
+/**
+ * File Sources are on but `FILE_SOURCES_READER_URL` cannot be used (an
+ * unsupported `sslmode`). `problem` names what is wrong for the log and for
+ * start-up, which refuses it; the answer never carries it.
+ */
+export class FileSourcesMisconfiguredError extends AppError {
+  constructor(public readonly problem: string) {
+    super(
+      503,
+      "file_sources_misconfigured",
+      "File Sources are misconfigured; ask the operator"
+    );
+    this.name = "FileSourcesMisconfiguredError";
+  }
+}
+
+/**
+ * An upload over `FILE_SOURCE_MAX_BYTES` (`max_bytes`), or an xlsx workbook
+ * whose content inflates past `max_uncompressed_bytes` (twice the limit).
+ */
 export class FileTooLargeError extends AppError {
-  constructor(maxBytes: number) {
-    super(413, "file_too_large", `The file is larger than ${maxBytes} bytes`, {
-      details: { max_bytes: maxBytes },
-    });
+  constructor(maxBytes: number, maxUncompressedBytes?: number) {
+    super(
+      413,
+      "file_too_large",
+      maxUncompressedBytes === undefined
+        ? `The file is larger than ${maxBytes} bytes`
+        : `The workbook's content is larger than ${maxUncompressedBytes} bytes once uncompressed (uploads are limited to ${maxBytes} bytes, and a workbook's content to twice that)`,
+      {
+        details: {
+          max_bytes: maxBytes,
+          ...(maxUncompressedBytes !== undefined && {
+            max_uncompressed_bytes: maxUncompressedBytes,
+          }),
+        },
+      }
+    );
     this.name = "FileTooLargeError";
   }
 }

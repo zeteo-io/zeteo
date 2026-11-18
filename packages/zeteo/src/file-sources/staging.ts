@@ -1,8 +1,9 @@
 import { FileParseError, type ParseLimits, type Row } from "./parse/types.js";
 import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
+import { prisma, type Prisma } from "../utils/db/prisma.js";
 import type { FileColumnType } from "./types.js";
 import { normalizeName } from "./parse/names.js";
-import { prisma } from "../utils/db/prisma.js";
+import { withXlsxSlot } from "./uploadLimits.js";
 import { checkZipBounds } from "./zipGuard.js";
 import { parseXlsx } from "./parse/xlsx.js";
 import { logger } from "../utils/logger.js";
@@ -14,6 +15,7 @@ import {
   FileTooLargeError,
   FileUnreadableError,
   StagingNotFoundError,
+  TooManyRequestsError,
   UnsupportedFileTypeError,
 } from "../utils/errors.js";
 import {
@@ -33,7 +35,8 @@ import {
  * staging table in batches; only an xlsx is buffered (the workbook reader
  * needs it all): its compressed bytes are counted against `FILE_SOURCE_MAX_BYTES`
  * as they arrive, and it is checked before reading (`checkZipBounds`, on the entries JSZip
- * itself finds: declared and actual inflated size within twice the limit, no entry over 100:1).
+ * itself finds: declared and actual inflated size within twice the limit), and read while
+ * fewer than `FILE_SOURCE_XLSX_CONCURRENCY` other workbooks are (`withXlsxSlot`).
  * A table's types come from per-column state kept while its rows go by.
  */
 
@@ -136,6 +139,35 @@ export const deleteExpiredStagings = async (
       deleted += 1;
     }
   }
+};
+
+/**
+ * Refuses, with 429 `too_many_stagings`, a user who already holds
+ * `FILE_SOURCE_MAX_STAGINGS` unexpired stagings; `retry_after` is when the
+ * oldest expires. Checked before an upload is read, and again, under a lock
+ * per owner, as its staging row is recorded.
+ */
+export const checkStagingRoom = async (
+  ownerId: string,
+  now: Date = new Date(),
+  db: Prisma.TransactionClient = prisma
+): Promise<void> => {
+  const max = env.FILE_SOURCE_MAX_STAGINGS;
+  const held = await db.fileStaging.findMany({
+    where: { ownerId, expiresAt: { gt: now } },
+    select: { expiresAt: true },
+    orderBy: { expiresAt: "asc" },
+  });
+  if (held.length < max) return;
+  const retryAfter = Math.max(
+    1,
+    Math.ceil((held[0]!.expiresAt.getTime() - now.getTime()) / 1000)
+  );
+  throw new TooManyRequestsError(
+    retryAfter,
+    `You have ${held.length} uploads not yet confirmed, the most allowed; confirm one or wait for it to expire`,
+    "too_many_stagings"
+  );
 };
 
 const startsWith = (head: Buffer, magic: Buffer) =>
@@ -373,21 +405,24 @@ export const stageUpload = async ({
         const parts: Buffer[] = [];
         for await (const chunk of bytes) parts.push(chunk as Buffer);
         const workbook = Buffer.concat(parts);
-        await checkZipBounds(workbook, 2 * maxBytes);
-        const sheets = await parseXlsx(workbook, limits);
-        for (const sheet of sheets) {
-          const result = await stageTable(
-            sheet.rows,
-            {
-              key: `${sheet.kind}:${sheet.name}`,
-              fallbackName: sheet.name,
-              kind: sheet.kind,
-            },
-            taken,
-            created
-          );
-          if (result) tables.push(result);
-        }
+        // The workbook is read whole into memory: a few at a time per process.
+        await withXlsxSlot(async () => {
+          await checkZipBounds(workbook, 2 * maxBytes, maxBytes);
+          const sheets = await parseXlsx(workbook, limits);
+          for (const sheet of sheets) {
+            const result = await stageTable(
+              sheet.rows,
+              {
+                key: `${sheet.kind}:${sheet.name}`,
+                fallbackName: sheet.name,
+                kind: sheet.kind,
+              },
+              taken,
+              created
+            );
+            if (result) tables.push(result);
+          }
+        });
       }
     } catch (err) {
       throw toUnreadable(err);
@@ -395,14 +430,20 @@ export const stageUpload = async ({
     if (tables.length === 0) throw new EmptyFileError();
 
     const preview = tables.map((t) => t.preview);
-    const row = await prisma.fileStaging.create({
-      data: {
-        ownerId,
-        kind: type === "csv" ? "csv" : "xlsx",
-        preview: preview as unknown as object,
-        tables: tables.map((t) => t.staged) as unknown as object,
-        expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
-      },
+    // Uploads of one owner record their stagings one at a time, each
+    // counting the others first.
+    const row = await prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:file-stagings:${ownerId}`}, 0))`;
+      await checkStagingRoom(ownerId, new Date(), tx);
+      return tx.fileStaging.create({
+        data: {
+          ownerId,
+          kind: type === "csv" ? "csv" : "xlsx",
+          preview: preview as unknown as object,
+          tables: tables.map((t) => t.staged) as unknown as object,
+          expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
+        },
+      });
     });
     return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
   } catch (err) {
