@@ -4,7 +4,12 @@ const TYPE_NAMES: Record<SourceType, string> = {
   postgres: "PostgreSQL",
   "azure-sql": "Azure SQL",
   upload: "Upload",
+  "google-sheets": "Google Sheets",
 };
+
+/** An upload shell's source: files, or a Google Sheet that Zeteo copies and keeps in sync. */
+export const isUploadType = (type: SourceType): boolean =>
+  type === "upload" || type === "google-sheets";
 
 /** A source type by its product name. */
 export const sourceTypeName = (type: SourceType): string =>

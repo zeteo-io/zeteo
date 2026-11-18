@@ -1,10 +1,10 @@
 // Field for field the OpenAPI `Source`, `CreateSourceRequest`,
 // `UpdateSourceRequest`, `TestSourceResponse` and `RefreshSummary` schemas.
 
-export type SourceType = "postgres" | "azure-sql" | "upload";
+export type SourceType = "postgres" | "azure-sql" | "upload" | "google-sheets";
 
-/** The types a person registers a database source with; an `upload` source is made from a file. */
-export type DatabaseType = Exclude<SourceType, "upload">;
+/** The types a person registers a database source with; an upload source is made from a file or a Google Sheet. */
+export type DatabaseType = Exclude<SourceType, "upload" | "google-sheets">;
 
 export interface PostgresSettings {
   host: string;
@@ -26,6 +26,20 @@ export interface AzureSqlSettings {
 }
 
 export type SourceSettings = PostgresSettings | AzureSqlSettings;
+
+/** A Google Sheets source's spreadsheet; only its owner and `zeteo.sources.read` see it. */
+export interface SheetInfo {
+  spreadsheet_id: string;
+  url: string;
+}
+
+/** A Google Sheets source's sync state; `last_refreshed_at` is the last successful sync. */
+export interface SyncInfo {
+  interval_minutes: number;
+  last_attempt_at: string | null;
+  last_error: { code: string; message: string } | null;
+  stale: boolean;
+}
 
 export interface Source {
   id: string;
@@ -59,6 +73,10 @@ export interface Source {
   share_count: number;
   created_at: string;
   archived_at: string | null;
+  /** A Google Sheets source only. */
+  sheet?: SheetInfo;
+  /** A Google Sheets source only. */
+  sync?: SyncInfo;
 }
 
 interface SourceLimits {
@@ -88,6 +106,8 @@ export interface UpdateSource extends SourceLimits {
   schemas?: string[];
   /** Accepted only together with `settings`. */
   allow_writable_login?: boolean;
+  /** A Google Sheets source: minutes between syncs, 15 to 1440. */
+  sync_interval_minutes?: number;
 }
 
 export interface LoginFinding {

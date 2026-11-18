@@ -23,6 +23,12 @@ export const SECTIONS: Section[] = [
     group: "admin",
   },
   {
+    path: "/connections",
+    label: "Connections",
+    permission: "zeteo.sources.read",
+    group: "admin",
+  },
+  {
     path: "/grants",
     label: "Grants",
     permission: "zeteo.grants.read",

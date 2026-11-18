@@ -1,11 +1,13 @@
+import type { FileColumnType, SheetStaging, Staging } from "../api/types";
+import { isUploadType, sourceHref } from "../../components/sourceLabels";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { FileColumnType, Staging } from "../api/types";
-import { sourceHref } from "../../components/sourceLabels";
+import { parseNumberField } from "@/utils/parseNumberField";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { LoadFailure } from "./CastFailedNotice";
+import { SheetLinkStep } from "./SheetLinkStep";
 import { useSource } from "../../api/useSource";
 import { useNavigate } from "react-router-dom";
 import type { Source } from "../../api/types";
@@ -34,6 +36,7 @@ import {
 } from "./PreviewEditor";
 import {
   useAddTables,
+  useCreateSheetsSource,
   useCreateUploadSource,
   useDiscardStaging,
   useReuploadTable,
@@ -44,6 +47,22 @@ const ACCEPT = ".csv,.xlsx";
 const FORM_ID = "z-fs-form";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
+
+/** How often a Google Sheet is synced: zeteo's default, and its bounds in minutes. */
+const DEFAULT_INTERVAL = "60";
+const MIN_INTERVAL = 15;
+const MAX_INTERVAL = 1440;
+
+/** The problem with a "Sync every" value, or undefined when it is fine. */
+const intervalProblem = (text: string): string | undefined => {
+  const n = parseNumberField(text);
+  return n === undefined ||
+    Number.isNaN(n) ||
+    n < MIN_INTERVAL ||
+    n > MAX_INTERVAL
+    ? `Sync every is ${MIN_INTERVAL} to ${MAX_INTERVAL} minutes.`
+    : undefined;
+};
 
 /** A file's name without its extension: "Q3 sales.xlsx" → "Q3 sales". */
 const baseName = (file: string) => file.replace(/\.[^.]+$/, "");
@@ -100,10 +119,47 @@ const FilePicker = ({
   );
 };
 
+type Origin = "file" | "sheet";
+
+/** The first step of Add data: where the data comes from. */
+const SourceChoice = ({ onChoose }: { onChoose: (origin: Origin) => void }) => (
+  <div className="z-fs-choices">
+    <button
+      type="button"
+      className="z-fs-choice"
+      onClick={() => onChoose("file")}
+    >
+      <span className="z-fs-choice-title">Upload a file</span>
+      <span className="z-fs-choice-note">
+        A CSV or Excel file, loaded once. Re-upload it when it changes.
+      </span>
+    </button>
+    <button
+      type="button"
+      className="z-fs-choice"
+      onClick={() => onChoose("sheet")}
+    >
+      <span className="z-fs-choice-title">Google Sheet</span>
+      <span className="z-fs-choice-note">
+        Zeteo keeps a copy and syncs it from the sheet on a schedule.
+      </span>
+    </button>
+  </div>
+);
+
 /** Upload a file, check its preview, then create a source, add tables or replace one table's data. */
 const AddData = ({ mode }: { mode: Mode }) => {
   const navigate = useNavigate();
   const [staging, setStaging] = useState<Staging | null>(null);
+  // Add data starts with a choice; Add tables follows its source's kind.
+  const [chosen, setChosen] = useState<Origin | null>(null);
+  const [syncEvery, setSyncEvery] = useState(DEFAULT_INTERVAL);
+  const origin: Origin | null =
+    mode.kind === "create"
+      ? chosen
+      : mode.source.type === "google-sheets"
+        ? "sheet"
+        : "file";
   const [edits, setEdits] = useState<Edits>({});
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -115,7 +171,9 @@ const AddData = ({ mode }: { mode: Mode }) => {
     setName(value);
     if (!slugEdited) setSlug(slugify(value));
   };
-  const create = useCreateUploadSource();
+  const createFile = useCreateUploadSource();
+  const createSheet = useCreateSheetsSource();
+  const create = origin === "sheet" ? createSheet : createFile;
   const sourceId = mode.kind === "create" ? "" : mode.source.id;
   const add = useAddTables(sourceId);
   const target = mode.kind === "reupload" ? mode.target : undefined;
@@ -134,7 +192,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
     [discard]
   );
 
-  const onStaged = (s: Staging, fileName: string) => {
+  const onStaged = (s: Staging, defaultName: string) => {
     setStaging(s);
     unused.current = s.staging_id;
     if (mode.kind === "reupload") {
@@ -150,7 +208,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
     } else {
       setEdits(initialEdits(s.tables));
     }
-    if (mode.kind === "create" && !name) changeName(baseName(fileName));
+    if (mode.kind === "create" && !name) changeName(defaultName);
   };
 
   const back =
@@ -162,7 +220,9 @@ const AddData = ({ mode }: { mode: Mode }) => {
   const ready =
     !!staging &&
     editsValid(staging.tables, edits) &&
-    (mode.kind !== "create" || (name.trim() !== "" && !slugProblem));
+    (mode.kind !== "create" || (name.trim() !== "" && !slugProblem)) &&
+    (!(mode.kind === "create" && origin === "sheet") ||
+      !intervalProblem(syncEvery));
   const descriptionError = descriptionProblem(description);
 
   const submit = () => {
@@ -180,16 +240,21 @@ const AddData = ({ mode }: { mode: Mode }) => {
       navigate(sourceHref(source.id));
     };
     if (mode.kind === "create") {
-      create.mutate(
-        {
-          staging_id: staging.staging_id,
-          name: name.trim(),
-          ...(description.trim() && { description: description.trim() }),
-          ...(slug && { slug }),
-          tables: kept,
-        },
-        { onSuccess: done }
-      );
+      const body = {
+        staging_id: staging.staging_id,
+        name: name.trim(),
+        ...(description.trim() && { description: description.trim() }),
+        ...(slug && { slug }),
+        tables: kept,
+      };
+      if (origin === "sheet") {
+        createSheet.mutate(
+          { ...body, sync_interval_minutes: Number(syncEvery) },
+          { onSuccess: done }
+        );
+      } else {
+        createFile.mutate(body, { onSuccess: done });
+      }
     } else if (mode.kind === "add") {
       add.mutate(
         { staging_id: staging.staging_id, tables: kept },
@@ -259,7 +324,16 @@ const AddData = ({ mode }: { mode: Mode }) => {
         </p>
       )}
       {!staging ? (
-        <FilePicker onStaged={onStaged} />
+        origin === null ? (
+          <SourceChoice onChoose={setChosen} />
+        ) : origin === "sheet" ? (
+          <SheetLinkStep
+            sourceId={mode.kind === "add" ? mode.source.id : undefined}
+            onStaged={(s: SheetStaging) => onStaged(s, s.spreadsheet.title)}
+          />
+        ) : (
+          <FilePicker onStaged={(s, file) => onStaged(s, baseName(file))} />
+        )
       ) : (
         <form
           id={FORM_ID}
@@ -299,6 +373,18 @@ const AddData = ({ mode }: { mode: Mode }) => {
               />
             </BorderedSection>
           )}
+          {mode.kind === "create" && origin === "sheet" && (
+            <BorderedSection title="Sync" as="h2">
+              <Input
+                label="Sync every"
+                type="number"
+                value={syncEvery}
+                error={intervalProblem(syncEvery)}
+                helperText="Minutes between syncs, 15 to 1440. Zeteo reads the sheet again at this pace."
+                onChange={(e) => setSyncEvery(e.target.value)}
+              />
+            </BorderedSection>
+          )}
           <PreviewEditor
             tables={staging.tables}
             edits={edits}
@@ -317,30 +403,43 @@ export const AddDataPage = () => <AddData mode={{ kind: "create" }} />;
 /** Loads the source a page adds to or re-uploads into. */
 const WithSource = ({
   children,
+  sheets = false,
 }: {
   children: (source: Source) => ReactNode;
+  /** Whether a Google Sheets source may use the page. */
+  sheets?: boolean;
 }) => {
   const id = useUuidParam("sourceId");
-  return id ? <SourceLoader id={id}>{children}</SourceLoader> : <NotFound />;
+  return id ? (
+    <SourceLoader id={id} sheets={sheets}>
+      {children}
+    </SourceLoader>
+  ) : (
+    <NotFound />
+  );
 };
 
 const SourceLoader = ({
   id,
+  sheets,
   children,
 }: {
   id: string;
+  sheets: boolean;
   children: (source: Source) => ReactNode;
 }) => {
   const { data, error, isLoading } = useSource(id);
   if (isLoading) return <Spinner size="lg" />;
   if (!data) return <ErrorNotice error={error} />;
-  // Only an upload has tables to add or re-upload.
-  if (data.type !== "upload") return <NotFound />;
+  // Only an upload (files or a Google Sheet) has tables to add; a Sheets
+  // table is never re-uploaded.
+  if (!isUploadType(data.type)) return <NotFound />;
+  if (!sheets && data.type !== "upload") return <NotFound />;
   return <>{children(data)}</>;
 };
 
 export const AddTablesPage = () => (
-  <WithSource>
+  <WithSource sheets>
     {(source) => <AddData mode={{ kind: "add", source }} />}
   </WithSource>
 );

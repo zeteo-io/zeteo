@@ -21,6 +21,11 @@ const pages = {
   "/sources": lazy(() =>
     import("@/features/sources").then((m) => ({ default: m.SourcesPage }))
   ),
+  "/connections": lazy(() =>
+    import("@/features/connections").then((m) => ({
+      default: m.ConnectionsPage,
+    }))
+  ),
   "/grants": lazy(() =>
     import("@/features/grants").then((m) => ({ default: m.GrantsPage }))
   ),

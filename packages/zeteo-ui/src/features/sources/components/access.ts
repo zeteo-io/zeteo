@@ -1,3 +1,4 @@
+import { isUploadType } from "./sourceLabels";
 import type { Source } from "../api/types";
 import { useAuth } from "@tereo-io/react";
 import type { Me } from "@/lib/auth";
@@ -31,7 +32,7 @@ export const useSourceAccess = (source: Source): SourceAccess => {
   const grantsAdmin = hasPermission("zeteo.grants.write");
   const grantsReader = hasPermission("zeteo.grants.read");
 
-  if (source.type !== "upload") {
+  if (!isUploadType(source.type)) {
     return {
       isOwner: false,
       canManage: !archived && sourcesAdmin,

@@ -189,3 +189,40 @@ export const uploadGet =
     catalogueOf(source(), tables(), url, config) ?? {
       data: { data: [], next_cursor: null },
     };
+
+export const SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
+export const ROBOT_EMAIL = "zeteo@proj.iam.gserviceaccount.com";
+
+/** A Google Sheets source as `GET /v1/sources/:id` gives its owner. */
+export const makeSheetsSource = (over: Partial<Source> = {}): Source =>
+  makeUploadSource({
+    type: "google-sheets",
+    name: "Budget sheet",
+    slug: "budget-sheet",
+    last_refreshed_at: "2026-11-18T08:00:00.000Z",
+    sheet: {
+      spreadsheet_id: SHEET_ID,
+      url: `https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
+    },
+    sync: {
+      interval_minutes: 60,
+      last_attempt_at: "2026-11-18T08:00:00.000Z",
+      last_error: null,
+      stale: false,
+    },
+    ...over,
+  });
+
+/** What `POST /v1/uploads/links` answers. */
+export const makeSheetStaging = (tables?: PreviewTable[]) => ({
+  ...makeStaging(tables),
+  spreadsheet: { id: SHEET_ID, title: "Budget 2027" },
+});
+
+/** The Google connection `GET /v1/connections/google` answers. */
+export const GOOGLE_CONNECTION = {
+  provider: "google" as const,
+  service_account_email: ROBOT_EMAIL,
+  updated_at: "2026-11-10T10:00:00.000Z",
+  updated_by: TEST_ME.id,
+};

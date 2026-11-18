@@ -11,6 +11,7 @@ import { PrincipalLabel } from "@/features/principals";
 import { LoadFailure } from "./CastFailedNotice";
 import { nameProblem } from "@/utils/queryName";
 import { useNavigate } from "react-router-dom";
+import type { Source } from "../../api/types";
 import { formatBytes } from "./labels";
 import "./styles.css";
 import {
@@ -20,6 +21,67 @@ import {
   useTable,
   type ColumnEditing,
 } from "@/features/tables";
+
+/** A sync interval in words: 60 → "Every hour", 90 → "Every 90 minutes". */
+export const intervalName = (minutes: number): string =>
+  minutes === 60
+    ? "Every hour"
+    : minutes % 60 === 0
+      ? `Every ${minutes / 60} hours`
+      : `Every ${minutes} minutes`;
+
+/** A Google Sheets source's spreadsheet and sync state, as its owner or a sources reader sees them. */
+const SheetBlock = ({ source }: { source: Source }) => {
+  const { sheet, sync } = source;
+  if (!sheet && !sync) return null;
+  return (
+    <BorderedSection title="Google Sheet" as="h2">
+      <Facts
+        rows={[
+          ...(sheet
+            ? [
+                [
+                  "Spreadsheet",
+                  <a href={sheet.url} target="_blank" rel="noreferrer">
+                    Open in Google Sheets
+                  </a>,
+                ] as Row,
+              ]
+            : []),
+          ...(sync
+            ? [
+                ["Sync", intervalName(sync.interval_minutes)] as Row,
+                [
+                  "Last synced",
+                  source.last_refreshed_at ? (
+                    <When iso={source.last_refreshed_at} />
+                  ) : (
+                    "Not yet"
+                  ),
+                ] as Row,
+              ]
+            : []),
+          ...(sync?.last_error
+            ? [
+                [
+                  "Last error",
+                  <span className="z-fs-sync-error">
+                    {sync.last_error.message || sync.last_error.code}
+                    {sync.last_attempt_at && (
+                      <span className="z-muted">
+                        {" "}
+                        (<When iso={sync.last_attempt_at} />)
+                      </span>
+                    )}
+                  </span>,
+                ] as Row,
+              ]
+            : []),
+        ]}
+      />
+    </BorderedSection>
+  );
+};
 
 /** An upload's overview: its data and owner, and its limits, laid out as a database source's. */
 export const UploadOverview = () => {
@@ -31,6 +93,7 @@ export const UploadOverview = () => {
         <LimitSections source={source} />
       </div>
       <div className="z-source-column">
+        <SheetBlock source={source} />
         <BorderedSection title="Data" as="h2">
           <Facts
             rows={[
@@ -99,9 +162,12 @@ export const UploadTables = () => {
 const TableActions = ({
   sourceId,
   tableId,
+  sheets,
 }: {
   sourceId: string;
   tableId: string;
+  /** A Google Sheets source's table: removable, never re-uploaded. */
+  sheets: boolean;
 }) => {
   const navigate = useNavigate();
   const remove = useRemoveTable(sourceId);
@@ -111,14 +177,16 @@ const TableActions = ({
   if (!table || table.missing_since) return null;
   return (
     <>
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={() => navigate(`${base}/tables/${table.id}/reupload`)}
-      >
-        Re-upload
-      </Button>
+      {!sheets && (
+        <Button
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onClick={() => navigate(`${base}/tables/${table.id}/reupload`)}
+        >
+          Re-upload
+        </Button>
+      )}
       {tables.length > 1 && (
         <ConfirmButton
           danger
@@ -172,7 +240,11 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
       relationsHref={`${base}/relations`}
       headerActions={
         access.canManage && (
-          <TableActions sourceId={source.id} tableId={tableId} />
+          <TableActions
+            sourceId={source.id}
+            tableId={tableId}
+            sheets={source.type === "google-sheets"}
+          />
         )
       }
       columnNote={(c) =>
