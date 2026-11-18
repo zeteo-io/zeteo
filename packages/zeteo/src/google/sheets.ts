@@ -20,7 +20,7 @@ const CHUNK_ROWS = 5000;
 const SPREADSHEET_FIELDS =
   "properties(title,timeZone),sheets.properties(sheetId,title,index,sheetType,gridProperties)";
 const GRID_FIELDS =
-  "sheets.data(startRow,rowData.values(effectiveValue,effectiveFormat.numberFormat.type))";
+  "sheets.data(rowData.values(effectiveValue,effectiveFormat.numberFormat.type))";
 
 export type SpreadsheetTab = ParsedSheet & { sheetId: number };
 
@@ -86,8 +86,7 @@ const tooManyRows = (limits: ParseLimits) =>
 
 /**
  * One tab's rows, read from Google `CHUNK_ROWS` at a time. Trailing empty rows are not
- * yielded and columns are trimmed to the widest row of the first chunk holding data (a
- * stream cannot know a later width, so a value past it fails the read rather than being lost).
+ * yielded; every row is as wide as the tab's grid (`stageTable` trims the unused columns).
  */
 async function* readTab(
   clientName: string,
@@ -97,12 +96,15 @@ async function* readTab(
   limits: ParseLimits
 ): AsyncGenerator<Row> {
   const quoted = `'${tab.title.replaceAll("'", "''")}'`;
-  const lastColumn = columnLetters(tab.columnCount ?? 26);
-  let width: number | undefined;
+  const gridCols = tab.columnCount ?? 26;
+  const lastColumn = columnLetters(gridCols);
+  const rowCount = tab.rowCount ?? 0;
+  const line = (row: Row): Row =>
+    Array.from({ length: gridCols }, (_, i) => row[i] ?? null);
   let pendingEmpty = 0;
   let emitted = 0;
-  for (let start = 1; tab.rowCount === undefined || start <= tab.rowCount;) {
-    const end = start + CHUNK_ROWS - 1;
+  for (let start = 1; start <= rowCount; start += CHUNK_ROWS) {
+    const end = Math.min(start + CHUNK_ROWS - 1, rowCount);
     const response: Spreadsheet = await call(() =>
       sheetsApi.getSpreadsheet(clientName, spreadsheetId, {
         ranges: [`${quoted}!A${start}:${lastColumn}${end}`],
@@ -110,34 +112,14 @@ async function* readTab(
         fields: GRID_FIELDS,
       })
     );
+    // Google leaves out the trailing empty rows of the range (and each row's trailing empty cells).
     const rowData = response.sheets?.[0]?.data?.[0]?.rowData ?? [];
-    const rows = rowData.map((r) =>
-      (r.values ?? []).map((cell) => cellText(cell, timeZone))
-    );
-    const chunkWidth = rows.reduce((max, row) => {
-      let last = row.length;
-      while (last > 0 && row[last - 1] === null) last -= 1;
-      return Math.max(max, last);
-    }, 0);
-    if (width === undefined) {
-      if (chunkWidth > 0) width = chunkWidth;
-    } else if (chunkWidth > width) {
-      throw new FileParseError(
-        "malformed_xlsx",
-        `A column to the right of the first rows of "${tab.title}" holds data further down; move the data or clear the column.`
-      );
-    }
-    for (const row of rows) {
-      if (
-        width === undefined ||
-        chunkWidth === 0 ||
-        !row.some((c) => c !== null)
-      ) {
+    for (const data of rowData) {
+      const row = (data.values ?? []).map((cell) => cellText(cell, timeZone));
+      if (!row.some((c) => c !== null)) {
         pendingEmpty += 1;
         continue;
       }
-      const line = (row: Row): Row =>
-        Array.from({ length: width! }, (_, i) => row[i] ?? null);
       for (; pendingEmpty > 0; pendingEmpty -= 1) {
         emitted += 1;
         if (emitted > limits.maxRows + 1) throw tooManyRows(limits);
@@ -147,8 +129,8 @@ async function* readTab(
       if (emitted > limits.maxRows + 1) throw tooManyRows(limits);
       yield line(row);
     }
-    if (rowData.length < CHUNK_ROWS) return;
-    start = end + 1;
+    // The rows Google left out at the end of the range are empty too.
+    pendingEmpty += Math.max(0, end - start + 1 - rowData.length);
   }
 }
 

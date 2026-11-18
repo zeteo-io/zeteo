@@ -273,6 +273,8 @@ export const stageTable = async (
   let width = 0;
   let total = 0;
   let batch: Row[] = [];
+  // A Sheets tab arrives as wide as its grid: the columns that hold a value.
+  let used = 0;
   // Types over every row, and over the rows below the first.
   let all: TypeInferrer[] = [];
   let below: TypeInferrer[] = [];
@@ -299,6 +301,15 @@ export const stageTable = async (
             ...row.slice(0, width),
             ...Array(Math.max(0, width - row.length)).fill(null),
           ];
+    if (meta.kind === "sheet") {
+      for (let c = width - 1; c >= used; c--) {
+        const v = padded[c];
+        if (v !== null && v !== undefined && v !== "") {
+          used = c + 1;
+          break;
+        }
+      }
+    }
     for (let c = 0; c < width; c++) {
       all[c]!.add(padded[c]);
       if (total > 0) below[c]!.add(padded[c]);
@@ -309,7 +320,17 @@ export const stageTable = async (
     if (batch.length >= BATCH_ROWS) await flush();
   }
   if (stagingTable === null || total === 0) return null;
+  if (meta.kind === "sheet" && used === 0) {
+    // Nothing but empty cells: no table.
+    await dropStagingTable(stagingTable);
+    created.splice(created.indexOf(stagingTable), 1);
+    return null;
+  }
   await flush();
+  if (meta.kind === "sheet") {
+    width = used;
+    for (let i = 0; i < head.length; i++) head[i] = head[i]!.slice(0, used);
+  }
 
   const headerRow = detectHeaderRow(head);
   const warnings: string[] = [];

@@ -87,12 +87,14 @@ describe("stageSheets", () => {
     env.UPLOAD_MAX_STAGINGS = 1;
     try {
       await stageSheets({ ownerId: owner, spreadsheet: sheet() });
-      const before = (await listStagingTables()).sort();
+      const before = new Set(await listStagingTables());
       await expect(
         stageSheets({ ownerId: owner, spreadsheet: sheet() })
       ).rejects.toMatchObject({ code: "too_many_stagings" });
       // The refused staging's tables were made before recordStaging refused it.
-      expect((await listStagingTables()).sort()).toEqual(before);
+      expect((await listStagingTables()).filter((t) => !before.has(t))).toEqual(
+        []
+      );
     } finally {
       env.UPLOAD_MAX_STAGINGS = max;
     }
@@ -111,6 +113,40 @@ describe("stageSheets", () => {
       },
     });
     expect(result.tables.map((t) => t.name)).toEqual(["costs", "costs_2"]);
+  });
+
+  it("stages a 26-column grid with data in A-D as 4 columns, and an all-empty tab as nothing", async () => {
+    const wide = (cells: (string | null)[]): Row => [
+      ...cells,
+      ...Array(26 - cells.length).fill(null),
+    ];
+    const result = await stageSheets({
+      ownerId: owner,
+      spreadsheet: {
+        id: `sheet-${randomUUID()}`,
+        title: "T",
+        tabs: [
+          tab(1, "Wide", [
+            wide(["a", "b", "c", "d"]),
+            wide(["1", "2", "3", "4"]),
+            wide([]),
+            wide(["5", "6", null, "8"]),
+          ]),
+          tab(2, "Blank", [wide([]), wide([])]),
+        ],
+      },
+    });
+    expect(result.tables).toHaveLength(1);
+    expect(result.tables[0]!.columns.map((c) => c.name)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+    const row = await prisma.uploadStaging.findUniqueOrThrow({
+      where: { id: result.stagingId },
+    });
+    expect(row.tables).toMatchObject([{ key: "sheet:1", columnCount: 4 }]);
   });
 
   it("drops its staging tables when a tab fails", async () => {

@@ -51,11 +51,22 @@ const meta = (
   })),
 });
 
-const chunk = (startRow: number, rows: unknown[][]) => ({
-  sheets: [
-    { data: [{ startRow, rowData: rows.map((values) => ({ values })) }] },
-  ],
-});
+const isEmpty = (cell: unknown) =>
+  !cell || Object.keys(cell as object).length === 0;
+/** A response as Google makes it: no trailing empty cells in a row, no trailing empty rows. */
+const chunk = (_startRow: number, rows: unknown[][]) => {
+  const trimmed = rows.map((values) => {
+    const v = [...values];
+    while (v.length > 0 && isEmpty(v[v.length - 1])) v.pop();
+    return v;
+  });
+  while (trimmed.length > 0 && trimmed[trimmed.length - 1]!.length === 0) {
+    trimmed.pop();
+  }
+  return {
+    sheets: [{ data: [{ rowData: trimmed.map((values) => ({ values })) }] }],
+  };
+};
 
 const collect = async (rows: AsyncIterable<Row> | Row[]) => {
   const out: Row[] = [];
@@ -112,7 +123,7 @@ describe("readSpreadsheet", () => {
     expect(result.tabs.map((t) => t.sheetId)).toEqual([2]);
   });
 
-  it("a 1000x26 grid with 3 data rows yields 3 rows of 4 columns", async () => {
+  it("a 1000x26 grid with 3 data rows yields 3 rows as wide as the grid", async () => {
     getSpreadsheet
       .mockResolvedValueOnce(meta([{ sheetId: 1, title: "Costs", index: 0 }]))
       .mockResolvedValueOnce(
@@ -134,11 +145,15 @@ describe("readSpreadsheet", () => {
         ])
       );
     const result = await readSpreadsheet("id", LIMITS);
-    expect(await collect(result.tabs[0]!.rows)).toEqual([
+    const rows = await collect(result.tabs[0]!.rows);
+    expect(rows).toHaveLength(3);
+    expect(rows.every((r) => r.length === 26)).toBe(true);
+    expect(rows.map((r) => r.slice(0, 4))).toEqual([
       ["item", "amount", "paid", "when"],
       ["rent", "1200", "true", null],
       ["food", "300.5", null, "2024-01-01"],
     ]);
+    expect(rows.flatMap((r) => r.slice(4)).every((c) => c === null)).toBe(true);
     expect(getSpreadsheet).toHaveBeenCalledTimes(2);
   });
 
@@ -161,12 +176,12 @@ describe("readSpreadsheet", () => {
     expect(calls.map((c) => c[2].ranges)).toEqual([
       ["'Big'!A1:A5000"],
       ["'Big'!A5001:A10000"],
-      ["'Big'!A10001:A15000"],
+      ["'Big'!A10001:A12000"],
     ]);
     expect(calls[0]![2]).toMatchObject({
       includeGridData: true,
       fields:
-        "sheets.data(startRow,rowData.values(effectiveValue,effectiveFormat.numberFormat.type))",
+        "sheets.data(rowData.values(effectiveValue,effectiveFormat.numberFormat.type))",
     });
   });
 
@@ -194,7 +209,7 @@ describe("readSpreadsheet", () => {
     const result = await readSpreadsheet("id", LIMITS);
     await collect(result.tabs[0]!.rows);
     expect(getSpreadsheet.mock.calls[1]![2].ranges).toEqual([
-      "'Bob''s costs'!A1:C5000",
+      "'Bob''s costs'!A1:C1000",
     ]);
   });
 
@@ -286,7 +301,33 @@ describe("readSpreadsheet", () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain("45292");
   });
 
-  it("refuses data in a column the first 5,000 rows left empty", async () => {
+  it("does not stop at a short chunk: blank rows at a chunk's end drop nothing", async () => {
+    getSpreadsheet.mockResolvedValueOnce(
+      meta([{ sheetId: 1, title: "T", index: 0, rows: 6000, cols: 1 }])
+    );
+    // Rows 4,991-5,000 are blank, so Google returns 4,990 entries.
+    getSpreadsheet
+      .mockResolvedValueOnce(
+        chunk(
+          0,
+          Array.from({ length: 4990 }, (_, i) => [str(`r${i}`)])
+        )
+      )
+      .mockResolvedValueOnce(chunk(5000, [[str("later")], [str("last")]]));
+    const result = await readSpreadsheet("id", LIMITS);
+    const rows = await collect(result.tabs[0]!.rows);
+    expect(rows).toHaveLength(5002);
+    expect(rows[4989]).toEqual(["r4989"]);
+    expect(rows[4990]).toEqual([null]);
+    expect(rows[5000]).toEqual(["later"]);
+    expect(rows[5001]).toEqual(["last"]);
+    expect(getSpreadsheet.mock.calls.slice(1).map((c) => c[2].ranges)).toEqual([
+      ["'T'!A1:A5000"],
+      ["'T'!A5001:A6000"],
+    ]);
+  });
+
+  it("a later row wider than the first loads at the grid's width", async () => {
     getSpreadsheet.mockResolvedValueOnce(
       meta([{ sheetId: 1, title: "T", index: 0, rows: 6000, cols: 3 }])
     );
@@ -297,10 +338,31 @@ describe("readSpreadsheet", () => {
           Array.from({ length: 5000 }, () => [str("a")])
         )
       )
-      .mockResolvedValueOnce(chunk(5000, [[str("a"), str("late")]]));
+      .mockResolvedValueOnce(chunk(5000, [[str("a"), str("b"), str("c")]]));
     const result = await readSpreadsheet("id", LIMITS);
-    await expect(collect(result.tabs[0]!.rows)).rejects.toMatchObject({
-      name: "FileParseError",
+    const rows = await collect(result.tabs[0]!.rows);
+    expect(rows).toHaveLength(5001);
+    expect(rows[0]).toEqual(["a", null, null]);
+    expect(rows[5000]).toEqual(["a", "b", "c"]);
+  });
+
+  it("a tab without a rowCount has no rows and makes no request", async () => {
+    getSpreadsheet.mockResolvedValueOnce({
+      properties: { title: "B", timeZone: "UTC" },
+      sheets: [
+        {
+          properties: {
+            sheetId: 1,
+            title: "T",
+            index: 0,
+            sheetType: "GRID",
+            gridProperties: { columnCount: 3 },
+          },
+        },
+      ],
     });
+    const result = await readSpreadsheet("id", LIMITS);
+    expect(await collect(result.tabs[0]!.rows)).toEqual([]);
+    expect(getSpreadsheet).toHaveBeenCalledTimes(1);
   });
 });
