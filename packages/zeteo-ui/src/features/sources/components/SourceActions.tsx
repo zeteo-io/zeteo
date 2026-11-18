@@ -48,7 +48,10 @@ export const useSourceActions = (source: Source) => {
     setError(null);
     setTestResult(null);
     setSummary(null);
-    refresh.mutate(undefined, { onSuccess: setSummary, onError: setError });
+    refresh.mutate(undefined, {
+      onSuccess: (result) => !("synced_at" in result) && setSummary(result),
+      onError: setError,
+    });
   };
 
   const actions = canWrite ? (

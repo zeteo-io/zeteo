@@ -2,22 +2,16 @@ import { useRefreshSource } from "../../api/useRefreshSource";
 import type { SourceAccess } from "../../components/access";
 import { sourceHref } from "../../components/sourceLabels";
 import { ConfirmButton } from "@/components/ConfirmButton";
+import type { Source, SyncSummary } from "../../api/types";
 import { SourceForm } from "../../components/SourceForm";
 import { useDeleteUploadSource } from "../api/uploads";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { TransferDialog } from "./TransferDialog";
 import { Alert, Button } from "@kosmeo-ui/react";
 import { useNavigate } from "react-router-dom";
-import type { Source } from "../../api/types";
 import type { ApiError } from "@/lib/api";
 import { MY_DATA_HREF } from "./labels";
 import { useState } from "react";
-
-/** What `POST /v1/sources/:id/refresh` answers for a Google Sheets source. */
-interface SyncSummary {
-  synced_at: string;
-  tables: { id: string; name: string; row_count: number; missing: boolean }[];
-}
 
 const tablesSynced = (summary: SyncSummary) => {
   const n = summary.tables.filter((t) => !t.missing).length;
@@ -43,7 +37,7 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
     setSyncError(null);
     refresh.mutate(undefined, {
       // For a Sheets source the server answers with what it synced.
-      onSuccess: (summary) => setSynced(summary as unknown as SyncSummary),
+      onSuccess: (result) => "synced_at" in result && setSynced(result),
       onError: setSyncError,
     });
   };
