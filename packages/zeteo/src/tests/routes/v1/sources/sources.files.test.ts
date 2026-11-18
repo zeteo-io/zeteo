@@ -224,9 +224,9 @@ describe("POST /v1/sources (upload)", () => {
   });
 
   it("re-infers the types when the header row differs from the preview's", async () => {
-    // Row 0 is a title; the real header is row 1.
+    // Row 0 is a full-width title; the real header is row 1.
     const csv = csvOf(
-      ["Report", "", ""],
+      ["Report", "of", "sales"],
       [
         ["id", "amount", "note"],
         ["1", "2.5", "x"],

@@ -73,14 +73,28 @@ function render(cell: CellData | undefined, timeZone: string): string | null {
         ? new Date(instant).toISOString()
         : String(n);
     }
+    if (type === "TIME") return timeText(n);
     return String(n);
   }
   return null;
 }
 
 /**
+ * A TIME serial as zero-padded 24-hour `HH:MM:SS`, rounded to the second. Hours pass 23 only for a
+ * serial of 1 or more (a `[h]` duration); a time of day rounding up to 24:00:00 is `00:00:00`.
+ * Negative or non-finite is kept as its number.
+ */
+function timeText(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return String(n);
+  let seconds = Math.round(n * 86400);
+  if (n < 1) seconds %= 86400;
+  const pad = (v: number) => String(v).padStart(2, "0");
+  return `${pad(Math.floor(seconds / 3600))}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
+}
+
+/**
  * A cell as text, the way `uploads/parse/xlsx.ts` renders a workbook cell: text as is, booleans
- * `true`/`false`, a DATE `YYYY-MM-DD`, a DATE_TIME its full ISO 8601 UTC instant (the serial is
+ * `true`/`false`, a DATE `YYYY-MM-DD`, a TIME `HH:MM:SS`, a DATE_TIME its full ISO 8601 UTC instant (the serial is
  * wall time in the spreadsheet's `timeZone`; an unknown zone throws a RangeError), any other number
  * `String(n)`; an error, an empty cell and no cell are null. Formulas arrive as their value.
  */

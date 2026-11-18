@@ -130,3 +130,82 @@ describe("TypeInferrer", () => {
     }
   });
 });
+
+describe("detectHeaderRow under a banner", () => {
+  it("is 1 for a sparse banner then labels then data", () => {
+    expect(
+      detectHeaderRow([
+        ["Updated 2026-11-18", null, null],
+        ["sku", "asin", "qty"],
+        ["A1", "B1", "5"],
+      ])
+    ).toBe(1);
+  });
+
+  it("is 2 for two banner rows then labels", () => {
+    expect(
+      detectHeaderRow([
+        ["Report", null, null, null],
+        [null, "Part", null, null],
+        ["sku", "asin", "cond", "qty"],
+        ["A1", "B1", "New", "5"],
+      ])
+    ).toBe(2);
+  });
+
+  it("is 0 when the labels are on row 0", () => {
+    expect(
+      detectHeaderRow([
+        ["sku", "qty"],
+        ["A1", "5"],
+      ])
+    ).toBe(0);
+  });
+
+  it("keeps an all-text sheet with no evidence at today's answer", () => {
+    expect(
+      detectHeaderRow([
+        ["Updated", null, "General", null],
+        ["sku", "asin", "cond", "note"],
+        ["A1", "B1", "New", "x"],
+      ])
+    ).toBe(0);
+  });
+
+  it("is 0, not 1, when a full text first row sits above data", () => {
+    expect(
+      detectHeaderRow([
+        ["sku", "asin", "qty"],
+        ["A1", "B1", "5"],
+        ["A2", "B2", "6"],
+      ])
+    ).toBe(0);
+  });
+
+  it("finds the labels of the FBA shape", () => {
+    expect(
+      detectHeaderRow([
+        [
+          "Updated 2026-11-18 14:31:11",
+          null,
+          null,
+          "General Quantity",
+          null,
+          "Inbound Quantity",
+        ],
+        [
+          "SKU",
+          "ASIN",
+          "Condtion",
+          "Total Quantity",
+          "Fulfillable Quantity",
+          "Inbound Working Quantity",
+          "Inbound Shipped Quantity",
+          "Inbound Receiving Quantity",
+        ],
+        ["A-1", "B000", "New", "12", "10", "1", "0", "1"],
+        ["A-2", "B001", "Used", "3", "3", "0", "0", "0"],
+      ])
+    ).toBe(1);
+  });
+});

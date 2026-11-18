@@ -97,8 +97,8 @@ describe("cellText", () => {
     expect(cellText(num(45292, "DATE"), "Mars/Base")).toBe("2024-01-01");
   });
 
-  it("TIME stays a number", () => {
-    expect(cellText(num(0.75, "TIME"), "UTC")).toBe("0.75");
+  it("TIME 0.75 is 18:00:00", () => {
+    expect(cellText(num(0.75, "TIME"), "UTC")).toBe("18:00:00");
   });
 
   it("a percent stays a number", () => {
@@ -143,5 +143,20 @@ describe("cellText", () => {
         "UTC"
       )
     ).toBe("6");
+  });
+
+  it("TIME cells are zero-padded HH:MM:SS text", () => {
+    const t = (n: number) => cellText(num(n, "TIME"), "UTC");
+    expect(t(0.125)).toBe("03:00:00");
+    expect(t(0.02973379629838746)).toBe("00:42:49");
+    expect(t(0.5)).toBe("12:00:00");
+    expect(t(0.99999999)).toBe("00:00:00");
+    expect(t(1.1458333333)).toBe("27:30:00");
+    expect(t(-0.5)).toBe("-0.5");
+    expect(t(Infinity)).toBe("Infinity");
+  });
+
+  it("a DATE with a fractional serial still floors to the date", () => {
+    expect(cellText(num(44771.64790452547, "DATE"), "UTC")).toBe("2022-07-29");
   });
 });

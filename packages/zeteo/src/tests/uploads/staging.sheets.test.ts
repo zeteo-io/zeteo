@@ -69,6 +69,39 @@ describe("stageSheets", () => {
     ]);
   });
 
+  it("suggests the header row under a banner", async () => {
+    const result = await stageSheets({
+      ownerId: owner,
+      spreadsheet: {
+        id: `sheet-${randomUUID()}`,
+        title: "FBA",
+        tabs: [
+          tab(0, "Stock", [
+            [
+              "Updated 2026-11-18 14:31:11",
+              null,
+              null,
+              null,
+              "General Quantity",
+            ],
+            ["SKU", "ASIN", "Condition", "Total Quantity", "Fulfillable"],
+            ["A-1", "B000", "New", "12", "10"],
+            ["A-2", "B001", "Used", "3", "3"],
+          ]),
+        ],
+      },
+    });
+    const stock = result.tables[0]!;
+    expect(stock.header_row).toBe(1);
+    expect(stock.columns.map((c) => [c.name, c.type])).toEqual([
+      ["sku", "text"],
+      ["asin", "text"],
+      ["condition", "text"],
+      ["total_quantity", "number"],
+      ["fulfillable", "number"],
+    ]);
+  });
+
   it("records kind google-sheets and the vendor file id", async () => {
     const spreadsheet = sheet();
     const result = await stageSheets({ ownerId: owner, spreadsheet });
