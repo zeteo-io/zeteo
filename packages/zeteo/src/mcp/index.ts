@@ -1,8 +1,8 @@
 import { buildTereoDocument } from "../definitions/tereoDeclaration.js";
 import { defineSavedQueryTools } from "./savedQueryTools.js";
 import { defineSavedPanelTools } from "./savedPanelTools.js";
+import { callerInstructions } from "./callerInstructions.js";
 import { defineDashboardTools } from "./dashboardTools.js";
-import { MCP_INSTRUCTIONS } from "./instructions.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
 import { defineGuideTool } from "./guideTool.js";
@@ -41,7 +41,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   const mcp = createTereoMcp({
     name: "zeteo",
     version,
-    instructions: MCP_INSTRUCTIONS,
+    instructions: callerInstructions,
     core: getTereo(),
     publicUrl: env.PUBLIC_URL,
     path: MCP_PATH,

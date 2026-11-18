@@ -12,3 +12,27 @@ export const rateLimitRedis = (client: Redis): RateLimitRedis => ({
   expire: (key, seconds) => withinRedisTimeout(client.expire(key, seconds)),
   ttl: (key) => withinRedisTimeout(client.ttl(key)),
 });
+
+/** How long a caller's instructions are kept: grants change rarely, and the tools stay the source of truth. */
+export const INSTRUCTIONS_TTL_SECONDS = 300;
+
+const instructionsKey = (userId: string): string =>
+  `zeteo:mcp:instructions:${userId}`;
+
+/** A user's cached instructions, or null; a Redis that fails or does not answer throws. */
+export const readCachedInstructions = (
+  client: Redis,
+  userId: string
+): Promise<string | null> =>
+  withinRedisTimeout(client.get(instructionsKey(userId)));
+
+/** Keeps a user's instructions for `INSTRUCTIONS_TTL_SECONDS`. */
+export const cacheInstructions = async (
+  client: Redis,
+  userId: string,
+  text: string
+): Promise<void> => {
+  await withinRedisTimeout(
+    client.set(instructionsKey(userId), text, "EX", INSTRUCTIONS_TTL_SECONDS)
+  );
+};
