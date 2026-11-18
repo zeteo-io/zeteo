@@ -2,8 +2,8 @@ import type { ChartSettings } from "@/features/dashboards/api/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { stubResizeObserver } from "@/test/echartsMock";
 import { render, screen } from "@testing-library/react";
+import { PanelCard, panelRowsArgs } from "./PanelCard";
 import { fakeCardHost } from "@/test/cardHost";
-import { PanelCard } from "./PanelCard";
 import { CardToolError } from "./host";
 
 const echarts = vi.hoisted(() => ({
@@ -81,6 +81,44 @@ describe("PanelCard", () => {
     ]);
     expect(echarts.init).toHaveBeenCalled();
     expect(echarts.instance.setOption).toHaveBeenCalled();
+  });
+
+  it("previews a query that is not saved, passing the query on, under a generic title", async () => {
+    const query = {
+      source: "sales-db",
+      from: "orders",
+      select: ["month", "revenue"],
+    };
+    const fake = fakeCardHost("panel", {
+      card_panel_rows: () => rows({ title: null }),
+    });
+    render(
+      <PanelCard
+        host={fake.host}
+        input={{
+          query,
+          chart: line,
+          time_column: "created_at",
+          time_range: "last_30_days",
+        }}
+        result={{ columns: [], rows: [], problems: [] }}
+      />
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Preview" })
+    ).toBeInTheDocument();
+    expect(fake.callsTo("card_panel_rows")).toEqual([
+      {
+        query,
+        chart: line,
+        time_column: "created_at",
+        time_range: "last_30_days",
+      },
+    ]);
+  });
+
+  it("does not take an array query for a preview", () => {
+    expect(panelRowsArgs({ query: [], chart: line }, {})).toBeNull();
   });
 
   it("reads a saved panel named by the input's id", async () => {

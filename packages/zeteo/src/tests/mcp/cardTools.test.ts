@@ -163,11 +163,50 @@ describe("MCP card tools", () => {
     expect(call.json.rows).toHaveLength(12);
   });
 
+  it("card_panel_rows with a query that is not saved returns its rows, chart and problems, as preview_panel does", async () => {
+    const query = {
+      source: source.slug,
+      from: "orders",
+      select: ["id", "status", "total"],
+    };
+    const chart = { ...BAR, y: ["total", "revenue"] };
+    const [card, preview] = await Promise.all([
+      callTool(session.client, "card_panel_rows", { query, chart }),
+      callTool(session.client, "preview_panel", { query, chart }),
+    ]);
+    expect(card.isError, card.text).toBe(false);
+    expect(card.json).toMatchObject({ title: null, chart, truncated: false });
+    expect(card.json.rows).toHaveLength(12);
+    expect(card.json.columns).toEqual(preview.json.columns);
+    expect(card.json.problems).toEqual(preview.json.problems);
+    expect(card.json.problems).toEqual([
+      { setting: "y.1", problem: "missing_column" },
+    ]);
+
+    const filtered = await callTool(session.client, "card_panel_rows", {
+      query,
+      chart: BAR,
+      time_column: "created_at",
+      time_range: "last_30_days",
+    });
+    expect(filtered.isError, filtered.text).toBe(false);
+    expect(filtered.json.rows).toEqual([]);
+
+    const runs = await runsOf([userId]);
+    const last = runs[runs.length - 1]!;
+    expect(last.entryPoint).toBe("mcp");
+    expect(last.savedQueryId).toBeNull();
+  });
+
   it("card_panel_rows refuses neither or both forms with invalid_request", async () => {
+    const query = { source: "x", from: "orders", select: ["id"] };
     for (const args of [
       {},
       { saved_query_id: "x" },
       { saved_panel_id: "x", saved_query_id: "y", chart: TABLE },
+      { query },
+      { query, saved_query_id: "y", chart: TABLE },
+      { query, saved_panel_id: "x" },
     ]) {
       const call = await callTool(session.client, "card_panel_rows", args);
       expect(call.isError, JSON.stringify(args)).toBe(true);

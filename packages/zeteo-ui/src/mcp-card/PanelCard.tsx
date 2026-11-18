@@ -22,6 +22,7 @@ interface PanelRows {
 
 const PREVIEW_KEYS = [
   "saved_query_id",
+  "query",
   "chart",
   "time_column",
   "time_range",
@@ -31,7 +32,9 @@ const PREVIEW_KEYS = [
  * What to ask `card_panel_rows` for: a saved panel named by the input's id
  * (get or update a saved panel), else the saved panel a create made (an input
  * with a `name` and a result with an `id`), else the saved query and chart in
- * the input (preview), else a saved panel named by the result's id.
+ * the input, or the query that is not saved and chart (preview), else a saved
+ * panel named by the result's id. A query that is not saved has no title, so
+ * the card says "Preview".
  */
 export const panelRowsArgs = (
   input: Record<string, unknown>,
@@ -41,7 +44,12 @@ export const panelRowsArgs = (
   // create_saved_panel: the saved panel it made, under its name.
   if (typeof input.name === "string" && typeof result.id === "string")
     return { saved_panel_id: result.id };
-  if (typeof input.saved_query_id === "string" && input.chart) {
+  const previewed =
+    typeof input.saved_query_id === "string" ||
+    (typeof input.query === "object" &&
+      input.query !== null &&
+      !Array.isArray(input.query));
+  if (previewed && input.chart) {
     const args: Record<string, unknown> = {};
     for (const key of PREVIEW_KEYS)
       if (input[key] !== undefined) args[key] = input[key];
