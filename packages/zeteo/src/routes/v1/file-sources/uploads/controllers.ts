@@ -41,6 +41,8 @@ export const postUpload = async (req: Request, res: Response) => {
     const err = new Error("The upload was aborted");
     fileStream?.destroy(err);
     parser.destroy();
+    // A staging finished just before the client left would linger.
+    staged?.then((r) => discardStaging(r.stagingId)).catch(() => undefined);
     settle?.(err);
   };
   req.on("aborted", abort);
