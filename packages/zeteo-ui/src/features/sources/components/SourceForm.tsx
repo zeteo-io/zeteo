@@ -1,3 +1,4 @@
+import { descriptionProblem, DescriptionField } from "./DescriptionField";
 import { parseNumberField } from "@/utils/parseNumberField";
 import { useCreateSource } from "../api/useCreateSource";
 import { useUpdateSource } from "../api/useUpdateSource";
@@ -26,7 +27,6 @@ import {
   Input,
   Modal,
   Switch,
-  TextArea,
 } from "@kosmeo-ui/react";
 import type {
   CreateSource,
@@ -38,7 +38,6 @@ import type {
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
 
-const MAX_DESCRIPTION = 500;
 const MAX_SCHEMAS = 20;
 const MAX_SCHEMA_BYTES = 63;
 
@@ -292,9 +291,8 @@ export const SourceForm = ({
         "Use lower case letters, digits and hyphens, starting with a letter (2 to 63 characters).";
     }
     if (!name.trim()) found.name = "A name is required.";
-    if (description.trim().length > MAX_DESCRIPTION) {
-      found.description = `A description is at most ${MAX_DESCRIPTION} characters.`;
-    }
+    const tooLong = descriptionProblem(description);
+    if (tooLong) found.description = tooLong;
     if (connectionOpen) {
       const port = parseNumberField(conn.port);
       if (!conn.host.trim()) found["settings.host"] = "A host is required.";
@@ -509,26 +507,14 @@ export const SourceForm = ({
               </>
             )}
           </FormGrid>
-          <div>
-            <TextArea
-              label="Description"
-              rows={3}
-              value={description}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                edited("description");
-              }}
-            />
-            {errorFor("description") ? (
-              <p className="z-source-field-error" role="alert">
-                {errorFor("description")}
-              </p>
-            ) : (
-              <p className="z-muted z-source-field-note">
-                What this source holds. Shown to people and to Claude.
-              </p>
-            )}
-          </div>
+          <DescriptionField
+            value={description}
+            error={errorFor("description")}
+            onChange={(value) => {
+              setDescription(value);
+              edited("description");
+            }}
+          />
           <div className="z-source-about-row">
             {!source && (
               <div>

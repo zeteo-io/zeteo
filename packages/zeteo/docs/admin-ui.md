@@ -127,7 +127,8 @@ page and no sections.
   uploads a CSV or `.xlsx` file and shows its preview before anything is created: the tables to
   keep, their names, the header row, and each column's name and type with sample values and the
   parse warnings; a value that does not fit its type names the column and rows. Leaving Add
-  data, Add tables or Re-upload without creating discards the upload. Creating lands on the new
+  data, Add tables or Re-upload without creating discards the upload. Creating asks for a name, a slug and an optional description (at most 500 characters, as for a
+  database source) and lands on the new
   source's page. An upload source's page (`/sources/<id>`, reached by its owner from My sources and
   by admins from Sources; its owner needs only `zeteo.uploads.write`) is the same page as a
   database source's (above). Its Tables list adds each table's rows and last load; a table's page adds
