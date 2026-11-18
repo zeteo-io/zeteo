@@ -1323,7 +1323,7 @@ paths:
       description: |
         Answers one principal per requested one, in the request's order; a repeated one is answered
         once. A user or group tereo does not have is `orphaned`, with no name. Not counted against
-        the search limit.
+        the search limit for an admin (`zeteo.grants.read` or `zeteo.runs.read`).
 
         **Required permissions:** `zeteo.grants.read` or `zeteo.runs.read`, or
         `zeteo.file_sources.write` with `zeteo.data.read` (`403 forbidden` without). A caller let in

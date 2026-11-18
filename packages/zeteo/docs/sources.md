@@ -2,7 +2,8 @@
 
 A source is a database an administrator registers. The admin API is under `/v1/sources` (the
 reference is `openapi/openapi.yaml`; `npm run openapi:build` bundles it). Sources are archived,
-never deleted.
+never deleted. A source of type `upload` is a file source, owned by the person who uploaded it
+and managed under `/v1/file-sources` ([file-sources.md](file-sources.md)); it is listed here too.
 
 | Route | Permission | Result |
 |-------|------------|--------|

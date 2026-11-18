@@ -228,7 +228,8 @@ is added when `PUBLIC_URL` is https.
 | `GET /v1/me/runs` | `zeteo.data.read` | the caller's own runs, as `GET /v1/runs` without `user_id` and `source_id` |
 | `GET /v1/me/principals?type=user\|group&q=&limit=` | `zeteo.data.read` | `{ data: Principal[] }` as `GET /v1/principals`, for the sharing dialog: users (people only) and groups that are global or of the caller's organization |
 
-The saved queries the UI manages are in [saved-queries.md](saved-queries.md).
+The saved queries the UI manages are in [saved-queries.md](saved-queries.md), and File Sources in
+[file-sources.md](file-sources.md).
 
 A `Principal` is `{ type, id, name, email?, status }`, with `email` for users only and `status`
 `active`, `inactive` or `orphaned`.
