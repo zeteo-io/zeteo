@@ -38,12 +38,19 @@ function offsetAt(utcMs: number, timeZone: string): number {
   return wall - Math.floor(utcMs / 1000) * 1000;
 }
 
-/** The UTC instant at which a clock in `timeZone` shows the wall time `wallMs` (read as if UTC). */
+/**
+ * The UTC instant at which a clock in `timeZone` shows the wall time `wallMs` (read as if UTC).
+ * Like JS Temporal's "compatible": a repeated wall time (DST end) takes the earlier instant, one
+ * that does not exist (DST gap) is read with the offset from before the gap, so 02:30 becomes 03:30.
+ */
 function instantOf(wallMs: number, timeZone: string): number {
-  // The offset of the wall time itself is not known until the instant is; two passes settle it
-  // except inside a DST gap or overlap, where the first guess is kept.
-  const guess = wallMs - offsetAt(wallMs, timeZone);
-  return wallMs - offsetAt(guess, timeZone);
+  const before = offsetAt(wallMs - DAY_MS, timeZone);
+  const after = offsetAt(wallMs + DAY_MS, timeZone);
+  const candidates = [before, after]
+    .map((offset) => ({ offset, at: wallMs - offset }))
+    .filter(({ offset, at }) => offsetAt(at, timeZone) === offset)
+    .map(({ at }) => at);
+  return candidates.length > 0 ? Math.min(...candidates) : wallMs - before;
 }
 
 function render(cell: SheetCell | undefined, timeZone: string): string | null {
@@ -56,14 +63,22 @@ function render(cell: SheetCell | undefined, timeZone: string): string | null {
   if (value.numberValue !== undefined) {
     const n = value.numberValue;
     const type = cell?.effectiveFormat?.numberFormat?.type;
+    // A serial outside what a Date holds is kept as its number, so no data is lost.
     if (type === "DATE") {
-      return new Date(EPOCH_MS + Math.floor(n) * DAY_MS)
-        .toISOString()
-        .slice(0, 10);
+      const date = new Date(EPOCH_MS + Math.floor(n) * DAY_MS);
+      return Number.isNaN(date.getTime())
+        ? String(n)
+        : date.toISOString().slice(0, 10);
     }
     if (type === "DATE_TIME") {
       const wall = EPOCH_MS + Math.round(n * DAY_MS);
-      return new Date(instantOf(wall, timeZone)).toISOString();
+      if (Number.isNaN(new Date(wall).getTime())) return String(n);
+      const instant = new Date(instantOf(wall, timeZone));
+      // Unlike xlsx.ts, which cannot tell a date from a timestamp and collapses midnight UTC to a
+      // date, Sheets names the type: a DATE_TIME stays a timestamp even at midnight UTC.
+      return Number.isNaN(instant.getTime())
+        ? String(n)
+        : instant.toISOString();
     }
     return String(n);
   }

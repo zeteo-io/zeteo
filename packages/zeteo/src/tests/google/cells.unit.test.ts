@@ -31,10 +31,28 @@ describe("cellText", () => {
     ).toBe("2024-03-10T08:30:00.000Z");
   });
 
-  it("DATE_TIME at midnight UTC keeps the full instant form", () => {
+  it("a DATE_TIME at midnight UTC stays a timestamp (Sheets says it is one)", () => {
     expect(cellText(num(45292, "DATE_TIME"), "UTC")).toBe(
       "2024-01-01T00:00:00.000Z"
     );
+  });
+
+  it("a wall time inside a DST gap resolves forward (02:30 becomes 03:30 CDT)", () => {
+    expect(
+      cellText(num(45361 + 2.5 / 24, "DATE_TIME"), "America/Chicago")
+    ).toBe("2024-03-10T08:30:00.000Z");
+  });
+
+  it("a repeated wall time takes the earlier instant", () => {
+    // 2024-11-03 01:30 happens twice in Chicago; the first is CDT (UTC-5).
+    expect(
+      cellText(num(45599 + 1.5 / 24, "DATE_TIME"), "America/Chicago")
+    ).toBe("2024-11-03T06:30:00.000Z");
+  });
+
+  it("an out-of-range serial stays its number", () => {
+    expect(cellText(num(1e9, "DATE"), "UTC")).toBe("1000000000");
+    expect(cellText(num(1e12, "DATE_TIME"), "UTC")).toBe("1000000000000");
   });
 
   it("DATE_TIME east of UTC", () => {
