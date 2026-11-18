@@ -57,20 +57,25 @@ export function inferType(values: (string | null)[]): FileColumnType {
 }
 
 /**
- * 0 when every cell of row 0 is non-empty text and at least one column below it is not text;
- * otherwise null.
+ * 0 (row 0 is the header) unless row 0 looks like data: some column where row 0's value has the
+ * same non-text type as the values below it. Then null. Empty cells in row 0 don't count as data.
  */
 export function detectHeaderRow(rows: Row[]): number | null {
   const first = rows[0];
   if (!first || first.length === 0) return null;
-  for (const cell of first) {
-    if (cell === null || cell.trim() === "" || kindOf(cell) !== "text") {
+  const below = rows.slice(1);
+  for (let c = 0; c < first.length; c += 1) {
+    const cell = first[c];
+    if (cell === null || cell === undefined || cell.trim() === "") continue;
+    const kind = kindOf(cell);
+    if (kind === "text") continue;
+    const type = inferType([cell, ...below.map((r) => r[c] ?? null)]);
+    if (
+      type !== "text" &&
+      below.some((r) => r[c] != null && r[c]!.trim() !== "")
+    ) {
       return null;
     }
   }
-  const below = rows.slice(1);
-  for (let c = 0; c < first.length; c += 1) {
-    if (inferType(below.map((r) => r[c] ?? null)) !== "text") return 0;
-  }
-  return null;
+  return 0;
 }

@@ -26,74 +26,61 @@ function render(value: ExcelJS.CellValue): string | null {
   return text === null || text === "" ? null : text;
 }
 
-function trim(rows: Row[]): Row[] {
-  let lastRow = rows.length;
-  while (lastRow > 0 && rows[lastRow - 1]!.every((c) => c === null))
-    lastRow -= 1;
-  let width = 0;
-  for (let r = 0; r < lastRow; r += 1) {
-    for (let c = rows[r]!.length; c > width; c -= 1) {
-      if (rows[r]![c - 1] !== null) {
-        width = c;
-        break;
-      }
-    }
-  }
-  return rows.slice(0, lastRow).map((row) => {
-    const out = row.slice(0, width);
-    while (out.length < width) out.push(null);
-    return out;
-  });
+function tooManyRows(limits: ParseLimits): FileParseError {
+  return new FileParseError(
+    "too_many_rows",
+    `A sheet has more than ${limits.maxRows} rows.`
+  );
 }
 
-function checkLimits(rows: Row[], limits: ParseLimits): void {
-  const width = rows[0]?.length ?? 0;
-  if (width > limits.maxColumns) {
-    throw new FileParseError(
-      "too_many_columns",
-      `A sheet has more than ${limits.maxColumns} columns.`
-    );
-  }
-  if (rows.length - 1 > limits.maxRows) {
-    throw new FileParseError(
-      "too_many_rows",
-      `A sheet has more than ${limits.maxRows} rows.`
-    );
-  }
+function tooManyColumns(limits: ParseLimits): FileParseError {
+  return new FileParseError(
+    "too_many_columns",
+    `A sheet has more than ${limits.maxColumns} columns.`
+  );
 }
 
+/**
+ * The rows of `ws` inside the 1-based range (the whole sheet when `range` is omitted), read from
+ * the cells that exist only, with trailing empty rows and columns trimmed. The first row is the
+ * header; a value beyond the column limit, or past the header plus `maxRows` rows, fails at once,
+ * before more is read.
+ */
 function readRange(
   ws: ExcelJS.Worksheet,
-  top: number,
-  left: number,
-  bottom: number,
-  right: number,
-  limits: ParseLimits
+  limits: ParseLimits,
+  range?: { top: number; left: number; bottom: number; right: number }
 ): Row[] {
-  if (
-    right - left + 1 > limits.maxColumns + 50 ||
-    bottom - top > limits.maxRows + 1
-  ) {
-    // Refuse before materialising an absurd range; exact limits are checked after trimming.
-    if (right - left + 1 > limits.maxColumns + 50) {
-      throw new FileParseError(
-        "too_many_columns",
-        `A sheet has more than ${limits.maxColumns} columns.`
-      );
-    }
-    throw new FileParseError(
-      "too_many_rows",
-      `A sheet has more than ${limits.maxRows} rows.`
-    );
-  }
+  const top = range?.top ?? 1;
+  const left = range?.left ?? 1;
+  const cells = new Map<number, Map<number, string>>();
+  let lastRow = 0;
+  let width = 0;
+  ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber < top || (range && rowNumber > range.bottom)) return;
+    const r = rowNumber - top + 1;
+    row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+      if (colNumber < left || (range && colNumber > range.right)) return;
+      const text = render(cell.value);
+      if (text === null) return;
+      const c = colNumber - left + 1;
+      if (c > limits.maxColumns) throw tooManyColumns(limits);
+      if (r > limits.maxRows + 1) throw tooManyRows(limits);
+      let line = cells.get(r);
+      if (!line) cells.set(r, (line = new Map()));
+      line.set(c, text);
+      if (r > lastRow) lastRow = r;
+      if (c > width) width = c;
+    });
+  });
   const rows: Row[] = [];
-  for (let r = top; r <= bottom; r += 1) {
+  for (let r = 1; r <= lastRow; r += 1) {
+    const line = cells.get(r);
     const row: Row = [];
-    for (let c = left; c <= right; c += 1)
-      row.push(render(ws.getCell(r, c).value));
+    for (let c = 1; c <= width; c += 1) row.push(line?.get(c) ?? null);
     rows.push(row);
   }
-  return trim(rows);
+  return rows;
 }
 
 /**
@@ -118,26 +105,29 @@ export async function parseXlsx(
 
   const sheets: ParsedSheet[] = [];
   for (const ws of workbook.worksheets) {
-    const rows = readRange(ws, 1, 1, ws.rowCount, ws.columnCount, limits);
-    checkLimits(rows, limits);
-    sheets.push({ name: ws.name, kind: "sheet", rows });
+    sheets.push({ name: ws.name, kind: "sheet", rows: readRange(ws, limits) });
 
     for (const entry of ws.getTables() as unknown as {
       table: { name: string; tableRef: string };
     }[]) {
-      const ref = ws.getCell(entry.table.tableRef.split(":")[0]!);
-      const end = entry.table.tableRef.split(":")[1] ?? entry.table.tableRef;
-      const endCell = ws.getCell(end);
-      const tableRows = readRange(
-        ws,
-        Number(ref.row),
-        Number(ref.col),
-        Number(endCell.row),
-        Number(endCell.col),
-        limits
-      );
-      checkLimits(tableRows, limits);
-      sheets.push({ name: entry.table.name, kind: "table", rows: tableRows });
+      const [from, to] = entry.table.tableRef.split(":");
+      const start = ws.getCell(from!);
+      const end = ws.getCell(to ?? from!);
+      const range = {
+        top: Number(start.row),
+        left: Number(start.col),
+        bottom: Number(end.row),
+        right: Number(end.col),
+      };
+      if (range.right - range.left + 1 > limits.maxColumns) {
+        throw tooManyColumns(limits);
+      }
+      if (range.bottom - range.top > limits.maxRows) throw tooManyRows(limits);
+      sheets.push({
+        name: entry.table.name,
+        kind: "table",
+        rows: readRange(ws, limits, range),
+      });
     }
   }
   return sheets;

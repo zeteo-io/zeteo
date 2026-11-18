@@ -116,4 +116,48 @@ describe("parseXlsx", () => {
       code: "too_many_columns",
     });
   });
+
+  it("fails on a far-out value without walking the sheet", async () => {
+    const stream = await build((wb) => {
+      const ws = wb.addWorksheet("Big");
+      ws.addRow(["a"]);
+      ws.getCell("A1048576").value = "late";
+      ws.getCell("XFD1").value = "wide";
+    });
+    const started = Date.now();
+    await expect(parseXlsx(stream, limits)).rejects.toMatchObject({
+      code: expect.stringMatching(/^too_many_(rows|columns)$/),
+    });
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("reports the row limit and the column limit apart on sparse sheets", async () => {
+    const rowy = await build((wb) => {
+      wb.addWorksheet("R").getCell("A500000").value = "x";
+    });
+    await expect(parseXlsx(rowy, limits)).rejects.toMatchObject({
+      code: "too_many_rows",
+    });
+    const widey = await build((wb) => {
+      wb.addWorksheet("C").getCell("XFD1").value = "x";
+    });
+    await expect(parseXlsx(widey, limits)).rejects.toMatchObject({
+      code: "too_many_columns",
+    });
+  });
+
+  it("keeps blank rows and columns inside the data", async () => {
+    const stream = await build((wb) => {
+      const ws = wb.addWorksheet("G");
+      ws.getCell("A1").value = "a";
+      ws.getCell("C1").value = "c";
+      ws.getCell("A3").value = "z";
+    });
+    const [sheet] = await parseXlsx(stream, limits);
+    expect(sheet?.rows).toEqual([
+      ["a", null, "c"],
+      [null, null, null],
+      ["z", null, null],
+    ]);
+  });
 });
