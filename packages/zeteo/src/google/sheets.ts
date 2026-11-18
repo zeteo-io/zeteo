@@ -15,8 +15,19 @@ import {
   SheetNotAccessibleError,
 } from "../utils/errors.js";
 
-/** Rows asked of Google per request. */
+/** Rows asked of Google per request, at the most. */
 const CHUNK_ROWS = 5000;
+/** Cells asked of Google per request: a wide tab is read in fewer rows at a time. */
+const CHUNK_CELLS = 200_000;
+/** Rows asked per request however wide the tab. */
+const MIN_CHUNK_ROWS = 100;
+
+/** Rows per request for a tab `gridCols` wide: about `CHUNK_CELLS` cells, 100 to 5,000 rows. */
+const rowsPerChunk = (gridCols: number) =>
+  Math.min(
+    CHUNK_ROWS,
+    Math.max(MIN_CHUNK_ROWS, Math.floor(CHUNK_CELLS / Math.max(1, gridCols)))
+  );
 const SPREADSHEET_FIELDS =
   "properties(title,timeZone),sheets.properties(sheetId,title,index,sheetType,gridProperties)";
 const GRID_FIELDS =
@@ -85,7 +96,7 @@ const tooManyRows = (limits: ParseLimits) =>
   );
 
 /**
- * One tab's rows, read from Google `CHUNK_ROWS` at a time. Trailing empty rows are not
+ * One tab's rows, read from Google `rowsPerChunk` rows at a time. Trailing empty rows are not
  * yielded; every row is as wide as the tab's grid (`stageTable` trims the unused columns).
  */
 async function* readTab(
@@ -103,8 +114,9 @@ async function* readTab(
     Array.from({ length: gridCols }, (_, i) => row[i] ?? null);
   let pendingEmpty = 0;
   let emitted = 0;
-  for (let start = 1; start <= rowCount; start += CHUNK_ROWS) {
-    const end = Math.min(start + CHUNK_ROWS - 1, rowCount);
+  const chunkRows = rowsPerChunk(gridCols);
+  for (let start = 1; start <= rowCount; start += chunkRows) {
+    const end = Math.min(start + chunkRows - 1, rowCount);
     const response: Spreadsheet = await call(() =>
       sheetsApi.getSpreadsheet(clientName, spreadsheetId, {
         ranges: [`${quoted}!A${start}:${lastColumn}${end}`],

@@ -1,6 +1,8 @@
 import type { SealedSettings } from "../utils/crypto/envelope.js";
+import { GoogleNotConfiguredError } from "../utils/errors.js";
 import { openSettings } from "../utils/crypto/envelope.js";
 import { prisma } from "../utils/db/prisma.js";
+import { logger } from "../utils/logger.js";
 import { z } from "zod";
 
 export const PROVIDER = "google";
@@ -67,17 +69,31 @@ export const readGoogleStamp = async (): Promise<Date | null> =>
     })
   )?.updatedAt ?? null;
 
-/** The stored connection with its key opened, or null when none is set. */
+/**
+ * The stored connection with its key opened, or null when none is set. A row
+ * that cannot be read or opened (the master key rotated, say) is
+ * `GoogleNotConfiguredError`, as none would be, so an admin sets the key
+ * again; it is logged at warn with no key material.
+ */
 export const readGoogleConnection =
   async (): Promise<GoogleConnection | null> => {
     const row = await prisma.connection.findUnique({
       where: { provider: PROVIDER },
     });
     if (!row) return null;
-    const stored = StoredConnectionSchema.parse(row.sealedSettings);
-    const settings = SettingsSchema.parse(
-      openSettings(stored.sealed as unknown as SealedSettings, SEAL_ID)
-    );
+    let settings: z.infer<typeof SettingsSchema>;
+    try {
+      const stored = StoredConnectionSchema.parse(row.sealedSettings);
+      settings = SettingsSchema.parse(
+        openSettings(stored.sealed as unknown as SealedSettings, SEAL_ID)
+      );
+    } catch (err) {
+      logger.warn(
+        { reason: err instanceof Error ? err.name : typeof err },
+        "The stored Google connection cannot be read or opened; set the key again"
+      );
+      throw new GoogleNotConfiguredError();
+    }
     return {
       ...settings,
       updatedAt: row.updatedAt,

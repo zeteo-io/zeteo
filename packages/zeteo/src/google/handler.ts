@@ -28,10 +28,14 @@ const build = () => {
   return { handler, requests: handler.use(google) };
 };
 
-let started: ReturnType<typeof build> | undefined;
+type Built = ReturnType<typeof build>;
+
+let started: Built | undefined;
 /** The `updatedAt` of the connection this process last registered. */
 let registeredAt: number | undefined;
-let startPromise: Promise<ReturnType<typeof build>> | undefined;
+let startPromise: Promise<Built> | undefined;
+/** The handler once its start finished; set only after `start()` resolved. */
+let running: Built | undefined;
 /** The registration under way, shared by every caller that finds the connection newer. */
 let registering: Promise<void> | undefined;
 
@@ -52,20 +56,59 @@ const handlerKey = (): string => {
 const ensureHandler = () => (started ??= build());
 
 const INSTANCE_PREFIX_PROBE = "validate-";
+/** A probe client younger than this may still be in use by another replica's key check. */
+const PROBE_SWEEP_AGE_MS = 5 * 60_000;
+
+/** A probe client's instance id: `validate-<epoch ms>-<uuid>`, so a sweep can tell its age. */
+const probeInstanceId = () =>
+  `${INSTANCE_PREFIX_PROBE}${Date.now()}-${randomUUID()}`;
 
 /**
- * Starts the handler once. The start loads every stored client, so a probe
- * client a dead process left behind (`validate-*`, holding a candidate key)
- * is among the loaded ones: dianemo lists no stored templates, only the
- * clients this replica loaded, and those are what is swept.
+ * Whether a loaded client is a probe old enough to sweep: one named
+ * `validate-<epoch ms>-…` more than `PROBE_SWEEP_AGE_MS` ago, or a
+ * `validate-` one with no time in its name.
  */
-const ensureStarted = (): Promise<ReturnType<typeof build>> =>
-  (startPromise ??= (async () => {
+const isStaleProbe = (instanceId: string | undefined, now: number) => {
+  if (!instanceId?.startsWith(INSTANCE_PREFIX_PROBE)) return false;
+  const madeAt = /^validate-(\d+)-/.exec(instanceId)?.[1];
+  return madeAt === undefined || now - Number(madeAt) > PROBE_SWEEP_AGE_MS;
+};
+
+/**
+ * Forgets a handler that dianemo stopped on its own. dianemo stops itself on
+ * SIGTERM, SIGINT or SIGHUP, before Zeteo has drained its requests; the calls
+ * still running then (and a job's sync) would be refused `handler_stopped`.
+ * The next use builds and starts a new handler, and registers the connection
+ * on it; Zeteo's shutdown stops that one with `stopGoogleHandler`.
+ */
+const forgetIfStopped = () => {
+  if (!running || running !== started) return;
+  if (running.handler.getMetadata().status !== "stopped") return;
+  logger.warn("The Google handler stopped on its own; starting a new one");
+  started = undefined;
+  startPromise = undefined;
+  running = undefined;
+  registeredAt = undefined;
+};
+
+/**
+ * Starts the handler once (again after dianemo stopped it, `forgetIfStopped`).
+ * The start loads every stored client, so a probe client a dead process left
+ * behind (`validate-*`, holding a candidate key) is among the loaded ones:
+ * dianemo lists no stored templates, only the clients this replica loaded,
+ * and those older than `PROBE_SWEEP_AGE_MS` are swept (a younger one may be
+ * another replica's check under way).
+ */
+const ensureStarted = (): Promise<Built> => {
+  forgetIfStopped();
+  return (startPromise ??= (async () => {
     const built = ensureHandler();
     await built.handler.start();
+    if (started === built) running = built;
+    const now = Date.now();
     for (const { name } of built.handler.getLoadedClients()) {
       const instanceId = name.split(":")[2];
-      if (instanceId?.startsWith(INSTANCE_PREFIX_PROBE)) {
+      if (isStaleProbe(instanceId, now)) {
         await built.handler
           .removeTemplateClient("google", instanceId)
           .catch((err: unknown) =>
@@ -81,6 +124,7 @@ const ensureStarted = (): Promise<ReturnType<typeof build>> =>
     startPromise = undefined;
     throw err;
   }));
+};
 
 const codeOf = (err: unknown): string | undefined =>
   typeof err === "object" && err !== null
@@ -88,17 +132,18 @@ const codeOf = (err: unknown): string | undefined =>
     : undefined;
 
 const register = async (): Promise<void> => {
-  const { handler } = await ensureStarted();
+  const built = await ensureStarted();
   const connection = await readGoogleConnection();
   if (!connection) throw new GoogleNotConfiguredError();
-  await handler.addTemplateClient("google", {
+  await built.handler.addTemplateClient("google", {
     instanceId: INSTANCE_ID,
     baseUrl: BASE_URL,
     serviceAccountEmail: connection.serviceAccountEmail,
     privateKey: connection.privateKey,
     scopes: SCOPES,
   });
-  registeredAt = connection.updatedAt.getTime();
+  // A stop (or a restart) while this ran: the handler it registered on is gone.
+  if (started === built) registeredAt = connection.updatedAt.getTime();
 };
 
 /**
@@ -110,6 +155,7 @@ const register = async (): Promise<void> => {
 export const googleClient = async (): Promise<string> => {
   const stamp = await readGoogleStamp();
   if (!stamp) throw new GoogleNotConfiguredError();
+  forgetIfStopped();
   while (registeredAt === undefined || stamp.getTime() > registeredAt) {
     await (registering ??= register().finally(() => {
       registering = undefined;
@@ -123,6 +169,7 @@ export const stopGoogleHandler = async (): Promise<void> => {
   const current = started;
   started = undefined;
   startPromise = undefined;
+  running = undefined;
   registering = undefined;
   registeredAt = undefined;
   await current?.handler.stop();
@@ -146,7 +193,7 @@ export const checkServiceAccountKey = async (key: {
   private_key: string;
 }): Promise<void> => {
   const { handler } = await ensureStarted();
-  const instanceId = `${INSTANCE_PREFIX_PROBE}${randomUUID()}`;
+  const instanceId = probeInstanceId();
   try {
     try {
       await handler.addTemplateClient("google", {

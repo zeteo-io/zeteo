@@ -185,6 +185,26 @@ describe("readSpreadsheet", () => {
     });
   });
 
+  it("reads a 500-column grid in chunks of 400 rows", async () => {
+    getSpreadsheet.mockResolvedValueOnce(
+      meta([{ sheetId: 1, title: "Wide", index: 0, rows: 1000, cols: 500 }])
+    );
+    getSpreadsheet
+      .mockResolvedValueOnce(chunk(0, [[str("a")], [str("1")]]))
+      .mockResolvedValue(chunk(0, []));
+    const result = await readSpreadsheet("id", {
+      maxRows: 100_000,
+      maxColumns: 500,
+    });
+    const rows = await collect(result.tabs[0]!.rows);
+    expect(rows).toHaveLength(2);
+    expect(getSpreadsheet.mock.calls.slice(1).map((c) => c[2].ranges)).toEqual([
+      ["'Wide'!A1:SF400"],
+      ["'Wide'!A401:SF800"],
+      ["'Wide'!A801:SF1000"],
+    ]);
+  });
+
   it("stops at the grid's last row without asking for more", async () => {
     getSpreadsheet.mockResolvedValueOnce(
       meta([{ sheetId: 1, title: "Full", index: 0, rows: 5000, cols: 1 }])

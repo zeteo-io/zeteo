@@ -10,6 +10,8 @@ const readGoogleStamp = vi.fn();
 const start = vi.fn(async () => undefined);
 const stop = vi.fn(async () => undefined);
 const getLoadedClients = vi.fn(() => [] as Array<{ name: string }>);
+/** What the mocked handler reports; dianemo stops itself on SIGTERM, SIGINT or SIGHUP. */
+const handlerState = { status: "started" as "started" | "stopped" };
 
 vi.mock("@dianemo/core", () => ({
   default: class {
@@ -21,6 +23,7 @@ vi.mock("@dianemo/core", () => ({
     start = start;
     stop = stop;
     getLoadedClients = getLoadedClients;
+    getMetadata = () => ({ status: handlerState.status });
   },
   buildClientName: (_: string, o: { instanceId: string }) =>
     `google:_:${o.instanceId}`,
@@ -55,6 +58,7 @@ describe("googleClient", () => {
   beforeEach(async () => {
     await stopGoogleHandler();
     vi.clearAllMocks();
+    handlerState.status = "started";
   });
 
   it("re-registers the template after the connection changes, and not before", async () => {
@@ -98,15 +102,42 @@ describe("googleClient", () => {
     });
   });
 
-  it("sweeps leftover key-check clients when it starts, and no other client", async () => {
+  it("sweeps key-check clients older than 5 minutes when it starts, and no other client", async () => {
+    const old = `validate-${Date.now() - 6 * 60_000}-abc`;
+    const fresh = `validate-${Date.now() - 60_000}-def`;
     getLoadedClients.mockReturnValueOnce([
-      { name: "google:_:validate-abc" },
+      { name: `google:_:${old}` },
+      { name: `google:_:${fresh}` },
       { name: "google:_:main" },
     ]);
     setConnection(new Date(1000));
     await googleClient();
     expect(removeTemplateClient).toHaveBeenCalledTimes(1);
-    expect(removeTemplateClient).toHaveBeenCalledWith("google", "validate-abc");
+    expect(removeTemplateClient).toHaveBeenCalledWith("google", old);
+  });
+
+  it("starts a new handler when dianemo stopped the last one on a signal", async () => {
+    setConnection(new Date(1000));
+    await googleClient();
+    handlerState.status = "stopped";
+    await googleClient();
+    expect(start).toHaveBeenCalledTimes(2);
+    expect(addTemplateClient).toHaveBeenCalledTimes(2);
+  });
+
+  it("a registration that a stop overtook does not count as registered", async () => {
+    setConnection(new Date(1000));
+    let release!: () => void;
+    addTemplateClient.mockImplementationOnce(
+      () => new Promise<undefined>((r) => (release = () => r(undefined)))
+    );
+    const first = googleClient();
+    await vi.waitFor(() => expect(addTemplateClient).toHaveBeenCalled());
+    await stopGoogleHandler();
+    release();
+    await first;
+    await googleClient();
+    expect(addTemplateClient).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -114,6 +145,7 @@ describe("stopGoogleHandler", () => {
   beforeEach(async () => {
     await stopGoogleHandler();
     vi.clearAllMocks();
+    handlerState.status = "started";
   });
 
   it("is a no-op when the handler never started", async () => {
@@ -141,12 +173,27 @@ describe("checkServiceAccountKey", () => {
   beforeEach(async () => {
     await stopGoogleHandler();
     vi.clearAllMocks();
+    handlerState.status = "started";
   });
 
   it("accepts a key whose sign-in succeeded and whose probe Google answered 403/404", async () => {
     getSpreadsheet.mockRejectedValue(failure("GGL_0009"));
     await expect(checkServiceAccountKey(key)).resolves.toBeUndefined();
     expect(removeTemplateClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("names its probe client validate-<epoch ms>-<uuid>", async () => {
+    getSpreadsheet.mockRejectedValue(failure("GGL_0009"));
+    const before = Date.now();
+    await checkServiceAccountKey(key);
+    const [, { instanceId }] = addTemplateClient.mock.calls[0] as unknown as [
+      string,
+      { instanceId: string },
+    ];
+    const match = /^validate-(\d+)-[0-9a-f-]{36}$/.exec(instanceId);
+    expect(match).not.toBeNull();
+    expect(Number(match![1])).toBeGreaterThanOrEqual(before);
+    expect(Number(match![1])).toBeLessThanOrEqual(Date.now());
   });
 
   it("rejects a key Google's sign-in refused", async () => {
