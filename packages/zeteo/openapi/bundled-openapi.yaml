@@ -2003,7 +2003,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `too_many_tables`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+          description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `malformed_csv`, `malformed_xlsx` or `empty_file`
           content:
             application/json:
               schema:
@@ -2022,7 +2022,7 @@ paths:
         and needs `zeteo.sources.read` (`403 forbidden` without). Archived (deleted) file sources
         are left out.
 
-        **Required permissions:** `zeteo.data.read`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: listFileSources
       parameters:
         - name: scope
@@ -2101,14 +2101,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '413':
-          description: Payload too large - `file_too_large`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         '422':
-          description: Unprocessable - `cast_failed`, or `invalid_request` with `issues`
+          description: Unprocessable - `cast_failed` (a column's values do not fit the type forced on it; names the column and the first rows)
           content:
             application/json:
               schema:
@@ -2129,9 +2123,7 @@ paths:
         - File sources
       summary: Get a file source
       description: |
-        The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`. (A holder of `zeteo.sources.read` may also read it.) `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-
-        **Required permissions:** `zeteo.data.read`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). Reading needs the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.read`; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: getFileSource
       responses:
         '200':
@@ -2145,7 +2137,11 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -2159,7 +2155,7 @@ paths:
         `PATCH /v1/sources/{sourceId}`, which accepts only limit fields for one.) A
         `zeteo.file_source.updated` audit entry is written.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: updateFileSource
       requestBody:
         required: true
@@ -2181,7 +2177,17 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `source_archived` (the file source is deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -2194,7 +2200,7 @@ paths:
         Archives the source and drops its stored data. Catalogue rows stay, marked missing. A
         `zeteo.file_source.deleted` audit entry is written.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: deleteFileSource
       responses:
         '204':
@@ -2204,7 +2210,17 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `source_archived` (the file source is deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -2224,7 +2240,7 @@ paths:
         Loads more staged tables into the file source, each with an owner grant. A table name the
         source already has is `409 name_taken`.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: addFileSourceTables
       requestBody:
         required: true
@@ -2246,15 +2262,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
-        '409':
-          description: Conflict - `name_taken` or `quota_exceeded`
+          description: Not found - `file_source_not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '413':
-          description: Payload too large - `file_too_large`
+        '409':
+          description: Conflict - `source_archived` (the file source is deleted), `name_taken` or `quota_exceeded`
           content:
             application/json:
               schema:
@@ -2287,7 +2301,7 @@ paths:
         `missing_since`. The swap is one transaction, so a reader sees the old data or the new,
         never an empty or partial table. A `zeteo.file_source.reuploaded` audit entry is written.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: reuploadFileSourceTable
       requestBody:
         required: true
@@ -2309,15 +2323,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
-        '409':
-          description: Conflict - `quota_exceeded`
+          description: Not found - `file_source_not_found`, `staging_not_found` (expired, missing or someone else's), or `file_sources_not_configured`, or `not_found` (no such table in the source)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        '413':
-          description: Payload too large - `file_too_large`
+        '409':
+          description: Conflict - `source_archived` (the file source is deleted), `quota_exceeded`
           content:
             application/json:
               schema:
@@ -2343,7 +2355,7 @@ paths:
       description: |
         Drops the table's data; its catalogue row stays, marked missing.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: deleteFileSourceTable
       responses:
         '204':
@@ -2353,7 +2365,17 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`, or `not_found` (no such table in the source)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `source_archived` (the file source is deleted)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -2380,7 +2402,7 @@ paths:
         Changes a column's type (the data is cast; values that do not fit are `422 cast_failed`,
         naming the column and the first rows), its name, or its description.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: updateFileSourceColumn
       requestBody:
         required: true
@@ -2402,9 +2424,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`, or `not_found` (no such table or column)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `name_taken`
+          description: Conflict - `source_archived` (the file source is deleted), `name_taken`
           content:
             application/json:
               schema:
@@ -2436,7 +2462,7 @@ paths:
         ordinary `all_columns` grant unless `keep_access` is false. The new owner's quota must fit
         the source (`409 quota_exceeded`). A `zeteo.file_source.transferred` audit entry is written.
 
-        **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`.
+        **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
       operationId: transferFileSource
       requestBody:
         required: true
@@ -2462,9 +2488,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          $ref: '#/components/responses/NotFoundResponse'
+          description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `quota_exceeded`
+          description: Conflict - `source_archived` (the file source is deleted), `quota_exceeded`
           content:
             application/json:
               schema:

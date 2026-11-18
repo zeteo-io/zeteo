@@ -5,9 +5,7 @@
     tags: [File sources]
     summary: Get a file source
     description: |
-      The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`. (A holder of `zeteo.sources.read` may also read it.) `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
-
-      **Required permissions:** `zeteo.data.read`.
+      **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). Reading needs the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.read`; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: getFileSource
     responses:
       '200':
@@ -18,7 +16,12 @@
               $ref: '../../components/file-sources/schemas.yaml#/FileSource'
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
-      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '404':
+        description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
   patch:
@@ -29,7 +32,7 @@
       `PATCH /v1/sources/{sourceId}`, which accepts only limit fields for one.) A
       `zeteo.file_source.updated` audit entry is written.
 
-      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+      **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: updateFileSource
     requestBody:
       required: true
@@ -47,7 +50,18 @@
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
-      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '404':
+        description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `source_archived` (the file source is deleted)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
   delete:
@@ -57,13 +71,24 @@
       Archives the source and drops its stored data. Catalogue rows stay, marked missing. A
       `zeteo.file_source.deleted` audit entry is written.
 
-      **Required permissions:** `zeteo.file_sources.write` and `zeteo.data.read`. Without a permission, `403 forbidden`. The owner, or a holder of `zeteo.sources.write`; anyone else gets `404 not_found`.
+      **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` to reach the route (`403 forbidden` without). Only the owner (with `zeteo.file_sources.write`) or a holder of `zeteo.sources.write` may change it; anyone else, and an id that is not a file source, gets `404 file_source_not_found`. An archived (deleted) file source is `409 source_archived`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: deleteFileSource
     responses:
       '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
-      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '404':
+        description: Not found - `file_source_not_found`, or `file_sources_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `source_archived` (the file source is deleted)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503':
         description: Service unavailable - `file_source_busy` (another load of this source is running; retry), or `service_unavailable`

@@ -51,7 +51,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `too_many_tables`, `malformed_csv`, `malformed_xlsx` or `empty_file`
+        description: Unprocessable - `unsupported_encoding`, `row_too_long`, `too_many_rows`, `too_many_columns`, `malformed_csv`, `malformed_xlsx` or `empty_file`
         content:
           application/json:
             schema:

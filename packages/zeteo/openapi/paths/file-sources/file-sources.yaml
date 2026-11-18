@@ -7,7 +7,7 @@
       and needs `zeteo.sources.read` (`403 forbidden` without). Archived (deleted) file sources
       are left out.
 
-      **Required permissions:** `zeteo.data.read`. `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
+      **Required permissions:** `zeteo.data.read`, and `zeteo.file_sources.write` or `zeteo.sources.read` (`403 forbidden` without). `404 file_sources_not_configured` when `FILE_SOURCES_READER_URL` is unset.
     operationId: listFileSources
     parameters:
       - name: scope
@@ -72,14 +72,8 @@
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
-      '413':
-        description: Payload too large - `file_too_large`
-        content:
-          application/json:
-            schema:
-              $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: Unprocessable - `cast_failed`, or `invalid_request` with `issues`
+        description: Unprocessable - `cast_failed` (a column's values do not fit the type forced on it; names the column and the first rows)
         content:
           application/json:
             schema:
