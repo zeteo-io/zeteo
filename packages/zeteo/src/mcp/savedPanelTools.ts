@@ -49,7 +49,7 @@ const forModel = <T extends { owner: { id: string; name: string | null } }>(
 export interface PreviewRun {
   body: Record<string, unknown>;
   savedQuery?: { id: string; sourceId: string };
-  /** A metric query given a time column other than "range": not filtered, and reported as a problem. */
+  /** A metric query given a time column other than "range", or a table query given "range": not filtered, and reported as a problem. */
   wrongTimeColumn?: boolean;
 }
 
@@ -75,7 +75,8 @@ export const previewRun = async (
     run = { body: found.body, savedQuery: found.savedQuery };
   }
   if (input.time_column !== undefined && input.time_range !== undefined) {
-    if (isMetricBody(run.body) && input.time_column !== RANGE_TIME_COLUMN) {
+    const isRange = input.time_column === RANGE_TIME_COLUMN;
+    if (isMetricBody(run.body) ? !isRange : isRange) {
       run.wrongTimeColumn = true;
       return run;
     }

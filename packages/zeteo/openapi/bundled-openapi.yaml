@@ -10096,9 +10096,9 @@ components:
         `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
         takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
         "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
-        `isNull` (true or false). The comparison operators above (not `in`, `notIn` or `between`) also
-        take `{ "measure": name }`, a fixed measure of any table, as their value (`{ "total": { "gt": {
-        "measure": "avg_order_value" } } }`); a measure that is not fixed is `invalid_operator`. Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+        `isNull` (true or false). The comparison operators above, `between` included (not `in` or
+        `notIn`), also take `{ "measure": name }`, a fixed measure of any table, as a value (`{ "total":
+        { "gt": { "measure": "avg_order_value" } } }`); a measure that is not fixed is `invalid_value`. Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
         a column with one of those names cannot be filtered on directly. In `having`, the keys are
         the names of aggregate select items.
       additionalProperties: true

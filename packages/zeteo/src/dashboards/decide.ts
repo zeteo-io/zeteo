@@ -175,11 +175,13 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
           r.timeColumn,
           ctx.timeRange ?? CHECK_RANGE
         );
-  // A metric query follows the range through `time_column: "range"` only.
+  // A metric query follows the range through `time_column: "range"` only,
+  // and a table query never takes "range".
   const wrongForMetrics =
     r.timeColumn !== null &&
-    r.timeColumn !== RANGE_TIME_COLUMN &&
-    isMetricBody(savedQuery.query);
+    (isMetricBody(savedQuery.query)
+      ? r.timeColumn !== RANGE_TIME_COLUMN
+      : r.timeColumn === RANGE_TIME_COLUMN);
   const columns = wrongForMetrics
     ? null
     : planColumns(ctx.access, savedQuery.sourceId, query, catalog);
