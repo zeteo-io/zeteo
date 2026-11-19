@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 97 operations as the description", () => {
+  it("lists the same 103 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(97);
-    expect(Object.keys(found)).toHaveLength(97);
+    expect(blocks).toBe(103);
+    expect(Object.keys(found)).toHaveLength(103);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -140,6 +140,31 @@ describe("operations against the API description", () => {
               table: "orders",
               formula: { sum: "total" },
             },
+          }),
+      ],
+      ["metrics.list", (c) => c.metrics.list(ID)],
+      [
+        "metrics.create",
+        (c) =>
+          c.metrics.create(ID, {
+            name: "m",
+            description: "d",
+            formula: { div: [{ measure: "a" }, { measure: "b" }] },
+          }),
+      ],
+      ["metrics.get", (c) => c.metrics.get(ID, ID2)],
+      ["metrics.update", (c) => c.metrics.update(ID, ID2, { name: "n" })],
+      ["metrics.delete", (c) => c.metrics.delete(ID, ID2)],
+      [
+        "metrics.preview",
+        (c) =>
+          c.metrics.preview(ID, {
+            metric: {
+              name: "m",
+              description: "d",
+              formula: { div: [{ measure: "a" }, { measure: "b" }] },
+            },
+            bucket: "month",
           }),
       ],
       ["measures.editors", (c) => c.measures.editors(ID)],

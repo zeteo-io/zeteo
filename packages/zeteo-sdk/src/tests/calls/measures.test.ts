@@ -13,6 +13,8 @@ const input: MeasureInput = {
   table: "orders",
   formula: { sum: "total" },
   where: { status: { eq: "paid" } },
+  fixed: false,
+  date_column: "created_at",
 };
 
 const measure: Measure = {
@@ -22,6 +24,8 @@ const measure: Measure = {
   table: "orders",
   formula: { sum: "total" },
   where: { status: { eq: "paid" } },
+  fixed: false,
+  date_column: "created_at",
   created_at: "2026-11-19T10:00:00.000Z",
   updated_at: "2026-11-19T10:00:00.000Z",
   usable: true,
@@ -92,13 +96,20 @@ describe("measures", () => {
       body: {
         error: "measure_in_use",
         error_description: "Other measures use this one",
-        dependents: ["aov"],
+        dependents: [
+          { kind: "measure", name: "aov" },
+          { kind: "metric", name: "cost_per_dollar" },
+        ],
       },
     }));
     const err = await t.client.measures.delete(SRC, MID).catch((e) => e);
     expect(err).toBeInstanceOf(ZeteoError);
     expect((err as ZeteoError).code).toBe("measure_in_use");
     expect((err as ZeteoError).status).toBe(409);
+    expect((err as ZeteoError).dependents).toEqual([
+      { kind: "measure", name: "aov" },
+      { kind: "metric", name: "cost_per_dollar" },
+    ]);
   });
 
   it("preview sends POST .../measures/preview and returns the query result", async () => {

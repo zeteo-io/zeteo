@@ -1,0 +1,94 @@
+/v1/sources/{sourceId}/metrics/{metricId}:
+  get:
+    tags: [Metrics]
+    summary: Get a metric
+    description: |
+      One metric in full, to a caller who may see it in full: those who see every metric
+      (`zeteo.sources.read`, or the owner of an upload source), and anyone whose catalogue holds
+      every measure it uses. Anyone else gets the `404 not_found` a metric that does not exist gives.
+
+      **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+    operationId: getMetric
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MetricIdParam'
+    responses:
+      '200':
+        description: The metric
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Metric'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Metrics]
+    summary: Change a metric
+    description: |
+      Changes any of the create fields, at least one. An editor may change only a metric they can
+      see in full (else the 404 of a metric that does not exist for them). The changed metric is
+      checked as on create. Saved queries that use it do not block a change; `used_by` says how
+      many there are. A `zeteo.metric.updated` audit entry is written.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+      **Errors:** `400` as on create; `404 not_found`; `409 measure_name_taken`, `409 source_archived`.
+    operationId: updateMetric
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MetricIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/UpdateMetricRequest'
+    responses:
+      '200':
+        description: The metric
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Metric'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues` (including a body with no field); or the
+          formula does not plan, with the query error code of the problem and the `path` at fault
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/InvalidMeasureError'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Metrics]
+    summary: Delete a metric
+    description: |
+      Deletes a metric the caller can see in full. Saved queries that use it do not block a
+      delete. A `zeteo.metric.deleted` audit entry is written.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+      **Errors:** `404 not_found`; `409 source_archived`.
+    operationId: deleteMetric
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MetricIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

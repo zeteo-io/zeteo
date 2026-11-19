@@ -49,10 +49,29 @@ MeasureUsedBy:
     saved_queries: { type: integer, minimum: 0, description: 'Saved queries that use it; they do not block a change, and fail with `not_found_or_not_accessible` once it no longer fits' }
     panels: { type: integer, minimum: 0, description: Dashboard panels that show one of those saved queries }
 
+MeasureFixed:
+  type: boolean
+  default: false
+  description: |
+    A fixed measure is one value that ignores the query's filters and grouping (a target, the
+    business days of the month): it may be a comparison value (`{ "measure": name }`) or appear
+    anywhere in an expression, inside an aggregate too, and in a metric query it reads no periods.
+    At most 10 fixed-measure subqueries to a query.
+
+MeasureDateColumn:
+  type: [string, 'null']
+  minLength: 1
+  maxLength: 256
+  description: |
+    The column a metric query's `bucket` and `range` apply to: a path from the home table,
+    through to-one relations, to a date or timestamp column; null for none (the measure then
+    cannot be bucketed or ranged, `measure_has_no_date`). Checked against the editor's catalogue
+    (`invalid_operator` for a column that is not a date, at path `["date_column"]`).
+
 Measure:
   type: object
   description: A measure in full
-  required: [id, name, description, table, formula, where, created_at, updated_at, usable]
+  required: [id, name, description, table, formula, where, fixed, date_column, created_at, updated_at, usable]
   properties:
     id: { type: string, format: uuid }
     name: { $ref: '#/MeasureName' }
@@ -64,6 +83,8 @@ Measure:
         - { $ref: '#/MeasureWhere' }
         - { type: 'null' }
       description: The measure's filter; null when it has none
+    fixed: { $ref: '#/MeasureFixed' }
+    date_column: { $ref: '#/MeasureDateColumn' }
     created_at: { type: string, format: date-time }
     updated_at: { type: string, format: date-time }
     usable: { type: boolean, description: "Whether it plans against the caller's own visible catalogue, so the caller can use it in a query" }
@@ -119,12 +140,14 @@ CreateMeasureRequest:
       oneOf:
         - { $ref: '#/MeasureWhere' }
         - { type: 'null' }
+    fixed: { $ref: '#/MeasureFixed' }
+    date_column: { $ref: '#/MeasureDateColumn' }
 
 UpdateMeasureRequest:
   type: object
   additionalProperties: false
   minProperties: 1
-  description: 'Any of a measure''s fields, at least one. `where: null` removes its filter.'
+  description: 'Any of a measure''s fields, at least one. `where: null` removes its filter and `date_column: null` its date column.'
   properties:
     name: { $ref: '#/MeasureName' }
     description: { $ref: '#/MeasureDescription' }
@@ -134,6 +157,8 @@ UpdateMeasureRequest:
       oneOf:
         - { $ref: '#/MeasureWhere' }
         - { type: 'null' }
+    fixed: { $ref: '#/MeasureFixed' }
+    date_column: { $ref: '#/MeasureDateColumn' }
 
 PreviewMeasureRequest:
   type: object
@@ -183,7 +208,7 @@ ReplaceMeasureEditorsRequest:
       items: { $ref: '../saved-queries/schemas.yaml#/SharePrincipal' }
 
 InvalidMeasureError:
-  description: The body of a `400`. For a measure that does not plan its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]` or `["table"]`).
+  description: The body of a `400`. For a measure that does not plan its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]`, `["table"]` or `["date_column"]`; `["formula"]` for a metric).
   allOf:
     - $ref: '../responses.yaml#/Error'
     - type: object
@@ -193,12 +218,97 @@ InvalidMeasureError:
           items: { type: string }
 
 MeasureInUseError:
-  description: The body of a `409`; `dependents` is present on `measure_in_use` only (`measure_name_taken` and `source_archived` carry none)
+  description: The body of a `409`; `dependents` is present on `measure_in_use` only (`measure_name_taken` and `source_archived` carry none), measures first
   allOf:
     - $ref: '../responses.yaml#/Error'
     - type: object
       properties:
         dependents:
           type: array
-          description: The names of the measures that use this one and would break
-          items: { type: string }
+          description: The measures and metrics that use this one and would break
+          items:
+            type: object
+            required: [kind, name]
+            properties:
+              kind: { type: string, enum: [measure, metric] }
+              name: { type: string }
+
+MetricFormula:
+  description: |
+    An expression whose leaves are numbers and `{ "measure": name }` (a measure of any table of
+    the source, at least one), combined only by `add`, `sub`, `mul`, `div`, `abs` and `round` and
+    the calendar functions over date literals (`businessDaysInMonth` and the like). No columns,
+    `case`, aggregates, text or other metrics. Planned against the editor's own catalogue.
+  $ref: '../queries/schemas.yaml#/CalcExpr'
+
+CreateMetricRequest:
+  type: object
+  additionalProperties: false
+  required: [name, description, formula]
+  properties:
+    name: { $ref: '#/MeasureName' }
+    description: { $ref: '#/MeasureDescription' }
+    formula: { $ref: '#/MetricFormula' }
+
+UpdateMetricRequest:
+  type: object
+  additionalProperties: false
+  minProperties: 1
+  description: Any of a metric's fields, at least one
+  properties:
+    name: { $ref: '#/MeasureName' }
+    description: { $ref: '#/MeasureDescription' }
+    formula: { $ref: '#/MetricFormula' }
+
+Metric:
+  type: object
+  description: A metric in full
+  required: [id, name, description, formula, created_at, updated_at, usable]
+  properties:
+    id: { type: string, format: uuid }
+    name: { $ref: '#/MeasureName' }
+    description: { $ref: '#/MeasureDescription' }
+    formula: { $ref: '#/MetricFormula' }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+    usable: { type: boolean, description: "Whether every measure it uses is in the caller's own visible catalogue, so the caller can ask for it" }
+    used_by: { $ref: '#/MeasureUsedBy', description: Present for measure editors and for those who see every metric }
+    broken:
+      oneOf:
+        - { $ref: '#/MeasureBroken' }
+        - { type: 'null' }
+      description: Present for those who see every metric (`zeteo.sources.read`, or the upload source's owner); null when the metric plans cleanly
+
+RedactedMetric:
+  type: object
+  description: A metric an editor cannot fully see, because a measure it uses is not theirs. Never its formula, which would name measures they cannot see.
+  required: [name, description, usable]
+  properties:
+    name: { $ref: '#/MeasureName' }
+    description: { $ref: '#/MeasureDescription' }
+    usable: { type: boolean, const: false }
+
+ListMetricsResponse:
+  type: object
+  required: [data, can_edit, can_manage_editors]
+  properties:
+    can_edit: { type: boolean, description: 'Whether the caller may create, change and delete the source''s metrics now: `zeteo.measures.write`, an editor of the source, and the source not archived' }
+    can_manage_editors: { type: boolean, description: Whether the caller may replace the source's editor list now }
+    data:
+      type: array
+      description: A `Metric`, or a `RedactedMetric` (told apart by its `id`, which a redacted one lacks)
+      items:
+        anyOf:
+          - { $ref: '#/Metric' }
+          - { $ref: '#/RedactedMetric' }
+
+PreviewMetricRequest:
+  type: object
+  additionalProperties: false
+  required: [metric]
+  properties:
+    metric:
+      $ref: '#/CreateMetricRequest'
+      description: A draft metric, not saved. A draft of the name of a stored metric stands in its place for the run.
+    bucket: { type: string, enum: [day, week, month, quarter, year, fiscal_quarter, fiscal_year] }
+    range: { $ref: '../queries/schemas.yaml#/MetricQuery/properties/range' }

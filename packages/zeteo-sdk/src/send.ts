@@ -1,10 +1,14 @@
 import type { DianemoResponse, RequestConfig } from "@dianemo/core";
 import { OPERATIONS, type OperationId } from "./operations.js";
-import { QueryRefusedError, ZeteoError } from "./errors.js";
 import type { ClientNames } from "./template.js";
 import type RequestHandler from "@dianemo/core";
 import type { Readable } from "node:stream";
 import { buildPath } from "./paths.js";
+import {
+  QueryRefusedError,
+  ZeteoError,
+  type MeasureDependent,
+} from "./errors.js";
 
 export interface Transport {
   handler: RequestHandler;
@@ -89,6 +93,9 @@ export function fromResponse(response: {
     findings: Array.isArray(body.findings) ? body.findings : undefined,
     problems: Array.isArray(body.problems)
       ? (body.problems as { setting: string; problem: string }[])
+      : undefined,
+    dependents: Array.isArray(body.dependents)
+      ? (body.dependents as MeasureDependent[])
       : undefined,
   };
   const message =
