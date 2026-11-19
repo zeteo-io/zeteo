@@ -1,0 +1,73 @@
+/v1/sources/{sourceId}/tables/{tableId}/merged:
+  put:
+    tags: [Catalogue]
+    summary: Replace a merged table's definition
+    description: |
+      Replaces the members, labels, label column, name and included columns of a merged table.
+      The merged table keeps its id and its grants; a column keeps its id and grants by the member
+      column it reads (`from_name`), and one no longer included is marked missing. A member that
+      is missing may stay a member of it (it contributes no rows); another table must be a live
+      table that is not merged. A table that is not a merged table of the source is `404 not_found`.
+
+      A merged table is a view of an upload source that stacks two or more of its other tables
+      (its members; tables that are not merged themselves, whether from files or spreadsheets). A
+      row of it is a row of one member, with `label_column` holding that member's `label`; the
+      other columns are the members' columns matched by name (`from_name`), each included one
+      under the name `name` and typed from its members (`text` where they disagree), a member
+      without it giving null. It is a table like any other: it is granted, queried and joined, its
+      `row_count` is the members' rows, and its view is made again whenever a member changes.
+      The owner of the source gets an owner grant on a new one. A `zeteo.source.merged_table_saved`
+      audit entry records the members and the number of columns (never any cell data).
+
+      Checks, each `400 invalid_request` naming its field in `issues`: `name` and `label_column`
+      are lowercase names; at least two members, each once, with a label of 1 to 100 characters
+      different from the others'; every column's `from_name` given once, the included ones with
+      names that differ from each other and from `label_column`, at least one included, and a
+      `from_name` that some member has.
+
+      **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+      `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
+      not, gets the same `403 forbidden`.
+
+      **Upload sources only:** a database source is `409 not_an_upload_source`; a deleted one is
+      `409 source_archived`.
+    operationId: putMergedTable
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/TableIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/catalog/schemas.yaml#/MergedTableRequest'
+    responses:
+      '200':
+        description: The merged table after the change
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/Table'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `not_found` (no such source, or merged table in it, or a member that is not a table of the source), or `uploads_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `not_an_upload_source`, `source_archived` or `name_taken` (a table of the source has the name)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503':
+        description: Service unavailable - `upload_source_busy` (the source's load lock could not be taken in time; retry after `Retry-After`), or `service_unavailable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'

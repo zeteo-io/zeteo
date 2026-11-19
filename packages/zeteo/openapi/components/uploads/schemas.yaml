@@ -74,7 +74,7 @@ TableCorrection:
 
 CreateUploadSourceRequest:
   type: object
-  description: An upload source, made from the caller's staging
+  description: An upload source, made from the caller's staging of a file or of a spreadsheet (`POST /v1/uploads`, `POST /v1/uploads/links`)
   additionalProperties: false
   required: [type, staging_id, name, tables]
   properties:
@@ -89,6 +89,7 @@ CreateUploadSourceRequest:
       maxItems: 100
       description: The staged tables to load, with any corrections
       items: { $ref: '#/TableCorrection' }
+    sync_interval_minutes: { type: integer, minimum: 15, maximum: 1440, default: 60, description: 'Minutes between syncs; used once the source has Google Sheets tables' }
 
 AddTablesRequest:
   type: object
@@ -147,34 +148,10 @@ SheetsUploadResponse:
             title: { type: string }
 
 LinkRequest:
-  description: A spreadsheet to stage, named by its link or by an existing Sheets source
-  oneOf:
-    - type: object
-      additionalProperties: false
-      required: [url]
-      properties:
-        url: { type: string, minLength: 1, maxLength: 2048, description: 'The link from the sheet''s address bar or Share dialog, or the bare spreadsheet id' }
-    - type: object
-      additionalProperties: false
-      required: [source_id]
-      properties:
-        source_id: { type: string, format: uuid, description: 'A Google Sheets source the caller owns (or, with `zeteo.sources.write`, any): stages its spreadsheet again, to add tabs' }
-
-CreateSheetsSourceRequest:
   type: object
-  description: A Google Sheets source, made from the caller's staging of a spreadsheet (`POST /v1/uploads/links`)
+  description: A spreadsheet to stage, by its link or id; with `source_id`, to add its tabs to an upload source
   additionalProperties: false
-  required: [type, staging_id, name, tables]
+  required: [url]
   properties:
-    type: { type: string, const: google-sheets }
-    staging_id: { type: string, format: uuid }
-    name: { type: string, minLength: 1, maxLength: 255 }
-    description: { type: string, maxLength: 500, description: 'What the source holds, for the people and the AI that query it; trimmed' }
-    slug: { type: string, pattern: '^[a-z][a-z0-9-]{1,62}$', description: Generated from the name when omitted }
-    sync_interval_minutes: { type: integer, minimum: 15, maximum: 1440, default: 60, description: Minutes between syncs }
-    tables:
-      type: array
-      minItems: 1
-      maxItems: 100
-      description: The staged tabs to load, with any corrections
-      items: { $ref: '#/TableCorrection' }
+    url: { type: string, minLength: 1, maxLength: 2048, description: 'The link from the sheet''s address bar or Share dialog, or the bare spreadsheet id' }
+    source_id: { type: string, format: uuid, description: 'An upload source the caller owns (or, with `zeteo.sources.write`, any): the staging is for new tables of it, and the source''s own claim on the spreadsheet is no conflict' }

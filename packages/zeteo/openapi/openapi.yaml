@@ -36,12 +36,14 @@ info:
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
     as a source they may not see does. See `docs/uploads.md`.
 
-    A Google Sheets source (`type: google-sheets`) is an upload source whose tables are the tabs
-    of a Google spreadsheet, kept current by a sync. Zeteo reads Google as one service account, set
-    with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a Viewer.
-    Its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a spreadsheet with
-    `POST /v1/uploads/links`, creates the source, adds tabs, changes its sync interval and runs
-    Sync now (`POST /v1/sources/{sourceId}/refresh`) through the same routes as an upload source.
+    An upload source's tables each come from a file, a tab of a Google spreadsheet or a merge
+    (the table's `origin`); one source may hold all three. Zeteo reads Google as one service
+    account, set with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a
+    Viewer. The source's owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a
+    spreadsheet with `POST /v1/uploads/links` (naming `source_id` to add its tabs to a source
+    that exists), creates the source or adds tables, changes its sync interval, runs Sync now
+    (`POST /v1/sources/{sourceId}/refresh`) and merges tables
+    (`POST /v1/sources/{sourceId}/merged-tables`) through the same routes as any upload source.
 
     ## Sources
 
@@ -176,6 +178,12 @@ paths:
     $ref: './paths/catalog/tables.yaml#/~1v1~1sources~1{sourceId}~1tables'
   /v1/sources/{sourceId}/tables/{tableId}:
     $ref: './paths/catalog/table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}'
+  /v1/sources/{sourceId}/merged-tables:
+    $ref: './paths/catalog/merged-tables.yaml#/~1v1~1sources~1{sourceId}~1merged-tables'
+  /v1/sources/{sourceId}/merged-tables/columns:
+    $ref: './paths/catalog/merged-columns.yaml#/~1v1~1sources~1{sourceId}~1merged-tables~1columns'
+  /v1/sources/{sourceId}/tables/{tableId}/merged:
+    $ref: './paths/catalog/merged-table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}~1merged'
   /v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}:
     $ref: './paths/catalog/column.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}~1columns~1{columnId}'
   /v1/sources/{sourceId}/relations:
@@ -427,12 +435,20 @@ components:
       $ref: './components/uploads/schemas.yaml#/SheetsUploadResponse'
     LinkRequest:
       $ref: './components/uploads/schemas.yaml#/LinkRequest'
-    CreateSheetsSourceRequest:
-      $ref: './components/uploads/schemas.yaml#/CreateSheetsSourceRequest'
     GoogleConnection:
       $ref: './components/connections/schemas.yaml#/GoogleConnection'
     PutGoogleConnectionRequest:
       $ref: './components/connections/schemas.yaml#/PutGoogleConnectionRequest'
+    TableOrigin:
+      $ref: './components/catalog/schemas.yaml#/TableOrigin'
+    TableSyncError:
+      $ref: './components/catalog/schemas.yaml#/TableSyncError'
+    MergedTableRequest:
+      $ref: './components/catalog/schemas.yaml#/MergedTableRequest'
+    MergedDetail:
+      $ref: './components/catalog/schemas.yaml#/MergedDetail'
+    MergedColumnsResponse:
+      $ref: './components/catalog/schemas.yaml#/MergedColumnsResponse'
     SyncSummary:
       $ref: './components/catalog/schemas.yaml#/SyncSummary'
     ColumnCorrection:

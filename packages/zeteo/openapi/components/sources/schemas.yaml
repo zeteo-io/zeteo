@@ -1,7 +1,7 @@
 SourceType:
   type: string
-  enum: [postgres, azure-sql, upload, google-sheets]
-  description: The kind of source. `upload` is an upload source, whose data Zeteo stores from uploaded files. `google-sheets` is a Google Sheets source, stored the same way and synced from a spreadsheet on a schedule.
+  enum: [postgres, azure-sql, upload]
+  description: 'The kind of source. `upload` is an upload source, whose data Zeteo stores: from uploaded files, from tabs of Google spreadsheets kept current by a sync, and merged tables over those.'
 
 PostgresSettings:
   type: object
@@ -73,7 +73,7 @@ LoginFinding:
 
 Source:
   type: object
-  description: A registered database, an upload source or a Google Sheets source. `settings` is the redacted form; it is null for an upload or Sheets source and when the stored settings cannot be decrypted.
+  description: A registered database or an upload source. `settings` is the redacted form; it is null for an upload source and when the stored settings cannot be decrypted.
   required:
     - id
     - slug
@@ -125,14 +125,14 @@ Source:
     owner_id:
       type: [string, 'null']
       format: uuid
-      description: An upload or Sheets source's owner; null for a database source
+      description: An upload source's owner; null for a database source
     status:
       type: string
       enum: [active, unreachable]
     last_refreshed_at:
       type: [string, 'null']
       format: date-time
-      description: A database source's last catalogue refresh; an upload or Sheets source's last load of any of its tables (null before one), which for a Sheets source is its last good sync.
+      description: A database source's last catalogue refresh; an upload source's last load of any of its tables (null before one); with live Sheets tables, the oldest good sync among them.
     size_bytes:
       type: [integer, 'null']
       minimum: 0
@@ -152,30 +152,29 @@ Source:
       description: How many people and groups its tables are granted to (distinct principals of its grants; an upload source's owner grants not counted)
     created_at: { type: string, format: date-time }
     archived_at: { type: [string, 'null'], format: date-time }
-    sheet:
-      type: object
-      description: A Google Sheets source's spreadsheet; absent on any other type
-      required: [spreadsheet_id, url]
-      properties:
-        spreadsheet_id: { type: string }
-        url: { type: string, format: uri }
     sync:
       type: object
-      description: A Google Sheets source's sync state; absent on any other type
-      required: [interval_minutes, last_attempt_at, last_error, stale]
+      description: |
+        An upload source with Google Sheets tables (those not removed): their sync state. Only in the
+        view of its owner or of `zeteo.sources.read`; absent otherwise and on any other source.
+      required: [interval_minutes, last_attempt_at, failing, stale]
       properties:
         interval_minutes: { type: integer, minimum: 15, maximum: 1440 }
-        last_attempt_at: { type: [string, 'null'], format: date-time, description: 'The last sync tried, good or not' }
-        last_error:
-          type: [object, 'null']
-          description: Why the last sync failed; null after a good one
-          required: [code, message]
-          properties:
-            code: { type: string, description: 'An error code such as `sheet_not_accessible`, `google_unavailable` or `sync_failed`' }
-            message: { type: string }
+        last_attempt_at: { type: [string, 'null'], format: date-time, description: 'The last sync tried, good or not; null before one' }
+        failing:
+          type: array
+          description: The Sheets tables whose last sync failed; empty when every one is good
+          items:
+            type: object
+            required: [table_id, name, code, message]
+            properties:
+              table_id: { type: string, format: uuid }
+              name: { type: string }
+              code: { type: string, description: 'An error code such as `sheet_not_accessible`, `google_unavailable` or `sync_failed`' }
+              message: { type: string }
         stale:
           type: boolean
-          description: The last sync failed and the last good one (`last_refreshed_at`) is over 24 hours old or never happened
+          description: A Sheets table fails and has had no good sync for over 24 hours
 
 ListSourcesResponse:
   type: object
@@ -248,7 +247,7 @@ UpdateSourceRequest:
       uniqueItems: true
       items: { type: string, minLength: 1, maxLength: 63, description: 'At most 63 bytes, no control characters, no leading or trailing whitespace' }
     allow_writable_login: { type: boolean }
-    sync_interval_minutes: { type: integer, minimum: 15, maximum: 1440, description: 'A Google Sheets source only (`422 not_synced` on any other); minutes between syncs' }
+    sync_interval_minutes: { type: integer, minimum: 15, maximum: 1440, description: 'An upload source only (`422 not_synced` on a database source); minutes between syncs, used for its Google Sheets tables' }
     timeout_ms: { type: integer, minimum: 1000, maximum: 120000 }
     row_cap: { type: integer, minimum: 1, maximum: 50000 }
     max_joins: { type: integer, minimum: 1, maximum: 8, description: The most joins one query on this source may use }

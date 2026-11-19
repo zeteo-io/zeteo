@@ -5,26 +5,30 @@
     description: |
       Reads every tab of a Google spreadsheet into a staging, like `POST /v1/uploads` does a file,
       and returns the same preview plus the spreadsheet's id and title. Name the spreadsheet by
-      `url` (the link from its address bar or Share dialog, or its bare id) or, to add tabs to a
-      Sheets source, by `source_id`. The spreadsheet must be shared with the service account
-      (`GET /v1/connections/google`) as a Viewer. A staging is used by `POST /v1/sources` with
-      `type: google-sheets`, or by `POST /v1/sources/{sourceId}/tables` for a source's new tabs. It
-      expires one hour after creation and counts against `UPLOAD_MAX_STAGINGS` and the caller's
-      upload slots like a file (`429 too_many_stagings`, `too_many_uploads`).
+      `url` (the link from its address bar or Share dialog, or its bare id). The spreadsheet must
+      be shared with the service account (`GET /v1/connections/google`) as a Viewer. A staging is
+      used by `POST /v1/sources` with `type: upload`, or by `POST /v1/sources/{sourceId}/tables`
+      for an upload source's new tabs. It expires one hour after creation and counts against
+      `UPLOAD_MAX_STAGINGS` and the caller's upload slots like a file (`429 too_many_stagings`,
+      `too_many_uploads`).
 
-      With `source_id` the caller must own the source or hold `zeteo.sources.write`; a source that
-      is missing and one that is someone else's both answer `404 not_found`.
+      With `source_id` (and `url`) the staging is for tables to add to that upload source, which
+      may hold files, other spreadsheets and merged tables too: the caller must own the source or
+      hold `zeteo.sources.write`; a source that is missing and one that is someone else's both
+      answer `404 not_found`. The spreadsheet may already be the source's own (its claim is no
+      conflict); one another unarchived source reads is `409 sheet_in_use` with or without
+      `source_id`.
 
       **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read` (`403 forbidden`
       without).
 
       **Errors:** `404 uploads_not_configured` or `google_not_configured`, `404 not_found`,
       `409 sheet_in_use` (an unarchived source already reads this spreadsheet; says nothing of
-      whose), `409 not_a_sheets_source`, `409 source_archived`, `422 invalid_sheet_link`, `422
-      sheet_not_accessible` (not shared with the service account, or it does not exist), `422`
-      codes a file's limits give (`too_many_rows`, `too_many_columns`, `empty_file`),
-      `502 google_unavailable`, `502 google_sign_in_failed` (Google refused the stored key; an
-      admin should check it).
+      whose), `409 not_an_upload_source` (a database source named by `source_id`),
+      `409 source_archived`, `422 invalid_sheet_link`, `422 sheet_not_accessible` (not shared with
+      the service account, or it does not exist), `422` codes a file's limits give
+      (`too_many_rows`, `too_many_columns`, `empty_file`), `502 google_unavailable`,
+      `502 google_sign_in_failed` (Google refused the stored key; an admin should check it).
     operationId: createUploadFromLink
     requestBody:
       required: true
@@ -49,7 +53,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `sheet_in_use`, `not_a_sheets_source` or `source_archived`
+        description: Conflict - `sheet_in_use`, `not_an_upload_source` or `source_archived`
         content:
           application/json:
             schema:

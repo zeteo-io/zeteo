@@ -1,0 +1,56 @@
+/v1/sources/{sourceId}/merged-tables/columns:
+  get:
+    tags: [Catalogue]
+    summary: The columns tables would give a merged table
+    description: |
+      For the merged table editor: the union of the columns of the given tables, matched by name
+      and in order of first appearance, with the types the members give each (`type` is `text`
+      when they disagree), and a suggested label for each member (the part of its spreadsheet's
+      title or file's name the others do not share; the table names when titles repeat). A
+      missing table counts by the columns it last had. Pass each table as `member`, repeated:
+      `?member=<id>&member=<id>`, two to 100 of them, each a table of the source that is not
+      merged (`400 invalid_request` otherwise).
+
+      **Required permissions:** `zeteo.sources.read`, or the source's owner (holding
+      `zeteo.uploads.write` and `zeteo.data.read`); anyone else gets the same `403 forbidden`.
+
+      **Upload sources only:** a database source is `409 not_an_upload_source`;
+      `404 uploads_not_configured` while `UPLOADS_READER_URL` is unset.
+    operationId: getMergedColumns
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - name: member
+        in: query
+        required: true
+        description: A table of the source to merge; repeat the parameter for each (2 to 100)
+        style: form
+        explode: true
+        schema:
+          type: array
+          minItems: 2
+          maxItems: 100
+          items: { type: string, format: uuid }
+    responses:
+      '200':
+        description: The union of the members' columns and their suggested labels
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/catalog/schemas.yaml#/MergedColumnsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404':
+        description: Not found - `not_found`, or `uploads_not_configured`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '409':
+        description: Conflict - `not_an_upload_source`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

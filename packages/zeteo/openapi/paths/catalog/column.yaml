@@ -9,6 +9,10 @@
       for one the table has), or its description. The column keeps its id and grants. A
       `zeteo.source.updated` audit entry is written.
 
+      A merged table's column takes its type from its members: retyping one is `400
+      invalid_request`; rename or describe it here, and change what it reads with `PUT
+      /v1/sources/{sourceId}/tables/{tableId}/merged`.
+
       **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
       `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
       not, gets the same `403 forbidden`.
