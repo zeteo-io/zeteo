@@ -326,6 +326,62 @@ describe("postgres runQuery", () => {
     ]);
   });
 
+  it("computes a case: conditional sums and counts equal their filtered queries, and text cases return text", async () => {
+    const paid = { status: { eq: "paid" } };
+    const conditional = await run({
+      from: "orders",
+      select: [
+        {
+          sum: { case: { when: [{ if: paid, then: "total" }] } },
+          as: "paid",
+        },
+        {
+          count: { case: { when: [{ if: paid, then: 1 }] } },
+          as: "paid_orders",
+        },
+        {
+          countDistinct: {
+            case: { when: [{ if: paid, then: "customer_id" }] },
+          },
+          as: "paid_customers",
+        },
+      ],
+    });
+    const filtered = await run({
+      from: "orders",
+      select: [
+        { sum: "total", as: "paid" },
+        { count: "*", as: "paid_orders" },
+        { countDistinct: "customer_id", as: "paid_customers" },
+      ],
+      where: paid,
+    });
+    expect(conditional.rows).toEqual(filtered.rows);
+    expect(conditional.rows).toEqual([["3585.59", "7", "3"]]);
+
+    const text = await run({
+      from: "orders",
+      select: [
+        "id",
+        {
+          calc: {
+            case: {
+              when: [{ if: { total: { gte: 500 } }, then: { value: "big" } }],
+              else: "status",
+            },
+          },
+          as: "size",
+        },
+      ],
+      where: { id: { in: [1, 4, 8] } },
+    });
+    expect(text.rows).toEqual([
+      [1, "paid"],
+      [4, "big"],
+      [8, "big"],
+    ]);
+  });
+
   it("joins, buckets in UTC and groups", async () => {
     const result = await run({
       from: "orders",

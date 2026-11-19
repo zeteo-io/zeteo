@@ -169,6 +169,11 @@ interface Resolved {
 }
 
 /** A resolved calculation and what decides its level. */
+interface CaseOperand {
+  when: { if: Filter; then: CalcExpr }[];
+  else?: CalcExpr;
+}
+
 interface ResolvedCalc {
   resolved: ResolvedExpr;
   hasAggregate: boolean;
@@ -232,7 +237,10 @@ class Planner {
   private readonly references = new Map<string, Reference>();
   private readonly tablesById: Map<string, VisibleTable>;
 
-  constructor(private readonly catalog: VisibleCatalog) {
+  constructor(
+    private readonly catalog: VisibleCatalog,
+    private readonly now: Date
+  ) {
     this.tablesById = new Map(catalog.tables.map((t) => [t.id, t]));
   }
 
@@ -441,6 +449,14 @@ class Planner {
     }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     const keyAt = [...at, key];
+    if (key === "case") {
+      return this.resolveCase(
+        operand as CaseOperand,
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
     if (AGGREGATE_FNS.includes(key as AggregateFn)) {
       return {
         resolved: this.resolveAggregate(
@@ -512,6 +528,83 @@ class Planner {
       },
       hasAggregate: resolvedOperands.some((o) => o.hasAggregate),
       bareColumn: resolvedOperands.find((o) => o.bareColumn)?.bareColumn,
+    };
+  }
+
+  /**
+   * A `case` at `at`. Each `if` filters column paths as `where` does, and the
+   * columns it reads count as reads, and as bare when the case is outside an
+   * aggregate; every `then` and the `else` share one type.
+   */
+  private resolveCase(
+    operand: CaseOperand,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    let bareColumn: ResolvedCalc["bareColumn"];
+    let hasAggregate = false;
+    let type: QueryableType | undefined;
+    const typed = (e: ResolvedCalc, p: QueryPath) => {
+      const t = typeOf(e.resolved);
+      if (type === undefined) {
+        refuseJson(t, "the expression", "a case", p);
+        type = t;
+      } else if (t !== type) {
+        throw fail(
+          "invalid_operator",
+          `case takes values of one type; this one is ${t}, not ${type}`,
+          p
+        );
+      }
+      hasAggregate ||= e.hasAggregate;
+      bareColumn ??= e.bareColumn;
+    };
+    const branches = operand.when.map((branch, i) => {
+      const whenAt = [...at, "when", i];
+      const when = resolveFilter<ColumnRef>(
+        branch.if,
+        [...whenAt, "if"],
+        (key, p) => {
+          const { ref, reference } = this.resolveColumn(key, p);
+          reads.set(referenceKey(reference), reference);
+          if (!insideAggregate) bareColumn ??= { path: key, at: p };
+          return { subject: ref, type: ref.type };
+        },
+        this.now,
+        this.catalog.calendar
+      );
+      const thenAt = [...whenAt, "then"];
+      const then = this.resolveExpr(
+        branch.then,
+        thenAt,
+        reads,
+        insideAggregate
+      );
+      typed(then, thenAt);
+      return { when, then: then.resolved };
+    });
+    let otherwise: ResolvedExpr | undefined;
+    if (operand.else !== undefined) {
+      const elseAt = [...at, "else"];
+      const resolved = this.resolveExpr(
+        operand.else,
+        elseAt,
+        reads,
+        insideAggregate
+      );
+      typed(resolved, elseAt);
+      otherwise = resolved.resolved;
+    }
+    return {
+      resolved: {
+        kind: "case",
+        branches,
+        ...(otherwise ? { otherwise } : {}),
+        type: type!,
+      },
+      hasAggregate,
+      bareColumn,
     };
   }
 
@@ -716,7 +809,7 @@ export const planSql = (
       ["join"]
     );
   }
-  const planner = new Planner(catalog);
+  const planner = new Planner(catalog, now);
   const from = planner.resolveFrom(query.from);
 
   const joins: ResolvedJoin[] = [];

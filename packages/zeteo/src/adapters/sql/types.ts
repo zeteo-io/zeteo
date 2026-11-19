@@ -63,6 +63,15 @@ export type ResolvedExpr =
       type: "number" | "text";
     }
   | {
+      kind: "case";
+      /** In order; the first `when` that holds gives its `then`. */
+      branches: { when: ResolvedFilter<ColumnRef>; then: ResolvedExpr }[];
+      /** Null when absent. */
+      otherwise?: ResolvedExpr;
+      /** The type every `then` and the `otherwise` share. */
+      type: QueryableType;
+    }
+  | {
       kind: "aggregate";
       fn: AggregateFn;
       /** `"*"` only for `count`. */

@@ -436,3 +436,73 @@ describe("compileSql on SQL Server: calculations", () => {
     );
   });
 });
+
+describe("compileSql: case", () => {
+  const sumCase = {
+    select: [
+      {
+        sum: {
+          case: { when: [{ if: { status: { eq: "paid" } }, then: "total" }] },
+        },
+        as: "paid",
+      },
+    ],
+    orderBy: [],
+  };
+
+  it("compiles a case on Postgres, each when through the where compiler", () => {
+    const { sql, parameters } = pg(
+      calcQuery({
+        case: {
+          when: [
+            { if: { status: { eq: "paid" } }, then: { value: "a" } },
+            { if: { total: { gt: 100 } }, then: { value: "b" } },
+          ],
+          else: "status",
+        },
+      })
+    );
+    expect(sql).toBe(
+      'select case when "t0"."status" = $1 then cast($2 as text) when "t0"."total" > $3 then cast($4 as text) else "t0"."status" end as "c0" from "shop"."orders" as "t0" limit $5 offset $6'
+    );
+    expect(parameters.slice(0, 4)).toEqual(["paid", "a", 100, "b"]);
+  });
+
+  it("compiles a conditional sum on both engines", () => {
+    expect(pg(sumCase).sql).toContain(
+      'select sum(case when "t0"."status" = $1 then "t0"."total" end)'
+    );
+    expect(ms(sumCase).sql).toContain(
+      "sum(case when [t0].[status] = @1 then [t0].[total] end)"
+    );
+    expect(ms(sumCase).parameters[0]).toEqual(nvarchar("paid"));
+  });
+
+  it("compiles a case with an else on SQL Server", () => {
+    const { sql } = ms(
+      calcQuery({
+        case: {
+          when: [{ if: { status: { eq: "paid" } }, then: "total" }],
+          else: 0,
+        },
+      })
+    );
+    expect(sql).toContain(
+      "case when [t0].[status] = @1 then [t0].[total] else @2 end"
+    );
+  });
+
+  it("compiles count over a case", () => {
+    expect(
+      pg({
+        select: [
+          {
+            count: { case: { when: [{ if: { id: { eq: 1 } }, then: 1 }] } },
+            as: "n",
+          },
+        ],
+        orderBy: [],
+      }).sql
+    ).toContain('count(case when "t0"."id" = $1 then cast($2 as bigint) end)');
+  });
+});

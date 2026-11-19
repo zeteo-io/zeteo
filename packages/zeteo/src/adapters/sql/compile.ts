@@ -58,6 +58,10 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
       );
     case "literal":
       return false;
+    case "case":
+      return [...expr.branches.map((b) => b.then), expr.otherwise].some(
+        (e) => e !== undefined && isApproximate(e, dialect)
+      );
     case "aggregate":
       if (expr.fn === "avg") return true;
       if (expr.fn === "count" || expr.fn === "countDistinct") return false;
@@ -77,6 +81,13 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
 const typeOf = (expr: ResolvedExpr) =>
   expr.kind === "column" ? expr.column.type : expr.type;
 
+/** A filter over catalogue columns: the column read as every part of the query reads it. */
+const columnSubject = (dialect: SqlDialect) => (c: ColumnRef) => ({
+  expression: column(c, dialect),
+  type: c.type,
+  nativeType: c.nativeType,
+});
+
 /** A planned calculation as SQL; literals are bound by the dialect. */
 export const compileExpr = (
   expr: ResolvedExpr,
@@ -94,6 +105,16 @@ export const compileExpr = (
         typeof expr.value === "number" ? plainNumber(expr.value) : expr.value,
         expr.type
       );
+    case "case": {
+      const whens = expr.branches.map(
+        (b) =>
+          sql`when ${compileFilter(b.when, dialect, columnSubject(dialect))} then ${compileExpr(b.then, dialect)}`
+      );
+      const otherwise = expr.otherwise
+        ? sql` else ${compileExpr(expr.otherwise, dialect)}`
+        : sql``;
+      return sql`case ${sql.join(whens, sql` `)}${otherwise} end`;
+    }
     case "aggregate":
       if (expr.arg === "*") return dialect.aggregate(expr.fn, "*");
       return expr.arg.kind === "column"
@@ -273,11 +294,7 @@ export const compileSql = (
       compileFilter(plan.where, dialect, (s: WhereSubject) =>
         "index" in s
           ? { expression: selected[s.index]!, type: s.type }
-          : {
-              expression: column(s, dialect),
-              type: s.type,
-              nativeType: s.nativeType,
-            }
+          : columnSubject(dialect)(s)
       )
     );
   }

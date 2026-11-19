@@ -240,6 +240,14 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
       // An integer expression is summed in decimal(38, 0), see `aggregate`.
       return expr.fn === "sum" && kind === "integer" ? "decimal" : kind;
     }
+    case "case":
+      return expr.type !== "number"
+        ? undefined
+        : widest(
+            [...expr.branches.map((b) => b.then), expr.otherwise].flatMap(
+              (e) => (e ? [exprKind(e)] : [])
+            )
+          );
     case "op":
       if (expr.type !== "number") return undefined;
       if (expr.op === "div" || expr.op === "round") return "decimal";
