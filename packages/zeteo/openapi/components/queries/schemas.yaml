@@ -307,7 +307,7 @@ Run:
     id: { type: string, format: uuid }
     user_id: { type: string, format: uuid }
     source_id: { type: [string, 'null'], format: uuid, description: Null when the query named no source the caller could see }
-    entry_point: { type: string, enum: [api, mcp, export, dashboard], description: '`POST /v1/query` (and the saved query and saved panel runs), the MCP `query` tool, `POST /v1/export`, or a panel of `POST /v1/dashboards/{dashboardId}/run`' }
+    entry_point: { type: string, enum: [api, mcp, export, dashboard, measure_preview], description: '`POST /v1/query` (and the saved query and saved panel runs), the MCP `query` tool, `POST /v1/export`, a panel of `POST /v1/dashboards/{dashboardId}/run`, or `POST /v1/sources/{sourceId}/measures/preview`' }
     query:
       description: |
         The query as it was sent. In `GET /v1/me/runs`, `{ "withheld": true }` instead for a run of a

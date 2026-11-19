@@ -1,12 +1,13 @@
+import type { MeasureRow, VisibleCatalog } from "../grants/visibleCatalog.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
-import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { stampSavedQueryRun } from "../saved-queries/stamps.js";
 import { coalesce, waitForLeases } from "./dashboardRun.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
+import { withDraftMeasure } from "../measures/draft.js";
 import { loadUserLimits } from "../limits/resolve.js";
 import type { CachedResult } from "./resultCache.js";
 import type { Caller } from "../middleware/auth.js";
@@ -77,6 +78,12 @@ export interface RunQueryInput {
    * process, waits for its leases, and is recorded at most once per window.
    */
   dashboard?: DashboardRun;
+  /**
+   * Set only by src/measures/ for a measure's preview: the catalogue's
+   * measures for this one run are decided again with this draft in place of
+   * the stored measure of its id or name. Never with `savedQuery`.
+   */
+  draftMeasure?: MeasureRow;
 }
 
 /** A dashboard's run of one panel's query. */
@@ -317,13 +324,19 @@ const execute = async (
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
-  const { caller, body, savedQuery } = input;
+  const { caller, body, savedQuery, draftMeasure } = input;
   const planned = savedQuery
     ? await loadAndPlanSaved(caller, savedQuery, body, progress)
-    : await loadCatalogFor(caller, slug, progress).then((loaded) => ({
-        ...loaded,
-        ...planFor(body, loaded.access, loaded.catalog, progress),
-      }));
+    : await loadCatalogFor(caller, slug, progress).then(async (loaded) => {
+        const catalog = draftMeasure
+          ? await withDraftMeasure(loaded.catalog, draftMeasure)
+          : loaded.catalog;
+        return {
+          ...loaded,
+          catalog,
+          ...planFor(body, loaded.access, catalog, progress),
+        };
+      });
   return { plan: planned.plan, result: await runPlanned(input, planned) };
 };
 
@@ -406,6 +419,9 @@ export async function runQuery(
     throw new Error(
       "a dashboard run needs the dashboard entry point, the dashboard option and a saved query, all three"
     );
+  }
+  if (input.draftMeasure && (input.savedQuery || input.dashboard)) {
+    throw new Error("a draft measure is previewed in a query of its own");
   }
   if (input.dashboard && input.savedQuery) {
     return runDashboardQuery(input, input.dashboard, input.savedQuery);

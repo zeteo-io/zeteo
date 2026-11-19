@@ -242,6 +242,7 @@ enum EntryPoint {
   mcp
   export
   dashboard
+  measure_preview
 
   @@map("entry_point")
   @@schema("zeteo")

@@ -6751,7 +6751,8 @@ components:
             - mcp
             - export
             - dashboard
-          description: '`POST /v1/query` (and the saved query and saved panel runs), the MCP `query` tool, `POST /v1/export`, or a panel of `POST /v1/dashboards/{dashboardId}/run`'
+            - measure_preview
+          description: '`POST /v1/query` (and the saved query and saved panel runs), the MCP `query` tool, `POST /v1/export`, a panel of `POST /v1/dashboards/{dashboardId}/run`, or `POST /v1/sources/{sourceId}/measures/preview`'
         query:
           description: |
             The query as it was sent. In `GET /v1/me/runs`, `{ "withheld": true }` instead for a run of a
