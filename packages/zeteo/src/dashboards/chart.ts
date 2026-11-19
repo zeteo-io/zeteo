@@ -70,6 +70,20 @@ const tableChart = z.strictObject({
   legend,
 });
 
+// Value, target and max name result columns (the first row is read); `min`
+// is a column name or a fixed number, 0 when left out.
+const gaugeChart = z.strictObject({
+  type: z.literal("gauge"),
+  version: z.literal(1),
+  value: columnName,
+  max: columnName,
+  target: columnName.optional(),
+  min: z.union([columnName, z.number().finite()]).optional(),
+  unit: z.string().max(20).optional(),
+  decimals,
+  legend,
+});
+
 export const chartSchema = z.discriminatedUnion("type", [
   statChart,
   lineChart,
@@ -77,6 +91,7 @@ export const chartSchema = z.discriminatedUnion("type", [
   barChart,
   pieChart,
   tableChart,
+  gaugeChart,
 ]);
 
 export type ChartSettings = z.infer<typeof chartSchema>;
@@ -96,6 +111,7 @@ export const DEFAULT_SIZES: Record<ChartType, { w: number; h: number }> = {
   area: { w: 6, h: 4 },
   bar: { w: 6, h: 4 },
   pie: { w: 6, h: 4 },
+  gauge: { w: 3, h: 3 },
 };
 
 const NUMBER: readonly ColumnType[] = ["number"];
@@ -157,6 +173,12 @@ export const chartProblems = (
     case "pie":
       check("label", chart.label, TEXT);
       check("value", chart.value, NUMBER);
+      break;
+    case "gauge":
+      check("value", chart.value, NUMBER);
+      check("max", chart.max, NUMBER);
+      check("target", chart.target, NUMBER);
+      if (typeof chart.min === "string") check("min", chart.min, NUMBER);
       break;
     case "table":
       checkEach("columns", chart.columns);

@@ -160,9 +160,21 @@ page and no sections.
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
   shown here and the sections have no edit: only the owner changes one.
 
+- **Measures** tab on a source (`/sources/<id>/measures`): name, table, description, used-by counts and a
+  Broken pill with the server's message; rows an editor may not use show "Not usable by you" and no
+  formula. `zeteo.measures.write` adds New and Edit (a dialog with JSON editors for `formula` and
+  `where`, the server's plan errors shown under the field at their path, and Preview, which runs the
+  draft) and Delete (confirmed with what uses it). A sources admin or an upload's owner also gets
+  **Editors**, the users and groups who may manage the source's measures.
+- **Calendar** under Admin (`/calendar`): working days, fiscal year start month, time zone, and
+  holidays by year (add, remove, paste `date,name` lines; a year with none says so). Anyone who can
+  query reads it; `zeteo.calendar.write` changes it, and Save replaces the whole calendar.
+- My Zeteo's catalogue lists each table's measures with their descriptions where the catalogue has them.
+
 The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that
-lists the admin sections the person may see (Sources, Grants, Limits, Runs, Saved queries,
-Dashboards, Saved panels) and is absent when they may see none; it is marked active under any of
+lists the admin sections the person may see (Sources, Grants, Limits, Calendar, Runs, Saved queries,
+Dashboards, Saved panels) and is absent when they may see none (the Calendar is read by anyone who can
+query, so it is there for them); it is marked active under any of
 their paths. `/` lands on My Zeteo for anyone holding `zeteo.data.read`, admins included, and
 otherwise on their first admin section. The sections are listed once, in `src/app/sections.tsx`.
 

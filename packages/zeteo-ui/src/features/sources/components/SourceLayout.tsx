@@ -21,6 +21,7 @@ const TABS: (SourceTab & { uploadsOnly?: boolean })[] = [
   { to: "tables", label: "Tables" },
   { to: "uploads", label: "Upload Sources", uploadsOnly: true },
   { to: "relations", label: "Relations" },
+  { to: "measures", label: "Measures" },
   { to: "sharing", label: "Shared with" },
 ];
 

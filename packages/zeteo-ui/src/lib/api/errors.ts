@@ -9,6 +9,10 @@ export interface ApiError {
   findings?: { code: string; detail: string }[];
   /** `invalid_panel`: each chart or panel setting at fault and why. */
   problems?: { setting: string; problem: string }[];
+  /** A plan or measure error: where in the request it is, keys and array indexes from the root. */
+  path?: (string | number)[];
+  /** `measure_in_use`: the measures that use this one. */
+  dependents?: string[];
   /** Seconds, from `Retry-After`. */
   retryAfter?: number;
   /** `cast_failed`: the column (and table) whose values do not fit its type, and the first 1-based rows at fault. */
@@ -120,6 +124,17 @@ export const toApiError = (err: unknown): ApiError => {
   if (out.code === "cast_failed") {
     const cast = castOf(body);
     if (cast) out.cast = cast;
+  }
+  if (
+    Array.isArray(body.path) &&
+    body.path.every((k) => typeof k === "string" || typeof k === "number")
+  ) {
+    out.path = body.path as (string | number)[];
+  }
+  if (Array.isArray(body.dependents)) {
+    out.dependents = body.dependents.filter(
+      (d): d is string => typeof d === "string"
+    );
   }
   const retry = retryAfterSeconds(res.headers?.["retry-after"]);
   if (retry !== undefined) out.retryAfter = retry;

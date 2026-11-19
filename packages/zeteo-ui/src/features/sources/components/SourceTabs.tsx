@@ -3,6 +3,7 @@ import { UploadOriginsPage } from "../upload/components/UploadOrigins";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { isUploadType, sourceHref } from "./sourceLabels";
 import { RelationsList } from "@/features/relations";
+import { MeasuresTab } from "@/features/measures";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { SourceGrants } from "@/features/grants";
 import { NotFound } from "@/components/NotFound";
@@ -108,4 +109,16 @@ export const SourceSharingPage = () => {
 export const SourceUploadsPage = () => {
   const { source } = useSourceContext();
   return isUploadType(source.type) ? <UploadOriginsPage /> : <NotFound />;
+};
+
+/** Measures: named calculations on a table; who writes them is `zeteo.measures.write`, who edits the editor list a sources admin or an upload's owner. */
+export const SourceMeasuresPage = () => {
+  const { source, access } = useSourceContext();
+  return (
+    <MeasuresTab
+      sourceId={source.id}
+      canWrite={access.canWriteMeasures}
+      canManageEditors={access.canManageMeasureEditors}
+    />
+  );
 };
