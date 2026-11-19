@@ -5,6 +5,7 @@ import { useDeleteMeasure } from "../api/useDeleteMeasure";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { EditButton } from "@/components/EditButton";
+import { MetricsSection } from "./MetricsSection";
 import { useMeasures } from "../api/useMeasures";
 import { MeasureDialog } from "./MeasureDialog";
 import { useState } from "react";
@@ -206,6 +207,7 @@ export const MeasuresTab = ({
           />
         </div>
       )}
+      <MetricsSection sourceId={sourceId} canWrite={canWrite} />
     </>
   );
 };

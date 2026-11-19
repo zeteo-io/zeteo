@@ -6,6 +6,8 @@ export const MEASURE_FIELDS = [
   "table",
   "formula",
   "where",
+  "fixed",
+  "date_column",
 ] as const;
 export type MeasureField = (typeof MEASURE_FIELDS)[number];
 
@@ -43,22 +45,24 @@ export const fieldErrors = (
 };
 
 /**
- * Where a preview's refusal belongs. Its request is `{ measure, bucket }`, so
- * a validation issue's path starts at `measure.`; a plan error's `path` names
+ * Where a preview's refusal belongs. Its request is `{ measure, bucket }` (or
+ * `{ metric, ... }`, named by `root`), so a validation issue's path starts at
+ * `measure.`; a plan error's `path` names
  * a field of the measure (`formula`, `where`, `table`) when the draft is at
  * fault. A path into the query the preview runs (`select`, `from`) is not the
  * measure's and stays with the generic notice.
  */
 export const previewFieldErrors = (
-  error: ApiError | null
+  error: ApiError | null,
+  root: "measure" | "metric" = "measure"
 ): Partial<Record<MeasureField, string>> => {
   if (!error) return {};
   const path = error.path?.map(String);
   return fieldErrors({
     ...error,
-    path: path?.[0] === "measure" ? path.slice(1) : path,
+    path: path?.[0] === root ? path.slice(1) : path,
     issues: error.issues
-      ?.filter((i) => i.path.startsWith("measure."))
-      .map((i) => ({ ...i, path: i.path.slice("measure.".length) })),
+      ?.filter((i) => i.path.startsWith(`${root}.`))
+      .map((i) => ({ ...i, path: i.path.slice(root.length + 1) })),
   });
 };

@@ -104,3 +104,20 @@ describe("fieldOf", () => {
     expect(fieldOf("y.1")).toBe("y");
   });
 });
+
+describe("timeColumnOptions for a metric query", () => {
+  it("offers range, the metric query's own time column", () => {
+    expect(
+      timeColumnOptions({ source: "s", metrics: ["margin_pct"] }, undefined)
+    ).toEqual(["range"]);
+    expect(
+      timeColumnOptions(
+        { source: "s", metrics: ["margin_pct"] },
+        {
+          slug: "s",
+          tables: [],
+        }
+      )
+    ).toEqual(["range"]);
+  });
+});

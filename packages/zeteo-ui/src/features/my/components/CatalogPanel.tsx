@@ -32,6 +32,19 @@ const SourceRow = ({ source }: { source: CatalogSource }) => {
           {count === 1 ? "table" : "tables"}
         </span>
       </button>
+      {open && source.metrics && source.metrics.length > 0 && (
+        <ul
+          className="z-catalog-measures"
+          aria-label={`Metrics in ${source.name}`}
+        >
+          {source.metrics.map((m) => (
+            <li key={m.name}>
+              <code>{m.name}</code>{" "}
+              <span className="z-muted">{m.description}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       {open && (
         <ul className="z-catalog-tables">
           {source.tables.map((t) => (

@@ -21,6 +21,10 @@ export interface Measure {
   table: string;
   formula: unknown;
   where: unknown;
+  /** One value over the whole table, ignoring a query's filters; usable from any table. */
+  fixed: boolean;
+  /** A column path from the home table through to-one relations; null for none. */
+  date_column: string | null;
   created_at: string;
   updated_at: string;
   usable: boolean;
@@ -59,6 +63,8 @@ export interface MeasureInput {
   table: string;
   formula: unknown;
   where?: unknown;
+  fixed?: boolean;
+  date_column?: string | null;
 }
 
 export interface MeasureEditor {
@@ -73,4 +79,48 @@ export interface PreviewResult {
   columns: { name: string; type: string }[];
   rows: unknown[][];
   truncated: boolean;
+}
+
+/** A metric the caller sees in full (the server's `metricView`). */
+export interface Metric {
+  id: string;
+  name: string;
+  description: string;
+  formula: unknown;
+  created_at: string;
+  updated_at: string;
+  usable: boolean;
+  /** Editors and admins only. */
+  used_by?: UsedBy;
+  broken?: Broken | null;
+}
+
+/** A metric an editor may not use: never its formula. */
+export interface RedactedMetric {
+  name: string;
+  description: string;
+  usable: false;
+}
+
+export type MetricListItem = Metric | RedactedMetric;
+
+export interface MetricList {
+  data: MetricListItem[];
+  can_edit: boolean;
+  can_manage_editors: boolean;
+}
+
+export const isRedactedMetric = (m: MetricListItem): m is RedactedMetric =>
+  !("id" in m);
+
+export interface MetricInput {
+  name: string;
+  description: string;
+  formula: unknown;
+}
+
+export interface MetricPreviewBody {
+  metric: MetricInput;
+  bucket?: "month";
+  range?: { gte?: { date: string }; lt?: { date: string } };
 }

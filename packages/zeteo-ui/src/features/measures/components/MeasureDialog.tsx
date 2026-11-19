@@ -1,9 +1,11 @@
-import type { Measure, MeasureInput, PreviewResult } from "../api/types";
 import { usePreviewMeasure } from "../api/usePreviewMeasure";
+import type { Measure, MeasureInput } from "../api/types";
 import { useMemo, useState, type ReactNode } from "react";
+import { useDateColumns } from "../api/useDateColumns";
 import { useSaveMeasure } from "../api/useSaveMeasure";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useAllTables } from "@/features/tables";
+import { PreviewResult } from "./PreviewResult";
 import type { ApiError } from "@/lib/api";
 import "./styles.css";
 import {
@@ -13,6 +15,7 @@ import {
   Input,
   Modal,
   SearchSelect,
+  Switch,
   TextArea,
 } from "@kosmeo-ui/react";
 import {
@@ -22,6 +25,7 @@ import {
 } from "./fieldErrors";
 
 const FORM_ID = "measure-form";
+const NO_DATE_COLUMN = "No date column";
 const NAME = /^[a-z][a-z0-9_]{0,62}$/;
 
 const pretty = (value: unknown) =>
@@ -55,48 +59,6 @@ const Field = ({
   </div>
 );
 
-const Preview = ({ result }: { result: PreviewResult }) => {
-  const single = result.columns.length === 1 && result.rows.length === 1;
-  const show = (v: unknown) =>
-    typeof v === "number" ? v.toLocaleString() : v === null ? "—" : String(v);
-  return (
-    <div className="z-measure-preview">
-      {single ? (
-        <strong
-          className="z-measure-preview-value"
-          data-testid="measure-preview-value"
-        >
-          {show(result.rows[0]![0])}
-        </strong>
-      ) : result.rows.length === 0 ? (
-        <span className="z-muted">No rows.</span>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              {result.columns.map((c) => (
-                <th key={c.name}>{c.name}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {result.rows.map((row, i) => (
-              <tr key={i}>
-                {row.map((v, j) => (
-                  <td key={j}>{show(v)}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-      {result.truncated && (
-        <small className="z-muted">Rows were cut off.</small>
-      )}
-    </div>
-  );
-};
-
 interface MeasureDialogProps {
   sourceId: string;
   /** The measure to change; absent to create one. */
@@ -126,6 +88,8 @@ export const MeasureDialog = ({
   );
   const [formula, setFormulaText] = useState(pretty(measure?.formula));
   const [where, setWhereText] = useState(pretty(measure?.where));
+  const [fixed, setFixedFlag] = useState(measure?.fixed ?? false);
+  const [dateColumn, setDateColumnPath] = useState(measure?.date_column ?? "");
   // A preview is of the draft it ran; any change to the draft clears it.
   const changing =
     <T,>(set: (value: T) => void) =>
@@ -138,6 +102,8 @@ export const MeasureDialog = ({
   const setDescription = changing(setDescriptionText);
   const setFormula = changing(setFormulaText);
   const setWhere = changing(setWhereText);
+  const setFixed = changing(setFixedFlag);
+  const setDateColumn = changing(setDateColumnPath);
   const [local, setLocal] = useState<Partial<Record<MeasureField, string>>>({});
   const [failure, setFailure] = useState<ApiError | null>(null);
 
@@ -153,6 +119,16 @@ export const MeasureDialog = ({
   }, [tables]);
   const options =
     table && !tableNames.includes(table) ? [table, ...tableNames] : tableNames;
+
+  const dateOptions = useDateColumns(sourceId, table);
+  const dateChoices =
+    dateColumn && !dateOptions.includes(dateColumn)
+      ? [dateColumn, ...dateOptions]
+      : dateOptions;
+  // Nothing else in a search field takes a value back out.
+  const dateChoicesWithNone = dateColumn
+    ? [NO_DATE_COLUMN, ...dateChoices]
+    : dateChoices;
 
   const busy = save.isPending;
 
@@ -182,6 +158,8 @@ export const MeasureDialog = ({
         table,
         formula: (f as { value: unknown }).value,
         ...(w?.ok && { where: w.value }),
+        ...(fixed && { fixed }),
+        ...(dateColumn && { date_column: dateColumn }),
       },
     };
   };
@@ -199,7 +177,7 @@ export const MeasureDialog = ({
       save.mutate({ body: input }, { onSuccess: onClose, onError: setFailure });
       return;
     }
-    const body: Partial<MeasureInput> & { where?: unknown } = {};
+    const body: Partial<MeasureInput> = {};
     if (input.name !== measure.name) body.name = input.name;
     if (input.description !== measure.description)
       body.description = input.description;
@@ -212,6 +190,10 @@ export const MeasureDialog = ({
     ) {
       body.where = input.where ?? null;
     }
+    if ((input.fixed ?? false) !== measure.fixed)
+      body.fixed = input.fixed ?? false;
+    if ((input.date_column ?? null) !== measure.date_column)
+      body.date_column = input.date_column ?? null;
     if (Object.keys(body).length === 0) return onClose();
     save.mutate(
       { id: measure.id, body },
@@ -341,10 +323,36 @@ export const MeasureDialog = ({
               />
             </div>
           </Field>
+          <Field name="fixed" error={err("fixed")}>
+            <Switch
+              size="sm"
+              label="Fixed"
+              labelLocation="left"
+              checked={fixed}
+              onChange={(e) => setFixed(e.target.checked)}
+            />
+            <small className="z-muted">
+              Ignores the query's filters; one value over the whole table —
+              usable from any table.
+            </small>
+          </Field>
+          <Field name="date_column" error={err("date_column")}>
+            <SearchSelect<string>
+              label="Date column (optional)"
+              placeholder="Search date columns"
+              value={dateColumn || null}
+              options={dateChoicesWithNone}
+              getOptionLabel={(c) => c}
+              getOptionKey={(c) => c}
+              disabled={!table}
+              longDropDown
+              onSelect={(c) => setDateColumn(c === NO_DATE_COLUMN ? "" : c)}
+            />
+          </Field>
           {(preview.data ||
             (preview.error && Object.keys(previewed).length === 0)) && (
             <BorderedSection title="Preview" as="h3">
-              {preview.data && <Preview result={preview.data} />}
+              {preview.data && <PreviewResult result={preview.data} />}
               <ErrorNotice error={preview.error} />
             </BorderedSection>
           )}
