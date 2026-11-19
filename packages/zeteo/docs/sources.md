@@ -27,7 +27,7 @@ table over other tables of the source (`POST /v1/sources/:sourceId/merged-tables
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
 validated. The owner of an upload source (holding `zeteo.uploads.write` and `zeteo.data.read`)
 may also read, rename, transfer and delete it here; anyone else gets the same `403`, whether the
-source exists or not. `archive`, `test`, `refresh` (an upload source with Sheets tables excepted), and `settings` or `schemas` in a `PATCH`, are
+source exists or not. `archive`, `test`, `refresh` (an upload source with Sheets tables excepted; on a file-only upload source it is `409 nothing_to_sync`), and `settings` or `schemas` in a `PATCH`, are
 `409 not_a_database_source` on an upload source; `DELETE` and `transfer` (and the upload-only table
 and column routes) are `409 not_an_upload_source` on a database source.
 

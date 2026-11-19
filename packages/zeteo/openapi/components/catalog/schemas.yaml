@@ -231,7 +231,7 @@ SyncSummary:
     synced_at: { type: string, format: date-time }
     tables:
       type: array
-      description: Every Sheets table of the source that is not removed, each synced on its own
+      description: The tables synced, or marked missing, in this run, each on its own (a table that was already missing and stays missing is not listed)
       items:
         type: object
         required: [id, name, row_count, missing, error]

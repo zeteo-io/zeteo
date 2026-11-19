@@ -278,7 +278,7 @@ or the bare id; a published-to-web link is refused, `invalid_sheet_link`). `POST
 (`{ url }` to add data, `{ source_id, url }` to add tables) reads it and returns the same preview as a
 file: one table per grid tab (chart tabs are skipped), the header row, and each column's name and
 type to correct. A sheet not shared with the email is `sheet_not_accessible`, naming the email. A
-preview made for another kind of staging is `staging_kind_mismatch`. Adding a tab that already backs a
+preview made for another kind of staging is `not_a_file_upload` on a re-upload. Adding a tab that already backs a
 table of the source is `tab_already_added`.
 
 **First claim wins, per spreadsheet.** A spreadsheet backs tables in at most one source (`upload_claims`).
@@ -317,12 +317,16 @@ preview.
 
 A source has one sync interval (`sync_interval_minutes`, 15 to 1440, default 60) for all its Sheets
 tables, set when a source is created from a sheet and changed by an admin in the same `PATCH` as the
-source's limits (`422 not_synced` for a source that has never had a Sheets table). The `refreshSources`
+source's limits; the owner may also set it, on any upload source (`422 not_synced` is for a database source only). The `refreshSources`
 job checks every five minutes and syncs a source whose interval has passed since its last attempt
 (nothing syncs while uploads are off). **Sync now** is `POST /v1/sources/:sourceId/refresh` (the owner,
 or `zeteo.sources.write`), at most once a minute: sooner is `429 sync_too_soon` with `Retry-After`. A
 source with no non-removed Sheets table answers `409 nothing_to_sync`. A busy `503 upload_source_busy`
-does not use the window and is not recorded as a failed sync. The answer is a `SyncSummary`.
+does not use the window and is not recorded as a failed sync. The answer is a `SyncSummary` (`200`)
+when at least one table synced or there was nothing to load; when every table failed, the request
+fails with the first table's error (for example `422 sheet_not_accessible` or `502 google_unavailable`),
+and each table's `sync_error` is still recorded. `tables` lists the tables synced or marked missing in
+that run.
 
 **Each Sheets table loads in its own transaction**: one spreadsheet's or tab's failure never holds back
 the others, and a failed table keeps its last good data. A source whose Sheets tables are all missing keeps
@@ -379,15 +383,15 @@ the source's schema, so it is never loaded or synced itself: it reads its member
   id and grants when a member has it again; columns never selected are listed as available. The row
   count is the sum of the members' rows.
 - **Grants:** a merged table has its own grants and catalogue entries, like any table; its creator gets
-  an owner grant on create. Granting a member does not grant the merged table, nor the reverse.
+  an owner grant on create, to the source's owner (also when an admin creates the merged table). Granting a member does not grant the merged table, nor the reverse.
 - **Removal:** removing a table that a merged table reads is `409 table_in_merged_table`; change or
   remove the merged table first. A merged table is removed like any table.
 - **Rebuilding:** a view is rebuilt only when a change touches its members, so a long read of a merged
   table does not stall unrelated loads.
 
 Error codes: `invalid_sheet_link`, `sheet_in_use`, `sheet_not_accessible`, `google_not_configured`,
-`google_key_rejected`, `google_unavailable`, `google_sign_in_failed`, `staging_kind_mismatch`,
-`tab_already_added`, `not_a_file_upload`, `not_synced`, `not_a_sheets_source`, `sync_too_soon`,
+`google_key_rejected`, `google_unavailable`, `google_sign_in_failed`,
+`tab_already_added`, `not_a_file_upload`, `not_synced`, `sync_too_soon`,
 `nothing_to_sync`, `table_in_merged_table`.
 
 ## Not supported yet
