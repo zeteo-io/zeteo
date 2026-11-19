@@ -175,6 +175,7 @@ describe("sync and origins in the view", () => {
       spreadsheet_title: "Book",
       url: `https://docs.google.com/spreadsheets/d/${sheet}/edit#gid=7`,
       tab_id: 7,
+      tab_title: "Data",
     });
     const expected = {
       sync: {
