@@ -322,12 +322,12 @@ const syncSpreadsheet = async (
     ...live.map((table) => ({ table, revived: false })),
     ...revivable(live, missing).map((table) => ({ table, revived: true })),
   ];
-  const failed = (table: SourceTable, err: unknown): Outcome => ({
-    table,
-    kind: "failed",
-    err,
-    error: syncErrorOf(err),
-  });
+  // Recorded on the table at once, so a later stop (busy) keeps it.
+  const failed = async (table: SourceTable, err: unknown): Promise<Outcome> => {
+    const error = syncErrorOf(err);
+    await recordTableFailure(table, error, now);
+    return { table, kind: "failed", err, error };
+  };
   let tabs: Map<number, SpreadsheetTab>;
   try {
     const read = await readSpreadsheet(
@@ -338,7 +338,9 @@ const syncSpreadsheet = async (
     tabs = new Map(read.tabs.map((t) => [t.sheetId, t]));
   } catch (err) {
     const unreadable = toUnreadable(err);
-    return live.map((table) => failed(table, unreadable));
+    const outcomes: Outcome[] = [];
+    for (const table of live) outcomes.push(await failed(table, unreadable));
+    return outcomes;
   }
   const outcomes: Outcome[] = [];
   for (const { table, revived } of located) {
@@ -362,7 +364,7 @@ const syncSpreadsheet = async (
         );
         continue;
       }
-      outcomes.push(failed(table, err));
+      outcomes.push(await failed(table, err));
     }
   }
   return outcomes;
@@ -371,7 +373,8 @@ const syncSpreadsheet = async (
 /**
  * Keeps the run on the source: when it was attempted, the failing tables
  * (null for none), and as its last refresh the oldest good sync among its
- * live Sheets tables (what a reader can trust).
+ * live Sheets tables (what a reader can trust; null while one has never
+ * synced). Each failing table was recorded on the table as it failed.
  */
 const recordRun = async (sourceId: string, outcomes: Outcome[], now: Date) => {
   const failing = outcomes.flatMap((o) =>
@@ -385,7 +388,11 @@ const recordRun = async (sourceId: string, outcomes: Outcome[], now: Date) => {
   });
   const synced = live
     .filter((t) => sheetsOriginOf(t) !== null)
-    .map((t) => t.lastSyncedAt?.getTime() ?? 0);
+    .map((t) => t.lastSyncedAt);
+  // Null while a live Sheets table has never synced.
+  const oldest = synced.includes(null)
+    ? null
+    : new Date(Math.min(...synced.map((d) => d!.getTime())));
   await prisma.source
     .update({
       where: { id: sourceId },
@@ -393,9 +400,7 @@ const recordRun = async (sourceId: string, outcomes: Outcome[], now: Date) => {
         lastSyncAttemptAt: now,
         lastSyncError:
           failing.length > 0 ? { tables: failing } : PrismaRuntime.DbNull,
-        ...(synced.length > 0 && {
-          lastRefreshedAt: new Date(Math.min(...synced)),
-        }),
+        ...(synced.length > 0 && { lastRefreshedAt: oldest }),
         ...(outcomes.some((o) => o.kind !== "failed") && {
           status: "active" as const,
         }),
@@ -422,9 +427,6 @@ const sync = async (
     outcomes.push(
       ...(await syncSpreadsheet(sourceId, spreadsheetId, group, now))
     );
-  }
-  for (const o of outcomes) {
-    if (o.kind === "failed") await recordTableFailure(o.table, o.error, now);
   }
   await recordRun(sourceId, outcomes, now);
   const failures = outcomes.filter((o) => o.kind === "failed");
@@ -490,9 +492,10 @@ export const syncSource = async (
 
 /**
  * Sync now: a sync the caller asked for, refused with 429 `sync_too_soon`
- * within `SYNC_NOW_SECONDS` of the last one asked for the source (one refused
- * as `upload_source_busy` does not count). Call it only for a caller already
- * allowed to sync the source.
+ * within `SYNC_NOW_SECONDS` of the last one asked for the source. A sync
+ * stopped as `upload_source_busy` frees the window again, so the caller can
+ * retry at once. `nothing_to_sync` is answered before the window is taken.
+ * Call it only for a caller already allowed to sync the source.
  */
 export const syncNow = async (
   sourceId: string,

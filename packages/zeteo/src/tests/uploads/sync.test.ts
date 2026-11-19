@@ -356,6 +356,70 @@ describe("syncSource", () => {
     expect(table.lastSyncAttemptAt).toBeNull();
   });
 
+  it("a table that failed before a later table's swap was busy keeps its recorded error", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const costsTable = await tableNamed(id, "costs");
+    sheet.tab(1).rows.push(["food", "lots"]);
+    sheet.tab(2).rows.push(["again"]);
+    // A reader of notes keeps its swap waiting past the lock timeout.
+    let locked!: () => void;
+    let release!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const held = new Promise<void>((r) => (release = r));
+    const reader = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(
+          `LOCK TABLE "${schemaFor(id)}"."notes" IN ACCESS SHARE MODE`
+        );
+        locked();
+        await held;
+      },
+      { timeout: 30_000 }
+    );
+    await isLocked;
+    const wait = LOAD_LOCKING.swapLockTimeoutMs;
+    LOAD_LOCKING.swapLockTimeoutMs = 200;
+    try {
+      await expect(syncSource(id, ownerId)).rejects.toMatchObject({
+        code: "upload_source_busy",
+      });
+    } finally {
+      LOAD_LOCKING.swapLockTimeoutMs = wait;
+      release();
+      await reader;
+    }
+    const stored = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: costsTable.id },
+    });
+    expect(stored.lastSyncError).toEqual({
+      code: "cast_failed",
+      message: expect.stringMatching(/"amount".*"costs"/),
+    });
+    expect(stored.lastSyncAttemptAt).toBeInstanceOf(Date);
+    expect(await storedRows(id, "notes")).toEqual([{ note: "hello" }]);
+  });
+
+  it("a live Sheets table never synced leaves the source's last refresh null", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const notes = await tableNamed(id, "notes");
+    await prisma.sourceTable.update({
+      where: { id: notes.id },
+      data: { lastSyncedAt: null },
+    });
+    sheet.tab(2).rows = [];
+
+    await syncSource(id, ownerId);
+
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastRefreshedAt).toBeNull();
+  });
+
   it("a new header column is added; a removed one is marked missing", async () => {
     const { sheet, id } = await makeSource();
     const before = await tableNamed(id, "costs");
