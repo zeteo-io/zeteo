@@ -147,7 +147,7 @@
 /* The tabs of a preview of several tables: buttons drawn as the page tabs. */
 .z-fs-tab {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.4rem;
   border-top: 0;
   border-right: 0;
@@ -155,11 +155,6 @@
   background: none;
   font: inherit;
   cursor: pointer;
-}
-
-.z-fs-tab-note {
-  color: var(--k-text-color-secondary);
-  font-size: var(--k-text-size-sm);
 }
 
 .z-fs-nowrap {

@@ -192,9 +192,9 @@ export const PreviewEditor = ({
               >
                 {table.name}
                 {!kept && (
-                  <span className="z-fs-tab-note">
+                  <Badge size="sm" variant="danger">
                     {mode === "one" ? "not used" : "left out"}
-                  </span>
+                  </Badge>
                 )}
               </button>
             );
