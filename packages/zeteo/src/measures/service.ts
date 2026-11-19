@@ -697,19 +697,26 @@ export const updateMeasure = async (
       if (dependents.length > 0) throw new MeasureInUseError(dependents);
       if (nameInUse(catalogs, patch.name, id)) throw nameTaken();
     }
+    const tableId =
+      patch.table === undefined
+        ? old.tableId
+        : resolveTable(catalogs.mine, patch.table);
     const draft: MeasureRow = {
       ...old,
       name: patch.name ?? old.name,
       description: patch.description ?? old.description,
-      tableId:
-        patch.table === undefined
-          ? old.tableId
-          : resolveTable(catalogs.mine, patch.table),
+      tableId,
       formula: patch.formula ?? old.formula,
       where: patch.where === undefined ? old.where : patch.where,
       fixed: patch.fixed ?? old.fixed,
+      // A date column belongs to its table: moving the measure clears it
+      // unless the change sets one.
       dateColumn:
-        patch.date_column === undefined ? old.dateColumn : patch.date_column,
+        patch.date_column !== undefined
+          ? patch.date_column
+          : tableId !== old.tableId
+            ? null
+            : old.dateColumn,
     };
     // A stored date column the editor cannot see stays as it is: checked
     // only when the change sets it or moves the measure to another table.

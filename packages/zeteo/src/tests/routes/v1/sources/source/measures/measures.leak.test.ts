@@ -163,6 +163,9 @@ describe("/v1/sources/:sourceId/measures: a date column the caller lacks", () =>
     for (const who of [editor.principal, reader.principal]) {
       await grantTo(who, source.tables.orders!, ["id", "total"]);
     }
+    for (const who of [author.principal, editor.principal]) {
+      await grantTo(who, source.tables.customers!, "all");
+    }
     await setEditors(app.url, source.id, [author.principal, editor.principal]);
     ids = await createMeasures(app.url, source.id, author.token, [
       { ...measureBody("dated", { sum: "total" }), date_column: "created_at" },
@@ -227,5 +230,45 @@ describe("/v1/sources/:sourceId/measures: a date column the caller lacks", () =>
       error: "not_found_or_not_accessible",
       path: ["date_column"],
     });
+  });
+
+  it("clears a date column the editor cannot see when they move the measure, naming nothing", async () => {
+    const made = await createMeasures(app.url, source.id, author.token, [
+      {
+        ...measureBody("moved_by_editor", { sum: "total" }),
+        date_column: "created_at",
+      },
+    ]);
+    const path = `/${source.id}/measures/${made.moved_by_editor}`;
+    const res = await api("PATCH", path, editor.token, {
+      table: "customers",
+      formula: { count: "*" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date_column).toBeNull();
+    const row = await prisma.measure.findUniqueOrThrow({
+      where: { id: made.moved_by_editor },
+    });
+    expect(row.dateColumn).toBeNull();
+  });
+
+  it("clears the date column when whoever sees it moves the measure, unless they send one", async () => {
+    const made = await createMeasures(app.url, source.id, author.token, [
+      {
+        ...measureBody("moved_by_author", { sum: "total" }),
+        date_column: "created_at",
+      },
+    ]);
+    const path = `/${source.id}/measures/${made.moved_by_author}`;
+    const res = await api("PATCH", path, author.token, {
+      table: "customers",
+      formula: { count: "*" },
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date_column).toBeNull();
+    const row = await prisma.measure.findUniqueOrThrow({
+      where: { id: made.moved_by_author },
+    });
+    expect(row.dateColumn).toBeNull();
   });
 });
