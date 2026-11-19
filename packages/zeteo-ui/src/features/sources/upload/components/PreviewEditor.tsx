@@ -202,7 +202,7 @@ export const PreviewEditor = ({
               >
                 {table.name}
                 {added ? (
-                  <Badge size="sm" variant="secondary">
+                  <Badge size="sm" variant="success">
                     Added
                   </Badge>
                 ) : (
