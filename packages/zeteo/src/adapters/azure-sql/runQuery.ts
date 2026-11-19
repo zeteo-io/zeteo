@@ -145,7 +145,10 @@ const CONNECTION_CODES = new Set([
 // (a date a calculation shifts out of range or overflows, an extreme
 // dateAdd). Numbers bind
 // in types every numeric column compares with, so none overflows.
-const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 517, 8115]);
+const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 517]);
+/** 8115 is also an integer product that overflows, a failure of the source: it is a value error only for a date type. */
+const DATE_OVERFLOW =
+  /data type (date|datetime|datetime2|datetimeoffset|smalldatetime)\b/i;
 /** Errors of this severity end the session on the server: KILL, a crash, a shutdown. */
 const SESSION_FATAL_SEVERITY = 20;
 
@@ -188,7 +191,12 @@ const callerError = (err: unknown): AppError => {
     logger.warn({ err }, "source connection failed during a query");
     return new SourceUnreachableError();
   }
-  if (e.code === "EREQUEST" && VALUE_ERRORS.has(e.number ?? 0)) {
+  if (
+    e.code === "EREQUEST" &&
+    (VALUE_ERRORS.has(e.number ?? 0) ||
+      (e.number === 8115 &&
+        DATE_OVERFLOW.test(String((err as Error).message ?? ""))))
+  ) {
     logger.info({ err }, "the source could not convert a query's value");
     return invalidValue();
   }
