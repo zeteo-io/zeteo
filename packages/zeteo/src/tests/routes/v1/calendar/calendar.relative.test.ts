@@ -65,13 +65,6 @@ describe("the stored calendar in POST /v1/query", () => {
     await grantTo(user.principal, source.tables.orders!, "all");
   });
   afterAll(async () => {
-    // Back to the defaults through the API, so the server drops what it cached.
-    await put({
-      working_days: [1, 2, 3, 4, 5],
-      holidays: [],
-      fiscal_year_start_month: 1,
-      time_zone: "UTC",
-    });
     await resetCalendar();
     await removeRunsOf([user.id]);
     await removeSources([source.id]);
