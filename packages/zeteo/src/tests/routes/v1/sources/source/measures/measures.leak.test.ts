@@ -9,6 +9,8 @@ import { ENGINES } from "../../../../../support/engines.js";
 import { randomUUID } from "crypto";
 import {
   createMeasures,
+  measureBody,
+  measuresAdminToken,
   measureUser,
   setEditors,
   sourcesApi,
@@ -127,5 +129,103 @@ describe("/v1/sources/:sourceId/measures: a measure over a column the caller lac
     );
     expect(hidden.status).toBe(404);
     expect(withoutRequestId(hidden)).toEqual(withoutRequestId(random));
+  });
+});
+
+describe("/v1/sources/:sourceId/measures: a date column the caller lacks", () => {
+  let app: Awaited<ReturnType<typeof startV1Routes>>;
+  let source: SeededSource;
+  const api = sourcesApi(() => app.url);
+  const author = measureUser();
+  /** An editor granted orders' id and total: not created_at. */
+  const editor = measureUser();
+  /** A reader granted orders' id and total. */
+  const reader = newQueryUser();
+  let ids: Record<string, string>;
+
+  /** A measure's view without what tells two measures apart anyway. */
+  const shape = (body: Record<string, unknown>) => {
+    const {
+      id: _i,
+      name: _n,
+      description: _d,
+      created_at: _c,
+      updated_at: _u,
+      ...rest
+    } = body;
+    return rest;
+  };
+
+  beforeAll(async () => {
+    app = await startV1Routes();
+    source = await seedQuerySource(ENGINES[0]!, {}, "measures");
+    await grantTo(author.principal, source.tables.orders!, "all");
+    for (const who of [editor.principal, reader.principal]) {
+      await grantTo(who, source.tables.orders!, ["id", "total"]);
+    }
+    await setEditors(app.url, source.id, [author.principal, editor.principal]);
+    ids = await createMeasures(app.url, source.id, author.token, [
+      { ...measureBody("dated", { sum: "total" }), date_column: "created_at" },
+      measureBody("undated", { sum: "total" }),
+    ]);
+  });
+  afterAll(async () => {
+    await removeSources([source.id]);
+    await app.close();
+  });
+
+  it.each([
+    ["a reader", () => reader.token],
+    ["an editor", () => editor.token],
+  ])(
+    "shows %s the measure exactly as one with no date column",
+    async (_, token) => {
+      const get = (id: string) =>
+        api("GET", `/${source.id}/measures/${id}`, token());
+      const dated = await get(ids.dated!);
+      const undated = await get(ids.undated!);
+      expect(dated.status).toBe(200);
+      expect(dated.body.date_column).toBeNull();
+      expect(shape(dated.body)).toEqual(shape(undated.body));
+      const list = await api("GET", `/${source.id}/measures`, token());
+      const listed = list.body.data.find(
+        (m: { name: string }) => m.name === "dated"
+      );
+      expect(listed.date_column).toBeNull();
+      expect(JSON.stringify(list.body)).not.toContain(
+        '"date_column":"created_at"'
+      );
+    }
+  );
+
+  it("shows it to whoever sees every measure", async () => {
+    const res = await api(
+      "GET",
+      `/${source.id}/measures/${ids.dated}`,
+      measuresAdminToken()
+    );
+    expect(res.body.date_column).toBe("created_at");
+  });
+
+  it("lets the editor change the measure, keeping the date column they cannot see", async () => {
+    const path = `/${source.id}/measures/${ids.dated}`;
+    const res = await api("PATCH", path, editor.token, {
+      description: "Changed by an editor without the date column",
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body.date_column).toBeNull();
+    const row = await prisma.measure.findUniqueOrThrow({
+      where: { id: ids.dated },
+    });
+    expect(row.dateColumn).toBe("created_at");
+
+    const set = await api("PATCH", path, editor.token, {
+      date_column: "created_at",
+    });
+    expect(set.status).toBe(400);
+    expect(set.body).toMatchObject({
+      error: "not_found_or_not_accessible",
+      path: ["date_column"],
+    });
   });
 });

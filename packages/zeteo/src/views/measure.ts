@@ -21,7 +21,13 @@ export interface Broken {
 export const measureView = (
   row: Measure,
   table: string,
-  extra: { usable: boolean; usedBy?: UsedBy; broken?: Broken | null }
+  extra: {
+    usable: boolean;
+    /** The date column as this caller is shown it: see `visibleDateColumn`. */
+    dateColumn: string | null;
+    usedBy?: UsedBy;
+    broken?: Broken | null;
+  }
 ) => ({
   id: row.id,
   name: row.name,
@@ -30,7 +36,7 @@ export const measureView = (
   formula: row.formula,
   where: row.where ?? null,
   fixed: row.fixed,
-  date_column: row.dateColumn,
+  date_column: extra.dateColumn,
   created_at: row.createdAt.toISOString(),
   updated_at: row.updatedAt.toISOString(),
   usable: extra.usable,

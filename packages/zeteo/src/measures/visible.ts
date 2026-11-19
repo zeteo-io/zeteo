@@ -1,5 +1,4 @@
 import { MeasureError, expandMeasure } from "../adapters/sql/measures.js";
-import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { QueryError } from "../engine/errors.js";
 import type {
   MeasureRow,
@@ -12,6 +11,12 @@ import {
   metricFormulaMeasures,
   metricFormulaProblem,
 } from "../adapters/sql/metrics.js";
+import {
+  Planner,
+  newQueryState,
+  planSql,
+  queryNameOf,
+} from "../adapters/sql/plan.js";
 
 // The grant rule: a caller sees a measure only when its home table, every
 // column it reads and every relation it joins, through the measures it uses
@@ -138,4 +143,48 @@ export const visibleMetrics = (
       description: r.description,
       formula: r.formula,
     }));
+};
+
+/**
+ * The type of `dateColumn` read from `home` through to-one relations, as a
+ * metric query resolves a measure's date column. Throws the planner's
+ * refusal (a `QueryError` or `MeasureError`) when it does not resolve.
+ */
+export const resolveDateColumn = (
+  catalog: Omit<VisibleCatalog, "metrics">,
+  home: VisibleCatalog["tables"][number],
+  dateColumn: string,
+  at: (string | number)[] = ["date_column"]
+): string => {
+  const planner = new Planner(
+    { ...catalog, metrics: [] },
+    new Date(),
+    newQueryState()
+  );
+  planner.fromTable(home, ["table"]);
+  return planner.resolveMeasureColumn(dateColumn, at).ref.type;
+};
+
+/**
+ * A measure's date column as a caller who does not see every measure is
+ * shown it: the stored path when it resolves to a date or timestamp column in
+ * their catalogue, else null, exactly as for a measure with none (a metric
+ * query treats it so). Missing columns count as present, as for visibility.
+ * Every view of a measure for such a caller goes through this.
+ */
+export const visibleDateColumn = (
+  catalog: Omit<VisibleCatalog, "metrics"> | null,
+  measure: { tableId: string; dateColumn: string | null }
+): string | null => {
+  if (!catalog || measure.dateColumn === null) return null;
+  const probe = { ...catalog, ...withNothingMissing(catalog) };
+  const home = probe.tables.find((t) => t.id === measure.tableId);
+  if (!home) return null;
+  try {
+    const type = resolveDateColumn(probe, home, measure.dateColumn);
+    return type === "date" || type === "timestamp" ? measure.dateColumn : null;
+  } catch (err) {
+    if (err instanceof QueryError || err instanceof MeasureError) return null;
+    throw err;
+  }
 };

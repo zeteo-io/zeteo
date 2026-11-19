@@ -1,6 +1,8 @@
+import { resolveDateColumn, visibleDateColumn } from "./visible.js";
 import { runQuery, type RunQueryResult } from "../engine/index.js";
 import { notFoundMessage, QueryError } from "../engine/errors.js";
 import type { SharePrincipal } from "../sharing/principals.js";
+import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { loadAccess, type Access } from "../grants/access.js";
 import { MeasureError } from "../adapters/sql/measures.js";
@@ -39,12 +41,6 @@ import {
   type VisibleCatalog,
   type VisibleMeasure,
 } from "../grants/visibleCatalog.js";
-import {
-  Planner,
-  newQueryState,
-  planSql,
-  queryNameOf,
-} from "../adapters/sql/plan.js";
 import {
   assertGroupsChecked,
   groupsInReach,
@@ -244,6 +240,20 @@ const tableNameOf = (
   return "";
 };
 
+/**
+ * The measure's date column as the caller is shown it: as stored to those who
+ * see every measure, else only when it resolves in their own catalogue.
+ */
+const shownDateColumn = (
+  caller: Caller,
+  source: Source,
+  mine: VisibleCatalog | null,
+  record: Measure
+): string | null =>
+  seesAllMeasures(caller, source)
+    ? record.dateColumn
+    : visibleDateColumn(mine, record);
+
 /** Whether the caller may use the measure: it plans against their catalogue. */
 const usableBy = (mine: VisibleCatalog | null, id: string): boolean =>
   mine?.measures.some((m) => m.id === id) ?? false;
@@ -295,7 +305,12 @@ const draftOf = (
  * catalogue, with the other measures the editor may use: first its formula
  * alone, then with its `where`, so a refusal names the part at fault.
  */
-const checkDraft = (mine: VisibleCatalog | null, draft: MeasureRow): void => {
+const checkDraft = (
+  mine: VisibleCatalog | null,
+  draft: MeasureRow,
+  /** Whether the date column is checked: when it is set, or the table changes. */
+  checkDate = true
+): void => {
   if (!mine) {
     throw new InvalidMeasureError(
       "not_found_or_not_accessible",
@@ -342,7 +357,7 @@ const checkDraft = (mine: VisibleCatalog | null, draft: MeasureRow): void => {
   };
   plan({ ...draft, where: null }, "formula");
   if (draft.where) plan(draft, "where");
-  if (draft.dateColumn !== null) {
+  if (checkDate && draft.dateColumn !== null) {
     checkDateColumn({ ...base, measures: others }, home, draft.dateColumn);
   }
 };
@@ -359,11 +374,9 @@ const checkDateColumn = (
   dateColumn: string
 ): void => {
   const at = ["date_column"];
-  const planner = new Planner(catalog, new Date(), newQueryState());
   let type: string;
   try {
-    planner.fromTable(home, ["table"]);
-    type = planner.resolveMeasureColumn(dateColumn, at).ref.type;
+    type = resolveDateColumn(catalog, home, dateColumn, at);
   } catch (err) {
     if (err instanceof QueryError || err instanceof MeasureError) {
       throw new InvalidMeasureError(err.code, err.message, at);
@@ -515,6 +528,7 @@ export const listMeasures = async (
       }
       return measureView(record, table, {
         usable,
+        dateColumn: shownDateColumn(caller, source, catalogs.mine, record),
         ...((all || editor) && {
           usedBy: await usedBy(source.id, record.name),
         }),
@@ -549,6 +563,7 @@ export const getMeasure = async (
   if (!record || (!all && !usable)) throw new NotFoundError(NOT_FOUND);
   return measureView(record, tableNameOf(record.tableId, catalogs), {
     usable,
+    dateColumn: shownDateColumn(caller, source, catalogs.mine, record),
     ...((all || editor) && { usedBy: await usedBy(source.id, record.name) }),
     ...(all && {
       broken: brokenOf(
@@ -559,15 +574,22 @@ export const getMeasure = async (
   });
 };
 
+/** A measure just written, its table's name and its date column as its editor is shown it. */
+interface Written {
+  record: Measure;
+  table: string;
+  dateColumn: string | null;
+}
+
 /** The view of a measure just written, for the editor who wrote it. */
 const writtenView = async (
   caller: Caller,
   source: Source,
-  record: Measure,
-  table: string
+  { record, table, dateColumn }: Written
 ): Promise<MeasureView> =>
   measureView(record, table, {
     usable: true,
+    dateColumn,
     usedBy: await usedBy(source.id, record.name),
     ...(seesAllMeasures(caller, source) && { broken: null }),
   });
@@ -583,7 +605,7 @@ export const createMeasure = async (
     loadAccess(caller),
     loadCatalogBase(source),
   ]);
-  const { record, table } = await withAudit(async (tx, audit) => {
+  const written = await withAudit(async (tx, audit): Promise<Written> => {
     const catalogs = await lockedCatalogs(tx, source, access, base);
     if (nameInUse(catalogs, input.name)) throw nameTaken();
     const draft = draftOf(source, catalogs, input);
@@ -625,9 +647,10 @@ export const createMeasure = async (
     return {
       record: created,
       table: tableNameOf(created.tableId, catalogs),
+      dateColumn: shownDateColumn(caller, source, catalogs.mine, created),
     };
   });
-  return writtenView(caller, source, record, table);
+  return writtenView(caller, source, written);
 };
 
 /**
@@ -665,7 +688,7 @@ export const updateMeasure = async (
     loadAccess(caller),
     loadCatalogBase(source),
   ]);
-  const { record, table } = await withAudit(async (tx, audit) => {
+  const written = await withAudit(async (tx, audit): Promise<Written> => {
     const catalogs = await lockedCatalogs(tx, source, access, base);
     const before = fullySeen(caller, source, catalogs, id);
     const old = toRow(before);
@@ -688,7 +711,13 @@ export const updateMeasure = async (
       dateColumn:
         patch.date_column === undefined ? old.dateColumn : patch.date_column,
     };
-    checkDraft(catalogs.mine, draft);
+    // A stored date column the editor cannot see stays as it is: checked
+    // only when the change sets it or moves the measure to another table.
+    checkDraft(
+      catalogs.mine,
+      draft,
+      patch.date_column !== undefined || patch.table !== undefined
+    );
     checkSet(catalogs, draft, old.name);
     const updated = await mapUniqueViolation(
       () =>
@@ -726,9 +755,10 @@ export const updateMeasure = async (
     return {
       record: updated,
       table: tableNameOf(updated.tableId, catalogs),
+      dateColumn: shownDateColumn(caller, source, catalogs.mine, updated),
     };
   });
-  return writtenView(caller, source, record, table);
+  return writtenView(caller, source, written);
 };
 
 /** Deletes a measure the editor sees in full; refused while other measures use it. Saved queries using it do not block. */
