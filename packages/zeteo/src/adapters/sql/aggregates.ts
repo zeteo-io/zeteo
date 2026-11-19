@@ -13,6 +13,7 @@ const exprAggregates = (expr: ResolvedExpr): boolean => {
       return false;
     case "dateAdd":
     case "datePart":
+    case "calendarMonths":
       return exprAggregates(expr.arg);
     case "dateDiff":
       return exprAggregates(expr.start) || exprAggregates(expr.end);

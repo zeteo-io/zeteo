@@ -317,3 +317,96 @@ describe("azure-sql runQuery: calculations", () => {
     });
   });
 });
+
+describe("azure-sql runQuery: businessDaysInMonth over a column", () => {
+  const holiday = {
+    ...DEFAULT_CALENDAR,
+    holidays: new Map([["2026-01-19", "Martin Luther King Jr. Day"]]),
+  };
+
+  it("divides each month's total by its business days, a holiday counted out", async () => {
+    const result = await runWithCalendar(holiday, {
+      from: "orders",
+      select: [
+        { bucket: "month", column: "created_at", as: "month" },
+        { max: { businessDaysInMonth: "created_at" }, as: "days" },
+        {
+          calc: {
+            div: [
+              { sum: "total" },
+              { max: { businessDaysInMonth: "created_at" } },
+            ],
+          },
+          as: "per_day",
+        },
+      ],
+      groupBy: ["month"],
+      where: { created_at: { lt: "2026-04-01T00:00:00Z" } },
+    });
+    // January 2026 has 22 weekdays and the 19th is a holiday; February 20; March 22.
+    expect(result.rows.map((r) => r[1])).toEqual([21, 20, 22]);
+    const perDay = result.rows.map((r) => Number(r[2]));
+    expect(perDay[0]).toBeCloseTo(260.5 / 21, 5);
+    expect(perDay[1]).toBeCloseTo(1299.99 / 20, 5);
+    expect(perDay[2]).toBeCloseTo(80.25 / 22, 5);
+  });
+
+  it("reads a date column and a date operation by their months", async () => {
+    const days = (arg: unknown) =>
+      runWithCalendar(holiday, {
+        from: "typed_values",
+        select: [{ calc: { businessDaysInMonth: arg }, as: "x" }],
+        where: { id: { eq: 1 } },
+      }).then((r) => r.rows[0]![0]);
+    // probe/typed_values row 1: day is 2026-03-31.
+    expect(await days("day")).toBe(22);
+    expect(await days({ dateAdd: ["day", 1, "month"] })).toBe(22);
+  });
+
+  it("gives null for a month outside the 25-year window", async () => {
+    const result = await runWithCalendar(DEFAULT_CALENDAR, {
+      from: "typed_values",
+      select: [
+        {
+          calc: { businessDaysInMonth: { dateAdd: ["day", 30, "year"] } },
+          as: "x",
+        },
+      ],
+      where: { id: { eq: 1 } },
+    });
+    expect(result.rows).toEqual([[null]]);
+  });
+
+  it("filters and orders by the month's business days, not as a subquery in an aggregate", async () => {
+    const result = await runWithCalendar(holiday, {
+      from: "orders",
+      select: [
+        "id",
+        { calc: { businessDaysInMonth: "created_at" }, as: "days" },
+      ],
+      where: {
+        and: [
+          { created_at: { lt: "2026-04-01T00:00:00Z" } },
+          { id: { in: [1, 3, 5] } },
+        ],
+      },
+      orderBy: [{ days: "asc" }, { id: "asc" }],
+    });
+    expect(result.rows).toEqual([
+      [3, 20],
+      [1, 21],
+      [5, 22],
+    ]);
+  });
+
+  it("reads an offset timestamp column as its UTC month", async () => {
+    // probe/typed_values row 1: aware is 2026-03-31 23:59:59.99 at +02:00,
+    // 21:59:59 UTC on the 31st: March, 22 weekdays.
+    const result = await runWithCalendar(holiday, {
+      from: "typed_values",
+      select: [{ calc: { businessDaysInMonth: "aware" }, as: "x" }],
+      where: { id: { eq: 1 } },
+    });
+    expect(result.rows).toEqual([[22]]);
+  });
+});

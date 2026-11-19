@@ -124,6 +124,16 @@ export type ResolvedExpr =
       type: "number";
     }
   | {
+      kind: "calendarMonths";
+      /** The date or timestamp whose month is looked up. */
+      arg: ResolvedExpr;
+      argType: "date" | "timestamp";
+      /** The calendar's month starts (`YYYY-MM-01`) and their business days, in step; bound as parameters. */
+      months: string[];
+      counts: number[];
+      type: "number";
+    }
+  | {
       kind: "case";
       /** In order; the first `when` that holds gives its `then`. */
       branches: { when: ResolvedFilter<ColumnRef>; then: ResolvedExpr }[];

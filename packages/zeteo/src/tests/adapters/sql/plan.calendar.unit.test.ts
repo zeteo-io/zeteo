@@ -44,6 +44,91 @@ const refusal = (fn: object) => {
 
 const number = (value: number) => ({ kind: "literal", value, type: "number" });
 
+interface MonthsNode {
+  kind: string;
+  arg: { kind: string };
+  argType: string;
+  months: string[];
+  counts: number[];
+  type: string;
+}
+
+const itemOf = (
+  calc: object,
+  catalog = shopCatalog(),
+  at: Date = now
+): { level: string; expr: MonthsNode } =>
+  planSql(
+    sqlQuerySchema.parse({
+      source: "shop",
+      from: "orders",
+      select: [{ calc, as: "n" }],
+    }),
+    catalog,
+    { now: at }
+  ).select[0] as unknown as { level: string; expr: MonthsNode };
+
+describe("planSql: businessDaysInMonth over a column", () => {
+  const monthly = (catalog = shopCatalog()) =>
+    itemOf({ businessDaysInMonth: "created_at" }, catalog).expr;
+
+  it("plans a timestamp column, with the months 25 years either side of now", () => {
+    const node = monthly();
+    expect(node).toMatchObject({
+      kind: "calendarMonths",
+      argType: "timestamp",
+      type: "number",
+    });
+    expect(node.months).toHaveLength(601);
+    expect(node.counts).toHaveLength(601);
+    expect(node.months[0]).toBe("2001-11-01");
+    expect(node.months[300]).toBe("2026-11-01");
+    expect(node.months.at(-1)).toBe("2051-11-01");
+    expect(node.counts[300]).toBe(21);
+  });
+
+  it("carries the calendar's holidays in the counts", () => {
+    const node = monthly(
+      withCalendar({ holidays: new Map([["2026-11-26", "Thanksgiving"]]) })
+    );
+    expect(node.counts[300]).toBe(20);
+  });
+
+  it("centres the window on now in the calendar's time zone", () => {
+    const late = new Date("2026-11-30T23:30:00Z");
+    const node = itemOf(
+      { businessDaysInMonth: "created_at" },
+      withCalendar({ timeZone: "Pacific/Auckland" }),
+      late
+    ).expr;
+    expect(node.months[300]).toBe("2026-12-01");
+  });
+
+  it("plans a date operation as the argument", () => {
+    const node = itemOf({
+      businessDaysInMonth: { dateAdd: ["created_at", 1, "month"] },
+    }).expr;
+    expect(node.arg.kind).toBe("dateAdd");
+  });
+
+  it("is row-level over a bare column and group-level inside an aggregate", () => {
+    expect(itemOf({ businessDaysInMonth: "created_at" }).level).toBe("row");
+    expect(itemOf({ max: { businessDaysInMonth: "created_at" } }).level).toBe(
+      "group"
+    );
+  });
+
+  it("still folds a date, a timestamp and a relative date to a literal", () => {
+    expect(literalOf({ businessDaysInMonth: yesterday })).toEqual(number(21));
+    expect(literalOf({ businessDaysInMonth: { date: "2026-11-19" } })).toEqual(
+      number(21)
+    );
+    expect(
+      literalOf({ businessDaysInMonth: { timestamp: "2026-02-10T00:00:00Z" } })
+    ).toEqual(number(20));
+  });
+});
+
 describe("planSql: calendar functions", () => {
   it("binds the business days in the month of yesterday", () => {
     expect(literalOf({ businessDaysInMonth: yesterday })).toEqual(number(21));
@@ -84,19 +169,33 @@ describe("planSql: calendar functions", () => {
     expect(literalOf(fn)).toEqual(number(1));
   });
 
-  it("refuses a column argument", () => {
-    expect(refusal({ businessDaysInMonth: "created_at" })).toEqual({
-      code: "invalid_operator",
-      path: ["select", 0, "calc", "div", 1, "businessDaysInMonth"],
-      message:
-        "calendar functions take a date or a relative date in this version",
-    });
+  it("refuses a column argument to the other calendar functions", () => {
+    for (const fn of [
+      "businessDaysElapsed",
+      "businessDaysRemaining",
+    ] as const) {
+      expect(refusal({ [fn]: "created_at" })).toEqual({
+        code: "invalid_operator",
+        path: ["select", 0, "calc", "div", 1, fn],
+        message:
+          "calendar functions take a date or a relative date in this version",
+      });
+    }
   });
 
   it("refuses a column inside businessDays at its own position", () => {
     expect(
       refusal({ businessDays: [{ date: "2026-11-02" }, "created_at"] }).path
     ).toEqual(["select", 0, "calc", "div", 1, "businessDays", 1]);
+  });
+
+  it("refuses a non-date argument to businessDaysInMonth", () => {
+    expect(refusal({ businessDaysInMonth: "status" })).toEqual({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "div", 1, "businessDaysInMonth"],
+      message:
+        'businessDaysInMonth needs a date or timestamp; "status" is text',
+    });
   });
 
   it("counts each function as one operation", () => {

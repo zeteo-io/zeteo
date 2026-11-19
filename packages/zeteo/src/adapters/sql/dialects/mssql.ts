@@ -255,6 +255,7 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
       return undefined;
     case "dateDiff":
     case "datePart":
+    case "calendarMonths":
       return "integer";
     case "scalar":
       return exprKind(expr.plan.expr);
@@ -449,6 +450,9 @@ export const mssqlDialect: SqlDialect = {
   },
   // A datetimeoffset keeps its own offset; date parts and differences are
   // taken on the UTC wall clock, as a bucket's are.
+  subqueryInAggregate: false,
+  calendarMonths: (months, counts, monthStartOf) =>
+    sql`(select c.n from openjson(${param("nvarchar", JSON.stringify(months.map((m, i) => ({ m, n: counts[i] }))))}) with (m date '$.m', n int '$.n') as c where c.m = ${monthStartOf})`,
   timestampUtc: (expression, nativeType) =>
     baseType(nativeType) === "datetimeoffset"
       ? sql`cast(switchoffset(${expression}, '+00:00') as datetime2(7))`

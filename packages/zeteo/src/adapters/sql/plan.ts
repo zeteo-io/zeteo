@@ -12,6 +12,7 @@ import {
   businessDaysInMonth,
   businessDaysRemaining,
   localDate,
+  monthCounts,
   type Calendar,
 } from "../../calendar/calendar.js";
 import {
@@ -221,6 +222,12 @@ const OP_TYPES: Record<
 
 const typeOf = (e: ResolvedExpr): QueryableType =>
   e.kind === "column" ? e.column.type : e.type;
+
+/** A date, timestamp or relative date literal: what a calendar function folds to a constant. */
+const isDateLiteral = (operand: unknown): boolean =>
+  typeof operand === "object" &&
+  operand !== null &&
+  ("date" in operand || "timestamp" in operand || "relative" in operand);
 
 const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
 
@@ -590,6 +597,14 @@ class Planner {
       key === "businessDaysElapsed" ||
       key === "businessDaysRemaining"
     ) {
+      if (key === "businessDaysInMonth" && !isDateLiteral(operand)) {
+        return this.resolveCalendarMonths(
+          operand as CalcExpr,
+          keyAt,
+          reads,
+          insideAggregate
+        );
+      }
       return this.resolveCalendarFn(key, operand, keyAt);
     }
     if (key === "case") {
@@ -996,6 +1011,43 @@ class Planner {
     return {
       resolved: { kind: "literal", value, type: "number" },
       hasAggregate: false,
+    };
+  }
+
+  /**
+   * `businessDaysInMonth` of a column or a date operation: the calendar's
+   * counts for 25 years either side of now go into the plan as values, and
+   * the compiler looks the argument's month up in them. A date reads as its
+   * month, a timestamp as its UTC month.
+   */
+  private resolveCalendarMonths(
+    operand: CalcExpr,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const arg = this.resolveExpr(operand, at, reads, insideAggregate);
+    const argType = typeOf(arg.resolved);
+    if (argType !== "date" && argType !== "timestamp") {
+      throw fail(
+        "invalid_operator",
+        `businessDaysInMonth needs a date or timestamp; ${typeof operand === "string" ? `"${operand}"` : "the operand"} is ${argType}`,
+        at
+      );
+    }
+    const { months, counts } = monthCounts(this.catalog.calendar, this.now);
+    return {
+      hasAggregate: arg.hasAggregate,
+      hasFixed: arg.hasFixed,
+      bareColumn: arg.bareColumn,
+      resolved: {
+        kind: "calendarMonths",
+        arg: arg.resolved,
+        argType,
+        months,
+        counts,
+        type: "number",
+      },
     };
   }
 

@@ -266,6 +266,9 @@ export const postgresDialect: SqlDialect = {
   },
   // timestamptz is an instant, and the session runs in UTC.
   timestampUtc: (expression) => expression,
+  subqueryInAggregate: true,
+  calendarMonths: (months, counts, monthStartOf) =>
+    sql`(select c.n from unnest(${months}::date[], ${counts}::int[]) as c(m, n) where c.m = ${monthStartOf})`,
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),
   // The casts match SQL Server's, which keeps only 8 places of this quotient

@@ -64,9 +64,19 @@ const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
 export interface ExprContext {
   row: boolean;
   fixed: Map<string, ScalarPlan>;
+  /**
+   * The calendar lookups of a dialect that cannot aggregate a subquery (SQL
+   * Server), by alias: each is applied to every row, outer, and read as its
+   * column `n`, so an aggregate sees a column.
+   */
+  applied: Map<string, Expression<unknown>>;
 }
 
-const rowContext = (): ExprContext => ({ row: true, fixed: new Map() });
+const rowContext = (): ExprContext => ({
+  row: true,
+  fixed: new Map(),
+  applied: new Map(),
+});
 
 /** Joins `joins` in order: inner or left, on their key equalities. */
 const withJoins = (
@@ -107,15 +117,26 @@ const withFixed = (
   return qb;
 };
 
+/** Applies each calendar lookup of `applied` to every row, keeping rows with no month. */
+const withApplied = (
+  qb: AnySelect,
+  applied: ReadonlyMap<string, Expression<unknown>>
+): AnySelect => {
+  for (const [alias, lookup] of applied) {
+    qb = qb.outerApply(sql`${lookup}`.as(alias));
+  }
+  return qb;
+};
+
 /** A fixed measure's own query: one row, its value as `v`. */
 const scalarQuery = (plan: ScalarPlan, dialect: SqlDialect): AnySelect => {
-  const ctx: ExprContext = { row: false, fixed: new Map() };
+  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
   const value = compileExpr(plan.expr, dialect, ctx);
   const qb = withJoins(
     dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
     plan.joins
   ).select(sql`${value}`.as("v"));
-  return withFixed(qb, ctx.fixed, dialect);
+  return withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
 };
 /** Whether an expression's value is a binary float on the engine (a float column, an average, arithmetic over either). */
 const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
@@ -128,6 +149,7 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
     case "dateAdd":
     case "dateDiff":
     case "datePart":
+    case "calendarMonths":
       return false;
     case "case":
       return [...expr.branches.map((b) => b.then), expr.otherwise].some(
@@ -210,6 +232,26 @@ export const compileExpr = (
         inner(expr.arg),
         expr.fiscalStartMonth
       );
+    case "calendarMonths": {
+      // The argument is already UTC (`timestampUtc` on a column), so the
+      // bucket's native type is the plain one.
+      const start = dialect.bucket(
+        "month",
+        inner(expr.arg),
+        expr.argType,
+        "datetime2",
+        1
+      );
+      const lookup = dialect.calendarMonths(
+        expr.months,
+        expr.counts,
+        expr.argType === "date" ? start : sql`cast(${start} as date)`
+      );
+      if (!ctx.row || dialect.subqueryInAggregate) return lookup;
+      const alias = `m${ctx.applied.size}`;
+      ctx.applied.set(alias, lookup);
+      return sql.id(alias, "n");
+    }
     case "case": {
       const whens = expr.branches.map(
         (b) =>
@@ -273,7 +315,8 @@ const perGroup = (item: ResolvedSelect) =>
 const selectExpression = (
   item: ResolvedSelect,
   dialect: SqlDialect,
-  fixed: Map<string, ScalarPlan>
+  fixed: Map<string, ScalarPlan>,
+  applied: Map<string, Expression<unknown>>
 ): Expression<unknown> => {
   switch (item.kind) {
     case "column":
@@ -298,6 +341,7 @@ const selectExpression = (
       return compileExpr(item.expr, dialect, {
         row: item.level === "row",
         fixed,
+        applied,
       });
   }
 };
@@ -374,9 +418,10 @@ export const compileSql = (
   );
   // The fixed measures read per row, joined once all is compiled.
   const fixed = new Map<string, ScalarPlan>();
+  const applied = new Map<string, Expression<unknown>>();
 
   const selected = plan.select.map((item) =>
-    selectExpression(item, dialect, fixed)
+    selectExpression(item, dialect, fixed, applied)
   );
   qb = qb.select(
     selected.map((e, i) =>
@@ -400,7 +445,7 @@ export const compileSql = (
           "index" in s
             ? { expression: selected[s.index]!, type: s.type }
             : columnSubject(dialect)(s),
-        { row: true, fixed }
+        { row: true, fixed, applied }
       )
     );
   }
@@ -431,7 +476,7 @@ export const compileSql = (
           expression: selected[h.index]!,
           type: h.type,
         }),
-        { row: false, fixed }
+        { row: false, fixed, applied }
       )
     );
   }
@@ -461,7 +506,7 @@ export const compileSql = (
     qb = dialect.orderBy(qb, sorted, direction);
   }
 
-  qb = withFixed(qb, fixed, dialect);
+  qb = withApplied(withFixed(qb, fixed, dialect), applied);
   qb = dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
   const { sql: text, parameters } = qb.compile();
   if (parameters.length > dialect.maxParameters) {

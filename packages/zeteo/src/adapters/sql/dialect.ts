@@ -166,6 +166,22 @@ export interface SqlDialect {
     expression: Expression<unknown>,
     nativeType: string
   ): Expression<unknown>;
+  /**
+   * Whether an aggregate may take a scalar subquery (Postgres); where it may
+   * not (SQL Server), a row-level calendar lookup is applied to the rows
+   * instead and read as a column.
+   */
+  subqueryInAggregate: boolean;
+  /**
+   * The business days of the month a date starts, looked up in the calendar's
+   * month starts (`months`, `YYYY-MM-01`) and counts, bound as parameters; null
+   * for a month the arrays lack. `monthStartOf` is the date of the month's first day.
+   */
+  calendarMonths(
+    months: string[],
+    counts: number[],
+    monthStartOf: Expression<unknown>
+  ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,

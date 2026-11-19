@@ -95,6 +95,31 @@ const monthEnd = (date: string): string => {
 export const businessDaysInMonth = (cal: Calendar, date: string): number =>
   businessDays(cal, monthStart(date), monthEnd(date));
 
+/**
+ * The business days of every month from `years` years before to `years` years
+ * after the month of `now` in the calendar's time zone, both ends included:
+ * the month starts (`YYYY-MM-01`) and their counts, in step.
+ */
+export const monthCounts = (
+  cal: Calendar,
+  now: Date,
+  years = 25
+): { months: string[]; counts: number[] } => {
+  const { y, m } = parse(localDate(now, cal.timeZone));
+  const months: string[] = [];
+  const counts: number[] = [];
+  for (
+    let index = (y - years) * 12 + (m - 1);
+    index <= (y + years) * 12 + (m - 1);
+    index += 1
+  ) {
+    const start = `${pad(Math.floor(index / 12), 4)}-${pad((index % 12) + 1)}-01`;
+    months.push(start);
+    counts.push(businessDaysInMonth(cal, start));
+  }
+  return { months, counts };
+};
+
 /** The 1st of the month through `date`, inclusive. */
 export const businessDaysElapsed = (cal: Calendar, date: string): number =>
   businessDays(cal, monthStart(date), date);
