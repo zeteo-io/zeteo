@@ -1,0 +1,65 @@
+/v1/calendar:
+  get:
+    tags: [Calendar]
+    summary: Get the calendar
+    description: |
+      The one calendar of the install: working days, holidays, the month a fiscal year starts in
+      and the time zone. Until an admin saves one, the defaults are Monday to Friday, no holidays,
+      January and `UTC`, and `updated_at` is null.
+
+      The calendar shapes queries: a business day is a working weekday that is not a holiday (the
+      `businessDays*` operations); the fiscal buckets, relative units and `datePart` parts follow
+      the fiscal year; and "now" for every relative date (in `where`, a measure's filter, the
+      calendar functions and a dashboard's time range) is evaluated in the time zone, so
+      `{ "unit": "day", "offset": -1, "startOf": true }` is the start of yesterday there. Buckets
+      on timestamp columns stay in UTC. The calendar's values are folded into each plan as bound
+      literals, so a change reaches dashboard results without any invalidation.
+
+      **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+    operationId: getCalendar
+    responses:
+      '200':
+        description: The calendar
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/calendar/schemas.yaml#/Calendar'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Calendar]
+    summary: Replace the calendar
+    description: |
+      Replaces the whole calendar (working days, holidays, fiscal year start month and time zone)
+      and answers the calendar as it now stands. At most 5,000 holidays, each date once; the body
+      may be up to 512 KB. A `zeteo.calendar.updated` audit entry is written.
+
+      **Required permissions:** `zeteo.calendar.write` (`403 forbidden` without).
+    operationId: replaceCalendar
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/calendar/schemas.yaml#/CalendarInput'
+          example:
+            working_days: [1, 2, 3, 4, 5]
+            holidays:
+              - { date: '2026-12-25', name: Christmas Day }
+            fiscal_year_start_month: 7
+            time_zone: America/Chicago
+    responses:
+      '200':
+        description: The calendar
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/calendar/schemas.yaml#/Calendar'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

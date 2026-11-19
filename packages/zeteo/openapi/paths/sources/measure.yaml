@@ -1,0 +1,112 @@
+/v1/sources/{sourceId}/measures/{measureId}:
+  get:
+    tags: [Measures]
+    summary: Get a measure
+    description: |
+      One measure in full, to a caller who may see it in full: those who see every measure
+      (`zeteo.sources.read`, or the owner of an upload source), and anyone it plans against the
+      catalogue of. Anyone else gets the `404 not_found` a measure that does not exist gives.
+
+      **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+    operationId: getMeasure
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MeasureIdParam'
+    responses:
+      '200':
+        description: The measure
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Measure'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  patch:
+    tags: [Measures]
+    summary: Change a measure
+    description: |
+      Changes any of the create fields, at least one; `where: null` removes the filter. An editor
+      may change only a measure they can see in full (else the 404 of a measure that does not exist
+      for them). The changed measure is checked as on create, and so is every measure that uses it,
+      directly or not, against the source's whole catalogue: if one that planned before would break,
+      the change is refused with `409 measure_in_use`, naming them in `dependents`; a dependent
+      already broken does not refuse it. A rename is refused the same way while other measures use
+      the measure. Saved queries that use it do not block a change; `used_by` says how many there
+      are, and they fail with `not_found_or_not_accessible` until fixed. A change that makes a
+      dependent read a column some callers lack is allowed: those callers stop seeing the dependent.
+      A `zeteo.measure.updated` audit entry is written.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+      **Errors:** `400` as on create; `404 not_found`; `409 measure_in_use`,
+      `409 measure_name_taken`, `409 source_archived`.
+    operationId: updateMeasure
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MeasureIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/UpdateMeasureRequest'
+    responses:
+      '200':
+        description: The measure
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Measure'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues` (including a body with no field); or the
+          measure does not plan, with the query error code of the problem and the `path` at fault
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/InvalidMeasureError'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `measure_in_use` (with `dependents`), `measure_name_taken` or `source_archived`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/MeasureInUseError'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  delete:
+    tags: [Measures]
+    summary: Delete a measure
+    description: |
+      Deletes a measure the caller can see in full, refused with `409 measure_in_use` (naming the
+      measures in `dependents`) while other measures use it. Saved queries that use it do not block
+      a delete. A `zeteo.measure.deleted` audit entry is written.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+      **Errors:** `404 not_found`; `409 measure_in_use`, `409 source_archived`.
+    operationId: deleteMeasure
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+      - $ref: '../../components/parameters.yaml#/MeasureIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `measure_in_use` (with `dependents`) or `source_archived`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/MeasureInUseError'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

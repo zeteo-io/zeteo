@@ -5,6 +5,8 @@ import { connectionsCalls } from "./calls/connections.js";
 import { dashboardsCalls } from "./calls/dashboards.js";
 import { principalsCalls } from "./calls/principals.js";
 import { redisBackend } from "@dianemo/backend-redis";
+import { measuresCalls } from "./calls/measures.js";
+import { calendarCalls } from "./calls/calendar.js";
 import { uploadsCalls } from "./calls/uploads.js";
 import { catalogCalls } from "./calls/catalog.js";
 import { sourcesCalls } from "./calls/sources.js";
@@ -55,6 +57,8 @@ const buildCalls = (ctx: CallContext) => ({
   sources: sourcesCalls(ctx),
   uploads: uploadsCalls(ctx),
   connections: connectionsCalls(ctx),
+  measures: measuresCalls(ctx),
+  calendar: calendarCalls(ctx),
   grants: grantsCalls(ctx),
   principalLimits: principalLimitsCalls(ctx),
 });

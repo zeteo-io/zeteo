@@ -204,6 +204,34 @@ export const OPERATIONS = {
     method: "POST",
     path: "/v1/saved-panels/{savedPanelId}/transfer",
   },
+  listMeasures: { method: "GET", path: "/v1/sources/{sourceId}/measures" },
+  createMeasure: { method: "POST", path: "/v1/sources/{sourceId}/measures" },
+  previewMeasure: {
+    method: "POST",
+    path: "/v1/sources/{sourceId}/measures/preview",
+  },
+  getMeasure: {
+    method: "GET",
+    path: "/v1/sources/{sourceId}/measures/{measureId}",
+  },
+  updateMeasure: {
+    method: "PATCH",
+    path: "/v1/sources/{sourceId}/measures/{measureId}",
+  },
+  deleteMeasure: {
+    method: "DELETE",
+    path: "/v1/sources/{sourceId}/measures/{measureId}",
+  },
+  listMeasureEditors: {
+    method: "GET",
+    path: "/v1/sources/{sourceId}/measure-editors",
+  },
+  replaceMeasureEditors: {
+    method: "PUT",
+    path: "/v1/sources/{sourceId}/measure-editors",
+  },
+  getCalendar: { method: "GET", path: "/v1/calendar" },
+  replaceCalendar: { method: "PUT", path: "/v1/calendar" },
   getMe: { method: "GET", path: "/v1/me" },
   searchPrincipals: { method: "GET", path: "/v1/principals" },
   lookupPrincipals: { method: "POST", path: "/v1/principals/lookup" },

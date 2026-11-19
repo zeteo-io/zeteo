@@ -17,6 +17,7 @@ export type {
 export type {
   Path,
   Alias,
+  CalcExpr,
   SelectItem,
   JoinItem,
   FilterValue,
@@ -135,6 +136,7 @@ export type {
   AreaChart,
   BarChart,
   PieChart,
+  GaugeChart,
   TableChart,
   ChartSettings,
   PanelState,
@@ -167,3 +169,17 @@ export type {
   SaveAsSavedPanelRequest,
   PreviewSavedPanelRequest,
 } from "./types/savedPanels.js";
+export type {
+  MeasureInput,
+  UpdateMeasureRequest,
+  MeasureBroken,
+  MeasureUsedBy,
+  Measure,
+  RedactedMeasure,
+  ListMeasuresResponse,
+  PreviewMeasureRequest,
+  PreviewMeasureResponse,
+  MeasureEditor,
+  MeasureEditors,
+} from "./types/measures.js";
+export type { Holiday, CalendarInput, Calendar } from "./types/calendar.js";

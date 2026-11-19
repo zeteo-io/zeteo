@@ -81,3 +81,10 @@ SavedPanelIdParam:
   required: true
   description: The saved panel's id. One the caller may not see is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
+
+MeasureIdParam:
+  name: measureId
+  in: path
+  required: true
+  description: The measure's id, in the source named by the path. A measure of another source, or one the caller may not see in full, is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }

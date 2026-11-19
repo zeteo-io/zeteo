@@ -14,16 +14,46 @@ export interface TextLiteral {
   value: string;
 }
 
+/** A date literal, `YYYY-MM-DD`. */
+export interface DateLiteral {
+  date: string;
+}
+
+/** A timestamp literal, ISO 8601 with an offset or `Z`. */
+export interface TimestampLiteral {
+  timestamp: string;
+}
+
+/** The unit of `dateAdd` and `dateDiff`. */
+export type DateUnit = "day" | "week" | "month" | "quarter" | "year";
+
+/** What `datePart` takes out of a date; `weekday` is 1 for Monday to 7 for Sunday. */
+export type DatePart =
+  | "year"
+  | "quarter"
+  | "month"
+  | "day"
+  | "weekday"
+  | "fiscal_year"
+  | "fiscal_quarter";
+
 /**
- * A calculation expression: a column path, a number, a text literal, an
- * aggregate, or an operation object with exactly one key. At most 8 levels
- * deep (an aggregate counts as one), and 100 operations and aggregates per
- * query. `add`, `mul`, `concat` and `coalesce` take 2 to 10 operands.
+ * A calculation expression: a column path, a number, a text, date or
+ * timestamp literal, a relative date, a measure, an aggregate, or an
+ * operation object with exactly one key. At most 8 levels deep (an aggregate
+ * counts as one), and 100 operations and aggregates per query (a measure's
+ * expansion is counted apart, at most 500 in all). `add`, `mul`, `concat` and
+ * `coalesce` take 2 to 10 operands.
  */
 export type CalcExpr =
   | Path
   | number
   | TextLiteral
+  | DateLiteral
+  | TimestampLiteral
+  | RelativeDate
+  /** A measure of the query's `from` table; group-level, and never inside an aggregate. */
+  | { measure: Alias }
   | { add: CalcExpr[] }
   | { sub: [CalcExpr, CalcExpr] }
   | { mul: CalcExpr[] }
@@ -42,10 +72,29 @@ export type CalcExpr =
   | { avg: CalcExpr }
   | { min: CalcExpr }
   | { max: CalcExpr }
-  | { count: Path | "*" }
-  | { countDistinct: Path };
+  /** A path, `"*"` or an expression. */
+  | { count: CalcExpr }
+  | { countDistinct: CalcExpr }
+  /** `[date or timestamp, amount (-10,000 to 10,000), unit]`; a month, quarter or year step clamps to the month's last day. */
+  | { dateAdd: [CalcExpr, number, DateUnit] }
+  /** `[unit, start, end]`: whole units completed, negative when end is before start. */
+  | { dateDiff: [DateUnit, CalcExpr, CalcExpr] }
+  /** `[part, date or timestamp]`: a number; fiscal parts follow the calendar. */
+  | { datePart: [DatePart, CalcExpr] }
+  /** The calendar's business days from start to end, both inclusive. Arguments are date, timestamp or relative date literals, not columns. */
+  | { businessDays: [CalcExpr, CalcExpr] }
+  | { businessDaysInMonth: CalcExpr }
+  | { businessDaysElapsed: CalcExpr }
+  | { businessDaysRemaining: CalcExpr }
+  /**
+   * The `then` of the first branch whose `if` holds, else `else` (null without
+   * one); 1 to 10 branches, every `then` and the `else` of one type.
+   */
+  | { case: { when: { if: Filter; then: CalcExpr }[]; else?: CalcExpr } };
 
-type ExpressionAggregate<K extends "sum" | "avg" | "min" | "max"> =
+type ExpressionAggregate<
+  K extends "sum" | "avg" | "min" | "max" | "count" | "countDistinct",
+> =
   | ({ [P in K]: Path } & { as?: Alias })
   | ({ [P in K]: Exclude<CalcExpr, Path> } & { as: Alias });
 
@@ -53,19 +102,37 @@ export type SelectItem =
   | Path
   | { count: string; as?: Alias }
   | { countDistinct: Path; as?: Alias }
+  | ExpressionAggregate<"count">
+  | ExpressionAggregate<"countDistinct">
   /** Over an expression rather than a path, `as` is required. */
   | ExpressionAggregate<"sum">
   | ExpressionAggregate<"avg">
   | ExpressionAggregate<"min">
   | ExpressionAggregate<"max">
   | {
-      /** Truncated in UTC; weeks start on Monday. */
-      bucket: "day" | "week" | "month" | "quarter" | "year";
+      /**
+       * Truncated in UTC; weeks start on Monday. A fiscal bucket gives the
+       * start of the fiscal quarter or year, which follows the calendar.
+       */
+      bucket:
+        | "day"
+        | "week"
+        | "month"
+        | "quarter"
+        | "year"
+        | "fiscal_quarter"
+        | "fiscal_year";
       column: Path;
       as?: Alias;
     }
   /** Row-level (no aggregate) or group-level (every column inside an aggregate), not mixed. */
-  | { calc: CalcExpr; as: Alias };
+  | { calc: CalcExpr; as: Alias }
+  /**
+   * A measure of the source, over the query's `from` table, which must be the
+   * measure's home table. Group-level, like an aggregate; the output name is
+   * `as`, else the measure's name.
+   */
+  | { measure: Alias; as?: Alias };
 
 export type JoinItem = Path | { relation: Path; type?: "inner" | "left" };
 
@@ -75,13 +142,23 @@ export type FilterValue = string | number | boolean | null;
  * A moment relative to now, for a date or timestamp column:
  * `{ relative: { unit: "day", offset: -30 } }` is 30 days before now, and with
  * `startOf` it is cut back to the start of the unit (`{ unit: "month",
- * offset: 0, startOf: true }` is the start of this month). Resolved in UTC
- * against the minute the run starts; a week starts on Monday. A saved query
- * keeps it relative.
+ * offset: 0, startOf: true }` is the start of this month). Resolved against
+ * the minute the run starts, in the calendar's time zone (`UTC` by default);
+ * a week starts on Monday and the fiscal units follow the calendar's fiscal
+ * year. A saved query keeps it relative.
  */
 export interface RelativeDate {
   relative: {
-    unit: "minute" | "hour" | "day" | "week" | "month" | "quarter" | "year";
+    unit:
+      | "minute"
+      | "hour"
+      | "day"
+      | "week"
+      | "month"
+      | "quarter"
+      | "year"
+      | "fiscal_quarter"
+      | "fiscal_year";
     /** Whole units from now, -1000 to 1000; negative is the past. */
     offset: number;
     startOf?: boolean;

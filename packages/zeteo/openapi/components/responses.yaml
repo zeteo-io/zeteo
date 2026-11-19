@@ -27,6 +27,14 @@ Error:
             description: The field, dotted (`settings.port`); empty for the whole value
           message:
             type: string
+    dependents:
+      type: array
+      description: On `measure_in_use`, the names of the measures that use the one changed and would break
+      items: { type: string }
+    path:
+      type: array
+      description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]` or `["table"]`
+      items: { type: string }
     merged_table:
       type: string
       description: On `table_in_merged_table`, the name of the live merged table that reads the table
