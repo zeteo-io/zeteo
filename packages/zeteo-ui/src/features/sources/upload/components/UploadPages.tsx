@@ -1,6 +1,6 @@
 import { Facts, LimitSections, When, type Row } from "../../components/Facts";
+import { Badge, BorderedSection, Button, Tooltip } from "@kosmeo-ui/react";
 import { FILE_COLUMN_TYPES, type UpdateColumn } from "../api/types";
-import { Badge, BorderedSection, Button } from "@kosmeo-ui/react";
 import { useRemoveTable, useUpdateColumn } from "../api/uploads";
 import { useSourceContext } from "../../components/context";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
@@ -107,21 +107,20 @@ const OriginCell = ({ table }: { table: Table }) => {
     <span className="z-fs-origin">
       {origin?.kind === "file" ? (
         <span className="z-fs-origin-name">
-          <span title={origin.filename}>File Upload</span>
+          <Tooltip content={origin.filename}>
+            <span>File Upload</span>
+          </Tooltip>
           {origin.tab_title && (
             <span className="z-fs-origin-tab">{origin.tab_title}</span>
           )}
         </span>
       ) : origin?.kind === "google-sheets" ? (
         <span className="z-fs-origin-name">
-          <a
-            href={origin.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            title={origin.spreadsheet_title}
-          >
-            Google Sheet
-          </a>
+          <Tooltip content={origin.spreadsheet_title}>
+            <a href={origin.url} target="_blank" rel="noopener noreferrer">
+              Google Sheet
+            </a>
+          </Tooltip>
           {origin.tab_title && (
             <span className="z-fs-origin-tab">{origin.tab_title}</span>
           )}
@@ -132,11 +131,13 @@ const OriginCell = ({ table }: { table: Table }) => {
         <span className="z-muted">—</span>
       )}
       {table.sync_error && (
-        <span title={table.sync_error.message || table.sync_error.code}>
-          <Badge size="sm" variant="danger">
-            Sync failing
-          </Badge>
-        </span>
+        <Tooltip content={table.sync_error.message || table.sync_error.code}>
+          <span>
+            <Badge size="sm" variant="danger">
+              Sync failing
+            </Badge>
+          </span>
+        </Tooltip>
       )}
     </span>
   );

@@ -70,6 +70,7 @@ describe("the Tables tab's Origin column", () => {
   });
 
   it("shows a Sheets table as a Google Sheet link, with the spreadsheet in its tooltip and the tab below", async () => {
+    const user = userEvent.setup();
     serve(makeSheetsSource(), [sheet(2, "Budget 2027", "Orders", "SPREAD1")]);
     renderAt("/tables");
     const link = await screen.findByRole("link", { name: "Google Sheet" });
@@ -77,13 +78,17 @@ describe("the Tables tab's Origin column", () => {
       "href",
       "https://docs.google.com/spreadsheets/d/SPREAD1"
     );
-    expect(link).toHaveAttribute("title", "Budget 2027");
     expect(link).toHaveAttribute("target", "_blank");
     expect(link).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByText("Orders")).toBeInTheDocument();
+    // The spreadsheet's name shows at once on hover (kosmeo's Tooltip, not a slow native title).
+    expect(screen.queryByText("Budget 2027")).toBeNull();
+    await user.hover(link);
+    expect(await screen.findByText("Budget 2027")).toBeInTheDocument();
   });
 
   it("shows a file table as File Upload with the file name in its tooltip, and an xlsx's sheet below", async () => {
+    const user = userEvent.setup();
     serve(makeSheetsSource(), [
       file(1),
       file(2, {
@@ -94,10 +99,14 @@ describe("the Tables tab's Origin column", () => {
     await screen.findAllByText("File Upload");
     const cells = screen.getAllByText("File Upload");
     expect(cells).toHaveLength(2);
-    expect(cells[0]).toHaveAttribute("title", "data 1.csv");
-    expect(cells[1]).toHaveAttribute("title", "book.xlsx");
     expect(screen.getByText("Costs")).toBeInTheDocument();
-    expect(cells[0]!.parentElement!.children).toHaveLength(1);
+    await user.hover(cells[0]!);
+    expect(await screen.findByText("data 1.csv")).toBeInTheDocument();
+    await user.unhover(cells[0]!);
+    await user.hover(cells[1]!);
+    expect(await screen.findByText("book.xlsx")).toBeInTheDocument();
+    // A CSV has no sheet line under it.
+    expect(screen.getAllByText("Costs")).toHaveLength(1);
   });
 
   it("leaves a merged table as it was", async () => {
@@ -125,7 +134,8 @@ describe("the Tables tab's Origin column", () => {
     ]);
     renderAt("/tables");
     const badge = await screen.findByText("Sync failing");
-    expect(badge.closest("[title]")).toHaveAttribute("title", "Share it again");
+    await userEvent.setup().hover(badge);
+    expect(await screen.findByText("Share it again")).toBeInTheDocument();
     expect(screen.getAllByText("Sync failing")).toHaveLength(1);
   });
 
