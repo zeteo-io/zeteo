@@ -5,6 +5,7 @@ import * as dashboards from "./dashboards.js";
 import * as queryRuns from "./queryRuns.js";
 import * as calendar from "./calendar.js";
 import * as measures from "./measures.js";
+import * as metrics from "./metrics.js";
 import * as sources from "./sources.js";
 import * as catalog from "./catalog.js";
 import * as grants from "./grants.js";
@@ -14,6 +15,7 @@ export const db = {
   sources,
   calendar,
   measures,
+  metrics,
   catalog,
   grants,
   principalLimits,

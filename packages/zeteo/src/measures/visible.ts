@@ -3,9 +3,15 @@ import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { QueryError } from "../engine/errors.js";
 import type {
   MeasureRow,
+  MetricRow,
   VisibleCatalog,
   VisibleMeasure,
+  VisibleMetric,
 } from "../grants/visibleCatalog.js";
+import {
+  metricFormulaMeasures,
+  metricFormulaProblem,
+} from "../adapters/sql/metrics.js";
 
 // The grant rule: a caller sees a measure only when its home table, every
 // column it reads and every relation it joins, through the measures it uses
@@ -20,8 +26,8 @@ import type {
  * would stop at the first missing column and could pass over an ungranted one.
  */
 const withNothingMissing = (
-  catalog: Omit<VisibleCatalog, "measures">
-): Omit<VisibleCatalog, "measures"> => ({
+  catalog: Omit<VisibleCatalog, "measures" | "metrics">
+): Omit<VisibleCatalog, "measures" | "metrics"> => ({
   ...catalog,
   tables: catalog.tables.map((t) => ({
     ...t,
@@ -49,7 +55,7 @@ const toVisible = (row: MeasureRow): VisibleMeasure => ({
  * never recurses without end.
  */
 export const visibleMeasures = (
-  catalog: Omit<VisibleCatalog, "measures">,
+  catalog: Omit<VisibleCatalog, "measures" | "metrics">,
   rows: readonly MeasureRow[],
   /** Told of a failure that is not a planner's refusal, such as a malformed stored formula. */
   onUnexpected: (err: unknown, measureId: string) => void = () => {}
@@ -59,7 +65,11 @@ export const visibleMeasures = (
     .map(toVisible);
   if (candidates.length === 0) return [];
   const byName = new Map(candidates.map((m) => [m.name, m]));
-  const probe = { ...withNothingMissing(catalog), measures: candidates };
+  const probe = {
+    ...withNothingMissing(catalog),
+    measures: candidates,
+    metrics: [],
+  };
   const now = new Date();
 
   const plans = new Map<string, boolean>();
@@ -102,4 +112,30 @@ export const visibleMeasures = (
       return used !== undefined && plansAlone(used);
     });
   });
+};
+
+/**
+ * The metrics of `rows` the caller of `catalog` may use: each formula is a
+ * metric's (see `metricFormulaProblem`) and every measure it names is among
+ * the caller's measures. One that is not is absent, exactly as if it did not
+ * exist; a metric query naming it is refused as for a nonexistent name.
+ */
+export const visibleMetrics = (
+  catalog: Pick<VisibleCatalog, "source" | "measures">,
+  rows: readonly MetricRow[]
+): VisibleMetric[] => {
+  const usable = new Set(catalog.measures.map((m) => m.name));
+  return rows
+    .filter(
+      (r) =>
+        r.sourceId === catalog.source.id &&
+        metricFormulaProblem(r.formula) === undefined &&
+        metricFormulaMeasures(r.formula).every((name) => usable.has(name))
+    )
+    .map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      formula: r.formula,
+    }));
 };

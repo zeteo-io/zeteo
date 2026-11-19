@@ -6,6 +6,7 @@
 --   sales.blobs          0   (types no query can use)
 --   sales.typed_values   5   (Postgres-only types, for the wire forms)
 --   sales.ledger         4   (portable; queries; uuid and money)
+--   sales.ad_spend       7   (portable; queries; a second fact table by day)
 --   sales.moods          3   (Postgres-only: an enum, domains over an enum,
 --                             money and uuid, and citext, char(n) and name)
 --   hr.salaries          0   (not granted)
@@ -98,6 +99,15 @@ CREATE TABLE sales.ledger (
   amount money
 );
 
+-- Spend by day: months with orders but no spend (June) and spend but no
+-- orders (July), for metrics across two tables.
+CREATE TABLE sales.ad_spend (
+  id integer PRIMARY KEY,
+  day date NOT NULL,
+  channel text NOT NULL,
+  cost numeric(12,2) NOT NULL
+);
+
 -- Declared in an order that is not alphabetical, so sorting as text shows.
 CREATE TYPE sales.mood AS ENUM ('sad', 'ok', 'happy');
 CREATE DOMAIN sales.feeling AS sales.mood;
@@ -167,6 +177,15 @@ INSERT INTO sales.ledger VALUES
   (2, 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', 0.99),
   (3, '00000000-0000-0000-0000-000000000003', -12.25),
   (4, NULL, NULL);
+
+INSERT INTO sales.ad_spend VALUES
+  (1, '2026-01-10', 'search', 100.00),
+  (2, '2026-01-25', 'social', 50.00),
+  (3, '2026-02-03', 'search', 200.00),
+  (4, '2026-03-15', 'search', 25.00),
+  (5, '2026-04-01', 'social', 40.00),
+  (6, '2026-05-20', 'search', 80.00),
+  (7, '2026-07-04', 'search', 60.00);
 
 INSERT INTO sales.moods VALUES
   (1, 'happy', 'sad', 10.50, '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', 'Beta', 'ab', 'zed'),

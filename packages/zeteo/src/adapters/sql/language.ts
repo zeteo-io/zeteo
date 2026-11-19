@@ -1,6 +1,7 @@
 import { relativeDateSchema, type RelativeDate } from "./relative.js";
 import type { QueryLanguage } from "../types.js";
 import { planSql, queryNameOf } from "./plan.js";
+import { planMetrics } from "./metrics.js";
 import type { SqlPlan } from "./types.js";
 import { z } from "zod";
 
@@ -244,6 +245,8 @@ export const DATE_OPS = [
   "businessDaysRemaining",
 ] as const;
 const MAX_TEXT_LITERAL_CHARS = 1000;
+const RANGE_BOUND_ERROR_TEXT =
+  "A bound is { date: YYYY-MM-DD }, { timestamp: ISO 8601 } or { relative: { unit, offset, startOf? } }";
 
 export type CalcExpr =
   | string
@@ -558,6 +561,37 @@ const operation = (key: string, operand: object, description?: string) => ({
   ...(description ? { description } : {}),
 });
 const calcRef = { $ref: "#/$defs/CalcExpr" };
+const boundJson = {
+  description: RANGE_BOUND_ERROR_TEXT,
+  anyOf: [
+    {
+      type: "object",
+      properties: { date: { type: "string", format: "date" } },
+      required: ["date"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { timestamp: { type: "string", format: "date-time" } },
+      required: ["timestamp"],
+      additionalProperties: false,
+    },
+    {
+      type: "object",
+      properties: { relative: { type: "object" } },
+      required: ["relative"],
+      additionalProperties: false,
+    },
+  ],
+};
+/** A metric query's range, which the dispatched Zod schema cannot show. */
+const METRIC_RANGE_JSON = {
+  type: "object",
+  description:
+    "Half-open bounds on each measure's date column: gte, lt or both; relative dates in the calendar's time zone",
+  properties: { gte: boundJson, lt: boundJson },
+  additionalProperties: false,
+};
 const pathJson = { type: "string", minLength: 1 };
 const asJson = { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" };
 
@@ -904,16 +938,126 @@ export const sqlQuerySchema = z
 export type SqlQuery = z.infer<typeof sqlQuerySchema>;
 export type JoinItem = NonNullable<SqlQuery["join"]>[number];
 
-export const sqlLanguage: QueryLanguage<SqlQuery, SqlPlan> = {
+/** Names one metric query asks for, metrics and measures together. */
+export const MAX_METRIC_NAMES = 20;
+
+/** A range's bound: a date, a timestamp or a moment relative to now. */
+export type RangeBound =
+  { date: string } | { timestamp: string } | RelativeDate;
+
+const RANGE_BOUND_ERROR = RANGE_BOUND_ERROR_TEXT;
+
+/** Dispatched by key, so an issue keeps its exact path. */
+const rangeBoundSchema = dispatching<RangeBound>((value) => {
+  if (isPlainObject(value) && "date" in value) {
+    return dateLiteralSchema.safeParse(value);
+  }
+  if (isPlainObject(value) && "timestamp" in value) {
+    return timestampLiteralSchema.safeParse(value);
+  }
+  if (isPlainObject(value) && "relative" in value) {
+    return relativeDateSchema.safeParse(value);
+  }
+  return z.never({ error: RANGE_BOUND_ERROR }).safeParse(value);
+}, RANGE_BOUND_ERROR);
+
+/**
+ * A metric query: metrics and measures by name, each measure bucketed and
+ * ranged by its own date column, combined per period. Told apart from a
+ * table query by its `metrics` key.
+ */
+export const metricQuerySchema = z
+  .strictObject({
+    /** The source's slug; the engine resolves it before planning. */
+    source: z.string().min(1),
+    metrics: z.array(measureNameSchema).min(1).max(MAX_METRIC_NAMES),
+    bucket: z.enum(BUCKET_UNITS).optional(),
+    range: z
+      .strictObject({
+        gte: rangeBoundSchema.optional(),
+        lt: rangeBoundSchema.optional(),
+      })
+      .refine((r) => r.gte !== undefined || r.lt !== undefined, {
+        error: "A range has gte, lt or both",
+      })
+      .optional(),
+    orderBy: z
+      .array(orderSchema)
+      .max(MAX_METRIC_NAMES + 1)
+      .optional(),
+    limit: z.int().min(1).optional(),
+    offset: z.int().min(0).max(MAX_OFFSET).optional(),
+  })
+  .superRefine((query, ctx) => {
+    const seen = new Set<string>();
+    query.metrics.forEach((name, i) => {
+      if (seen.has(name)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["metrics", i],
+          message: "Each name is asked for once",
+        });
+      }
+      seen.add(name);
+    });
+  });
+
+export type MetricQuery = z.infer<typeof metricQuerySchema>;
+
+/** Either query shape of the language. */
+export type SqlLanguageQuery = SqlQuery | MetricQuery;
+
+export const isMetricQuery = (query: SqlLanguageQuery): query is MetricQuery =>
+  "metrics" in query;
+
+/**
+ * The language's schema: a metric query when the body has a `metrics` key,
+ * else a table query. Dispatched rather than a union, so each issue keeps the
+ * exact path the shape's own schema gives it.
+ */
+export const sqlLanguageSchema = dispatching<SqlLanguageQuery>(
+  (value) =>
+    isPlainObject(value) && "metrics" in value
+      ? metricQuerySchema.safeParse(value)
+      : sqlQuerySchema.safeParse(value),
+  "A table query ({ source, from, select, ... }) or a metric query ({ source, metrics, bucket?, range?, ... })"
+);
+
+export const sqlLanguage: QueryLanguage<SqlLanguageQuery, SqlPlan> = {
   id: "sql",
-  schema: sqlQuerySchema,
+  schema: sqlLanguageSchema,
   describe: () => {
-    const schema = z.toJSONSchema(sqlQuerySchema, {
+    // One pass over both shapes, so their shared definitions get one name each.
+    const {
+      anyOf: [table, metric],
+      $defs,
+      ...rest
+    } = z.toJSONSchema(z.union([sqlQuerySchema, metricQuerySchema]), {
       reused: "ref",
       unrepresentable: "any",
-    });
-    return { ...schema, $defs: { ...schema.$defs, ...CALC_JSON_SCHEMA_DEFS } };
+    }) as { anyOf: Record<string, unknown>[]; $defs?: object };
+    return {
+      ...rest,
+      description:
+        "A table query, or a metric query (told apart by its metrics key)",
+      anyOf: [{ $ref: "#/$defs/TableQuery" }, { $ref: "#/$defs/MetricQuery" }],
+      $defs: {
+        ...$defs,
+        ...CALC_JSON_SCHEMA_DEFS,
+        TableQuery: table,
+        MetricQuery: {
+          ...metric,
+          properties: {
+            ...(metric!.properties as Record<string, unknown>),
+            range: METRIC_RANGE_JSON,
+          },
+        },
+      },
+    };
   },
-  plan: planSql,
+  plan: (query, catalog, ctx) =>
+    isMetricQuery(query)
+      ? planMetrics(query, catalog, ctx)
+      : planSql(query, catalog, ctx),
   tableName: queryNameOf,
 };

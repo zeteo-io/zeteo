@@ -157,6 +157,8 @@ export interface SqlDialect {
     expression: Expression<unknown>,
     fiscalStartMonth: number
   ): Expression<unknown>;
+  /** A date bucket as a timestamp at its UTC midnight, beside timestamp buckets. */
+  asTimestamp(expression: Expression<unknown>): Expression<unknown>;
   /**
    * A timestamp column as a calculation reads it: the instant in UTC, so a
    * column with an offset (SQL Server's datetimeoffset) is not read as its

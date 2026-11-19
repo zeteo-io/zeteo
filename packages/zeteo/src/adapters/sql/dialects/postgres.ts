@@ -264,6 +264,8 @@ export const postgresDialect: SqlDialect = {
         return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
     }
   },
+  // Midnight, read as UTC beside a timestamptz: the session runs in UTC.
+  asTimestamp: (expression) => sql`cast(${expression} as timestamp)`,
   // timestamptz is an instant, and the session runs in UTC.
   timestampUtc: (expression) => expression,
   subqueryInAggregate: true,

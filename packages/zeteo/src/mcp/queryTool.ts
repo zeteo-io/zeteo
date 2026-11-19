@@ -48,6 +48,22 @@ export const QueryInput = z.looseObject({
     .describe('Entries of one { path: "asc" | "desc" }'),
   limit: z.int().optional(),
   offset: z.int().optional(),
+  metrics: z
+    .array(z.unknown())
+    .optional()
+    .describe(
+      "A metric query instead of from and select: metric and measure names, combined per period"
+    ),
+  bucket: z
+    .string()
+    .optional()
+    .describe('A metric query\'s period, such as "month"'),
+  range: z
+    .record(z.string(), z.unknown())
+    .optional()
+    .describe(
+      "A metric query's half-open range on each measure's date column: { gte, lt }"
+    ),
 });
 
 /**

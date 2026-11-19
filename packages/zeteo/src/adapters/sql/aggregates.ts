@@ -6,6 +6,7 @@ import type { ResolvedExpr, ResolvedSelect } from "./types.js";
 const exprAggregates = (expr: ResolvedExpr): boolean => {
   switch (expr.kind) {
     case "aggregate":
+    case "pivot":
       return true;
     case "column":
     case "literal":

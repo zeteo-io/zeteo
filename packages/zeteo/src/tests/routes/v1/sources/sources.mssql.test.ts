@@ -89,6 +89,7 @@ describe("/v1/sources with azure-sql", () => {
       tables.body.data.map((t: { name: string }) => t.name).sort()
     ).toEqual([
       "accounts",
+      "ad_spend",
       "broken_orders",
       "customers",
       "ledger",

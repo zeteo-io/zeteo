@@ -9,8 +9,8 @@ import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { fixtureAdminSettings } from "../../support/fixtureDb.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import * as cancel from "../../../adapters/postgres/cancel.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { performance } from "node:perf_hooks";
 import type { EventEmitter } from "events";
 import { Client, Pool } from "pg";
@@ -45,7 +45,7 @@ const LIMITS: TestLimits = {
   timeoutMs: 5000,
 };
 
-const accountIds = (): SqlPlan => idsOf("sales", "accounts");
+const accountIds = (): TablePlan => idsOf("sales", "accounts");
 
 const pools: Pool[] = [];
 const opened: SourceConnection[] = [];
@@ -152,7 +152,7 @@ describe("postgres runQuery: a cancel that is not confirmed", () => {
       () => new Promise((resolve) => setTimeout(() => resolve(false), 200))
     );
     const controller = new AbortController();
-    const slow: SqlPlan = {
+    const slow: TablePlan = {
       ...accountIds(),
       from: { alias: "t0", schemaName: "sales", name: "slow_orders" },
     };
@@ -196,7 +196,8 @@ const connectWith = async (options = OPTIONS) => {
 };
 
 /** `select id from <schema>.<name> order by id`, as the planner would make it. */
-const idsOf = (schemaName: string, name: string): SqlPlan => ({
+const idsOf = (schemaName: string, name: string): TablePlan => ({
+  kind: "table",
   from: { alias: "t0", schemaName, name },
   joins: [],
   select: [
@@ -225,7 +226,7 @@ const idsOf = (schemaName: string, name: string): SqlPlan => ({
   offset: 0,
 });
 
-const prepared = (plan: SqlPlan, limit = 100_000) =>
+const prepared = (plan: TablePlan, limit = 100_000) =>
   preparePostgresQuery(plan, { limit, offset: 0 });
 
 const limitsOf = (timeoutMs = 5000) => ({

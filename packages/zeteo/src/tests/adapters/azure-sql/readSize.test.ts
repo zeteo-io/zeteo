@@ -72,6 +72,7 @@ describe("azure-sql readSize", () => {
       "sales.orders",
       "sales.order_lines",
       "sales.ledger",
+      "sales.ad_spend",
     ]);
     expect(sales).toBeGreaterThan(0);
     expect(await connection.readSize(["sales"])).toBe(sales);

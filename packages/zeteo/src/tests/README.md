@@ -58,6 +58,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `calendar`    | the business calendar: working days, holidays, fiscal periods, zones  |
   | `measures`    | measures: expansion in the planner, their joins, limits and errors    |
   | `fixed`       | fixed measures: scalar subqueries that ignore the query they are in   |
+  | `metrics`     | metric queries: measures of several tables by period, and metrics     |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

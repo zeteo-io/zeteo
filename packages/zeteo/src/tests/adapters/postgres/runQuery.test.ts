@@ -13,8 +13,8 @@ import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import * as cancel from "../../../adapters/postgres/cancel.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -59,7 +59,7 @@ let catalog: VisibleCatalog;
 const sources: string[] = [];
 const opened: SourceConnection[] = [];
 
-const plan = (query: object): SqlPlan =>
+const plan = (query: object): TablePlan =>
   planSql(
     sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
     catalog
@@ -687,7 +687,7 @@ describe("postgres runQuery", () => {
                 .column as never,
               value: unserialisable as never,
             },
-          } as SqlPlan,
+          } as TablePlan,
           LIMITS
         )
       );

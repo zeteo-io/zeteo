@@ -17,4 +17,5 @@ export type SqlQueryErrorCode =
   | "measure_cycle"
   | "measure_too_deep"
   | "measure_not_aggregate"
-  | "too_complex";
+  | "too_complex"
+  | "measure_has_no_date";

@@ -42,6 +42,7 @@ describe("azure-sql readRowCounts", () => {
       "sales.orders": 12,
       "sales.order_lines": 2,
       "sales.ledger": 4,
+      "sales.ad_spend": 7,
     });
   });
 

@@ -10,7 +10,7 @@ import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { QueryError } from "../../../engine/errors.js";
@@ -47,7 +47,7 @@ let connection: SourceConnection;
 let catalog: VisibleCatalog;
 let sourceId: string;
 
-const plan = (query: object): SqlPlan =>
+const plan = (query: object): TablePlan =>
   planSql(
     sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
     catalog

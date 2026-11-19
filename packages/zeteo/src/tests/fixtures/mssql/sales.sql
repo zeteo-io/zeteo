@@ -6,6 +6,7 @@
 --   sales.orders        12   (two quarters of 2026)
 --   sales.order_lines    0
 --   sales.ledger         4   (uniqueidentifier and money)
+--   sales.ad_spend       7   (a second fact table by day)
 --   hr.salaries          0   (denied to zeteo_ro)
 -- Views:
 --   sales.paid_orders    the paid orders
@@ -62,6 +63,13 @@ CREATE TABLE sales.ledger (
   id int NOT NULL CONSTRAINT ledger_pkey PRIMARY KEY,
   ref uniqueidentifier,
   amount money
+);
+
+CREATE TABLE sales.ad_spend (
+  id int NOT NULL CONSTRAINT ad_spend_pkey PRIMARY KEY,
+  day date NOT NULL,
+  channel nvarchar(200) NOT NULL,
+  cost decimal(12,2) NOT NULL
 );
 
 CREATE TABLE hr.salaries (
@@ -130,6 +138,15 @@ INSERT INTO sales.ledger VALUES
   (2, 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', 0.99),
   (3, '00000000-0000-0000-0000-000000000003', -12.25),
   (4, NULL, NULL);
+
+INSERT INTO sales.ad_spend VALUES
+  (1, '2026-01-10', N'search', 100.00),
+  (2, '2026-01-25', N'social', 50.00),
+  (3, '2026-02-03', N'search', 200.00),
+  (4, '2026-03-15', N'search', 25.00),
+  (5, '2026-04-01', N'social', 40.00),
+  (6, '2026-05-20', N'search', 80.00),
+  (7, '2026-07-04', N'search', 60.00);
 GO
 
 CREATE USER zeteo_ro FOR LOGIN zeteo_ro;

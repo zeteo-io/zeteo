@@ -9,8 +9,8 @@ import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
+import type { TablePlan } from "../../adapters/sql/types.js";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
-import type { SqlPlan } from "../../adapters/sql/types.js";
 import { removeSources, uniqueSlug } from "./sources.js";
 import { refreshSource } from "../../catalog/refresh.js";
 import { runPlan, type TestLimits } from "./runPlan.js";
@@ -146,7 +146,7 @@ export const useMssqlRuns = () => {
     return conn;
   };
 
-  const plan = (query: object): SqlPlan =>
+  const plan = (query: object): TablePlan =>
     planSql(
       sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
       catalog

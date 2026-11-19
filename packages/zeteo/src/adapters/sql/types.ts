@@ -149,7 +149,21 @@ export type ResolvedExpr =
       arg: ResolvedExpr | "*";
       type: QueryableType;
     }
-  | ScalarExpr;
+  | ScalarExpr
+  | PivotExpr;
+
+/**
+ * A measure's value in a metric query, per period: its part's column `v<index>`
+ * of the union, picked out by `max` in the pivot. `of` is the part's own
+ * expression, so the value keeps the type (and, per engine, the kind of
+ * number) the measure has in a table query.
+ */
+export interface PivotExpr {
+  kind: "pivot";
+  index: number;
+  of: ResolvedExpr;
+  type: QueryableType;
+}
 
 /**
  * One result column. `output` is its name in the result, unique in the plan;
@@ -248,7 +262,12 @@ export interface ResolvedOrder {
   direction: Direction;
 }
 
-export interface SqlPlan extends QueryPlan {
+/** Either shape a SQL query plans to: a table query or a metric query. */
+export type SqlPlan = TablePlan | MetricPlan;
+
+/** A table query's plan: one `from` table, its joins and select items. */
+export interface TablePlan extends QueryPlan {
+  kind: "table";
   from: ResolvedTable;
   /** In query order; each join's parent alias is the `from` table's or an earlier join's. */
   joins: ResolvedJoin[];
@@ -273,5 +292,57 @@ export interface SqlPlan extends QueryPlan {
    * True when the query names no order of its own (no `orderBy`, or an empty
    * one), so `orderBy` is the planner's, or empty for an empty `orderBy`.
    */
+  defaultOrder: boolean;
+}
+
+/**
+ * One distinct non-fixed measure of a metric query: an aggregate subquery
+ * over its home table and its to-one left joins, its rows cut to the range on
+ * its date column and grouped by the bucket of it. Its aliases (`t0`, `t1`…)
+ * are its own: each part is a branch of a union.
+ */
+export interface MetricPart {
+  from: TableName & { alias: "t0" };
+  /** Left joins along to-one relations, each parent before its children. */
+  joins: ResolvedJoin[];
+  /** Group-level: the measure's expansion. */
+  expr: ResolvedExpr;
+  /** The measure's date column; absent only when the query has neither bucket nor range. */
+  date: ColumnRef | undefined;
+  /** Half-open bounds on `date`, coerced to its type. */
+  range: { gte?: PlanValue; lt?: PlanValue };
+}
+
+/** A metric query's result column besides `period`: a formula over the parts' values and fixed measures. */
+export interface MetricSelect {
+  output: string;
+  expr: ResolvedExpr;
+  type: QueryableType;
+}
+
+/**
+ * A metric query's plan. Each part is a branch of a `UNION ALL` with columns
+ * `period` (when bucketed) and `v0`…`v<n-1>`, its own value in its column and
+ * null in the others; the union is pivoted by `GROUP BY period` (one group
+ * without a bucket), each value read with `max`, and each select item
+ * computed over the pivoted values and fixed measures' scalar subqueries.
+ */
+export interface MetricPlan extends QueryPlan {
+  kind: "metrics";
+  parts: MetricPart[];
+  /** The bucket every part's date column is truncated to, as `period`. */
+  bucket:
+    | {
+        unit: BucketUnit;
+        /** Read only by a fiscal unit. */
+        fiscalStartMonth: number;
+        /** `timestamp` when any part's date column is one: date buckets are then read as UTC midnight. */
+        type: "date" | "timestamp";
+      }
+    | undefined;
+  /** In the order of `columns`, after `period` when bucketed. */
+  select: MetricSelect[];
+  /** By index into `columns` (`period` is 0 when bucketed). */
+  orderBy: { index: number; direction: Direction }[];
   defaultOrder: boolean;
 }

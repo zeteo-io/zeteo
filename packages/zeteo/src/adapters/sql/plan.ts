@@ -67,7 +67,7 @@ import type {
   ResolvedOrder,
   ResolvedSelect,
   ScalarExpr,
-  SqlPlan,
+  TablePlan,
   WhereSubject,
 } from "./types.js";
 
@@ -137,7 +137,7 @@ const isCalendarDate = (y: string, m: string, d: string): boolean => {
   );
 };
 
-const VALUE_FORMS: Record<QueryableType, string> = {
+export const VALUE_FORMS: Record<QueryableType, string> = {
   text: "a string",
   number: "a number or a decimal string",
   boolean: "true or false",
@@ -147,7 +147,10 @@ const VALUE_FORMS: Record<QueryableType, string> = {
 };
 
 /** `value` as a value for a subject of `type`, or undefined when it is not one. */
-const coerce = (value: Scalar, type: QueryableType): PlanValue | undefined => {
+export const coerce = (
+  value: Scalar,
+  type: QueryableType
+): PlanValue | undefined => {
   switch (type) {
     case "text":
       return typeof value === "string" ? value : undefined;
@@ -195,7 +198,7 @@ interface CaseOperand {
   else?: CalcExpr;
 }
 
-interface ResolvedCalc {
+export interface ResolvedCalc {
   resolved: ResolvedExpr;
   hasAggregate: boolean;
   /** Holds a fixed measure outside any aggregate: one value per query. */
@@ -220,7 +223,7 @@ const OP_TYPES: Record<
   concat: { takes: ["text", "number"], yields: "text" },
 };
 
-const typeOf = (e: ResolvedExpr): QueryableType =>
+export const typeOf = (e: ResolvedExpr): QueryableType =>
   e.kind === "column" ? e.column.type : e.type;
 
 /** A date, timestamp or relative date literal: what a calendar function folds to a constant. */
@@ -229,7 +232,7 @@ const isDateLiteral = (operand: unknown): boolean =>
   operand !== null &&
   ("date" in operand || "timestamp" in operand || "relative" in operand);
 
-const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
+export const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
 
 /** `customer.account.plan` → relation path `customer.account`, column `plan`. */
 const splitPath = (path: string): { prefix: string; last: string } => {
@@ -242,7 +245,7 @@ const splitPath = (path: string): { prefix: string; last: string } => {
 const joinPath = (prefix: string, name: string) =>
   prefix === "" ? name : `${prefix}.${name}`;
 
-const fail = (
+export const fail = (
   code: SqlQueryErrorCode,
   message: string,
   path: QueryPath
@@ -265,7 +268,7 @@ export const queryNameOf = (
  * What one query and the fixed measures' subqueries in it share: the columns
  * read, the expansion budget and the fixed measures planned so far.
  */
-interface QueryState {
+export interface QueryState {
   references: Map<string, Reference>;
   expandedNodes: number;
   /** Each fixed measure is planned once per query, by name. */
@@ -288,7 +291,18 @@ interface ValueContext {
   measure: (name: string, path: QueryPath, type: QueryableType) => ScalarExpr;
 }
 
-class Planner {
+/** A query's shared state before anything is planned. */
+export const newQueryState = (): QueryState => ({
+  references: new Map(),
+  expandedNodes: 0,
+  fixed: new Map(),
+  fixedStack: [],
+  fixedWeight: new Map(),
+  fixedReads: new Map(),
+  subqueries: 0,
+});
+
+export class Planner {
   /** The query's own scopes: its `from` and its joins. */
   private readonly scopes = new Map<string, Scope>();
   /**
@@ -311,15 +325,7 @@ class Planner {
   constructor(
     private readonly catalog: VisibleCatalog,
     private readonly now: Date,
-    private readonly state: QueryState = {
-      references: new Map(),
-      expandedNodes: 0,
-      fixed: new Map(),
-      fixedStack: [],
-      fixedWeight: new Map(),
-      fixedReads: new Map(),
-      subqueries: 0,
-    },
+    private readonly state: QueryState = newQueryState(),
     /** Before every alias: empty for the query, `f1_`… in a fixed measure's subquery. */
     private readonly aliasPrefix = ""
   ) {
@@ -377,6 +383,51 @@ class Planner {
     const scope = { alias: "t0", table };
     this.scopes.set("", scope);
     return scope;
+  }
+
+  /**
+   * `table` as the `from` of a query the planner makes itself (a metric
+   * query's part), alias `t0`. A missing table cannot be read.
+   */
+  fromTable(table: VisibleTable, path: QueryPath): Scope {
+    if (table.missing) {
+      throw fail(
+        "missing_in_source",
+        `Table "${queryNameOf(this.catalog.tables, table)}" is missing from the source`,
+        path
+      );
+    }
+    const scope = { alias: "t0", table };
+    this.scopes.set("", scope);
+    return scope;
+  }
+
+  /**
+   * A column path of a measure's definition (its date column), from the
+   * `from` table: each relation on the way is joined as a measure's joins
+   * are, a to-one left join after the others, and the column is read through
+   * them.
+   */
+  resolveMeasureColumn(columnPath: string, path: QueryPath): Resolved {
+    const segments = columnPath.split(".");
+    this.inMeasure = true;
+    try {
+      for (let i = 1; i < segments.length; i++) {
+        this.joinForMeasure(segments.slice(0, i).join("."), path);
+      }
+      return this.resolveColumn(columnPath, path);
+    } finally {
+      this.inMeasure = false;
+    }
+  }
+
+  /** Fixed measure `measure` at `at`, alone: its scalar subquery, from no table of the query's. */
+  resolveFixedMeasure(
+    measure: VisibleMeasure,
+    at: QueryPath,
+    reads: Map<string, Reference>
+  ): ResolvedCalc {
+    return this.resolveFixed(measure, at, reads);
   }
 
   /** The key column `name` of a relation's table; the relation is unusable without it. */
@@ -1400,7 +1451,7 @@ export const planSql = (
   query: SqlQuery,
   catalog: VisibleCatalog,
   ctx?: PlanContext
-): SqlPlan => {
+): TablePlan => {
   const now = ctx?.now ?? floorToMinute(new Date());
   const maxJoins = catalog.source.maxJoins;
   if ((query.join?.length ?? 0) > maxJoins) {
@@ -1719,6 +1770,7 @@ export const planSql = (
     : [];
 
   return {
+    kind: "table",
     from: {
       alias: "t0",
       schemaName: from.table.schemaName,

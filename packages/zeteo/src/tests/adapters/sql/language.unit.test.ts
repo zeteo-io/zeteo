@@ -1,7 +1,11 @@
 // @module-tag unit
 // @module-tag platform
-import { sqlLanguage, sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { describe, expect, it } from "vitest";
+import {
+  sqlLanguage,
+  sqlLanguageSchema,
+  sqlQuerySchema,
+} from "../../../adapters/sql/language.js";
 
 const SPEC_EXAMPLE = {
   source: "sales-db",
@@ -214,11 +218,30 @@ describe("sqlQuerySchema", () => {
 describe("sqlLanguage", () => {
   it("is the sql language with the schema and the planner", () => {
     expect(sqlLanguage.id).toBe("sql");
-    expect(sqlLanguage.schema).toBe(sqlQuerySchema);
+    expect(sqlLanguage.schema).toBe(sqlLanguageSchema);
+    // A body without metrics is a table query, checked as before.
+    expect(sqlLanguage.schema.safeParse(SPEC_EXAMPLE).success).toBe(true);
+    expect(sqlQuerySchema.safeParse(SPEC_EXAMPLE).success).toBe(true);
   });
 
-  it("describes itself as a JSON Schema", () => {
-    const described = sqlLanguage.describe() as {
+  it("describes itself as a JSON Schema: a table query or a metric query", () => {
+    const schema = sqlLanguage.describe() as {
+      anyOf: { $ref: string }[];
+      $defs: Record<string, Record<string, unknown>>;
+    };
+    expect(schema.anyOf).toEqual([
+      { $ref: "#/$defs/TableQuery" },
+      { $ref: "#/$defs/MetricQuery" },
+    ]);
+    const metric = schema.$defs.MetricQuery as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(Object.keys(metric.properties)).toEqual(
+      expect.arrayContaining(["source", "metrics", "bucket", "range"])
+    );
+    expect(metric.required).toEqual(["source", "metrics"]);
+    const described = schema.$defs.TableQuery as {
       type: string;
       properties: Record<string, unknown>;
       required: string[];
@@ -619,7 +642,8 @@ const operationNamed = (key: string): Json =>
 describe("sqlLanguage.describe, calculations", () => {
   it("points select items and calculations at structured definitions", () => {
     const schema = described();
-    const select = schema.$defs[schema.properties.select.$ref.split("/").pop()];
+    const table = schema.$defs.TableQuery;
+    const select = schema.$defs[table.properties.select.$ref.split("/").pop()];
     expect(select.items.$ref).toBe("#/$defs/SelectItem");
     expect(Object.keys(schema.$defs)).toEqual(
       expect.arrayContaining(["CalcExpr", "SelectItem"])

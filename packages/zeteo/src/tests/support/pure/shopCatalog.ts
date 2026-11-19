@@ -10,6 +10,7 @@ import type {
 import {
   buildVisibleCatalog,
   type MeasureRow,
+  type MetricRow,
   type VisibleCatalog,
 } from "../../../grants/visibleCatalog.js";
 
@@ -152,6 +153,8 @@ export interface ShopOptions {
   maxJoins?: number;
   /** The source's stored measures; the catalogue holds those the caller may use. */
   measures?: MeasureRow[];
+  /** The source's stored metrics; the catalogue holds those the caller may use. */
+  metrics?: MetricRow[];
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -259,6 +262,10 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
     columns,
     relations,
     access,
-    { calendar: DEFAULT_CALENDAR, measures: options.measures ?? [] }
+    {
+      calendar: DEFAULT_CALENDAR,
+      measures: options.measures ?? [],
+      metrics: options.metrics ?? [],
+    }
   );
 };

@@ -5,6 +5,9 @@ import { plainNumber } from "./values.js";
 import type {
   ColumnRef,
   CompareOp,
+  MetricPart,
+  MetricPlan,
+  TablePlan,
   FilterValue,
   HavingSubject,
   PlanValue,
@@ -45,6 +48,8 @@ const COMPARE_SQL: Record<CompareOp, RawBuilder<unknown>> = {
   lte: sql`<=`,
 };
 const AND = sql` and `;
+/** The alias of a metric query's union of parts. */
+const UNION = "u";
 const OR = sql` or `;
 
 const table = (t: TableName) => sql.id(t.schemaName, t.name);
@@ -161,6 +166,8 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
       return expr.arg !== "*" && isApproximate(expr.arg, dialect);
     case "scalar":
       return isApproximate(expr.plan.expr, dialect);
+    case "pivot":
+      return isApproximate(expr.of, dialect);
     case "op":
       return (
         (expr.op === "add" ||
@@ -198,6 +205,9 @@ export const compileExpr = (
       }
       // Kysely puts a subquery inside an expression in parentheses.
       return sql`${scalarQuery(expr.plan, dialect)}`;
+    case "pivot":
+      // Each period has one row per part, so max picks the part's value.
+      return sql`max(${sql.id(UNION, `v${expr.index}`)})`;
     case "column": {
       const read = column(expr.column, dialect);
       if (expr.column.type === "text") {
@@ -411,7 +421,178 @@ export const compileSql = (
   plan: SqlPlan,
   dialect: SqlDialect,
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
-): CompiledQuery => {
+): CompiledQuery =>
+  finish(
+    plan.kind === "metrics"
+      ? compileMetrics(plan, dialect, fetch)
+      : compileTable(plan, dialect, fetch),
+    dialect
+  );
+
+/** The statement's text and parameters, refused when it binds more than the engine takes. */
+const finish = (qb: AnySelect, dialect: SqlDialect): CompiledQuery => {
+  const { sql: text, parameters } = qb.compile();
+  if (parameters.length > dialect.maxParameters) {
+    throw new QueryError(
+      "too_many_parameters",
+      `The query binds ${parameters.length} values; this source takes at most ${dialect.maxParameters} in one query, paging included`,
+      []
+    );
+  }
+  return { sql: text, parameters: [...parameters] };
+};
+
+/**
+ * One part of a metric query: its measure's aggregate over its home table and
+ * joins, its rows cut to the range on its date column, grouped by the bucket
+ * of it as `period`. It selects its value as `v<k>` and null as every other
+ * part's, so the union keeps each measure's own type in its own column.
+ */
+const partQuery = (
+  plan: MetricPlan,
+  part: MetricPart,
+  k: number,
+  dialect: SqlDialect
+): AnySelect => {
+  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
+  let qb = withJoins(
+    dialect.kysely.selectFrom(sql`${table(part.from)}`.as(part.from.alias)),
+    part.joins
+  );
+  const items: unknown[] = [];
+  const named: { expression: Expression<unknown>; alias: string }[] = [];
+  let period: Expression<unknown> | undefined;
+  if (plan.bucket) {
+    const date = part.date!;
+    const type = date.type === "date" ? "date" : "timestamp";
+    period = dialect.bucket(
+      plan.bucket.unit,
+      column(date, dialect),
+      type,
+      date.nativeType,
+      plan.bucket.fiscalStartMonth
+    );
+    if (plan.bucket.type === "timestamp" && type === "date") {
+      period = dialect.asTimestamp(period);
+    }
+    named.push({ expression: period, alias: "period" });
+  }
+  const value = compileExpr(part.expr, dialect, ctx);
+  plan.parts.forEach((_, i) =>
+    named.push({ expression: i === k ? value : sql`null`, alias: `v${i}` })
+  );
+  for (const { expression, alias } of named) {
+    items.push(sql`${expression}`.as(alias));
+  }
+  qb = qb.select(items as never);
+  const bounds: ResolvedFilter<ColumnRef>[] = [];
+  for (const op of ["gte", "lt"] as const) {
+    const bound = part.range[op];
+    if (bound !== undefined) {
+      bounds.push({ kind: "compare", op, subject: part.date!, value: bound });
+    }
+  }
+  if (bounds.length > 0) {
+    qb = qb.where(
+      compileFilter(
+        bounds.length === 1 ? bounds[0]! : { kind: "and", filters: bounds },
+        dialect,
+        columnSubject(dialect),
+        { ...ctx, row: true }
+      )
+    );
+  }
+  if (period) qb = dialect.groupBy(qb, [{ expression: period, index: 0 }]);
+  return withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
+};
+
+/**
+ * A metric query: its parts in a `UNION ALL` as `u`, grouped by `period`
+ * (one group without a bucket), each select item computed over the parts'
+ * values (`max(u.v<k>)`) and fixed measures' scalar subqueries. With no part
+ * (fixed measures only) it reads no table and gives one row.
+ */
+const compileMetrics = (
+  plan: MetricPlan,
+  dialect: SqlDialect,
+  fetch: { limit: number; offset: number; defaultOrder?: boolean }
+): AnySelect => {
+  const branches = plan.parts.map((part, k) =>
+    partQuery(plan, part, k, dialect)
+  );
+  let qb: AnySelect =
+    branches.length === 0
+      ? (dialect.kysely.selectNoFrom([]) as unknown as AnySelect)
+      : dialect.kysely.selectFrom(
+          branches
+            .slice(1)
+            .reduce((union, branch) => union.unionAll(branch), branches[0]!)
+            .as(UNION)
+        );
+  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
+  const selected: Expression<unknown>[] = [];
+  const outputs: ResolvedSelect[] = [];
+  if (plan.bucket) {
+    const ref: ColumnRef = {
+      alias: UNION,
+      name: "period",
+      type: plan.bucket.type,
+      nativeType: plan.bucket.type,
+    };
+    selected.push(sql.id(UNION, "period"));
+    outputs.push({
+      kind: "bucket",
+      unit: plan.bucket.unit,
+      fiscalStartMonth: plan.bucket.fiscalStartMonth,
+      column: ref,
+      output: "period",
+      type: plan.bucket.type,
+    });
+  }
+  for (const item of plan.select) {
+    selected.push(compileExpr(item.expr, dialect, ctx));
+    outputs.push({
+      kind: "calc",
+      expr: item.expr,
+      level: "group",
+      output: item.output,
+      type: item.type,
+    });
+  }
+  qb = qb.select(
+    selected.map((e, i) =>
+      sql`${dialect.output(outputs[i]!, e)}`.as(`c${i}`)
+    ) as never
+  );
+  if (plan.bucket) {
+    qb = dialect.groupBy(qb, [{ expression: selected[0]!, index: 0 }]);
+  }
+  const ordered = new Set<number>();
+  const orderBy =
+    fetch.defaultOrder === false && plan.defaultOrder
+      ? []
+      : plan.orderBy.filter(({ index }) => {
+          if (ordered.has(index)) return false;
+          ordered.add(index);
+          return true;
+        });
+  for (const { index, direction } of orderBy) {
+    qb = dialect.orderBy(
+      qb,
+      { expression: selected[index]!, alias: sql.id(`c${index}`) },
+      direction
+    );
+  }
+  qb = withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
+  return dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
+};
+
+/** A table query. */
+const compileTable = (
+  plan: TablePlan,
+  dialect: SqlDialect,
+  fetch: { limit: number; offset: number; defaultOrder?: boolean }
+): AnySelect => {
   let qb: AnySelect = withJoins(
     dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
     plan.joins
@@ -507,14 +688,5 @@ export const compileSql = (
   }
 
   qb = withApplied(withFixed(qb, fixed, dialect), applied);
-  qb = dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
-  const { sql: text, parameters } = qb.compile();
-  if (parameters.length > dialect.maxParameters) {
-    throw new QueryError(
-      "too_many_parameters",
-      `The query binds ${parameters.length} values; this source takes at most ${dialect.maxParameters} in one query, paging included`,
-      []
-    );
-  }
-  return { sql: text, parameters: [...parameters] };
+  return dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
 };

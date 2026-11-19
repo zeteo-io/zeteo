@@ -58,6 +58,7 @@ const catalog = (over: Partial<VisibleCatalog> = {}): VisibleCatalog => ({
   ],
   calendar: DEFAULT_CALENDAR,
   measures: [],
+  metrics: [],
   ...over,
 });
 

@@ -61,6 +61,43 @@ to-one relation path from the home table.
   measure's path in the query.
 - A measure whose column a catalogue refresh marked missing is `missing_in_source` where used.
 
+## Metric queries
+
+A second query shape, told apart by its `metrics` key, combines measures of different tables of one
+source per period:
+
+```json
+{ "source": "sales-db", "metrics": ["revenue", "spend"], "bucket": "month",
+  "range": { "gte": { "relative": { "unit": "year", "offset": 0, "startOf": true } } },
+  "orderBy": [{ "period": "asc" }], "limit": 100 }
+```
+
+- `metrics`: 1–20 names, each asked for once. A measure named here is the trivial metric. Stored
+  metrics (formulas over measures) are not in this version yet, so every name is a measure's.
+- `bucket` (optional, any bucket unit, fiscal ones included) and `range` (optional, `gte`, `lt` or
+  both, each `{ "date" }`, `{ "timestamp" }` or `{ "relative" }`, half-open) apply to each non-fixed
+  measure's own date column (`date_column`, through its to-one relations). A measure without one, or
+  whose date column the caller cannot read, is `measure_has_no_date` at its name; without `bucket`
+  and `range` it is fine. A relative bound resolves in the calendar's time zone: a date column gets
+  the local date, a timestamp column the instant. A date bound against a timestamp column is local
+  midnight in the calendar's zone; a timestamp bound against a date column is its local date.
+- Result: `period` (the bucket start, when bucketed) then one column per name, in order. `period`
+  is a date when every date column is a date, else a timestamp (date buckets read as UTC
+  midnight). Periods are those any measure has; a measure with no rows in a period gives null.
+  Without `bucket` there is one row.
+- Fixed measures read no periods: they are one value on every row, and a `bucket` over fixed
+  measures only is `invalid_operator`. A non-fixed measure must be a number (`invalid_operator`).
+- `orderBy` names `period` or a requested name (`invalid_order` otherwise); `limit` and `offset`
+  as usual. No `where`, `join`, `groupBy` or `having`.
+- At most 20 distinct non-fixed measures (`too_complex`); fixed-measure subqueries count toward 10
+  as in a table query.
+- A dashboard panel over a metric query with time column `"range"` takes the dashboard's time
+  range as its `range`, replacing the stored one.
+- Compiled, on both engines, as one aggregate subquery per non-fixed measure (its home table and
+  joins, the range on its date column, grouped by the bucket), unioned with each measure's value in
+  its own column (`v0`, `v1`…, null in the others) so each keeps its own type, then grouped by
+  `period` with `max` picking each value, and fixed measures as scalar subqueries.
+
 ## Who sees what (the grant rule)
 
 A caller sees and can use a measure only if its home table, every column it reads (through other
@@ -131,8 +168,8 @@ and `max` the end of the scale. A null value or `max` shows "No data"; a null ta
 
 ## Not supported
 
-- **Metrics**: a calculation combining measures from different tables. A measure reads one home
-  table (and its to-one relations); there is no cross-table metric.
+- **Stored metrics**: named formulas combining measures of different tables. Metric queries combine
+  measures by name; there is no stored metric yet.
 - **Fixed values** that ignore the query's filters and grouping.
 - **Calendar functions over columns** (business days per row): the calendar functions take a date or
   relative date only ([calendar.md](calendar.md)).

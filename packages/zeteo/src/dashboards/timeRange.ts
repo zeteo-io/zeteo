@@ -71,8 +71,15 @@ export const TIME_RANGES: Record<
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+/** A dashboard panel's time column that, on a metric query, sets its `range`. */
+export const RANGE_TIME_COLUMN = "range";
+
 /**
- * The query with `<column> >= start` and `<column> < end` ANDed onto its
+ * A metric query (one with `metrics`) given time column `"range"` gets the
+ * range as its `range`, replacing any it had: each measure is then cut to it
+ * on its own date column.
+ *
+ * Any other query gets `<column> >= start` and `<column> < end` ANDed onto its
  * `where`: `{ and: [<stored where>, { <column>: { gte: start } }, { <column>: { lt: end } }] }`,
  * without the stored part when it had none. Two conditions, as the language
  * takes one operator per path. A new object: the stored query is not changed.
@@ -85,6 +92,9 @@ export const withTimeFilter = (
 ): unknown => {
   if (!isObject(query)) return query;
   const { start, end } = TIME_RANGES[key];
+  if ("metrics" in query && column === RANGE_TIME_COLUMN) {
+    return { ...query, range: { gte: start, lt: end } };
+  }
   const bounds = [{ [column]: { gte: start } }, { [column]: { lt: end } }];
   return {
     ...query,

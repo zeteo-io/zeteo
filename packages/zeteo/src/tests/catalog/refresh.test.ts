@@ -94,14 +94,14 @@ describe("refreshSource", () => {
     }),
   });
 
-  it("adds the twelve sales tables and views, their columns and six relations", async () => {
+  it("adds the thirteen sales tables and views, their columns and six relations", async () => {
     const summary = await refreshSource(sourceId, ACTOR);
     expect(summary).toEqual({
-      tables: { added: 12, missing: 0, restored: 0 },
-      columns: { added: 55, changed: 0, missing: 0, restored: 0 },
+      tables: { added: 13, missing: 0, restored: 0 },
+      columns: { added: 59, changed: 0, missing: 0, restored: 0 },
       relations: { added: 6, missing: 0, restored: 0 },
     });
-    expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
+    expect(await counts()).toEqual({ tables: 13, columns: 59, relations: 6 });
     expect((await tableRow("paid_orders")).kind).toBe("view");
     expect(await columnRow("orders", "total")).toMatchObject({
       type: "number",
@@ -207,7 +207,7 @@ describe("refreshSource", () => {
     expect(dropped.tables.missing).toBe(1);
     expect(dropped.columns.missing).toBe(3);
     expect((await tableRow("blobs")).missingSince).toBeInstanceOf(Date);
-    expect(await counts()).toMatchObject({ tables: 12, columns: 55 });
+    expect(await counts()).toMatchObject({ tables: 13, columns: 59 });
 
     await fixture.run(
       "CREATE TABLE sales.blobs (id integer, data bytea, tags text[]); GRANT SELECT ON sales.blobs TO zeteo_ro"
