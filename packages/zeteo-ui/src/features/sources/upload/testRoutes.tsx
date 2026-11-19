@@ -22,6 +22,10 @@ export const SourceTestRoutes = () => (
     <Route path="/sources" element={<p>Sources list</p>} />
     <Route path="/sources/:sourceId/add" element={<p>Add tables page</p>} />
     <Route
+      path="/sources/:sourceId/merged/new"
+      element={<p>Add merged table page</p>}
+    />
+    <Route
       path="/sources/:sourceId/tables/:tableId/reupload"
       element={<p>Re-upload page</p>}
     />

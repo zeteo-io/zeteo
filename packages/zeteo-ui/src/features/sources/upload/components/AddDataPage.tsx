@@ -37,7 +37,6 @@ import {
 } from "./PreviewEditor";
 import {
   useAddTables,
-  useCreateSheetsSource,
   useCreateUploadSource,
   useDiscardStaging,
   useReuploadTable,
@@ -142,12 +141,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
   // Add data starts with a choice; Add tables follows its source's kind.
   const [chosen, setChosen] = useState<Origin | null>(null);
   const [syncEvery, setSyncEvery] = useState(DEFAULT_INTERVAL);
-  const origin: Origin | null =
-    mode.kind === "create"
-      ? chosen
-      : mode.source.type === "google-sheets"
-        ? "sheet"
-        : "file";
+  const origin: Origin | null = mode.kind === "reupload" ? "file" : chosen;
   const [edits, setEdits] = useState<Edits>({});
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -159,9 +153,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
     setName(value);
     if (!slugEdited) setSlug(slugify(value));
   };
-  const createFile = useCreateUploadSource();
-  const createSheet = useCreateSheetsSource();
-  const create = origin === "sheet" ? createSheet : createFile;
+  const create = useCreateUploadSource();
   const sourceId = mode.kind === "create" ? "" : mode.source.id;
   const add = useAddTables(sourceId);
   const target = mode.kind === "reupload" ? mode.target : undefined;
@@ -260,14 +252,12 @@ const AddData = ({ mode }: { mode: Mode }) => {
         ...(slug && { slug }),
         tables: kept,
       };
-      if (origin === "sheet") {
-        createSheet.mutate(
-          { ...body, sync_interval_minutes: Number(syncEvery) },
-          { onSuccess: done }
-        );
-      } else {
-        createFile.mutate(body, { onSuccess: done });
-      }
+      create.mutate(
+        origin === "sheet"
+          ? { ...body, sync_interval_minutes: Number(syncEvery) }
+          : body,
+        { onSuccess: done }
+      );
     } else if (mode.kind === "add") {
       add.mutate(
         { staging_id: staging.staging_id, tables: kept },
@@ -439,43 +429,30 @@ export const AddDataPage = () => <AddData mode={{ kind: "create" }} />;
 /** Loads the source a page adds to or re-uploads into. */
 const WithSource = ({
   children,
-  sheets = false,
 }: {
   children: (source: Source) => ReactNode;
-  /** Whether a Google Sheets source may use the page. */
-  sheets?: boolean;
 }) => {
   const id = useUuidParam("sourceId");
-  return id ? (
-    <SourceLoader id={id} sheets={sheets}>
-      {children}
-    </SourceLoader>
-  ) : (
-    <NotFound />
-  );
+  return id ? <SourceLoader id={id}>{children}</SourceLoader> : <NotFound />;
 };
 
 const SourceLoader = ({
   id,
-  sheets,
   children,
 }: {
   id: string;
-  sheets: boolean;
   children: (source: Source) => ReactNode;
 }) => {
   const { data, error, isLoading } = useSource(id);
   if (isLoading) return <Spinner size="lg" />;
   if (!data) return <ErrorNotice error={error} />;
-  // Only an upload (files or a Google Sheet) has tables to add; a Sheets
-  // table is never re-uploaded.
+  // Only an upload has tables to add or re-upload.
   if (!isUploadType(data.type)) return <NotFound />;
-  if (!sheets && data.type !== "upload") return <NotFound />;
   return <>{children(data)}</>;
 };
 
 export const AddTablesPage = () => (
-  <WithSource sheets>
+  <WithSource>
     {(source) => <AddData mode={{ kind: "add", source }} />}
   </WithSource>
 );

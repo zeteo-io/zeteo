@@ -15,23 +15,33 @@ describe("SourceStatus", () => {
   });
 
   it("shows Stale when the sync is stale", () => {
-    const error = { code: "sheet_not_accessible", message: "Not shared" };
+    const failing = [
+      {
+        table_id: "t1",
+        name: "orders",
+        code: "sheet_not_accessible",
+        message: "Not shared",
+      },
+    ];
     render(
       <SourceStatus
-        source={makeSheetsSource({
-          sync: sync({ stale: true, last_error: error }),
-        })}
+        source={makeSheetsSource({ sync: sync({ stale: true, failing }) })}
       />
     );
     expect(screen.getByText("Stale")).toBeInTheDocument();
   });
 
   it("shows Sync failing for an error that is not yet stale", () => {
-    const error = { code: "google_unavailable", message: "Down" };
+    const failing = [
+      {
+        table_id: "t1",
+        name: "orders",
+        code: "google_unavailable",
+        message: "Down",
+      },
+    ];
     render(
-      <SourceStatus
-        source={makeSheetsSource({ sync: sync({ last_error: error }) })}
-      />
+      <SourceStatus source={makeSheetsSource({ sync: sync({ failing }) })} />
     );
     expect(screen.getByText("Sync failing")).toBeInTheDocument();
     expect(screen.queryByText("Stale")).toBeNull();

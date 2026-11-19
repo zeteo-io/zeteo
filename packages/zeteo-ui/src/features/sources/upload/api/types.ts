@@ -63,16 +63,7 @@ export interface CreateUploadSource {
   description?: string;
   slug?: string;
   tables: TableCorrection[];
-}
-
-export interface CreateSheetsSource {
-  type: "google-sheets";
-  staging_id: string;
-  name: string;
-  description?: string;
-  slug?: string;
-  tables: TableCorrection[];
-  /** Minutes between syncs, 15 to 1440 (zeteo's default is 60). */
+  /** A Google Sheet staging: minutes between syncs, 15 to 1440 (zeteo's default is 60). */
   sync_interval_minutes?: number;
 }
 

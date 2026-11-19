@@ -1,11 +1,11 @@
 import { BorderedSection, Button, Input, Spinner } from "@kosmeo-ui/react";
 import { useGoogleConnection } from "@/features/connections";
 import { ErrorNotice } from "@/components/ErrorNotice";
-import { useEffect, useRef, useState } from "react";
 import type { SheetStaging } from "../api/types";
 import { useStageSheet } from "../api/uploads";
 import { useAuth } from "@tereo-io/react";
 import { Link } from "react-router-dom";
+import { useState } from "react";
 import "./styles.css";
 
 /** Failures that belong to the link the person typed. */
@@ -40,32 +40,27 @@ const CopyButton = ({ text }: { text: string }) => {
 };
 
 interface SheetLinkStepProps {
-  /** An existing Sheets source: its own spreadsheet is read, so there is no link to type. */
+  /** Add tables to this source: its id goes with the link. */
   sourceId?: string;
   onStaged: (staging: SheetStaging) => void;
 }
 
 /**
  * Step one of a Google Sheet: share it with Zeteo's service account, give its
- * link, and its tabs come back as a preview (or, for Add tables to a Sheets
- * source, they are read at once).
+ * link (any spreadsheet, for a new source or to add tables to one), and its
+ * tabs come back as a preview.
  */
 export const SheetLinkStep = ({ sourceId, onStaged }: SheetLinkStepProps) => {
   const { hasPermission } = useAuth();
   const connection = useGoogleConnection();
   const stage = useStageSheet();
   const [url, setUrl] = useState("");
-  const asked = useRef(false);
 
-  const read = (body: { url: string } | { source_id: string }) =>
-    stage.mutate(body, { onSuccess: onStaged });
-
-  useEffect(() => {
-    if (!sourceId || asked.current) return;
-    asked.current = true;
-    stage.mutate({ source_id: sourceId }, { onSuccess: onStaged });
-    // Once per page: a retry is the person's own click.
-  }, [sourceId]);
+  const read = (link: string) =>
+    stage.mutate(
+      { ...(sourceId && { source_id: sourceId }), url: link },
+      { onSuccess: onStaged }
+    );
 
   const email = connection.data?.service_account_email;
   const error = stage.error;
@@ -78,32 +73,6 @@ export const SheetLinkStep = ({ sourceId, onStaged }: SheetLinkStepProps) => {
       <CopyButton text={email} />
     </p>
   );
-
-  if (sourceId) {
-    return (
-      <BorderedSection title="Google Sheet" as="h2">
-        {share}
-        <ErrorNotice error={connection.error} />
-        {stage.isPending || (!error && !stage.isSuccess) ? (
-          <div className="z-fs-reading">
-            <Spinner size="md" />
-            <span>Reading the sheet…</span>
-          </div>
-        ) : null}
-        <ErrorNotice error={error} />
-        {error && (
-          <Button
-            size="sm"
-            variant="secondary"
-            fullWidth={false}
-            onClick={() => read({ source_id: sourceId })}
-          >
-            Try again
-          </Button>
-        )}
-      </BorderedSection>
-    );
-  }
 
   if (connection.isLoading) return <Spinner size="lg" />;
 
@@ -132,7 +101,7 @@ export const SheetLinkStep = ({ sourceId, onStaged }: SheetLinkStepProps) => {
         className="z-fs-link"
         onSubmit={(e) => {
           e.preventDefault();
-          if (trimmed && !stage.isPending) read({ url: trimmed });
+          if (trimmed && !stage.isPending) read(trimmed);
         }}
       >
         <Input

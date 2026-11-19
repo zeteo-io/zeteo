@@ -1,10 +1,10 @@
 // Field for field the OpenAPI `Source`, `CreateSourceRequest`,
 // `UpdateSourceRequest`, `TestSourceResponse` and `RefreshSummary` schemas.
 
-export type SourceType = "postgres" | "azure-sql" | "upload" | "google-sheets";
+export type SourceType = "postgres" | "azure-sql" | "upload";
 
-/** The types a person registers a database source with; an upload source is made from a file or a Google Sheet. */
-export type DatabaseType = Exclude<SourceType, "upload" | "google-sheets">;
+/** The types a person registers a database source with; an upload source is made from files and Google Sheets. */
+export type DatabaseType = Exclude<SourceType, "upload">;
 
 export interface PostgresSettings {
   host: string;
@@ -27,17 +27,12 @@ export interface AzureSqlSettings {
 
 export type SourceSettings = PostgresSettings | AzureSqlSettings;
 
-/** A Google Sheets source's spreadsheet; only its owner and `zeteo.sources.read` see it. */
-export interface SheetInfo {
-  spreadsheet_id: string;
-  url: string;
-}
-
-/** A Google Sheets source's sync state; `last_refreshed_at` is the last successful sync. */
+/** A source that has Google Sheets tables: its sync state; only its owner and `zeteo.sources.read` see it. */
 export interface SyncInfo {
   interval_minutes: number;
   last_attempt_at: string | null;
-  last_error: { code: string; message: string } | null;
+  /** The Sheets tables whose last sync failed. */
+  failing: { table_id: string; name: string; code: string; message: string }[];
   stale: boolean;
 }
 
@@ -73,9 +68,7 @@ export interface Source {
   share_count: number;
   created_at: string;
   archived_at: string | null;
-  /** A Google Sheets source only. */
-  sheet?: SheetInfo;
-  /** A Google Sheets source only. */
+  /** Present only when the source has Google Sheets tables. */
   sync?: SyncInfo;
 }
 
@@ -106,7 +99,7 @@ export interface UpdateSource extends SourceLimits {
   schemas?: string[];
   /** Accepted only together with `settings`. */
   allow_writable_login?: boolean;
-  /** A Google Sheets source: minutes between syncs, 15 to 1440. */
+  /** A source with Google Sheets tables: minutes between syncs, 15 to 1440. */
   sync_interval_minutes?: number;
 }
 
@@ -121,10 +114,16 @@ export interface TestResult {
   truncated?: true;
 }
 
-/** What a refresh answers for a Google Sheets source: what it synced. */
+/** What a refresh answers for a source with Google Sheets tables: what it synced, and which tables failed. */
 export interface SyncSummary {
   synced_at: string;
-  tables: { id: string; name: string; row_count: number; missing: boolean }[];
+  tables: {
+    id: string;
+    name: string;
+    row_count: number;
+    missing: boolean;
+    error: { code: string; message: string } | null;
+  }[];
 }
 
 export interface RefreshSummary {

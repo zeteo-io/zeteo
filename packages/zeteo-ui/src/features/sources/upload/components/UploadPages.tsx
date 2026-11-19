@@ -1,11 +1,11 @@
 import { Facts, LimitSections, When, type Row } from "../../components/Facts";
 import { FILE_COLUMN_TYPES, type UpdateColumn } from "../api/types";
+import { Badge, BorderedSection, Button } from "@kosmeo-ui/react";
 import { useRemoveTable, useUpdateColumn } from "../api/uploads";
 import { useSourceContext } from "../../components/context";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { sourceHref } from "../../components/sourceLabels";
 import { ConfirmButton } from "@/components/ConfirmButton";
-import { BorderedSection, Button } from "@kosmeo-ui/react";
 import { columnTypeName, RETYPE_WARNING } from "./labels";
 import { PrincipalLabel } from "@/features/principals";
 import { LoadFailure } from "./CastFailedNotice";
@@ -21,6 +21,7 @@ import {
   useAllTables,
   useTable,
   type ColumnEditing,
+  type Table,
 } from "@/features/tables";
 
 /** A sync interval in words: 60 → "Every hour", 90 → "Every 90 minutes". */
@@ -31,56 +32,106 @@ export const intervalName = (minutes: number): string =>
       ? `Every ${minutes / 60} hours`
       : `Every ${minutes} minutes`;
 
-/** A Google Sheets source's spreadsheet and sync state, as its owner or a sources reader sees them. */
-const SheetBlock = ({ source }: { source: Source }) => {
-  const { sheet, sync } = source;
-  if (!sheet && !sync) return null;
+/** The spreadsheets a source draws from, with its sync state, as its owner or a sources reader sees them. */
+const SheetsBlock = ({
+  source,
+  tables,
+}: {
+  source: Source;
+  tables: Table[];
+}) => {
+  const { sync } = source;
+  const failingIds = new Set(sync?.failing.map((f) => f.table_id));
+  const sheets = new Map<
+    string,
+    { title: string; url: string; tabs: number; failing: number }
+  >();
+  for (const t of tables) {
+    if (t.origin?.kind !== "google-sheets") continue;
+    const entry = sheets.get(t.origin.spreadsheet_id) ?? {
+      title: t.origin.spreadsheet_title,
+      url: t.origin.url,
+      tabs: 0,
+      failing: 0,
+    };
+    entry.tabs += 1;
+    if (t.sync_error || failingIds.has(t.id)) entry.failing += 1;
+    sheets.set(t.origin.spreadsheet_id, entry);
+  }
+  if (sheets.size === 0) return null;
   return (
-    <BorderedSection title="Google Sheet" as="h2">
+    <BorderedSection title="Google Sheets" as="h2">
+      <ul className="z-fs-sheets">
+        {[...sheets.entries()].map(([id, s]) => (
+          <li key={id}>
+            <a
+              href={s.url}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open ${s.title} in Google Sheets`}
+            >
+              {s.title}
+            </a>{" "}
+            <span className="z-muted">
+              {s.tabs} {s.tabs === 1 ? "tab" : "tabs"}
+            </span>
+            {s.failing > 0 && (
+              <span className="z-fs-sync-error"> · {s.failing} failing</span>
+            )}
+          </li>
+        ))}
+      </ul>
       <Facts
         rows={[
-          ...(sheet
-            ? [
-                [
-                  "Spreadsheet",
-                  <a href={sheet.url} target="_blank" rel="noreferrer">
-                    Open in Google Sheets
-                  </a>,
-                ] as Row,
-              ]
-            : []),
           ...(sync
-            ? [
-                ["Sync", intervalName(sync.interval_minutes)] as Row,
-                [
-                  "Last synced",
-                  source.last_refreshed_at ? (
-                    <When iso={source.last_refreshed_at} />
-                  ) : (
-                    "Not yet"
-                  ),
-                ] as Row,
-              ]
+            ? [["Sync", intervalName(sync.interval_minutes)] as Row]
             : []),
-          ...(sync?.last_error
-            ? [
-                [
-                  "Last error",
-                  <span className="z-fs-sync-error">
-                    {sync.last_error.message || sync.last_error.code}
-                    {sync.last_attempt_at && (
-                      <span className="z-muted">
-                        {" "}
-                        (<When iso={sync.last_attempt_at} />)
-                      </span>
-                    )}
-                  </span>,
-                ] as Row,
-              ]
-            : []),
+          [
+            "Last synced",
+            source.last_refreshed_at ? (
+              <When iso={source.last_refreshed_at} />
+            ) : (
+              "Not yet"
+            ),
+          ] as Row,
         ]}
       />
     </BorderedSection>
+  );
+};
+
+/** Where a table came from: its file, its spreadsheet tab, or its members; and a failing sync. */
+const OriginCell = ({ table }: { table: Table }) => {
+  const { origin } = table;
+  return (
+    <span className="z-fs-origin">
+      {origin?.kind === "file" ? (
+        origin.filename
+      ) : origin?.kind === "google-sheets" ? (
+        <>
+          {origin.spreadsheet_title} · {origin.tab_title}{" "}
+          <a
+            href={origin.url}
+            target="_blank"
+            rel="noreferrer"
+            aria-label={`Open ${origin.spreadsheet_title} in Google Sheets`}
+          >
+            Open
+          </a>
+        </>
+      ) : origin?.kind === "merged" ? (
+        `Merged · ${origin.members} ${origin.members === 1 ? "table" : "tables"}`
+      ) : (
+        <span className="z-muted">—</span>
+      )}
+      {table.sync_error && (
+        <span title={table.sync_error.message || table.sync_error.code}>
+          <Badge size="sm" variant="danger">
+            Sync failing
+          </Badge>
+        </span>
+      )}
+    </span>
   );
 };
 
@@ -94,7 +145,7 @@ export const UploadOverview = () => {
         <LimitSections source={source} />
       </div>
       <div className="z-source-column">
-        <SheetBlock source={source} />
+        <SheetsBlock source={source} tables={tables} />
         <BorderedSection title="Data" as="h2">
           <Facts
             rows={[
@@ -140,6 +191,11 @@ export const UploadTables = () => {
       tableHref={(id) => `${sourceHref(source.id)}/tables/${id}`}
       extraColumns={[
         {
+          title: "Origin",
+          minWidth: "10rem",
+          cellElement: (t) => <OriginCell table={t} />,
+        },
+        {
           title: "Rows",
           minWidth: "5rem",
           align: "right",
@@ -163,12 +219,9 @@ export const UploadTables = () => {
 const TableActions = ({
   sourceId,
   tableId,
-  sheets,
 }: {
   sourceId: string;
   tableId: string;
-  /** A Google Sheets source's table: removable, never re-uploaded. */
-  sheets: boolean;
 }) => {
   const navigate = useNavigate();
   const remove = useRemoveTable(sourceId);
@@ -178,7 +231,7 @@ const TableActions = ({
   if (!table || table.missing_since) return null;
   return (
     <>
-      {!sheets && !table.merged && (
+      {table.origin?.kind !== "google-sheets" && !table.merged && (
         <Button
           size="sm"
           variant="secondary"
@@ -243,11 +296,7 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
       relationsHref={`${base}/relations`}
       headerActions={
         access.canManage && (
-          <TableActions
-            sourceId={source.id}
-            tableId={tableId}
-            sheets={source.type === "google-sheets"}
-          />
+          <TableActions sourceId={source.id} tableId={tableId} />
         )
       }
       columnNote={(c) =>

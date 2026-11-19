@@ -1,14 +1,14 @@
-import { screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { SourceTestRoutes } from "../testRoutes";
 import {
   FS_ID,
-  SHEET_ID,
   TABLE_ID,
   makeSheetsSource,
   makeUploadSource,
+  sheetsOrders,
   uploadGet,
 } from "../testFixtures";
 
@@ -26,9 +26,14 @@ vi.mock("@tereo-io/react", async () =>
 const renderAt = (route = `/sources/${FS_ID}`) =>
   renderWithProviders(<SourceTestRoutes />, { route });
 
-describe("a Google Sheets source's page", () => {
+describe("a source with Google Sheets tables", () => {
   beforeEach(() => {
-    get.mockReset().mockImplementation(uploadGet(() => makeSheetsSource()));
+    get.mockReset().mockImplementation(
+      uploadGet(
+        () => makeSheetsSource(),
+        () => [sheetsOrders()]
+      )
+    );
     post.mockReset();
     patch.mockReset().mockResolvedValue({ data: makeSheetsSource() });
     del.mockReset().mockResolvedValue({});
@@ -37,7 +42,6 @@ describe("a Google Sheets source's page", () => {
   it("has the upload shell's actions", async () => {
     renderAt();
     await screen.findByRole("heading", { name: "Budget sheet" });
-    expect(screen.getByText("Google Sheets")).toBeInTheDocument();
     for (const name of ["Add tables", "Transfer", "Edit", "Delete"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
@@ -49,43 +53,40 @@ describe("a Google Sheets source's page", () => {
     expect(screen.queryByRole("button", { name: "Re-upload" })).toBeNull();
   });
 
-  it("shows the Google Sheet block with the link, interval and last synced", async () => {
-    renderAt();
-    const block = (
-      await screen.findByRole("heading", { name: "Google Sheet" })
-    ).closest(".k-bordered-section") as HTMLElement;
-    expect(
-      within(block).getByRole("link", { name: "Open in Google Sheets" })
-    ).toHaveAttribute(
-      "href",
-      `https://docs.google.com/spreadsheets/d/${SHEET_ID}`
-    );
-    expect(within(block).getByText("Every hour")).toBeInTheDocument();
-    expect(within(block).getByText("Last synced")).toBeInTheDocument();
-    expect(within(block).queryByText("Last error")).toBeNull();
-  });
-
-  it("shows the last error to the owner", async () => {
+  it("shows the failing tables as Sync failing in the status", async () => {
     get.mockImplementation(
-      uploadGet(() =>
-        makeSheetsSource({
-          sync: {
-            interval_minutes: 60,
-            last_attempt_at: "2026-11-18T09:00:00.000Z",
-            last_error: {
+      uploadGet(
+        () =>
+          makeSheetsSource({
+            sync: {
+              interval_minutes: 60,
+              last_attempt_at: "2026-11-18T09:00:00.000Z",
+              failing: [
+                {
+                  table_id: TABLE_ID,
+                  name: "orders",
+                  code: "sheet_not_accessible",
+                  message: "Share the sheet with robot@x",
+                },
+              ],
+              stale: false,
+            },
+          }),
+        () => [
+          sheetsOrders({
+            sync_error: {
               code: "sheet_not_accessible",
               message: "Share the sheet with robot@x",
             },
-            stale: false,
-          },
-        })
+          }),
+        ]
       )
     );
     renderAt();
-    expect(
-      await screen.findByText("Share the sheet with robot@x")
-    ).toBeInTheDocument();
-    expect(screen.getByText("Sync failing")).toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Budget sheet" });
+    expect((await screen.findAllByText("Sync failing")).length).toBeGreaterThan(
+      0
+    );
   });
 
   it("opens Add tables", async () => {

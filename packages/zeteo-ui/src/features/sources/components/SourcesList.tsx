@@ -35,7 +35,6 @@ const KIND: InfiniteScrollMenuFilter = {
     { id: "postgres", name: "PostgreSQL", selected: false },
     { id: "azure-sql", name: "Azure SQL", selected: false },
     { id: "upload", name: "Upload", selected: false },
-    { id: "google-sheets", name: "Google Sheets", selected: false },
   ],
 };
 const ALL_FILTERS = [SEARCH, KIND];

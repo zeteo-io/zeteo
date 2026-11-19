@@ -218,6 +218,22 @@
   color: var(--k-danger-color);
 }
 
+.z-fs-sheets {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.z-fs-origin {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.5rem;
+}
+
 /* Merged tables: the editor and a merged table's page. */
 .z-merged-about {
   display: grid;
