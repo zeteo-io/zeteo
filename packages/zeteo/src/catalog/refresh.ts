@@ -649,7 +649,7 @@ const applySnapshot = async (
 /**
  * Refreshes a source: a database source's catalogue is read again
  * (`refreshDatabaseSource`); an upload source's Google Sheets tables are
- * synced, each on its own (`syncSource`). An upload source with no live
+ * synced, each on its own (`syncSource`). An upload source with no
  * Sheets table has nothing to sync (`nothing_to_sync`).
  */
 export const refreshSource = async (

@@ -238,6 +238,22 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     expect(await redis.get(`zeteo:sync-now:${file.id}`)).toBeNull();
   });
 
+  it("Sync now on a source whose only tab was deleted is 200, not 409 nothing_to_sync", async () => {
+    const { sheet, id } = await makeSheets();
+    sheet.tabs = [];
+    const first = await call("POST", `/${id}/refresh`, owner);
+    expect(first.status, JSON.stringify(first.body)).toBe(200);
+    expect(first.body.tables).toEqual([
+      expect.objectContaining({ name: "costs", missing: true, error: null }),
+    ]);
+    await redis.del(`zeteo:sync-now:${id}`);
+    const again = await call("POST", `/${id}/refresh`, owner);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toEqual({ synced_at: expect.any(String), tables: [] });
+    const view = await call("GET", `/${id}`, owner);
+    expect(view.body.sync).toMatchObject({ failing: [], stale: false });
+  });
+
   it("Sync now twice within 60 s: second is 429 sync_too_soon with Retry-After", async () => {
     const { id } = await makeSheets();
     expect((await call("POST", `/${id}/refresh`, owner)).status).toBe(200);

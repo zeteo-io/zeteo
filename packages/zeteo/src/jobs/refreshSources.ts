@@ -23,9 +23,9 @@ const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call
 
 /**
  * Refreshes each unarchived database source not refreshed in the last 24
- * hours, and syncs each upload source with a live Google Sheets table whose
+ * hours, and syncs each upload source with Google Sheets tables (live or missing) whose
  * sync interval has passed (while uploads are on), one at a time; an upload
- * source without one never. A source
+ * source without any never. A source
  * another replica holds the lock for is skipped, and so is one that, read
  * again under the lock, is no longer due or has been archived since the list
  * was read. A failing one is logged (a failed sync is also recorded on the
@@ -57,7 +57,7 @@ export const refreshStaleSources = async (
           (isUploadSource(current)
             ? Boolean(env.UPLOADS_READER_URL) &&
               db.sources.syncIsDue(current, now) &&
-              (await db.sources.hasLiveSheetsTables(current.id))
+              (await db.sources.hasSheetsTables(current.id))
             : current.lastRefreshedAt === null ||
               current.lastRefreshedAt < cutoff);
         if (stillDue) await refreshSource(source.id, SYSTEM_USER_ID);

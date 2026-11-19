@@ -11,7 +11,7 @@ export const refreshSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
   const { userId } = callerOf(req);
   const row = await db.sources.findById(sourceId);
-  // An upload source: Sync now (409 `nothing_to_sync` without a live Sheets table).
+  // An upload source: Sync now (409 `nothing_to_sync` without Sheets tables).
   res
     .status(200)
     .json(

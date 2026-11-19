@@ -388,17 +388,44 @@ describe("refreshStaleSources of Google Sheets sources", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it("lists no source whose Sheets tables are all missing", async () => {
+  it("a source whose only Sheets tab was deleted keeps syncing, and the tab's table revives when the tab returns", async () => {
     const now = new Date();
-    const { id } = await makeSheets(61, now);
-    await prisma.sourceTable.updateMany({
-      where: { sourceId: id },
-      data: { missingSince: now },
+    const { sheet, id } = await makeSheets(61, now);
+    const [table] = await uploadTablesOf(id);
+    const tab = sheet.tab(1);
+    sheet.tabs = [];
+
+    await refreshStaleSources(now);
+    expect((await uploadTablesOf(id))[0]).toMatchObject({
+      id: table!.id,
+      missing: true,
     });
-    const cutoff = new Date(now.getTime() - 24 * HOUR);
+
+    // Still due once its interval has passed, though its only table is missing.
+    const attempt = (await prisma.source.findUniqueOrThrow({ where: { id } }))
+      .lastSyncAttemptAt!;
+    const later = new Date(attempt.getTime() + 61 * MINUTE);
+    const cutoff = new Date(later.getTime() - 24 * HOUR);
     expect(
-      (await db.sources.listDue(cutoff, now)).map((s) => s.id)
-    ).not.toContain(id);
+      (await db.sources.listDue(cutoff, later)).map((s) => s.id)
+    ).toContain(id);
+
+    // A run that finds it still gone ends cleanly.
+    await redis.del(`zeteo:refresh:${id}`);
+    await refreshStaleSources(later);
+    const quiet = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(quiet.lastSyncError).toBeNull();
+    expect((await uploadTablesOf(id))[0]!.missing).toBe(true);
+
+    // Undo in Sheets: the tab returns with its sheetId.
+    sheet.tabs = [{ ...tab, rows: [...tab.rows, ["food", "300"]] }];
+    const again = new Date(quiet.lastSyncAttemptAt!.getTime() + 61 * MINUTE);
+    await refreshStaleSources(again);
+    expect((await uploadTablesOf(id))[0]).toMatchObject({
+      id: table!.id,
+      missing: false,
+      row_count: 2,
+    });
   });
 
   it("still refreshes database sources after 24h", async () => {
