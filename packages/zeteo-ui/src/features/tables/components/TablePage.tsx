@@ -129,6 +129,8 @@ export interface TableViewProps {
   columnNote?: (column: Column) => ReactNode;
   /** Renaming and retyping columns in the edit mode (an upload's). */
   columnEditing?: ColumnEditing;
+  /** Shown between the description and the columns: what only this kind of table has. */
+  aside?: ReactNode;
 }
 
 /** One table of a source: the table page of a database source, and of an upload source. Key it by table, so edit state never carries over. */
@@ -142,6 +144,7 @@ export const TableView = ({
   headerActions,
   columnNote,
   columnEditing,
+  aside,
 }: TableViewProps) => {
   const database = catalogue === "database";
   const { data: table, error, isLoading } = useTable(sourceId, tableId);
@@ -480,6 +483,8 @@ export const TableView = ({
           </p>
         )}
       </section>
+
+      {aside}
 
       <div
         className="z-segmented z-table-switch"

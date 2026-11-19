@@ -11,6 +11,7 @@ import { PrincipalLabel } from "@/features/principals";
 import { LoadFailure } from "./CastFailedNotice";
 import { nameProblem } from "@/utils/queryName";
 import { useNavigate } from "react-router-dom";
+import { MergedDetail } from "./MergedDetail";
 import type { Source } from "../../api/types";
 import { formatBytes } from "./labels";
 import "./styles.css";
@@ -177,7 +178,7 @@ const TableActions = ({
   if (!table || table.missing_since) return null;
   return (
     <>
-      {!sheets && (
+      {!sheets && !table.merged && (
         <Button
           size="sm"
           variant="secondary"
@@ -216,6 +217,8 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
   const { source, access } = useSourceContext();
   const updateColumn = useUpdateColumn(source.id, tableId);
   const base = sourceHref(source.id);
+  const { data: table } = useTable(source.id, tableId);
+  const merged = table?.merged ?? null;
   const columnEditing: ColumnEditing = {
     types: TYPE_CHOICES,
     nameProblem,
@@ -255,7 +258,18 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
           </span>
         )
       }
-      columnEditing={access.canManage ? columnEditing : undefined}
+      // A merged table's columns come from its definition: edit it there.
+      columnEditing={access.canManage && !merged ? columnEditing : undefined}
+      aside={
+        merged && (
+          <MergedDetail
+            sourceId={source.id}
+            tableId={tableId}
+            merged={merged}
+            canEdit={access.canManage}
+          />
+        )
+      }
     />
   );
 };

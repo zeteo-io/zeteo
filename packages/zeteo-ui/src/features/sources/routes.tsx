@@ -56,6 +56,17 @@ const ReuploadPage = lazy(() =>
   }))
 );
 
+const MergedTableNewPage = lazy(() =>
+  import("./upload/components/MergedTablePage").then((m) => ({
+    default: m.MergedTableNewPage,
+  }))
+);
+const MergedTableEditPage = lazy(() =>
+  import("./upload/components/MergedTablePage").then((m) => ({
+    default: m.MergedTableEditPage,
+  }))
+);
+
 const READ = "zeteo.sources.read";
 const WRITE = "zeteo.sources.write";
 
@@ -133,6 +144,22 @@ export const sourceRoutes = [
     element: (
       <UploadGuard permissions={CHANGE_UPLOAD}>
         <AddTablesPage />
+      </UploadGuard>
+    ),
+  },
+  {
+    path: "/sources/:sourceId/merged/new",
+    element: (
+      <UploadGuard permissions={CHANGE_UPLOAD}>
+        <MergedTableNewPage />
+      </UploadGuard>
+    ),
+  },
+  {
+    path: "/sources/:sourceId/tables/:tableId/merged/edit",
+    element: (
+      <UploadGuard permissions={CHANGE_UPLOAD}>
+        <MergedTableEditPage />
       </UploadGuard>
     ),
   },
