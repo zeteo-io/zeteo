@@ -146,8 +146,15 @@ const CONNECTION_CODES = new Set([
 // dateAdd). Numbers bind
 // in types every numeric column compares with, so none overflows.
 const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 517]);
-/** 8115 is also an integer product that overflows, a failure of the source: it is a value error only for a date type. */
-const DATE_OVERFLOW =
+/**
+ * 8115 is also an integer product that overflows, a failure of the source: it
+ * is a value error only for a date type. SQL Server names the type only in
+ * the message, so it is matched by its English text ("Arithmetic overflow
+ * error converting expression to data type datetime."). A server or login set
+ * to another language does not match, and the error then fails safe as the
+ * generic 502 `query_failed`, never as a caller's `invalid_value`.
+ */
+export const DATE_OVERFLOW =
   /data type (date|datetime|datetime2|datetimeoffset|smalldatetime)\b/i;
 /** Errors of this severity end the session on the server: KILL, a crash, a shutdown. */
 const SESSION_FATAL_SEVERITY = 20;
