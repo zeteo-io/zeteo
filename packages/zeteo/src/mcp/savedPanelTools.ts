@@ -1,4 +1,5 @@
 import { TimeColumnSchema } from "../routes/v1/dashboards/dashboard/panels/schemas.js";
+import { RANGE_TIME_COLUMN, withTimeFilter } from "../dashboards/timeRange.js";
 import { TimeRangeSchema } from "../routes/v1/dashboards/schemas.js";
 import { chartProblems, chartSchema } from "../dashboards/chart.js";
 import { NotFoundError, ValidationError } from "../utils/errors.js";
@@ -6,7 +7,6 @@ import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
 import type { TimeRangeKey } from "../dashboards/timeRange.js";
 import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
-import { RANGE_TIME_COLUMN, withTimeFilter } from "../dashboards/timeRange.js";
 import { isMetricBody } from "../adapters/sql/language.js";
 import { PANEL_CARD_URI, withCardNote } from "./card.js";
 import { LIMIT_PROFILES } from "../engine/limits.js";

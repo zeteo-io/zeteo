@@ -1,6 +1,7 @@
 import type { DashboardWithPanels } from "../utils/db/dashboards.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { SavedQueryNotAccessibleError } from "../utils/errors.js";
+import { isMetricBody } from "../adapters/sql/language.js";
 import { planSavedAgainst } from "../engine/savedPlan.js";
 import type { OutputColumn } from "../adapters/types.js";
 import { groupIdsOf } from "../grants/principals.js";
@@ -16,7 +17,6 @@ import {
   loadSourceVisibleCatalog,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
-import { isMetricBody } from "../adapters/sql/language.js";
 import {
   RANGE_TIME_COLUMN,
   withTimeFilter,

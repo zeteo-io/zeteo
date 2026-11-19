@@ -1,8 +1,7 @@
 // @module-tag unit
 // @module-tag platform
-import { describe, expect, it } from "vitest";
-
 import { isMetricBody } from "../../../adapters/sql/language.js";
+import { describe, expect, it } from "vitest";
 
 describe("isMetricBody", () => {
   it("is true only for a plain object with a metrics key", () => {
