@@ -1,6 +1,7 @@
 import { nameProblem } from "@/utils/queryName";
 import { SampleValues } from "./SampleValues";
 import { columnTypeName } from "./labels";
+import { Link } from "react-router-dom";
 import { useState } from "react";
 import {
   Alert,
@@ -41,7 +42,7 @@ export const initialEdits = (
     tables.map((t) => [
       t.key,
       {
-        keep: only === undefined || t.key === only,
+        keep: !t.already_added && (only === undefined || t.key === only),
         columns: Object.fromEntries(
           t.columns
             .filter((c) => types?.has(c.name) && types.get(c.name) !== c.type)
@@ -84,7 +85,7 @@ export const correctionOf = (
 
 /** Whether every kept table's names are valid, and at least one is kept. */
 export const editsValid = (tables: PreviewTable[], edits: Edits) => {
-  const kept = tables.filter((t) => edits[t.key]?.keep);
+  const kept = tables.filter((t) => edits[t.key]?.keep && !t.already_added);
   return (
     kept.length > 0 &&
     kept.every((t) => {
@@ -138,6 +139,8 @@ interface PreviewEditorProps {
   mode?: "many" | "one";
   /** Where the tables come from: a Google Sheet's tabs are not an Excel file's sheets. */
   origin?: "file" | "sheet";
+  /** The source being added to: links a table that is already in it to its page. */
+  sourceId?: string;
 }
 
 /** The staged tables of an upload, to keep or leave out and correct before anything is created. */
@@ -147,6 +150,7 @@ export const PreviewEditor = ({
   onChange,
   mode = "many",
   origin = "file",
+  sourceId,
 }: PreviewEditorProps) => {
   const set = (key: string, edit: TableEdit) =>
     onChange({ ...edits, [key]: edit });
@@ -171,6 +175,11 @@ export const PreviewEditor = ({
 
   return (
     <>
+      {tables.length > 0 && tables.every((t) => t.already_added) && (
+        <Alert variant="warning">
+          Every tab of this spreadsheet is already in this source.
+        </Alert>
+      )}
       {tables.length > 1 && (
         <div
           className="z-source-tabs z-fs-table-tabs"
@@ -178,7 +187,8 @@ export const PreviewEditor = ({
           aria-label="Tables"
         >
           {tables.map((table) => {
-            const kept = edits[table.key]?.keep ?? false;
+            const added = table.already_added !== undefined;
+            const kept = !added && (edits[table.key]?.keep ?? false);
             return (
               <button
                 key={table.key}
@@ -191,10 +201,16 @@ export const PreviewEditor = ({
                 onClick={() => setActiveKey(table.key)}
               >
                 {table.name}
-                {!kept && (
-                  <Badge size="sm" variant="danger">
-                    {mode === "one" ? "not used" : "left out"}
+                {added ? (
+                  <Badge size="sm" variant="secondary">
+                    Added
                   </Badge>
+                ) : (
+                  !kept && (
+                    <Badge size="sm" variant="danger">
+                      {mode === "one" ? "not used" : "left out"}
+                    </Badge>
+                  )
                 )}
               </button>
             );
@@ -235,7 +251,8 @@ export const PreviewEditor = ({
                   size="sm"
                   label={mode === "one" ? "Use this table" : "Keep"}
                   labelLocation="left"
-                  checked={edit.keep}
+                  checked={edit.keep && !table.already_added}
+                  disabled={table.already_added !== undefined}
                   onChange={(e) => choose(table.key, e.target.checked)}
                 />
               }
@@ -248,7 +265,20 @@ export const PreviewEditor = ({
                 </Badge>
                 <span>{table.row_count.toLocaleString()} rows</span>
               </p>
-              {!edit.keep ? (
+              {table.already_added ? (
+                <p className="z-note">
+                  Already in this source as{" "}
+                  {sourceId ? (
+                    <Link
+                      to={`/sources/${sourceId}/tables/${table.already_added.table_id}`}
+                    >
+                      <code>{table.already_added.name}</code>
+                    </Link>
+                  ) : (
+                    <code>{table.already_added.name}</code>
+                  )}
+                </p>
+              ) : !edit.keep ? (
                 <p className="z-note">
                   {mode === "one"
                     ? "Not used."

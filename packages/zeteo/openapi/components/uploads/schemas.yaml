@@ -140,6 +140,20 @@ SheetsUploadResponse:
     - type: object
       required: [spreadsheet]
       properties:
+        tables:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/StagedTable'
+              - type: object
+                properties:
+                  already_added:
+                    type: object
+                    description: 'Only with `source_id`: this tab is already a table of that source (not a missing one); adding it is 409 `tab_already_added`'
+                    required: [table_id, name]
+                    properties:
+                      table_id: { type: string, format: uuid }
+                      name: { type: string }
         spreadsheet:
           type: object
           required: [id, title]

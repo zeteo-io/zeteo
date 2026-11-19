@@ -641,4 +641,64 @@ describe("AddDataPage: Google Sheet", () => {
       await screen.findByRole("heading", { name: "orders" })
     ).toBeInTheDocument();
   });
+  const stageAdded = (tables: ReturnType<typeof makePreviewTable>[]) =>
+    post.mockImplementation(async (url: string) =>
+      url === "/v1/uploads/links"
+        ? { data: makeSheetStaging(tables) }
+        : { data: makeSheetsSource() }
+    );
+  const addedOrders = () =>
+    makePreviewTable({
+      already_added: { table_id: TABLE_ID, name: "orders_tab" },
+    });
+  const notes = () => makePreviewTable({ key: "sheet:Notes", name: "notes" });
+  const preview = async (user: User) => {
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+  };
+
+  it("shows a tab already in the source as added, off and disabled, and never posts it", async () => {
+    stageAdded([addedOrders(), notes()]);
+    const user = userEvent.setup();
+    renderAt(`/sources/${FS_ID}/add`);
+    await preview(user);
+    expect(
+      await screen.findByRole("tab", { name: /^orders\s*Added/ })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^notes\s*$/ })).toBeInTheDocument();
+    const sec = within(await openSection(user, "orders"));
+    const link = sec.getByRole("link", { name: "orders_tab" });
+    expect(link).toHaveAttribute(
+      "href",
+      `/sources/${FS_ID}/tables/${TABLE_ID}`
+    );
+    expect(sec.getByText(/Already in this source as/)).toBeInTheDocument();
+    const keep = sec.getByLabelText("Keep");
+    expect(keep).toBeDisabled();
+    expect(keep).not.toBeChecked();
+    await openSection(user, "notes");
+    await user.click(screen.getByRole("button", { name: "Add tables" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        `/v1/sources/${FS_ID}/tables`,
+        expect.objectContaining({ tables: [{ key: "sheet:Notes" }] })
+      )
+    );
+  });
+
+  it("says so and disables Add tables when every tab is already added", async () => {
+    stageAdded([addedOrders()]);
+    const user = userEvent.setup();
+    renderAt(`/sources/${FS_ID}/add`);
+    await preview(user);
+    expect(
+      await screen.findByText(
+        "Every tab of this spreadsheet is already in this source."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add tables" })).toBeDisabled();
+  });
 });

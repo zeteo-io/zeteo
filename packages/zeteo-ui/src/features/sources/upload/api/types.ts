@@ -30,6 +30,8 @@ export interface PreviewTable {
   row_count: number;
   columns: PreviewColumn[];
   warnings: string[];
+  /** A Google Sheet tab that is already a live table of the source being added to. */
+  already_added?: { table_id: string; name: string };
 }
 
 export interface Staging {

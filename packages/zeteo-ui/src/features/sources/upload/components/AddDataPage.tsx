@@ -237,7 +237,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
       return;
     }
     const kept = staging.tables
-      .filter((t) => edits[t.key]?.keep)
+      .filter((t) => edits[t.key]?.keep && !t.already_added)
       .map((t) => correctionOf(t, edits[t.key]!));
     const done = (source: Source) => {
       // The server has used the staging.
@@ -417,6 +417,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
             onChange={setEdits}
             mode={mode.kind === "reupload" ? "one" : "many"}
             origin={origin ?? undefined}
+            sourceId={mode.kind === "add" ? mode.source.id : undefined}
           />
         </form>
       )}

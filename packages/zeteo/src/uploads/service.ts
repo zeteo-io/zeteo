@@ -574,6 +574,33 @@ const tabKey = (origin: TableOrigin | null): string | null =>
     ? `${origin.spreadsheetId}:${origin.sheetId}`
     : null;
 
+/**
+ * Marks the previews of a spreadsheet's tabs (`sheet:<sheetId>` keys) that are
+ * already live tables of the source with `already_added`; a missing table's tab
+ * is not marked.
+ */
+export const markTabsAlreadyAdded = async <T extends { key: string }>(
+  sourceId: string,
+  spreadsheetId: string,
+  previews: T[]
+): Promise<(T & { already_added?: { table_id: string; name: string } })[]> => {
+  const tables = await prisma.sourceTable.findMany({
+    where: { sourceId, missingSince: null },
+    select: { id: true, name: true, origin: true },
+  });
+  const byTab = new Map<string, { table_id: string; name: string }>();
+  for (const t of tables) {
+    const key = tabKey(originOf(t));
+    if (key !== null) byTab.set(key, { table_id: t.id, name: t.name });
+  }
+  return previews.map((p) => {
+    const existing = byTab.get(
+      `${spreadsheetId}:${p.key.replace("sheet:", "")}`
+    );
+    return existing ? { ...p, already_added: existing } : p;
+  });
+};
+
 /** 409 `tab_already_added` when a tab of `origins` already backs a table of the source that is not missing. */
 const assertTabsFree = async (
   client: Prisma.TransactionClient,

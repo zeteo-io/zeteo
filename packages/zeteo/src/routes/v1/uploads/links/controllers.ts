@@ -2,6 +2,7 @@ import { checkStagingRoom, stageSheets } from "../../../../uploads/staging.js";
 import { SOURCES_WRITE } from "../../../../definitions/tereoDeclaration.js";
 import { acquireUploadSlot } from "../../../../uploads/uploadLimits.js";
 import { callerOf, type Caller } from "../../../../middleware/auth.js";
+import { markTabsAlreadyAdded } from "../../../../uploads/service.js";
 import { assertSheetUnclaimed } from "../../../../uploads/claims.js";
 import { FileParseError } from "../../../../uploads/parse/types.js";
 import { hasPermission } from "../../../../utils/permissions.js";
@@ -79,7 +80,14 @@ export const postLink = async (req: Request, res: Response) => {
     res.status(201).json({
       staging_id: result.staged.stagingId,
       expires_at: result.staged.expiresAt.toISOString(),
-      tables: result.staged.tables,
+      tables:
+        sourceId === undefined
+          ? result.staged.tables
+          : await markTabsAlreadyAdded(
+              sourceId,
+              spreadsheetId,
+              result.staged.tables
+            ),
       spreadsheet: { id: spreadsheetId, title: result.title },
     });
   } finally {

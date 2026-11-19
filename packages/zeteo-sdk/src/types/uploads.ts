@@ -88,6 +88,10 @@ export interface TransferSourceRequest {
 
 /** A spreadsheet's tabs, staged like a file's. */
 export interface SheetsUploadResponse extends UploadResponse {
+  tables: (StagedTable & {
+    /** With `source_id`: the tab is already this table of that source. */
+    already_added?: { table_id: string; name: string };
+  })[];
   spreadsheet: { id: string; title: string };
 }
 

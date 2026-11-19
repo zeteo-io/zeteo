@@ -276,6 +276,47 @@ describe("POST /v1/uploads/links", () => {
     expect(row.vendorFileId).toBe(SHEET_ID);
   });
 
+  it("with source_id marks a tab that is a live table of the source as already_added", async () => {
+    const source = await makeSource(owner, { vendorFileId: SHEET_ID });
+    const table = await prisma.sourceTable.findFirstOrThrow({
+      where: { sourceId: source.id },
+    });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    const [costs, notes] = res.body.tables;
+    expect(costs.already_added).toEqual({ table_id: table.id, name: "tab" });
+    expect(notes).not.toHaveProperty("already_added");
+  });
+
+  it("does not mark a tab whose table is missing", async () => {
+    const source = await makeSource(owner, { vendorFileId: SHEET_ID });
+    await prisma.sourceTable.updateMany({
+      where: { sourceId: source.id },
+      data: { missingSince: new Date() },
+    });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    for (const t of res.body.tables)
+      expect(t).not.toHaveProperty("already_added");
+  });
+
+  it("marks nothing without source_id", async () => {
+    await makeSource(owner, { vendorFileId: SHEET_ID });
+    const res = await post(ownerToken, { url: SHEET_ID });
+    // the source's own claim makes this 409 for a new source; use a free sheet
+    expect([201, 409]).toContain(res.status);
+    const free = await post(ownerToken, { url: `${"zZ9y".repeat(8)}` });
+    expect(free.status).toBe(201);
+    for (const t of free.body.tables)
+      expect(t).not.toHaveProperty("already_added");
+  });
+
   it("with the source_id of a file-only source stages any free spreadsheet", async () => {
     const source = await makeSource(owner, { vendorFileId: null });
     const res = await post(ownerToken, {
