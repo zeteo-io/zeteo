@@ -399,4 +399,36 @@ describe("the merged table editor", () => {
     expect(screen.getByText("At most 100 characters.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
+
+  it("counts a label's length in characters, not UTF-16 units", async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await pickMembers(user);
+    await screen.findByText("vivo_sku");
+    await user.type(screen.getByLabelText("Name"), "all");
+    const first = screen.getByLabelText("Label for watermelon");
+    await waitFor(() => expect(first).toHaveValue("Watermelon Ball"));
+    fireEvent.change(first, { target: { value: "\u{1F349}".repeat(100) } });
+    expect(screen.queryByText("At most 100 characters.")).toBeNull();
+    fireEvent.change(first, { target: { value: "\u{1F349}".repeat(101) } });
+    expect(screen.getByText("At most 100 characters.")).toBeInTheDocument();
+  });
+
+  it("refuses a label column that is not a lowercase identifier", async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await pickMembers(user);
+    await screen.findByText("vivo_sku");
+    await user.type(screen.getByLabelText("Name"), "all");
+    const column = screen.getByLabelText("Label column");
+    await user.clear(column);
+    await user.type(column, "Brand Name");
+    expect(
+      screen.getByText(/Start with a lowercase letter/)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.clear(column);
+    await user.type(column, "brand_name");
+    expect(screen.queryByText(/Start with a lowercase letter/)).toBeNull();
+  });
 });

@@ -32,8 +32,15 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
   const [dialog, setDialog] = useState<"edit" | "transfer" | null>(null);
   const close = () => setDialog(null);
   const refresh = useRefreshSource(source.id);
-  const { tables } = useAllTables(source.id, { includeMissing: false });
-  const hasSheets = tables.some((t) => t.origin?.kind === "google-sheets");
+  const { tables: all } = useAllTables(source.id);
+  const tables = all.filter((t) => t.missing_since === null);
+  // The server syncs a source that has any Sheets table not removed, live or
+  // missing (a restored tab revives its table); a removed table is missing
+  // too, and `sync` is on the source exactly when one is not removed.
+  const sheets = all.filter((t) => t.origin?.kind === "google-sheets");
+  const hasSheets =
+    sheets.some((t) => t.missing_since === null) ||
+    (sheets.length > 0 && source.sync !== undefined);
   const canMerge =
     !source.archived_at &&
     tables.filter((t) => t.origin?.kind !== "merged").length >= 2;

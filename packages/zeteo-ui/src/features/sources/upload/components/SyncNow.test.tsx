@@ -104,6 +104,42 @@ describe("Sync now", () => {
     ).toBeInTheDocument();
   });
 
+  it("is shown while a Sheets table is missing (a restored tab revives it)", async () => {
+    get.mockImplementation(
+      uploadGet(
+        () => makeSheetsSource(),
+        () => [
+          sheetsOrders({ missing: true }),
+          {
+            ...ordersTable(),
+            id: "f1",
+            name: "f",
+            origin: { kind: "file", filename: "a.csv" },
+          },
+        ]
+      )
+    );
+    renderAt();
+    expect(
+      await screen.findByRole("button", { name: "Sync now" })
+    ).toBeInTheDocument();
+  });
+
+  it("is not shown once every Sheets table is removed (the source has no sync block)", async () => {
+    get.mockImplementation(
+      uploadGet(
+        () => {
+          const { sync: _sync, ...rest } = makeSheetsSource();
+          return rest;
+        },
+        () => [sheetsOrders({ missing: true })]
+      )
+    );
+    renderAt();
+    await screen.findByRole("button", { name: "Add tables" });
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
+  });
+
   it("is not shown on an archived source", async () => {
     get.mockImplementation(
       uploadGet(

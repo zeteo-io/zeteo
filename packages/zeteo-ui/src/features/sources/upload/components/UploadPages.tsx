@@ -109,7 +109,9 @@ const OriginCell = ({ table }: { table: Table }) => {
         origin.filename
       ) : origin?.kind === "google-sheets" ? (
         <>
-          {origin.spreadsheet_title} · {origin.tab_title}{" "}
+          {origin.tab_title === undefined
+            ? origin.spreadsheet_title
+            : `${origin.spreadsheet_title} · ${origin.tab_title}`}{" "}
           <a
             href={origin.url}
             target="_blank"

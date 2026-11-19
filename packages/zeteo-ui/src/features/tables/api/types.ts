@@ -10,7 +10,8 @@ export type TableOrigin =
       spreadsheet_title: string;
       url: string;
       tab_id: number | string;
-      tab_title: string;
+      /** Absent only for a table added before tab titles were kept. */
+      tab_title?: string;
     }
   | { kind: "merged"; members: number };
 

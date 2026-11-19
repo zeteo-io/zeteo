@@ -113,7 +113,7 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
   for (const id of memberIds) {
     const l = labelOf(id).trim();
     if (l === "") labelProblems.set(id, "Give the member a label.");
-    else if (l.length > LONGEST)
+    else if ([...l].length > LONGEST)
       labelProblems.set(id, `At most ${LONGEST} characters.`);
     else if (usedLabels.has(l))
       labelProblems.set(id, "Each member needs its own label");
@@ -122,8 +122,8 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
   const labelColumnProblem =
     labelColumn.trim() === ""
       ? "Give the label column a name."
-      : labelColumn.trim().length > LONGEST
-        ? `At most ${LONGEST} characters.`
+      : !/^[a-z][a-z0-9_]{0,62}$/.test(labelColumn.trim())
+        ? "Start with a lowercase letter, then lowercase letters, digits or _ (up to 63 characters)."
         : undefined;
 
   const nameProblems = new Map<string, string>();

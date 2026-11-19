@@ -85,6 +85,15 @@ describe("the Tables tab's Origin column", () => {
     expect(screen.getByText("Merged · 3 tables")).toBeInTheDocument();
   });
 
+  it("shows just the spreadsheet title for a table with no tab title", async () => {
+    const old = sheet(1, "Budget 2027", "Orders", "S1");
+    if (old.origin?.kind === "google-sheets") delete old.origin.tab_title;
+    serve(makeSheetsSource(), [old]);
+    renderAt("/tables");
+    expect(await screen.findByText("Budget 2027")).toBeInTheDocument();
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
   it("flags a Sheets table whose sync is failing, with the message", async () => {
     serve(makeSheetsSource(), [
       sheet(1, "Budget", "Orders", "S1", {
