@@ -93,13 +93,19 @@ source's whole catalogue (home table, result type, loops, nesting, node limits, 
 a dependent would break, the save is refused with `409 measure_in_use` naming the dependents;
 renaming or deleting a measure other measures use is refused the same way. Saved queries and panels
 do not block a change: `used_by` (`saved_queries`, `panels`) shows how many use a measure so an
-editor knows before changing it, and those queries then fail with `not_found_or_not_accessible`.
+editor knows before changing it. Once a measure they use is renamed or deleted, those saved queries
+fail with `saved_query_not_accessible`, like any saved query the caller cannot run, and their panels
+show a state other than `ok`; a direct query naming it fails with `not_found_or_not_accessible`.
+
+An upload source's owner retyping, renaming or re-uploading a table, or a column, is not checked
+against the measures that read it: a measure it breaks is kept and shows `broken` (and stops being
+usable) until an editor fixes it.
 
 ## The API
 
 | Call | Permission | Returns |
 |---|---|---|
-| `GET /v1/sources/{id}/measures` | `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` | the measures the caller sees: visible ones in full, others (for editors and admins) flagged `usable: false`, with `used_by` and `broken` where the caller may see them |
+| `GET /v1/sources/{id}/measures` | `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` | the measures the caller sees: visible ones in full, others (for editors and admins) flagged `usable: false`, with `used_by` and `broken` where the caller may see them; `can_edit` and `can_manage_editors`, whether the caller may change the measures and the editor list (both false once the source is archived) |
 | `POST /v1/sources/{id}/measures` | `zeteo.measures.write`, an editor | the created measure |
 | `GET`, `PATCH`, `DELETE /v1/sources/{id}/measures/{measureId}` | read as above; changes `zeteo.measures.write`, an editor | the measure; `409 measure_in_use` when a dependent would break |
 | `POST /v1/sources/{id}/measures/preview` | `zeteo.measures.write`, an editor | runs an unsaved draft grouped by nothing or by an optional bucket, as a normal query (limits, run log with entry point `measure_preview`) |
@@ -120,8 +126,8 @@ My Zeteo shows measures with their descriptions under what a person can query.
 
 A dashboard panel can be a `gauge`: `{ "type": "gauge", "version": 1, "value": col, "max": col,
 "target"?: col, "min"?: col | number, "unit"? }`, the columns being result columns (typically measure
-outputs) read from the first row. The value is the progress bar, the target a marker and `max` the
-end of the scale. See [dashboards.md](dashboards.md).
+outputs) read from the first row. It is drawn as an arc: the value fills it, the target is a marker
+and `max` the end of the scale. A null value or `max` shows "No data"; a null target has no marker. See [dashboards.md](dashboards.md).
 
 ## Not supported
 

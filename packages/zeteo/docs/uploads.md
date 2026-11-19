@@ -164,7 +164,9 @@ order of the table's last load, which is the file's order: a value an upload rep
 a file with a header is data row 2 here.
 Saved queries and dashboards are not checked at retype time: one the new type no longer allows (a
 `sum` over a column now `text`) fails when it runs, and for a recipient of a saved query that is the
-usual `saved_query_not_accessible`.
+usual `saved_query_not_accessible`. Measures are not checked either, at a retype, a rename or a
+re-upload: a measure the change breaks is kept and shows as broken
+([measures.md](measures.md#changing-measures)) until an editor fixes it.
 
 ## Owning, granting and sharing
 

@@ -157,11 +157,14 @@ text and a money column computes as numeric (see *Postgres's own types*); float 
 
 A date or timestamp in a comparison (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`) or in `between` (not `in`) may be
 a moment relative to now: `{ "relative": { "unit": "day", "offset": -30 } }`. `unit` is `minute`,
-`hour`, `day`, `week`, `month`, `quarter` or `year`; `offset` is a whole number from -1000 to 1000;
-`startOf: true` cuts the result back to the start of the unit (a week starts on Monday). It is
-resolved in UTC when the query is planned: `now` is the minute the run started (the dashboard
-run's own minute, for all of its panels), a date column takes the date of the moment, and a
-relative moment against any other type is `invalid_value`. Orders in the last 30 days:
+`hour`, `day`, `week`, `month`, `quarter`, `year`, `fiscal_quarter` or `fiscal_year` (fiscal units
+follow the [calendar](calendar.md)'s fiscal year start month); `offset` is a whole number from -1000
+to 1000; `startOf: true` cuts the result back to the start of the unit (a week starts on Monday). It
+is resolved when the query is planned, in the calendar's time zone (UTC by default): `minute` and
+`hour` shift the instant, and every larger unit works on that zone's wall clock, so `startOf` a day
+is local midnight. `now` is the minute the run started (the dashboard run's own minute, for all of
+its panels), a date column takes the date of the moment, and a relative moment against any other
+type is `invalid_value`. Orders in the last 30 days:
 
 ```json
 { "source": "sales-db", "from": "orders", "select": [{ "count": "*", "as": "orders" }],
@@ -362,8 +365,8 @@ date }`, `{ "businessDaysElapsed": date }` (the month's first day to `date`, inc
 "businessDaysRemaining": date }` (after `date` to month end). Their arguments are constant, a date
 or relative literal; a column is refused with `invalid_operator`. They are not supported over
 columns. `bucket` also takes `fiscal_quarter` and `fiscal_year` (the period's start date), and
-relative dates follow the calendar's time zone (UTC by default); buckets on timestamp columns stay
-in UTC.
+relative dates follow the calendar's time zone (UTC by default); buckets and `datePart` on
+timestamp columns stay in UTC.
 
 ### Measures
 
