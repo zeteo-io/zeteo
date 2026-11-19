@@ -33,7 +33,7 @@ const LOAD_TIMEOUT_MS = 600_000;
 /** How many failing rows a `CastFailedError` names. */
 const FAILING_ROWS = 5;
 
-const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+export const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
 
 const checkedName = (name: string): string => {
   if (!NAME.test(name)) throw new Error(`Not a normalized name: ${name}`);
