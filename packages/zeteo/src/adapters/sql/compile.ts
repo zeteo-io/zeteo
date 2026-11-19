@@ -1,5 +1,6 @@
 import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
 import { QueryError } from "../../engine/errors.js";
+import { aggregatesRows } from "./aggregates.js";
 import { plainNumber } from "./values.js";
 import type {
   ColumnRef,
@@ -269,33 +270,6 @@ export const compileExpr = (
 const perGroup = (item: ResolvedSelect) =>
   item.kind === "aggregate" || (item.kind === "calc" && item.level === "group");
 
-/** Whether an expression aggregates the query's own rows; a fixed measure's aggregates are its own. */
-const exprAggregates = (expr: ResolvedExpr): boolean => {
-  switch (expr.kind) {
-    case "aggregate":
-      return true;
-    case "column":
-    case "literal":
-    case "scalar":
-      return false;
-    case "dateAdd":
-    case "datePart":
-      return exprAggregates(expr.arg);
-    case "dateDiff":
-      return exprAggregates(expr.start) || exprAggregates(expr.end);
-    case "case":
-      return [...expr.branches.map((b) => b.then), expr.otherwise].some(
-        (e) => e !== undefined && exprAggregates(e)
-      );
-    case "op":
-      return expr.args.some(exprAggregates);
-  }
-};
-
-const holdsAggregate = (item: ResolvedSelect): boolean =>
-  item.kind === "aggregate" ||
-  (item.kind === "calc" && exprAggregates(item.expr));
-
 const selectExpression = (
   item: ResolvedSelect,
   dialect: SqlDialect,
@@ -436,13 +410,19 @@ export const compileSql = (
       qb,
       plan.groupBy.map((index) => ({ expression: selected[index]!, index }))
     );
-  } else if (plan.select.some(perGroup) && !plan.select.some(holdsAggregate)) {
-    // Group-level items with no aggregate, only fixed measures: one group
-    // over all rows, so one row, as an aggregate would give.
-    qb = qb.groupBy(sql`()`);
   }
 
-  if (plan.having) {
+  if (
+    plan.groupBy.length === 0 &&
+    !plan.having &&
+    plan.select.some(perGroup) &&
+    !plan.select.some(aggregatesRows)
+  ) {
+    // Group-level items with no aggregate, only fixed measures: a HAVING makes
+    // the query one group over all rows, so one row even over none, as an
+    // aggregate would give. SQL Server's GROUP BY () gives no row over none.
+    qb = qb.having(sql<SqlBool>`1 = 1`);
+  } else if (plan.having) {
     qb = qb.having(
       compileFilter(
         plan.having,

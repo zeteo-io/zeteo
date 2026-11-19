@@ -165,16 +165,63 @@ describe("planSql: a fixed measure", () => {
     }
   });
 
-  it("alone in select gives one row: the query groups by nothing", () => {
+  it("alone in select gives one row, over no rows too: the query has HAVING 1 = 1", () => {
     for (const compile of [pg, ms]) {
       const { sql } = compile({ select: [{ measure: "last_launch" }] });
-      expect(sql).toMatch(/group by \(\)/);
+      // GROUP BY () would give SQL Server no row over an empty input.
+      expect(sql).toMatch(/ having 1 = 1/);
+      expect(sql).not.toMatch(/group by/);
       expect(sql).toContain(`"f1_t0"`);
     }
     // A query with an aggregate already gives one row and is compiled as before.
+    const withSum = pg({
+      select: [{ sum: "total" }, { measure: "last_launch" }],
+    }).sql;
+    expect(withSum).not.toMatch(/group by|having/);
+    // A having of its own is kept as it is.
+    const having = pg({
+      select: [{ measure: "line_count" }],
+      having: { line_count: { gt: 1 } },
+    }).sql;
+    expect(having).not.toMatch(/1 = 1/);
+    expect(having).toMatch(/ having \(select count/);
+  });
+
+  it("names a fixed measure in the grouping refusal", () => {
     expect(
-      pg({ select: [{ sum: "total" }, { measure: "last_launch" }] }).sql
-    ).not.toMatch(/group by/);
+      refusal({ select: ["status", { measure: "last_launch" }] })
+    ).toMatchObject({
+      code: "invalid_grouping",
+      message:
+        '"status" must be in groupBy or be an aggregate or a fixed measure',
+    });
+  });
+
+  it("warns of a to-many join only when an item aggregates the query's rows", () => {
+    expect(
+      plan({ join: ["lines"], select: [{ measure: "last_launch" }] }).warnings
+    ).toEqual([]);
+    expect(
+      plan({
+        join: ["lines"],
+        select: [
+          { sum: "lines.quantity", as: "q" },
+          { measure: "last_launch" },
+        ],
+      }).warnings.map((w) => w.code)
+    ).toEqual(["join_multiplies_rows"]);
+  });
+
+  it("gives every use of a fixed measure the columns it reads", () => {
+    const p = plan({
+      select: [
+        { measure: "last_launch" },
+        { calc: { dateAdd: [{ measure: "last_launch" }, 1, "day"] }, as: "n" },
+      ],
+    });
+    const launched = { tableId: "products", columnId: "products.launched_on" };
+    expect(p.columns[0]!.references).toEqual([launched]);
+    expect(p.columns[1]!.references).toEqual([launched]);
   });
 
   it("applies its own where inside its subquery, aliased as its own", () => {
@@ -544,6 +591,45 @@ describe("planSql: a fixed measure", () => {
       (s) => JSON.stringify(s).match(/"alias":"(f\d+)"/)?.[1] ?? "none"
     );
     expect(aliases).toEqual(["f1", "f1"]);
+  });
+
+  it(`counts every subquery a use compiles to, nested ones included, toward ${MAX_FIXED_MEASURES}`, () => {
+    // Each level uses the next twice: 4 names, but 1 + 2 × (1 + 2 × (1 + 2)) = 15 subqueries.
+    const chain = (n: number) =>
+      Array.from({ length: n }, (_, i) =>
+        fixed(
+          `c${i}`,
+          i === n - 1
+            ? { count: "*" }
+            : {
+                add: [
+                  { count: "*" },
+                  { measure: `c${i + 1}` },
+                  { measure: `c${i + 1}` },
+                ],
+              },
+          "products"
+        )
+      );
+    const catalog = catalogWith(chain(4));
+    // c1 compiles to 7 subqueries and plans; c0 (15) could never plan, so it is hidden.
+    expect(() => plan({ select: [{ measure: "c1" }] }, catalog)).not.toThrow();
+    expect(catalog.measures.map((m) => m.name)).not.toContain("c0");
+    // The same measure used again counts again: 7 + 7 > 10.
+    expect(
+      refusal(
+        {
+          select: [
+            { measure: "c1" },
+            { calc: { add: [{ measure: "c1" }, 1] }, as: "x" },
+          ],
+        },
+        catalog
+      )
+    ).toMatchObject({
+      code: "too_complex",
+      path: ["select", 1, "calc", "add", 0, "measure"],
+    });
   });
 
   it("lists fixed measures among the suggestions for any table", () => {

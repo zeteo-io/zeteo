@@ -1,4 +1,5 @@
 import type { SqlQueryErrorCode } from "./errors.js";
+import { aggregatesRows } from "./aggregates.js";
 import type {
   VisibleCatalog,
   VisibleColumn,
@@ -264,6 +265,12 @@ interface QueryState {
   fixed: Map<string, ScalarExpr>;
   /** The fixed measures being planned, outermost first. */
   fixedStack: string[];
+  /** Per fixed measure planned: the subqueries one use compiles to, its nested ones included. */
+  fixedWeight: Map<string, number>;
+  /** Per fixed measure planned: the columns it reads, merged into every use's reads. */
+  fixedReads: Map<string, Map<string, Reference>>;
+  /** The subqueries the fixed measures used so far compile to, at most `MAX_FIXED_MEASURES`. */
+  subqueries: number;
 }
 
 /** The values a filter compares with besides literals: relative dates and fixed measures. */
@@ -302,6 +309,9 @@ class Planner {
       expandedNodes: 0,
       fixed: new Map(),
       fixedStack: [],
+      fixedWeight: new Map(),
+      fixedReads: new Map(),
+      subqueries: 0,
     },
     /** Before every alias: empty for the query, `f1_`… in a fixed measure's subquery. */
     private readonly aliasPrefix = ""
@@ -748,11 +758,15 @@ class Planner {
     reads: Map<string, Reference>
   ): ResolvedCalc {
     const { name } = measure;
-    const known = this.state.fixed.get(name);
-    if (known) {
-      return { resolved: known, hasAggregate: false, hasFixed: true };
-    }
     try {
+      const known = this.state.fixed.get(name);
+      if (known) {
+        this.countSubqueries(this.state.fixedWeight.get(name)!);
+        for (const [key, ref] of this.state.fixedReads.get(name)!) {
+          reads.set(key, ref);
+        }
+        return { resolved: known, hasAggregate: false, hasFixed: true };
+      }
       const stack = this.state.fixedStack;
       if (stack.includes(name)) {
         throw new MeasureError(
@@ -766,13 +780,10 @@ class Planner {
           `Measures use other measures at most ${MAX_MEASURE_NESTING} levels deep`
         );
       }
+      // Each use is counted with what it nests, as each compiles on its own.
+      this.countSubqueries(1);
+      const before = this.state.subqueries;
       const n = this.state.fixed.size + stack.length + 1;
-      if (n > MAX_FIXED_MEASURES) {
-        throw new MeasureError(
-          "too_complex",
-          `A query holds at most ${MAX_FIXED_MEASURES} fixed measures`
-        );
-      }
       const home = this.tablesById.get(measure.tableId);
       if (!home) throw notFound("measure", name, at, []);
       if (home.missing) {
@@ -787,6 +798,7 @@ class Planner {
       const from = { alias: `${prefix}t0`, table: home };
       inner.scopes.set("", from);
       stack.push(name);
+      const ownReads = new Map<string, Reference>();
       let calc: ResolvedCalc;
       try {
         const expansion = expandMeasure(name, home.id, this.measures);
@@ -801,10 +813,11 @@ class Planner {
         for (const relationPath of expansion.relationPaths) {
           inner.joinForMeasure(relationPath, at);
         }
-        calc = inner.resolveExpr(expansion.expr, at, reads);
+        calc = inner.resolveExpr(expansion.expr, at, ownReads);
       } finally {
         stack.pop();
       }
+      for (const [key, ref] of ownReads) reads.set(key, ref);
       if (!calc.hasAggregate || calc.bareColumn) {
         throw new MeasureError(
           "measure_not_aggregate",
@@ -826,12 +839,25 @@ class Planner {
         type: typeOf(calc.resolved),
       };
       this.state.fixed.set(name, scalar);
+      this.state.fixedWeight.set(name, 1 + this.state.subqueries - before);
+      this.state.fixedReads.set(name, ownReads);
       return { resolved: scalar, hasAggregate: false, hasFixed: true };
     } catch (err) {
       if (err instanceof MeasureError || err instanceof QueryError) {
         throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
       }
       throw err;
+    }
+  }
+
+  /** Counts `n` more fixed-measure subqueries toward the query's limit. */
+  private countSubqueries(n: number): void {
+    this.state.subqueries += n;
+    if (this.state.subqueries > MAX_FIXED_MEASURES) {
+      throw new MeasureError(
+        "too_complex",
+        `A query holds at most ${MAX_FIXED_MEASURES} fixed-measure subqueries, those inside fixed measures included`
+      );
     }
   }
 
@@ -1572,7 +1598,7 @@ export const planSql = (
       if (!perGroup(s) && !groupedItems.has(i)) {
         throw fail(
           "invalid_grouping",
-          `"${s.output}" must be in groupBy or be an aggregate`,
+          `"${s.output}" must be in groupBy or be an aggregate or a fixed measure`,
           ["select", i]
         );
       }
@@ -1632,7 +1658,7 @@ export const planSql = (
           : [{ target: { kind: "output", index }, direction: "asc" }]
       );
 
-  const warnings: QueryWarning[] = hasAggregate
+  const warnings: QueryWarning[] = select.some(aggregatesRows)
     ? toManyJoins.map(({ relation, path }) => ({
         code: "join_multiplies_rows",
         message: `"${relation}" can match several rows per row it joins to, so aggregates may count a row more than once`,

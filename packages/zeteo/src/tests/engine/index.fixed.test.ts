@@ -162,6 +162,19 @@ describeEachEngine("runQuery: fixed measures", (engine) => {
     ]);
   });
 
+  it("gives one row with its value when the query's where matches no row", async () => {
+    const none = await run("customers", [{ measure: "line_count" }], {
+      where: { region: { eq: "nowhere" } },
+    });
+    expect(none.map((r) => Number(r[0]))).toEqual([2]);
+    const [[at]] = (await run("orders", [{ measure: "last_shipped_at" }], {
+      where: { id: { lt: 0 } },
+    })) as [[unknown]];
+    expect(new Date(at as string).toISOString()).toBe(
+      new Date(LAST_SHIPPED).toISOString()
+    );
+  });
+
   it("works inside an aggregate and in a row-level calc", async () => {
     const [[sum, scaled]] = (await run("orders", [
       { sum: "total", as: "s" },
