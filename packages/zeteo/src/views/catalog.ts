@@ -5,6 +5,14 @@ import type {
   SourceTable,
 } from "../../prisma/generated/client/index.js";
 
+/** A table's origin as views give it: a merged table's as its member count. */
+const originView = (row: SourceTable) => {
+  const origin = originOf(row);
+  return origin?.kind === "merged"
+    ? { kind: "merged" as const, members: origin.definition.members.length }
+    : origin;
+};
+
 const iso = (date: Date | null) => date?.toISOString() ?? null;
 
 export const tableView = (row: SourceTable) => ({
@@ -23,8 +31,11 @@ export const tableView = (row: SourceTable) => ({
   row_count: row.rowCount === null ? null : Number(row.rowCount),
   /** An upload source's table: when it was last loaded; null for a database source's. */
   last_loaded_at: iso(row.lastSyncedAt),
-  /** An upload source's table: where it comes from (a file, a Sheets tab, a merge); null for a database source's. */
-  origin: originOf(row),
+  /**
+   * An upload source's table: where it comes from (a file, a Sheets tab, a
+   * merge, given as its number of members); null for a database source's.
+   */
+  origin: originView(row),
 });
 
 export const columnView = (row: SourceColumn) => ({

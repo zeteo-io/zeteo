@@ -273,6 +273,7 @@ describe("buildTereoDocument", () => {
       "zeteo.source.archived",
       "zeteo.source.created",
       "zeteo.source.deleted",
+      "zeteo.source.merged_table_saved",
       "zeteo.source.refreshed",
       "zeteo.source.table_removed",
       "zeteo.source.table_reuploaded",

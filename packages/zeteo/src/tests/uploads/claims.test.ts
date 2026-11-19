@@ -240,6 +240,46 @@ describe("mixed upload sources", () => {
     expect(res.status, JSON.stringify(res.body)).toBe(201);
   });
 
+  it("deleting a Sheets table a sync marked missing marks it removed and releases an all-missing spreadsheet", async () => {
+    const sheet = newSheetId();
+    const id = await fileSource(owner, ownerId);
+    expect(
+      (await addTab(owner, ownerId, id, sheet, "sheet:11", "orders")).status
+    ).toBe(201);
+    const orders = (await uploadTablesOf(id)).find((t) => t.name === "orders")!;
+    // As a sync leaves a table whose tab was deleted in Sheets.
+    const now = new Date();
+    await prisma.$executeRawUnsafe(
+      `DROP TABLE "zu_${id.replaceAll("-", "")}"."orders"`
+    );
+    await prisma.sourceTable.update({
+      where: { id: orders.id },
+      data: { missingSince: now },
+    });
+    await prisma.sourceColumn.updateMany({
+      where: { tableId: orders.id },
+      data: { missingSince: now },
+    });
+    expect(await claimsOf(id)).toHaveLength(1);
+
+    expect(
+      (await call("DELETE", `/${id}/tables/${orders.id}`, other)).status
+    ).toBe(403);
+    const res = await call("DELETE", `/${id}/tables/${orders.id}`, owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(204);
+
+    const row = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: orders.id },
+    });
+    expect(row.origin).toMatchObject({ kind: "google-sheets", removed: true });
+    expect(row.missingSince).toEqual(now);
+    expect(await claimsOf(id)).toHaveLength(0);
+    // Once removed, it is gone for good.
+    expect(
+      (await call("DELETE", `/${id}/tables/${orders.id}`, owner)).status
+    ).toBe(404);
+  });
+
   it("deleting the source releases its claims", async () => {
     const sheet = newSheetId();
     const id = await fileSource(owner, ownerId);

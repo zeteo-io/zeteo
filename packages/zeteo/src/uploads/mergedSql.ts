@@ -57,3 +57,21 @@ export const mergedViewSql = (
   });
   return `CREATE VIEW ${quote(schema)}.${quote(viewName)} AS ${selects.join(" UNION ALL ")}`;
 };
+
+/**
+ * `CREATE VIEW` of a merged table none of whose members is live: its columns,
+ * typed, and no rows, so queries over it keep working.
+ */
+export const emptyMergedViewSql = (
+  schema: string,
+  viewName: string,
+  def: Pick<ResolvedMerged, "labelColumn" | "columns">
+): string => {
+  const items = [
+    `NULL::text AS ${quote(def.labelColumn)}`,
+    ...def.columns.map(
+      (c) => `NULL::${NATIVE_TYPE[c.type]} AS ${quote(c.name)}`
+    ),
+  ];
+  return `CREATE VIEW ${quote(schema)}.${quote(viewName)} AS SELECT ${items.join(", ")} WHERE false`;
+};

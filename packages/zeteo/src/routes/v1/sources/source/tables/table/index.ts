@@ -1,6 +1,7 @@
 import { allowOwnerOr } from "../../../../../../middleware/uploadOwner.js";
 import { sourceOfParams } from "../../middleware.js";
 import columnsRouter from "./columns/index.js";
+import mergedRouter from "./merged/index.js";
 import express, { Router } from "express";
 import {
   SOURCES_READ,
@@ -19,6 +20,7 @@ const json64k = express.json({ limit: "64kb" });
 const json1m = express.json({ limit: "1mb" });
 
 tableRouter.use("/columns", columnsRouter);
+tableRouter.use("/merged", mergedRouter);
 
 tableRouter.get("/", allowOwnerOr(SOURCES_READ, sourceOfParams), getTable);
 tableRouter.patch(

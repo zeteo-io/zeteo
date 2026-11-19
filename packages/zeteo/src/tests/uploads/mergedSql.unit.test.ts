@@ -2,6 +2,7 @@
 // @module-tag platform
 import { describe, expect, it } from "vitest";
 import {
+  emptyMergedViewSql,
   mergedViewSql,
   sqlLiteral,
   type ResolvedMerged,
@@ -79,5 +80,10 @@ describe("mergedViewSql", () => {
   });
   it("refuses a table with no members", () => {
     expect(() => mergedViewSql("zu_x", "v", def({ members: [] }))).toThrow();
+  });
+  it("emptyMergedViewSql gives the typed columns and no rows", () => {
+    expect(emptyMergedViewSql("zu_x", "v", def())).toBe(
+      `CREATE VIEW "zu_x"."v" AS SELECT NULL::text AS "store", NULL::text AS "sku", NULL::numeric AS "qty" WHERE false`
+    );
   });
 });

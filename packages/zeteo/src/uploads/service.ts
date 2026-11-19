@@ -1,5 +1,4 @@
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
-import { isFileTable, originOf, type TableOrigin } from "./origin.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { isUploadSource, typeOf } from "../sources/types.js";
@@ -36,6 +35,7 @@ import {
   SourceArchivedError,
   TabAlreadyAddedError,
   TableInMergedTableError,
+  ValidationError,
 } from "../utils/errors.js";
 import {
   checkQuota,
@@ -58,6 +58,12 @@ import {
   stageStoredTable,
   swapIn,
 } from "./storage.js";
+import {
+  isFileTable,
+  isMergedTable,
+  originOf,
+  type TableOrigin,
+} from "./origin.js";
 import {
   assertSheetUnclaimed,
   claimSpreadsheet,
@@ -84,7 +90,7 @@ const SLUG_MAX = 63;
 
 const slugTaken = () =>
   new ConflictError("A source with this slug already exists", "name_taken");
-const tableNameTaken = () =>
+export const tableNameTaken = () =>
   new ConflictError(
     "The source already has a table of this name",
     "name_taken"
@@ -129,7 +135,7 @@ const checkChangeable = <
  * `not_an_upload_source` for a database source, the 403 of a caller without
  * `zeteo.sources.write` for someone else's, 409 `source_archived` once deleted.
  */
-const findChangeable = async (caller: Caller, id: string) => {
+export const findChangeable = async (caller: Caller, id: string) => {
   const row = checkChangeable(
     caller,
     await prisma.source.findUnique({ where: { id } })
@@ -143,7 +149,7 @@ const findChangeable = async (caller: Caller, id: string) => {
  * checked: the caller may still change it (a transfer may have landed) and it
  * is not archived.
  */
-const lockChangeable = async (
+export const lockChangeable = async (
   tx: Prisma.TransactionClient,
   caller: Caller,
   id: string
@@ -182,7 +188,7 @@ const freeSlug = async (name: string): Promise<string> => {
 };
 
 /** An owner grant of `tableId` to `ownerId`: their row becomes `all_columns` and flagged, or is created so. */
-const giveOwnerGrant = async (
+export const giveOwnerGrant = async (
   tx: Prisma.TransactionClient,
   tableId: string,
   ownerId: string,
@@ -496,7 +502,7 @@ export const changeUploadSource = async (
  * Runs a change of the source's stored tables that loads nothing (a drop) in
  * an audited transaction with the swap's lock timeout.
  */
-const inDrop = <T>(
+export const inDrop = <T>(
   sourceId: string,
   fn: (tx: Prisma.TransactionClient, audit: Audit) => Promise<T>
 ) => inSwap(sourceId, [], fn);
@@ -884,11 +890,24 @@ export const reuploadTable = async (
 };
 
 /**
+ * Whether a table may be removed: one that is not missing, or a Sheets table
+ * a sync marked missing (its tab deleted in Sheets), which removing stops a
+ * sync bringing back and frees its spreadsheet's claim.
+ */
+const removable = (table: { missingSince: Date | null; origin: unknown }) => {
+  if (table.missingSince === null) return true;
+  const origin = originOf(table);
+  return origin?.kind === "google-sheets" && origin.removed !== true;
+};
+
+/**
  * Drops a table and marks it and its columns missing; grants keep their
  * references. A Sheets table's origin is marked `removed`, so a sync leaves
  * it missing (its tab can be added again as a new table), and the source's
- * claim of its spreadsheet is released when no other table uses it. A table
- * a live merged table reads is 409 `table_in_merged_table`.
+ * claim of its spreadsheet is released when no other table uses it; a Sheets
+ * table a sync marked missing can be removed so too. A merged table's view
+ * is dropped. A table a live merged table reads is 409
+ * `table_in_merged_table`.
  */
 export const removeTable = async (
   caller: Caller,
@@ -896,25 +915,34 @@ export const removeTable = async (
   tableId: string
 ): Promise<void> => {
   await findChangeable(caller, id);
-  await findTable(id, tableId);
+  const found = await prisma.sourceTable.findFirst({
+    where: { id: tableId, sourceId: id },
+  });
+  if (!found || !removable(found)) throw new NotFoundError("Table not found");
   await assertNotMerged(prisma, id, tableId);
   await withLoadLock(id, () =>
     inDrop(id, async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
       const table = await tx.sourceTable.findFirst({
-        where: { id: tableId, sourceId: id, missingSince: null },
+        where: { id: tableId, sourceId: id },
       });
-      if (!table) throw new NotFoundError("Table not found");
+      if (!table || !removable(table)) {
+        throw new NotFoundError("Table not found");
+      }
       await assertNotMerged(tx, id, tableId);
       const now = new Date();
-      await dropStoredTable(tx, id, table.name);
+      const origin = originOf(table);
+      // A merged table's view is already dropped (`inDrop`) and is not
+      // created again once it is missing; a missing table has nothing stored.
+      if (table.missingSince === null && origin?.kind !== "merged") {
+        await dropStoredTable(tx, id, table.name);
+      }
       // A Sheets table's origin is marked removed so a sync never brings
       // it back as it does a table whose tab was deleted in Sheets.
-      const origin = originOf(table);
       await tx.sourceTable.update({
         where: { id: tableId },
         data: {
-          missingSince: now,
+          missingSince: table.missingSince ?? now,
           ...(origin?.kind === "google-sheets" && {
             origin: { ...origin, removed: true },
           }),
@@ -999,6 +1027,19 @@ export const changeColumn = async (
     throw columnNameTaken();
   }
   const retype = change.type !== undefined && change.type !== column.type;
+  const merged = isMergedTable(table);
+  if (merged && retype) {
+    throw new ValidationError(
+      "Invalid request body. type: A merged table's column takes its type from its members; edit the merged table",
+      [
+        {
+          path: "type",
+          message:
+            "A merged table's column takes its type from its members; edit the merged table",
+        },
+      ]
+    );
+  }
 
   const record = async (tx: Prisma.TransactionClient, audit: Audit) => {
     const row = await lockChangeable(tx, caller, id);
@@ -1052,6 +1093,13 @@ export const changeColumn = async (
 
   if (!retype && !rename) {
     await withAudit(record);
+    return viewOf(id);
+  }
+
+  // A merged table's column is renamed in the catalogue; its view is made
+  // again from it.
+  if (merged) {
+    await withLoadLock(id, () => inDrop(id, record));
     return viewOf(id);
   }
 

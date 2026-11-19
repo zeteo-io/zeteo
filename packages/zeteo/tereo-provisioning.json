@@ -177,6 +177,11 @@
         "readPermission": "zeteo.sources.read"
       },
       {
+        "eventType": "zeteo.source.merged_table_saved",
+        "description": "A merged table of an upload source was created or changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
         "eventType": "zeteo.connection.updated",
         "description": "The Google service-account key was set or replaced",
         "readPermission": "zeteo.sources.read"
