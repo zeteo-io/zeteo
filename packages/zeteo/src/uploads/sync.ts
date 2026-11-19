@@ -18,7 +18,7 @@ import type {
 import {
   AppError,
   FileUnreadableError,
-  NotASheetsSourceError,
+  NotAnUploadSourceError,
   NotFoundError,
   NothingToSyncError,
   SourceArchivedError,
@@ -119,13 +119,13 @@ const recordTableFailure = async (
 
 /**
  * The source row a sync starts from: 404 for none, 409 for a database source
- * (`not_a_sheets_source`), an archived one, or an upload source with no
+ * (`not_an_upload_source`), an archived one, or an upload source with no
  * Google Sheets table, live or missing (`nothing_to_sync`).
  */
 const sheetsSource = async (sourceId: string) => {
   const row = await prisma.source.findUnique({ where: { id: sourceId } });
   if (!row) throw new NotFoundError("Source not found");
-  if (!isUploadSource(row)) throw new NotASheetsSourceError();
+  if (!isUploadSource(row)) throw new NotAnUploadSourceError();
   if (row.archivedAt) throw new SourceArchivedError();
   if (!(await db.sources.hasSheetsTables(sourceId))) {
     throw new NothingToSyncError();

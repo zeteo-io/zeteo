@@ -1,6 +1,5 @@
 // @module-tag int
 // @module-tag platform
-import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { dropStoredTable, schemaFor } from "../../uploads/storage.js";
 import type { Caller } from "../../middleware/auth.js";
 import { startV1Routes } from "../support/v1App.js";
@@ -22,6 +21,7 @@ import {
   addTables,
   changeColumn,
   createUploadSource,
+  reuploadTable,
 } from "../../uploads/service.js";
 import {
   columnUnion,
@@ -29,6 +29,12 @@ import {
   mergedDetail,
   saveMergedTable,
 } from "../../uploads/merged.js";
+import {
+  csvOf,
+  removeUploadSourcesOf,
+  stageFile,
+  uploadTablesOf,
+} from "../support/uploads.js";
 import {
   afterAll,
   afterEach,
@@ -387,6 +393,73 @@ describe("merged tables", () => {
     expect(detail.columns.find((c) => c.name === "qty")!.members).toEqual([
       tables[0]!.id,
       tables[1]!.id,
+    ]);
+  });
+
+  it("a member that gains a selected column through re-upload (and through sync) shows its values in the merged table", async () => {
+    // Through sync: only the first member has `note` when the table is made.
+    const {
+      id,
+      tables,
+      sheets: made,
+    } = await makeSource([
+      fbaTab([
+        ["sku", "note"],
+        ["a", "x"],
+      ]),
+      fbaTab([["sku"], ["b"]]),
+    ]);
+    await merge(id, tables, ["A", "B"], ["sku", "note"]);
+    expect(await viewRows(id, "all_inventory", "sku")).toEqual([
+      { brand: "A", sku: "a", note: "x" },
+      { brand: "B", sku: "b", note: null },
+    ]);
+    made[1]!.tab(7).rows = [
+      ["sku", "note"],
+      ["b", "y"],
+    ];
+
+    await syncSource(id, ownerId);
+
+    expect(await viewRows(id, "all_inventory", "sku")).toEqual([
+      { brand: "A", sku: "a", note: "x" },
+      { brand: "B", sku: "b", note: "y" },
+    ]);
+    const merged = await mergedTable(id);
+    const detail = await detailOf(id, merged.id);
+    expect(detail.columns.find((c) => c.name === "note")!.members).toEqual([
+      tables[0]!.id,
+      tables[1]!.id,
+    ]);
+    expect(detail.available.map((a) => a.name)).not.toContain("note");
+
+    // Through re-upload, with two file tables.
+    const file = await stageFile(ownerId, csvOf(["sku", "note"], [["a", "x"]]));
+    const created = await createUploadSource(owner, {
+      type: "upload",
+      staging_id: file.stagingId,
+      name: "Files",
+      tables: [{ key: "csv", name: "f0" }],
+    });
+    const second = await stageFile(ownerId, csvOf(["sku"], [["b"]]));
+    await addTables(owner, created.id, {
+      staging_id: second.stagingId,
+      tables: [{ key: "csv", name: "f1" }],
+    });
+    const files = await uploadTablesOf(created.id);
+    await merge(created.id, files, ["A", "B"], ["sku", "note"]);
+    const again = await stageFile(
+      ownerId,
+      csvOf(["sku", "note"], [["b", "y"]])
+    );
+    await reuploadTable(owner, created.id, files[1]!.id, {
+      staging_id: again.stagingId,
+      key: "csv",
+    });
+
+    expect(await viewRows(created.id, "all_inventory", "sku")).toEqual([
+      { brand: "A", sku: "a", note: "x" },
+      { brand: "B", sku: "b", note: "y" },
     ]);
   });
 

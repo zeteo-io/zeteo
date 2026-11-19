@@ -19,6 +19,7 @@ import {
 import {
   createMergedViews,
   isLiveMember,
+  fromNameOf,
   resolveMemberColumn,
   type CatalogTable,
 } from "./mergedViews.js";
@@ -250,10 +251,6 @@ const checkInput = (input: MergedTableInput) => {
   }
   return { members, included };
 };
-
-/** The member column name a merged column maps from, as its catalogue row keeps it. */
-const fromNameOf = (c: { originalName: string | null; name: string }) =>
-  c.originalName ?? c.name;
 
 /**
  * Creates a merged table of the source (no `tableId`) or replaces the
@@ -524,7 +521,12 @@ export const mergedDetail = async (sourceId: string, tableId: string) => {
         // The live members that have it, fitting or not.
         members: live
           .filter((t) => {
-            const { state } = resolveMemberColumn(t, c.type, c.from[t.id]);
+            const { state } = resolveMemberColumn(
+              t,
+              c.type,
+              c.from[t.id],
+              fromNameOf(catalog)
+            );
             return state === "fits" || state === "unfit";
           })
           .map((t) => t.id),

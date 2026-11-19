@@ -33,6 +33,10 @@ export type MemberColumn =
   | { state: "unfit"; column: SourceColumn }
   | { state: "fits"; column: SourceColumn };
 
+/** The member column name a merged column maps from, as its catalogue row keeps it. */
+export const fromNameOf = (c: { originalName: string | null; name: string }) =>
+  c.originalName ?? c.name;
+
 /** A text merged column takes any member type; another takes its own only. */
 const fits = (merged: ColumnType, member: ColumnType) =>
   merged === "text" || merged === member;
@@ -40,14 +44,29 @@ const fits = (merged: ColumnType, member: ColumnType) =>
 /**
  * The live column of `member` a merged column reads, from its id in the
  * definition; a column back under a new id (it went missing and was added
- * again) is found by the name its old row had.
+ * again) is found by the name its old row had. With no id (the member did
+ * not have the column when it was chosen), a live column named `fromName` is
+ * taken.
  */
 export const resolveMemberColumn = (
   member: CatalogTable,
   type: ColumnType,
-  fromId: string | undefined
+  fromId: string | undefined,
+  fromName?: string
 ): MemberColumn => {
-  if (fromId === undefined) return { state: "none" };
+  if (fromId === undefined) {
+    // A member that gains the column later: its live column of that name.
+    const gained =
+      fromName === undefined
+        ? undefined
+        : member.columns.find(
+            (c) => c.missingSince === null && c.name === fromName
+          );
+    if (!gained) return { state: "none" };
+    return fits(type, gained.type)
+      ? { state: "fits", column: gained }
+      : { state: "unfit", column: gained };
+  }
   const byId = member.columns.find((c) => c.id === fromId);
   const column =
     byId && byId.missingSince === null
@@ -161,7 +180,12 @@ const rebuildOne = async (
     const from = { ...c.from };
     let provided = false;
     live.forEach(({ table: member }, i) => {
-      const r = resolveMemberColumn(member, c.type, c.from[member.id]);
+      const r = resolveMemberColumn(
+        member,
+        c.type,
+        c.from[member.id],
+        fromNameOf(catalog)
+      );
       if (r.state === "none") {
         names[i]!.push(null);
         return;

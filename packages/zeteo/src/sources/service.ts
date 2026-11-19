@@ -54,7 +54,7 @@ export type CreateSourceInput = Pick<
   };
 
 export type UpdateSourceInput = Partial<SourceFields> & {
-  /** Minutes between syncs; a Google Sheets source only (`not_synced` otherwise). */
+  /** Minutes between syncs; an upload source only (`not_synced` otherwise). */
   sync_interval_minutes?: number;
 };
 

@@ -431,18 +431,6 @@ export class TableInMergedTableError extends AppError {
   }
 }
 
-/** Tabs requested from the spreadsheet of a source that has none. */
-export class NotASheetsSourceError extends AppError {
-  constructor() {
-    super(
-      409,
-      "not_a_sheets_source",
-      "Only a Google Sheets source has a spreadsheet to read."
-    );
-    this.name = "NotASheetsSourceError";
-  }
-}
-
 /** A sync of an upload source that has no Google Sheets table that isn't removed (live or missing). */
 export class NothingToSyncError extends AppError {
   constructor() {
