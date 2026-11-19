@@ -65,14 +65,18 @@ describe("SourceTablesPage (database)", () => {
 });
 
 describe("SourceMeasuresPage", () => {
-  it("lists the measures, with write actions for a measures writer", async () => {
-    get
-      .mockReset()
-      .mockImplementation(async (url: string) =>
-        url === `/v1/sources/${SOURCE_ID}/measures`
-          ? { data: { data: [makeMeasure()] } }
-          : { data: makeSource() }
-      );
+  it("lists the measures, with write actions for a measures writer who is an editor", async () => {
+    get.mockReset().mockImplementation(async (url: string) =>
+      url === `/v1/sources/${SOURCE_ID}/measures`
+        ? {
+            data: {
+              data: [makeMeasure()],
+              can_edit: true,
+              can_manage_editors: false,
+            },
+          }
+        : { data: makeSource() }
+    );
     renderWithProviders(
       <Routes>
         <Route path="/sources/:sourceId" element={<SourceLayout />}>
