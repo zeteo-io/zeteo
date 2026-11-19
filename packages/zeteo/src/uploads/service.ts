@@ -63,6 +63,7 @@ import {
   isFileTable,
   isMergedTable,
   originOf,
+  sheetOfKey,
   type TableOrigin,
 } from "./origin.js";
 import {
@@ -218,6 +219,12 @@ export const giveOwnerGrant = async (
 
 type Staged = Awaited<ReturnType<typeof getStaging>>;
 
+/** A file table's origin: its file, and the worksheet it was read from when it has one. */
+const fileOrigin = (filename: string, key: string): TableOrigin => {
+  const sheet = sheetOfKey(key);
+  return { kind: "file", filename, ...(sheet !== undefined && { sheet }) };
+};
+
 /**
  * The origin of each planned table of a staging, in order: its Google Sheets
  * tab (with the header row it is loaded with) or its file.
@@ -238,7 +245,7 @@ const originsOf = (
           sheetId: staged.locator!.sheetId,
           headerRow: t.headerRow,
         }
-      : { kind: "file", filename: staged.filename ?? "" };
+      : fileOrigin(staged.filename ?? "", staged.key);
   });
 
 /** The spreadsheet of a Sheets staging; null for a file's. */
@@ -866,7 +873,7 @@ export const reuploadTable = async (
           lastSyncedAt: now,
           lastSeenAt: now,
           ...(filename !== undefined && {
-            origin: { kind: "file", filename },
+            origin: fileOrigin(filename, input.key),
           }),
         },
       });

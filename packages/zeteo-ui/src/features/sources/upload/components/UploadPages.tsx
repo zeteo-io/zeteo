@@ -106,21 +106,26 @@ const OriginCell = ({ table }: { table: Table }) => {
   return (
     <span className="z-fs-origin">
       {origin?.kind === "file" ? (
-        origin.filename
+        <span className="z-fs-origin-name">
+          <span title={origin.filename}>File Upload</span>
+          {origin.tab_title && (
+            <span className="z-fs-origin-tab">{origin.tab_title}</span>
+          )}
+        </span>
       ) : origin?.kind === "google-sheets" ? (
-        <>
-          {origin.tab_title === undefined
-            ? origin.spreadsheet_title
-            : `${origin.spreadsheet_title} · ${origin.tab_title}`}{" "}
+        <span className="z-fs-origin-name">
           <a
             href={origin.url}
             target="_blank"
-            rel="noreferrer"
-            aria-label={`Open ${origin.spreadsheet_title} in Google Sheets`}
+            rel="noopener noreferrer"
+            title={origin.spreadsheet_title}
           >
-            Open
+            Google Sheet
           </a>
-        </>
+          {origin.tab_title && (
+            <span className="z-fs-origin-tab">{origin.tab_title}</span>
+          )}
+        </span>
       ) : origin?.kind === "merged" ? (
         `Merged · ${origin.members} ${origin.members === 1 ? "table" : "tables"}`
       ) : (

@@ -29,6 +29,14 @@ export const originView = (row: { origin: unknown }) => {
       ...(origin.tabTitle !== undefined && { tab_title: origin.tabTitle }),
     };
   }
+  if (origin?.kind === "file") {
+    return {
+      kind: "file" as const,
+      filename: origin.filename,
+      /** An xlsx's worksheet or named table; absent for a CSV and for a table made before it was kept. */
+      ...(origin.sheet !== undefined && { tab_title: origin.sheet }),
+    };
+  }
   return origin;
 };
 

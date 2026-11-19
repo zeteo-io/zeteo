@@ -195,7 +195,12 @@ export interface SyncSummary {
 
 /** Where an upload source's table comes from. */
 export type TableOrigin =
-  | { kind: "file"; filename: string }
+  | {
+      kind: "file";
+      filename: string;
+      /** An xlsx file's worksheet or named table; absent for a CSV and on a table made before it was kept. */
+      tab_title?: string;
+    }
   | {
       kind: "google-sheets";
       spreadsheet_id: string;

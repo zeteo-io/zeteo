@@ -234,6 +234,16 @@
   gap: 0.25rem 0.5rem;
 }
 
+.z-fs-origin-name {
+  display: inline-flex;
+  flex-direction: column;
+}
+
+.z-fs-origin-tab {
+  color: var(--k-text-color-secondary);
+  font-size: 0.8em;
+}
+
 /* Merged tables: the editor and a merged table's page. */
 .z-merged-about {
   display: grid;

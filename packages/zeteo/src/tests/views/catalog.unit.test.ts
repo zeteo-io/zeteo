@@ -60,4 +60,13 @@ describe("originView", () => {
     ).toEqual({ kind: "merged", members: 2 });
     expect(originView({ origin: null })).toBeNull();
   });
+
+  it("gives a file's worksheet as tab_title, only when it is known", () => {
+    expect(
+      originView({ origin: { kind: "file", filename: "a.xlsx", sheet: "S" } })
+    ).toEqual({ kind: "file", filename: "a.xlsx", tab_title: "S" });
+    expect(originView({ origin: { kind: "file", filename: "a.csv" } })).toEqual(
+      { kind: "file", filename: "a.csv" }
+    );
+  });
 });

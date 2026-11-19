@@ -7,6 +7,7 @@ import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../support/tokens.js";
 import { randomUUID } from "crypto";
+import ExcelJS from "exceljs";
 import {
   DATA_READ,
   UPLOADS_WRITE,
@@ -341,5 +342,66 @@ describe("POST /v1/sources (google-sheets)", () => {
     );
     expect(res.status, JSON.stringify(res.body)).toBe(409);
     expect(res.body.error).toBe("not_a_file_upload");
+  });
+});
+
+describe("a file table's origin keeps its worksheet", () => {
+  const book = async () => {
+    const wb = new ExcelJS.Workbook();
+    wb.addWorksheet("Sales").addRows([["a"], [1]]);
+    wb.addWorksheet("Costs").addRows([["b"], [2]]);
+    return Buffer.from(await wb.xlsx.writeBuffer());
+  };
+  const originsByName = async (sourceId: string) =>
+    Object.fromEntries(
+      (await prisma.sourceTable.findMany({ where: { sourceId } })).map((t) => [
+        t.name,
+        t.origin,
+      ])
+    );
+
+  it("an xlsx's tables carry each worksheet's name; a CSV's carries none; re-upload from another sheet updates it", async () => {
+    const staged = await stageFile(ownerId, await book(), "b.xlsx");
+    const created = await call("POST", "", owner, {
+      type: "upload",
+      staging_id: staged.stagingId,
+      name: "Book",
+      tables: [
+        { key: "sheet:Sales", name: "sales" },
+        { key: "sheet:Costs", name: "costs" },
+      ],
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const id = created.body.id as string;
+    expect(await originsByName(id)).toEqual({
+      sales: { kind: "file", filename: "b.xlsx", sheet: "Sales" },
+      costs: { kind: "file", filename: "b.xlsx", sheet: "Costs" },
+    });
+
+    const csv = await stageFile(ownerId, csvOf(["c"], [["3"]]), "c.csv");
+    const added = await call("POST", `/${id}/tables`, owner, {
+      staging_id: csv.stagingId,
+      tables: [{ key: "csv", name: "plain" }],
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    expect((await originsByName(id)).plain).toEqual({
+      kind: "file",
+      filename: "c.csv",
+    });
+
+    const byName = Object.fromEntries(
+      (await uploadTablesOf(id)).map((t) => [t.name, t.id])
+    );
+    const again = await stageFile(ownerId, await book(), "b2.xlsx");
+    const re = await call("PUT", `/${id}/tables/${byName.sales}`, owner, {
+      staging_id: again.stagingId,
+      key: "sheet:Costs",
+    });
+    expect(re.status, JSON.stringify(re.body)).toBe(200);
+    expect((await originsByName(id)).sales).toEqual({
+      kind: "file",
+      filename: "b2.xlsx",
+      sheet: "Costs",
+    });
   });
 });

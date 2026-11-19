@@ -7163,6 +7163,9 @@ components:
             filename:
               type: string
               description: The uploaded file's name
+            tab_title:
+              type: string
+              description: An xlsx file's worksheet or named table; absent for a CSV and on a table made before it was kept
         - type: object
           required:
             - kind

@@ -22,7 +22,12 @@ export type MergedDefinition = {
 
 /** Where an upload source's table comes from, as `source_tables.origin` keeps it. */
 export type TableOrigin =
-  | { kind: "file"; filename: string }
+  | {
+      kind: "file";
+      filename: string;
+      /** An xlsx's worksheet or named table; absent for a CSV and in rows written before it was kept. */
+      sheet?: string;
+    }
   | {
       kind: "google-sheets";
       spreadsheetId: string;
@@ -34,6 +39,12 @@ export type TableOrigin =
       removed?: boolean;
     }
   | { kind: "merged"; definition: MergedDefinition };
+
+/** The worksheet or named table a staged file table's key (`csv`, `sheet:<name>`, `table:<name>`) names; undefined for a CSV. */
+export const sheetOfKey = (key: string): string | undefined => {
+  const m = /^(?:sheet|table):(.+)$/s.exec(key);
+  return m?.[1];
+};
 
 /** A Google Sheets table's origin. */
 export type SheetsOrigin = Extract<TableOrigin, { kind: "google-sheets" }>;
@@ -64,7 +75,11 @@ const mergedDefinitionSchema = z.object({
 });
 
 const originSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("file"), filename: z.string() }),
+  z.object({
+    kind: z.literal("file"),
+    filename: z.string(),
+    sheet: z.string().optional(),
+  }),
   z.object({
     kind: z.literal("google-sheets"),
     spreadsheetId: z.string(),

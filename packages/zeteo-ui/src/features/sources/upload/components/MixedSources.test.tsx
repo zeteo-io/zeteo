@@ -69,28 +69,50 @@ describe("the Tables tab's Origin column", () => {
     post.mockReset();
   });
 
-  it("says where each table came from", async () => {
-    serve(makeSheetsSource(), [
-      file(1),
-      sheet(2, "Budget 2027", "Orders", "SPREAD1"),
-      merged(3),
-    ]);
+  it("shows a Sheets table as a Google Sheet link, with the spreadsheet in its tooltip and the tab below", async () => {
+    serve(makeSheetsSource(), [sheet(2, "Budget 2027", "Orders", "SPREAD1")]);
     renderAt("/tables");
-    expect(await screen.findByText("Origin")).toBeInTheDocument();
-    expect(screen.getByText("data 1.csv")).toBeInTheDocument();
-    expect(screen.getByText("Budget 2027 · Orders")).toBeInTheDocument();
-    expect(
-      screen.getByRole("link", { name: /Open .* in Google Sheets/ })
-    ).toHaveAttribute("href", "https://docs.google.com/spreadsheets/d/SPREAD1");
-    expect(screen.getByText("Merged · 3 tables")).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "Google Sheet" });
+    expect(link).toHaveAttribute(
+      "href",
+      "https://docs.google.com/spreadsheets/d/SPREAD1"
+    );
+    expect(link).toHaveAttribute("title", "Budget 2027");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noopener noreferrer");
+    expect(screen.getByText("Orders")).toBeInTheDocument();
   });
 
-  it("shows just the spreadsheet title for a table with no tab title", async () => {
+  it("shows a file table as File Upload with the file name in its tooltip, and an xlsx's sheet below", async () => {
+    serve(makeSheetsSource(), [
+      file(1),
+      file(2, {
+        origin: { kind: "file", filename: "book.xlsx", tab_title: "Costs" },
+      }),
+    ]);
+    renderAt("/tables");
+    await screen.findAllByText("File Upload");
+    const cells = screen.getAllByText("File Upload");
+    expect(cells).toHaveLength(2);
+    expect(cells[0]).toHaveAttribute("title", "data 1.csv");
+    expect(cells[1]).toHaveAttribute("title", "book.xlsx");
+    expect(screen.getByText("Costs")).toBeInTheDocument();
+    expect(cells[0]!.parentElement!.children).toHaveLength(1);
+  });
+
+  it("leaves a merged table as it was", async () => {
+    serve(makeSheetsSource(), [merged(3)]);
+    renderAt("/tables");
+    expect(await screen.findByText("Merged · 3 tables")).toBeInTheDocument();
+  });
+
+  it("shows no second line for a Sheets table with no tab title", async () => {
     const old = sheet(1, "Budget 2027", "Orders", "S1");
     if (old.origin?.kind === "google-sheets") delete old.origin.tab_title;
     serve(makeSheetsSource(), [old]);
     renderAt("/tables");
-    expect(await screen.findByText("Budget 2027")).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "Google Sheet" });
+    expect(link.parentElement!.children).toHaveLength(1);
     expect(screen.queryByText(/undefined/)).toBeNull();
   });
 
@@ -110,7 +132,7 @@ describe("the Tables tab's Origin column", () => {
   it("shows no badge when the server sends no sync_error (a reader who is neither owner nor admin)", async () => {
     serve(makeSheetsSource(), [sheet(1, "Budget", "Orders", "S1")]);
     renderAt("/tables");
-    await screen.findByText("Budget · Orders");
+    await screen.findByRole("link", { name: "Google Sheet" });
     expect(screen.queryByText("Sync failing")).toBeNull();
   });
 });
