@@ -36,6 +36,15 @@ info:
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
     as a source they may not see does. See `docs/uploads.md`.
 
+    An upload source's tables each come from a file, a tab of a Google spreadsheet or a merge
+    (the table's `origin`); one source may hold all three. Zeteo reads Google as one service
+    account, set with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a
+    Viewer. The source's owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a
+    spreadsheet with `POST /v1/uploads/links` (naming `source_id` to add its tabs to a source
+    that exists), creates the source or adds tables, changes its sync interval, runs Sync now
+    (`POST /v1/sources/{sourceId}/refresh`) and merges tables
+    (`POST /v1/sources/{sourceId}/merged-tables`) through the same routes as any upload source.
+
     ## Sources
 
     A source's `settings` depend on its `type` and are write-only in part: the response carries
@@ -125,6 +134,8 @@ tags:
     description: Databases registered with Zeteo
   - name: Uploads
     description: CSV and xlsx files staged for upload sources, which their owners manage and grant
+  - name: Connections
+    description: The connection to Google that Google Sheets sources read through
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Grants
@@ -139,7 +150,7 @@ tags:
     description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
-    tags: [Sources, Uploads, Catalogue]
+    tags: [Sources, Uploads, Connections, Catalogue]
   - name: Access
     tags: [Grants]
   - name: Querying
@@ -167,6 +178,12 @@ paths:
     $ref: './paths/catalog/tables.yaml#/~1v1~1sources~1{sourceId}~1tables'
   /v1/sources/{sourceId}/tables/{tableId}:
     $ref: './paths/catalog/table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}'
+  /v1/sources/{sourceId}/merged-tables:
+    $ref: './paths/catalog/merged-tables.yaml#/~1v1~1sources~1{sourceId}~1merged-tables'
+  /v1/sources/{sourceId}/merged-tables/columns:
+    $ref: './paths/catalog/merged-columns.yaml#/~1v1~1sources~1{sourceId}~1merged-tables~1columns'
+  /v1/sources/{sourceId}/tables/{tableId}/merged:
+    $ref: './paths/catalog/merged-table.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}~1merged'
   /v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}:
     $ref: './paths/catalog/column.yaml#/~1v1~1sources~1{sourceId}~1tables~1{tableId}~1columns~1{columnId}'
   /v1/sources/{sourceId}/relations:
@@ -203,6 +220,10 @@ paths:
     $ref: './paths/principals/my-all-principals.yaml#/~1v1~1me~1principals~1all'
   /v1/uploads:
     $ref: './paths/uploads/uploads.yaml#/~1v1~1uploads'
+  /v1/uploads/links:
+    $ref: './paths/uploads/links.yaml#/~1v1~1uploads~1links'
+  /v1/connections/google:
+    $ref: './paths/connections/google.yaml#/~1v1~1connections~1google'
   /v1/uploads/{uploadId}:
     $ref: './paths/uploads/upload.yaml#/~1v1~1uploads~1{uploadId}'
   /v1/saved-queries:
@@ -410,6 +431,26 @@ components:
       $ref: './components/uploads/schemas.yaml#/StagedTable'
     UploadResponse:
       $ref: './components/uploads/schemas.yaml#/UploadResponse'
+    SheetsUploadResponse:
+      $ref: './components/uploads/schemas.yaml#/SheetsUploadResponse'
+    LinkRequest:
+      $ref: './components/uploads/schemas.yaml#/LinkRequest'
+    GoogleConnection:
+      $ref: './components/connections/schemas.yaml#/GoogleConnection'
+    PutGoogleConnectionRequest:
+      $ref: './components/connections/schemas.yaml#/PutGoogleConnectionRequest'
+    TableOrigin:
+      $ref: './components/catalog/schemas.yaml#/TableOrigin'
+    TableSyncError:
+      $ref: './components/catalog/schemas.yaml#/TableSyncError'
+    MergedTableRequest:
+      $ref: './components/catalog/schemas.yaml#/MergedTableRequest'
+    MergedDetail:
+      $ref: './components/catalog/schemas.yaml#/MergedDetail'
+    MergedColumnsResponse:
+      $ref: './components/catalog/schemas.yaml#/MergedColumnsResponse'
+    SyncSummary:
+      $ref: './components/catalog/schemas.yaml#/SyncSummary'
     ColumnCorrection:
       $ref: './components/uploads/schemas.yaml#/ColumnCorrection'
     TableCorrection:

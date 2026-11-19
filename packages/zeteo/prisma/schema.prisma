@@ -123,11 +123,18 @@ model Source {
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamp(3)
   archivedAt           DateTime?    @map("archived_at") @db.Timestamp(3)
+  // An upload source with Google Sheets tables: how often they are synced (15
+  // to 1440 minutes; null for a database source), and the source's last sync
+  // attempt and its error summary, if it failed.
+  syncIntervalMinutes  Int?         @map("sync_interval_minutes")
+  lastSyncAttemptAt    DateTime?    @map("last_sync_attempt_at") @db.Timestamp(3)
+  lastSyncError        Json?        @map("last_sync_error")
 
   tables       SourceTable[]
   relations    Relation[]
   runs         QueryRun[]
   savedQueries SavedQuery[]
+  uploadClaims UploadClaim[]
 
   @@index([ownerId])
   @@map("sources")
@@ -135,18 +142,24 @@ model Source {
 }
 
 model SourceTable {
-  id           String    @id @default(uuid(7)) @db.Uuid
-  sourceId     String    @map("source_id") @db.Uuid
-  schemaName   String    @map("schema_name")
-  name         String
-  kind         TableKind
-  description  String?
-  lastSeenAt   DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
-  missingSince DateTime? @map("missing_since") @db.Timestamp(3)
-  lastSyncedAt DateTime? @map("last_synced_at") @db.Timestamp(3)
+  id                String    @id @default(uuid(7)) @db.Uuid
+  sourceId          String    @map("source_id") @db.Uuid
+  schemaName        String    @map("schema_name")
+  name              String
+  kind              TableKind
+  description       String?
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
+  missingSince      DateTime? @map("missing_since") @db.Timestamp(3)
+  lastSyncedAt      DateTime? @map("last_synced_at") @db.Timestamp(3)
   // An upload source's table: its rows at its last load. A database source's:
   // the database's estimate at the last refresh, null when it gave none.
-  rowCount     BigInt?   @map("row_count")
+  rowCount          BigInt?   @map("row_count")
+  // An upload source's table: where it comes from (`TableOrigin` in
+  // src/uploads/origin.ts: a file, a Google Sheets tab or a merged table).
+  origin            Json?     @map("origin")
+  // A Google Sheets table: its last sync attempt and its error, if it failed.
+  lastSyncAttemptAt DateTime? @map("last_sync_attempt_at") @db.Timestamp(3)
+  lastSyncError     Json?     @map("last_sync_error")
 
   source        Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   columns       SourceColumn[]
@@ -271,17 +284,35 @@ model Grant {
 // preview shown to its owner and the names of the staging tables holding its
 // rows. Expires one hour after creation.
 model UploadStaging {
-  id        String   @id @default(uuid(7)) @db.Uuid
-  ownerId   String   @map("owner_id") @db.Uuid
-  kind      String
-  preview   Json
-  tables    Json
-  expiresAt DateTime @map("expires_at") @db.Timestamp(3)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  id           String   @id @default(uuid(7)) @db.Uuid
+  ownerId      String   @map("owner_id") @db.Uuid
+  // "file" or "google-sheets".
+  kind         String
+  vendorFileId String?  @map("vendor_file_id")
+  preview      Json
+  tables       Json
+  expiresAt    DateTime @map("expires_at") @db.Timestamp(3)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamp(3)
 
   @@index([expiresAt])
   @@index([ownerId])
   @@map("upload_stagings")
+  @@schema("zeteo")
+}
+
+// A spreadsheet (or another vendor's file) backing tables of an upload source:
+// one unarchived source at a time, the first to claim it.
+model UploadClaim {
+  vendor    String
+  fileId    String   @map("file_id")
+  sourceId  String   @map("source_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([vendor, fileId])
+  @@index([sourceId])
+  @@map("upload_claims")
   @@schema("zeteo")
 }
 
@@ -521,5 +552,16 @@ model SavedPanelShare {
   @@id([savedPanelId, principalType, principalId])
   @@index([principalType, principalId])
   @@map("saved_panel_shares")
+  @@schema("zeteo")
+}
+
+// A vendor connection Zeteo syncs from, one row per provider (`google`).
+model Connection {
+  provider       String   @id
+  sealedSettings Json     @map("sealed_settings")
+  updatedBy      String   @map("updated_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  @@map("connections")
   @@schema("zeteo")
 }

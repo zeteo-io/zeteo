@@ -30,6 +30,9 @@ const row = (overrides: Partial<Source>): Source => ({
   createdAt: new Date("2026-11-12T00:00:00.000Z"),
   updatedAt: new Date("2026-11-12T00:00:00.000Z"),
   archivedAt: null,
+  syncIntervalMinutes: null,
+  lastSyncAttemptAt: null,
+  lastSyncError: null,
   ...overrides,
 });
 

@@ -1,8 +1,44 @@
+import { originOf } from "../uploads/origin.js";
+import { tableSyncError } from "./source.js";
 import type {
   Relation,
   SourceColumn,
   SourceTable,
 } from "../../prisma/generated/client/index.js";
+
+/**
+ * A table's origin as views give it, in the API's snake_case: a Sheets table's
+ * as its spreadsheet and tab, a merged table's as its member count.
+ */
+export const originView = (row: { origin: unknown }) => {
+  const origin = originOf(row);
+  if (origin?.kind === "merged") {
+    return {
+      kind: "merged" as const,
+      members: origin.definition.members.length,
+    };
+  }
+  if (origin?.kind === "google-sheets") {
+    return {
+      kind: "google-sheets" as const,
+      spreadsheet_id: origin.spreadsheetId,
+      spreadsheet_title: origin.spreadsheetTitle,
+      url: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(origin.spreadsheetId)}/edit#gid=${origin.sheetId}`,
+      tab_id: origin.sheetId,
+      /** Absent only for a table added before tab titles were kept. */
+      ...(origin.tabTitle !== undefined && { tab_title: origin.tabTitle }),
+    };
+  }
+  if (origin?.kind === "file") {
+    return {
+      kind: "file" as const,
+      filename: origin.filename,
+      /** An xlsx's worksheet or named table; absent for a CSV and for a table made before it was kept. */
+      ...(origin.sheet !== undefined && { tab_title: origin.sheet }),
+    };
+  }
+  return origin;
+};
 
 const iso = (date: Date | null) => date?.toISOString() ?? null;
 
@@ -22,6 +58,16 @@ export const tableView = (row: SourceTable) => ({
   row_count: row.rowCount === null ? null : Number(row.rowCount),
   /** An upload source's table: when it was last loaded; null for a database source's. */
   last_loaded_at: iso(row.lastSyncedAt),
+  /**
+   * An upload source's table: where it comes from (a file, a Sheets tab, a
+   * merge, given as its number of members); null for a database source's.
+   */
+  origin: originView(row),
+  /**
+   * A Google Sheets table's last failed sync; null when its last sync was good
+   * or it has none. These views are its owner's and `zeteo.sources.read`'s only.
+   */
+  sync_error: tableSyncError(row.lastSyncError),
 });
 
 export const columnView = (row: SourceColumn) => ({

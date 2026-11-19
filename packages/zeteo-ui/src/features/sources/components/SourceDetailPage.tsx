@@ -1,7 +1,7 @@
+import { isUploadType, sourceTypeName, tlsName } from "./sourceLabels";
 import { UploadOverview } from "../upload/components/UploadPages";
 import { Facts, LimitSections, When, type Row } from "./Facts";
 import { Alert, BorderedSection } from "@kosmeo-ui/react";
-import { sourceTypeName, tlsName } from "./sourceLabels";
 import { formatBytes } from "@/utils/formatBytes";
 import { useSourceContext } from "./context";
 import "./styles.css";
@@ -9,7 +9,7 @@ import "./styles.css";
 /** A source's overview: an upload's data, or a database source's catalogue and connection. */
 export const SourceDetailPage = () => {
   const { source } = useSourceContext();
-  return source.type === "upload" ? <UploadOverview /> : <DatabaseOverview />;
+  return isUploadType(source.type) ? <UploadOverview /> : <DatabaseOverview />;
 };
 
 const DatabaseOverview = () => {

@@ -30,13 +30,14 @@ only when the login holds `SELECT` on the whole of it; one it can read only thro
 - after `POST /v1/sources`, and after a `PATCH` that changes `settings` or `schemas` (a failure
   there leaves the source with `status: unreachable`; the create or change stands),
 - on `POST /v1/sources/:sourceId/refresh`,
-- from a job that checks every hour and refreshes each unarchived source not refreshed in the last
+- from a job that checks every five minutes and refreshes each unarchived source not refreshed in the last
   24 hours (including sources never refreshed and ones marked `unreachable`), one at a time, under
   a Redis lock `zeteo:refresh:<sourceId>` with a 15 minute expiry so replicas do not repeat the
   work. Having taken the lock, the job reads the source again and skips it if another replica
   refreshed it, or it was archived, since the list was read. A failing source is logged and the
   job goes on. The first check comes 30 to 60 seconds after start (a random delay, so replicas
-  started together spread out), then one every hour.
+  started together spread out), then one every five minutes. The same check syncs upload sources with Google Sheets
+  tables on their own interval (each table in its own transaction) ([uploads.md](uploads.md#google-sheets)).
 
 The summary is `{ tables: { added, missing, restored }, columns: { added, changed, missing,
 restored }, relations: { added, missing, restored } }`. `missing` counts things newly marked

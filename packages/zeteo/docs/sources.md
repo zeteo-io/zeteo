@@ -4,7 +4,11 @@ A source is a database an administrator registers, or an upload source a person 
 file. The API is under `/v1/sources` (the reference is `openapi/openapi.yaml`; `npm run
 openapi:build` bundles it). Database sources are archived, never deleted. A source of type
 `upload` is an upload source, owned by the person who uploaded it; it is listed, read and changed
-through these same routes, and a few apply to it alone ([uploads.md](uploads.md)).
+through these same routes, and a few apply to it alone ([uploads.md](uploads.md)). Its tables
+have an origin: a file, a tab of a Google spreadsheet (synced on the source's interval; `POST
+/v1/sources/:sourceId/refresh` is its Sync now, [uploads.md](uploads.md#google-sheets)) or a merged
+table over other tables of the source (`POST /v1/sources/:sourceId/merged-tables`,
+[uploads.md](uploads.md#merged-tables)). There is no Sheets source type.
 
 | Route | Permission | Result |
 |-------|------------|--------|
@@ -16,12 +20,14 @@ through these same routes, and a few apply to it alone ([uploads.md](uploads.md)
 | `POST /v1/sources/:sourceId/transfer` | an upload source only: `zeteo.sources.write`, or its owner | the source |
 | `POST /v1/sources/:sourceId/archive` | `zeteo.sources.write` | `204` |
 | `POST /v1/sources/:sourceId/test` | `zeteo.sources.write` | `{ ok: true, findings, truncated? }` |
-| `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md) | |
+| `POST /v1/sources/:sourceId/refresh` and the `tables` and `relations` routes | see [catalog.md](catalog.md); on an upload source with Sheets tables, its owner may sync | |
+| `GET /v1/connections/google` | `zeteo.sources.read` or `zeteo.uploads.write` | the Google service account's email |
+| `PUT /v1/connections/google` | `zeteo.sources.write` | saves the service-account key, checked with Google first |
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
 validated. The owner of an upload source (holding `zeteo.uploads.write` and `zeteo.data.read`)
 may also read, rename, transfer and delete it here; anyone else gets the same `403`, whether the
-source exists or not. `archive`, `test`, `refresh`, and `settings` or `schemas` in a `PATCH`, are
+source exists or not. `archive`, `test`, `refresh` (an upload source with Sheets tables excepted; on a file-only upload source it is `409 nothing_to_sync`), and `settings` or `schemas` in a `PATCH`, are
 `409 not_a_database_source` on an upload source; `DELETE` and `transfer` (and the upload-only table
 and column routes) are `409 not_an_upload_source` on a database source.
 

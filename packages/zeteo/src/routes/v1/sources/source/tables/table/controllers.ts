@@ -1,5 +1,6 @@
 import { tableDetailView } from "../../../../../../views/catalog.js";
 import { describeTable } from "../../../../../../catalog/service.js";
+import { mergedDetail } from "../../../../../../uploads/merged.js";
 import { NotFoundError } from "../../../../../../utils/errors.js";
 import { callerOf } from "../../../../../../middleware/auth.js";
 import { db } from "../../../../../../utils/db/index.js";
@@ -26,7 +27,11 @@ export const getTable = async (req: Request, res: Response) => {
     db.catalog.listColumns(tableId),
     db.catalog.listRelationsFrom(tableId),
   ]);
-  res.status(200).json(tableDetailView(table, columns, relations));
+  const merged = await mergedDetail(sourceId, tableId);
+  res.status(200).json({
+    ...tableDetailView(table, columns, relations),
+    ...(merged && { merged }),
+  });
 };
 
 export const patchTable = async (req: Request, res: Response) => {

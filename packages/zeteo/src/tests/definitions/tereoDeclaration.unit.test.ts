@@ -239,6 +239,7 @@ describe("buildTereoDocument", () => {
 
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
+      "zeteo.connection.updated",
       "zeteo.dashboard.copied",
       "zeteo.dashboard.created",
       "zeteo.dashboard.deleted",
@@ -272,6 +273,7 @@ describe("buildTereoDocument", () => {
       "zeteo.source.archived",
       "zeteo.source.created",
       "zeteo.source.deleted",
+      "zeteo.source.merged_table_saved",
       "zeteo.source.refreshed",
       "zeteo.source.table_removed",
       "zeteo.source.table_reuploaded",

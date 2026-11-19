@@ -1,4 +1,3 @@
-import { FileParseError, type ParseLimits, type Row } from "./parse/types.js";
 import { detectHeaderRow, TypeInferrer } from "./parse/infer.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { emptyColumnsWarning } from "./warnings.js";
@@ -19,6 +18,12 @@ import {
   TooManyRequestsError,
   UnsupportedFileTypeError,
 } from "../utils/errors.js";
+import {
+  FileParseError,
+  type ParsedSheet,
+  type ParseLimits,
+  type Row,
+} from "./parse/types.js";
 import {
   appendStagingRows,
   createStagingTable,
@@ -92,6 +97,14 @@ export interface StagedTable {
   /** Rows in the staging table, the header row included. */
   rowCount: number;
   columnCount: number;
+  /** Where a Google Sheets tab lives in its spreadsheet; absent for a file's tables. */
+  locator?: { sheetId: number };
+  /** A Google Sheets tab: its spreadsheet's title, for the table's origin. */
+  spreadsheetTitle?: string;
+  /** A Google Sheets tab: its title, for the table's origin. */
+  tabTitle?: string;
+  /** A file's table: the uploaded file's name, for the table's origin. */
+  filename?: string;
 }
 
 export interface StagingResult {
@@ -244,19 +257,33 @@ const peek = async (iterator: AsyncIterator<Buffer | string>) => {
   return { chunks, head: Buffer.concat(chunks) };
 };
 
-const toUnreadable = (err: unknown): unknown =>
+/** A parse failure as the 422 the caller gets; anything else as it is. */
+export const toUnreadable = (err: unknown): unknown =>
   err instanceof FileParseError
     ? new FileUnreadableError(err.code, err.message, err.row)
     : err;
+
+/** What `stageTable` needs to know of a table besides its rows. */
+export interface StageMeta {
+  key: string;
+  fallbackName: string;
+  kind: PreviewTable["kind"];
+  /**
+   * Keep only the columns up to the last that holds a value, and nothing for a
+   * table of empty cells: a Google Sheets tab arrives as wide as its grid.
+   * A file's tables are as wide as their data already.
+   */
+  trimUnusedColumns?: boolean;
+}
 
 /**
  * A table's rows into a new staging table (all of them, the header row
  * included) while keeping what the preview needs. Returns null for a table
  * with no rows or no columns.
  */
-const stageTable = async (
+export const stageTable = async (
   rows: AsyncIterable<Row> | Row[],
-  meta: { key: string; fallbackName: string; kind: PreviewTable["kind"] },
+  meta: StageMeta,
   takenTableNames: Set<string>,
   created: string[]
 ): Promise<{ preview: PreviewTable; staged: StagedTable } | null> => {
@@ -265,9 +292,11 @@ const stageTable = async (
   let width = 0;
   let total = 0;
   let batch: Row[] = [];
-  // Types over every row, and over the rows below the first.
+  // With `trimUnusedColumns`: the columns up to the last that holds a value.
+  let used = 0;
+  // Types over every row, and over the rows below each possible header row (0, 1 or 2).
   let all: TypeInferrer[] = [];
-  let below: TypeInferrer[] = [];
+  let after: TypeInferrer[][] = [];
 
   const flush = async () => {
     if (batch.length === 0) return;
@@ -282,7 +311,9 @@ const stageTable = async (
       stagingTable = await createStagingTable(width);
       created.push(stagingTable);
       all = Array.from({ length: width }, () => new TypeInferrer());
-      below = Array.from({ length: width }, () => new TypeInferrer());
+      after = Array.from({ length: 3 }, () =>
+        Array.from({ length: width }, () => new TypeInferrer())
+      );
     }
     const padded =
       row.length === width
@@ -291,9 +322,20 @@ const stageTable = async (
             ...row.slice(0, width),
             ...Array(Math.max(0, width - row.length)).fill(null),
           ];
+    if (meta.trimUnusedColumns) {
+      for (let c = width - 1; c >= used; c--) {
+        const v = padded[c];
+        if (v !== null && v !== undefined && v !== "") {
+          used = c + 1;
+          break;
+        }
+      }
+    }
     for (let c = 0; c < width; c++) {
       all[c]!.add(padded[c]);
-      if (total > 0) below[c]!.add(padded[c]);
+      for (let k = 0; k < after.length; k++) {
+        if (total > k) after[k]![c]!.add(padded[c]);
+      }
     }
     if (head.length < HEAD_ROWS) head.push(padded);
     batch.push(padded);
@@ -301,7 +343,17 @@ const stageTable = async (
     if (batch.length >= BATCH_ROWS) await flush();
   }
   if (stagingTable === null || total === 0) return null;
+  if (meta.trimUnusedColumns && used === 0) {
+    // Nothing but empty cells: no table.
+    await dropStagingTable(stagingTable);
+    created.splice(created.indexOf(stagingTable), 1);
+    return null;
+  }
   await flush();
+  if (meta.trimUnusedColumns) {
+    width = used;
+    for (let i = 0; i < head.length; i++) head[i] = head[i]!.slice(0, used);
+  }
 
   const headerRow = detectHeaderRow(head);
   const warnings: string[] = [];
@@ -321,7 +373,7 @@ const stageTable = async (
         if (samples.length === SAMPLES_PER_COLUMN) break;
       }
     }
-    const type = (headerRow === null ? all : below)[index]!.type;
+    const type = (headerRow === null ? all : after[headerRow]!)[index]!.type;
     return {
       index,
       name,
@@ -402,7 +454,8 @@ export const stageUpload = async ({
           taken,
           created
         );
-        if (result) tables.push(result);
+        if (result)
+          tables.push({ ...result, staged: { ...result.staged, filename } });
       } else {
         const parts: Buffer[] = [];
         for await (const chunk of bytes) parts.push(chunk as Buffer);
@@ -422,7 +475,12 @@ export const stageUpload = async ({
               taken,
               created
             );
-            if (result) tables.push(result);
+            if (result) {
+              tables.push({
+                ...result,
+                staged: { ...result.staged, filename },
+              });
+            }
           }
         });
       }
@@ -431,34 +489,115 @@ export const stageUpload = async ({
     }
     if (tables.length === 0) throw new EmptyFileError();
 
-    const preview = tables.map((t) => t.preview);
-    // Uploads of one owner record their stagings one at a time, each
-    // counting the others first.
-    const row = await prisma.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:upload-stagings:${ownerId}`}, 0))`;
-      await checkStagingRoom(ownerId, new Date(), tx);
-      return tx.uploadStaging.create({
-        data: {
-          ownerId,
-          kind: type === "csv" ? "csv" : "xlsx",
-          preview: preview as unknown as object,
-          tables: tables.map((t) => t.staged) as unknown as object,
-          expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
-        },
-      });
+    return await recordStaging({
+      ownerId,
+      kind: type === "csv" ? "csv" : "xlsx",
+      tables,
+      now,
     });
-    return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
   } catch (err) {
-    for (const table of created) {
-      await dropStagingTable(table).catch((dropErr: unknown) => {
-        logger.error(
-          { err: dropErr, table },
-          "dropping a staging table failed"
-        );
-      });
-    }
+    await dropStagingTables(created);
     // Stop reading the upload; this destroys the stream.
     await iterator.return?.().catch(() => undefined);
+    throw err;
+  }
+};
+
+/** Drops staging tables no staging row will name; a failed drop is logged, not thrown. */
+export const dropStagingTables = async (created: string[]): Promise<void> => {
+  for (const table of created) {
+    await dropStagingTable(table).catch((dropErr: unknown) => {
+      logger.error({ err: dropErr, table }, "dropping a staging table failed");
+    });
+  }
+};
+
+/**
+ * Records a staging row for staged tables. Stagings of one owner are
+ * recorded one at a time, each counting the others first.
+ */
+const recordStaging = async ({
+  ownerId,
+  kind,
+  vendorFileId,
+  tables,
+  now,
+}: {
+  ownerId: string;
+  kind: "csv" | "xlsx" | "google-sheets";
+  vendorFileId?: string;
+  tables: { preview: PreviewTable; staged: StagedTable }[];
+  now: Date;
+}): Promise<StagingResult> => {
+  const preview = tables.map((t) => t.preview);
+  const row = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`zeteo:upload-stagings:${ownerId}`}, 0))`;
+    await checkStagingRoom(ownerId, new Date(), tx);
+    return tx.uploadStaging.create({
+      data: {
+        ownerId,
+        kind,
+        vendorFileId,
+        preview: preview as unknown as object,
+        tables: tables.map((t) => t.staged) as unknown as object,
+        expiresAt: new Date(now.getTime() + STAGING_TTL_MS),
+      },
+    });
+  });
+  return { stagingId: row.id, expiresAt: row.expiresAt, tables: preview };
+};
+
+/**
+ * Stages the tabs of an already-read spreadsheet for `ownerId` like an
+ * upload's tables, keyed `sheet:<sheetId>`, and records the staging with the
+ * spreadsheet's id. On any failure the staging tables made so far are dropped.
+ */
+export const stageSheets = async ({
+  ownerId,
+  spreadsheet,
+  now = new Date(),
+}: {
+  ownerId: string;
+  spreadsheet: {
+    id: string;
+    title: string;
+    tabs: (ParsedSheet & { sheetId: number })[];
+  };
+  now?: Date;
+}): Promise<StagingResult> => {
+  const created: string[] = [];
+  try {
+    const tables: { preview: PreviewTable; staged: StagedTable }[] = [];
+    const taken = new Set<string>();
+    for (const tab of spreadsheet.tabs) {
+      const result = await stageTable(
+        tab.rows,
+        {
+          key: `sheet:${tab.sheetId}`,
+          fallbackName: tab.name,
+          kind: "sheet",
+          trimUnusedColumns: true,
+        },
+        taken,
+        created
+      );
+      if (result) {
+        result.staged.locator = { sheetId: tab.sheetId };
+        result.staged.spreadsheetTitle = spreadsheet.title;
+        result.staged.tabTitle = tab.name;
+        tables.push(result);
+      }
+    }
+    if (tables.length === 0) throw new EmptyFileError();
+    return await recordStaging({
+      ownerId,
+      kind: "google-sheets",
+      vendorFileId: spreadsheet.id,
+      tables,
+      now,
+    });
+  } catch (err) {
+    await dropStagingTables(created);
     throw err;
   }
 };

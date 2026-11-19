@@ -1,5 +1,5 @@
+import { SourceFieldsShape, SyncIntervalSchema } from "../schemas.js";
 import { IdSchema } from "../../../../utils/idSchema.js";
-import { SourceFieldsShape } from "../schemas.js";
 import { z } from "zod";
 
 export const SourceParamsSchema = z.object({ sourceId: IdSchema });
@@ -19,6 +19,8 @@ export const UpdateSourceSchema = z
     export_row_cap: SourceFieldsShape.export_row_cap.optional(),
     query_concurrency: SourceFieldsShape.query_concurrency.optional(),
     export_concurrency: SourceFieldsShape.export_concurrency.optional(),
+    /** A Google Sheets source's minutes between syncs. */
+    sync_interval_minutes: SyncIntervalSchema.optional(),
   })
   .refine((body) => Object.keys(body).length > 0, {
     message: "Give at least one field to change",

@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { refreshDatabaseSource as refreshSource } from "../../catalog/refresh.js";
 import { createThrowawayDb, type ThrowawayDb } from "../support/throwawayDb.js";
 import type { AzureSqlConnection } from "../../adapters/azure-sql/connect.js";
 import type { PostgresConnection } from "../../adapters/postgres/connect.js";
@@ -9,7 +10,6 @@ import { ServiceUnavailableError } from "../../utils/errors.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { describeEachEngine } from "../support/engines.js";
 import type { SourceType } from "../../adapters/types.js";
-import { refreshSource } from "../../catalog/refresh.js";
 import { poolSizeFor } from "../../sources/connect.js";
 import { storedType } from "../../sources/types.js";
 import { prisma } from "../../utils/db/prisma.js";

@@ -74,6 +74,14 @@
       the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
       upload_source_busy`.
 
+      **From a spreadsheet:** the staging may be one of a Google spreadsheet (`POST
+      /v1/uploads/links`); its tabs become tables synced every `sync_interval_minutes` (15 to
+      1440, default 60) and claim the spreadsheet: one an unarchived source already reads is
+      `409 sheet_in_use` (it says nothing of whose). A source may mix tables from files and
+      spreadsheets, so the type is `upload` either way; the response carries `sync` once it has
+      Sheets tables. Further errors: `404 google_not_configured`, `422 sheet_not_accessible`,
+      `502 google_unavailable`, `502 google_sign_in_failed`.
+
       **Required permissions:** `zeteo.sources.write` or `zeteo.uploads.write` to reach the
       route, then as above for the body's `type` (`403 forbidden` without).
     operationId: createSource
@@ -96,27 +104,27 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `uploads_not_configured` or `staging_not_found` (an upload source)
+        description: Not found - `uploads_not_configured`, `staging_not_found` (an upload source) or `google_not_configured` (a spreadsheet staging)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source)
+        description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source), `sheet_in_use` (a spreadsheet staging)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
-        description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source
+        description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` or `sheet_not_accessible` for an upload source
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '502':
-        description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login
+        description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login; `google_unavailable` or `google_sign_in_failed` for a spreadsheet staging
         content:
           application/json:
             schema:

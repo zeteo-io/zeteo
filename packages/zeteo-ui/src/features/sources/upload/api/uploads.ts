@@ -4,6 +4,7 @@ import type { Source } from "../../api/types";
 import { useCallback } from "react";
 import type {
   CreateUploadSource,
+  SheetStaging,
   Staging,
   TableCorrection,
   UpdateColumn,
@@ -29,7 +30,7 @@ interface Page {
   next_cursor: string | null;
 }
 
-/** The caller's own upload sources, deleted ones left out: My sources. */
+/** The caller's own sources (files and Google Sheets), deleted ones left out: My sources. */
 export const useMyUploads = () => {
   const api = useZeteoApi();
   return useQuery<Source[], ApiError>({
@@ -42,7 +43,7 @@ export const useMyUploads = () => {
         const body = await call(() =>
           api.get<Page>("/v1/sources", {
             params: {
-              type: "upload",
+              // Only an upload or a Google Sheets source has an owner.
               owner_id: "me",
               limit: PAGE_LIMIT,
               ...(cursor ? { cursor } : {}),
@@ -68,6 +69,19 @@ export const useUploadFile = () => {
       form.append("file", file);
       return call(() => api.post<Staging>("/v1/uploads", form));
     },
+  });
+};
+
+/** Stages any Google Sheet from its link (for an existing source too, with its `source_id`): the answer is its preview. */
+export const useStageSheet = () => {
+  const api = useZeteoApi();
+  return useMutation<
+    SheetStaging,
+    ApiError,
+    { url: string; source_id?: string }
+  >({
+    mutationFn: (body) =>
+      call(() => api.post<SheetStaging>("/v1/uploads/links", body)),
   });
 };
 

@@ -47,6 +47,12 @@
       **Upload sources only:** a database source is `409 not_an_upload_source`. A deleted upload
       source is `409 source_archived`; `404 uploads_not_configured` while
       `UPLOADS_READER_URL` is unset.
+
+      **Files and spreadsheets mix:** the staging may be a file's or a spreadsheet's (`POST
+      /v1/uploads/links` with this `source_id`); a spreadsheet's tabs become Sheets tables that
+      sync with the source. A spreadsheet another unarchived source reads is `409 sheet_in_use`
+      (it says nothing of whose; the source's own claim is fine), and a tab the source already
+      has as a table is `409 tab_already_added`.
     operationId: addTables
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -73,7 +79,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken` or `quota_exceeded`
+        description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, `quota_exceeded`, `sheet_in_use` or `tab_already_added` (a spreadsheet staging)
         content:
           application/json:
             schema:

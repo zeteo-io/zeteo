@@ -28,9 +28,10 @@ export const getSource = async (req: Request, res: Response) => {
 };
 
 /**
- * An admin changes any source. An upload source's owner may only rename it
- * or change its description (as may an admin, recorded as a change of the
- * upload source); its limits are an admin's.
+ * An admin changes any source. An upload source's owner may only rename it,
+ * change its description or (a Sheets source) its sync interval, as may an
+ * admin, recorded as a change of the upload source; its limits are an
+ * admin's, and an admin may change them with the interval in one request.
  */
 export const updateSource = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
@@ -38,17 +39,21 @@ export const updateSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
   const row = await db.sources.findById(sourceId);
   if (!row) throw new NotFoundError("Source not found");
+  const { sync_interval_minutes: syncInterval, ...rest } = body;
   if (
     isUploadSource(row) &&
-    Object.keys(body).every((key) =>
-      UPLOAD_SOURCE_FIELDS.has(key as keyof typeof body)
+    Object.keys(rest).every((key) =>
+      UPLOAD_SOURCE_FIELDS.has(key as keyof typeof rest)
     )
   ) {
-    const { name, description } = body;
+    const { name, description } = rest;
     res.status(200).json(
       await changeUploadSource(caller, sourceId, {
         ...(name !== undefined && { name }),
         ...(description !== undefined && { description }),
+        ...(syncInterval !== undefined && {
+          sync_interval_minutes: syncInterval,
+        }),
       })
     );
     return;
@@ -56,6 +61,8 @@ export const updateSource = async (req: Request, res: Response) => {
   if (!hasPermission(caller.permissions, SOURCES_WRITE)) {
     throw lacking(SOURCES_WRITE);
   }
+  // A Sheets source's interval is changed with its limits, in one entry;
+  // any other source answers `not_synced`.
   const updated = await update(sourceId, body, caller.userId);
   // New settings or schemas describe another target: the catalogue follows now,
   // not at the next daily refresh. The change stands whether or not this works.

@@ -62,7 +62,8 @@ export const listSources = async (req: Request, res: Response) => {
   });
 };
 
-const isUpload = (body: unknown): boolean =>
+/** Whether a create body names an upload source rather than a database source. */
+const isUploadBody = (body: unknown): boolean =>
   typeof body === "object" &&
   body !== null &&
   (body as { type?: unknown }).type === "upload";
@@ -74,14 +75,14 @@ const isUpload = (body: unknown): boolean =>
  */
 export const createSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
-  if (isUpload(req.body)) {
+  if (isUploadBody(req.body)) {
     assertUploadsOn();
     for (const permission of [DATA_READ, UPLOADS_WRITE]) {
       if (!hasPermission(caller.permissions, permission)) {
         throw lacking(permission);
       }
     }
-    const { type: _, ...input } = validateBody(CreateUploadSourceSchema, req);
+    const input = validateBody(CreateUploadSourceSchema, req);
     res.status(201).json(await createUploadSource(caller, input));
     return;
   }

@@ -35,6 +35,11 @@ const RelationsPage = lazy(() =>
     default: m.SourceRelationsPage,
   }))
 );
+const UploadsPage = lazy(() =>
+  import("./components/SourceTabs").then((m) => ({
+    default: m.SourceUploadsPage,
+  }))
+);
 const SharingPage = lazy(() =>
   import("./components/SourceTabs").then((m) => ({
     default: m.SourceSharingPage,
@@ -53,6 +58,17 @@ const AddTablesPage = lazy(() =>
 const ReuploadPage = lazy(() =>
   import("./upload/components/AddDataPage").then((m) => ({
     default: m.ReuploadPage,
+  }))
+);
+
+const MergedTableNewPage = lazy(() =>
+  import("./upload/components/MergedTablePage").then((m) => ({
+    default: m.MergedTableNewPage,
+  }))
+);
+const MergedTableEditPage = lazy(() =>
+  import("./upload/components/MergedTablePage").then((m) => ({
+    default: m.MergedTableEditPage,
   }))
 );
 
@@ -124,6 +140,7 @@ export const sourceRoutes = [
       { index: true, element: loading(<SourceDetailPage />) },
       { path: "tables", element: loading(<TablesPage />) },
       { path: "tables/:tableId", element: loading(<TablePage />) },
+      { path: "uploads", element: loading(<UploadsPage />) },
       { path: "relations", element: loading(<RelationsPage />) },
       { path: "sharing", element: loading(<SharingPage />) },
     ],
@@ -133,6 +150,22 @@ export const sourceRoutes = [
     element: (
       <UploadGuard permissions={CHANGE_UPLOAD}>
         <AddTablesPage />
+      </UploadGuard>
+    ),
+  },
+  {
+    path: "/sources/:sourceId/merged/new",
+    element: (
+      <UploadGuard permissions={CHANGE_UPLOAD}>
+        <MergedTableNewPage />
+      </UploadGuard>
+    ),
+  },
+  {
+    path: "/sources/:sourceId/tables/:tableId/merged/edit",
+    element: (
+      <UploadGuard permissions={CHANGE_UPLOAD}>
+        <MergedTableEditPage />
       </UploadGuard>
     ),
   },

@@ -66,6 +66,8 @@ export const AUDIT_EVENTS = {
   sourceTablesAdded: "zeteo.source.tables_added",
   sourceTableReuploaded: "zeteo.source.table_reuploaded",
   sourceTableRemoved: "zeteo.source.table_removed",
+  sourceMergedTableSaved: "zeteo.source.merged_table_saved",
+  connectionUpdated: "zeteo.connection.updated",
   relationDeclared: "zeteo.relation.declared",
   relationRenamed: "zeteo.relation.renamed",
   relationRemoved: "zeteo.relation.removed",
@@ -117,6 +119,10 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
     "An upload source's table was replaced by a new upload",
   [AUDIT_EVENTS.sourceTableRemoved]:
     "A table was removed from an upload source",
+  [AUDIT_EVENTS.sourceMergedTableSaved]:
+    "A merged table of an upload source was created or changed",
+  [AUDIT_EVENTS.connectionUpdated]:
+    "The Google service-account key was set or replaced",
   [AUDIT_EVENTS.relationDeclared]: "A relation was declared between two tables",
   [AUDIT_EVENTS.relationRenamed]: "A relation was renamed",
   [AUDIT_EVENTS.relationRemoved]: "A declared relation was removed",
@@ -165,6 +171,8 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.sourceTablesAdded]: SOURCES_READ,
   [AUDIT_EVENTS.sourceTableReuploaded]: SOURCES_READ,
   [AUDIT_EVENTS.sourceTableRemoved]: SOURCES_READ,
+  [AUDIT_EVENTS.sourceMergedTableSaved]: SOURCES_READ,
+  [AUDIT_EVENTS.connectionUpdated]: SOURCES_READ,
   [AUDIT_EVENTS.relationDeclared]: SOURCES_READ,
   [AUDIT_EVENTS.relationRenamed]: SOURCES_READ,
   [AUDIT_EVENTS.relationRemoved]: SOURCES_READ,

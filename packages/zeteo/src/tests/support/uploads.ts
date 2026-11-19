@@ -221,7 +221,7 @@ export const uploadTablesOf = async (sourceId: string) => {
     name: t.name,
     description: t.description,
     row_count: Number(t.rowCount ?? 0),
-    last_synced_at: t.lastSyncedAt?.toISOString() ?? null,
+    last_loaded_at: t.lastSyncedAt?.toISOString() ?? null,
     missing: t.missingSince !== null,
     columns: t.columns.map((c) => ({
       id: c.id,

@@ -12,36 +12,68 @@
       `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
       See `docs/catalog.md`.
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without).
+      **An upload source** is synced instead (Sync now): each of its Google Sheets tables that is
+      not removed is read again and reloaded on its own. When at least one table synced (or there
+      is nothing to load, such as a tab that is gone) the answer is `200` with a `SyncSummary`,
+      which carries an `error` for each table that did not sync (the others still did): its `code`
+      is the cause, such as `sheet_not_accessible`, `google_unavailable`,
+      `google_sign_in_failed`, `cast_failed`, `empty_file`, `quota_exceeded` or `sync_failed`.
+      When **every** table failed, the request fails with the **first** table's error instead
+      (its status and code as listed under Errors), and no summary is returned. A table's failure
+      is also recorded as its `sync_error`, and the source's `sync.failing` lists it. The request
+      also fails when no sync can start: `409 nothing_to_sync` (the source has no Google Sheets
+      table, live or missing), `429 sync_too_soon` (a second Sync now within a minute, with
+      `Retry-After`; `nothing_to_sync` is answered before that window is taken) or
+      `503 upload_source_busy` (the window is freed again).
 
-      **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
-      (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). An upload source's
+      owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
+
+      **Errors:** `404 not_found`, `404 uploads_not_configured` (an upload source), `409 source_archived`,
+      `409 nothing_to_sync`, `429 sync_too_soon`, `503 upload_source_busy`; on an upload source, when
+      every table failed, the first table's error: `422 sheet_not_accessible`, `422 cast_failed`,
+      `422 empty_file` or an upload limit (`422 too_many_rows`, `422 too_many_columns`),
+      `409 quota_exceeded`, `502 google_unavailable`, `502 google_sign_in_failed`,
+      `404 google_not_configured`; on a database source `422 host_not_allowed` and
       `502 source_unreachable`.
     operationId: refreshSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
     responses:
       '200':
-        description: What the refresh changed
+        description: What the refresh changed (`RefreshSummary`), or for an upload source what the sync did (`SyncSummary`)
         content:
           application/json:
             schema:
-              $ref: '../../components/catalog/schemas.yaml#/RefreshSummary'
+              oneOf:
+                - $ref: '../../components/catalog/schemas.yaml#/RefreshSummary'
+                - $ref: '../../components/catalog/schemas.yaml#/SyncSummary'
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
-      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '409':
+        description: Conflict - `source_archived`; on an upload source `nothing_to_sync` (no Google Sheets table to sync) or `quota_exceeded` (every table failed, the first one's error)
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '429':
+        description: Too many requests - `sync_too_soon` (an upload source synced less than a minute ago), with `retry_after` and the `Retry-After` header
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: The host is not permitted - `host_not_allowed`
+        description: The host is not permitted - `host_not_allowed` (a database source); on an upload source, when every table failed, the first table's error (`sheet_not_accessible`, `cast_failed`, `empty_file`, `too_many_rows`, `too_many_columns`)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '502':
-        description: Bad gateway - `source_unreachable`
+        description: Bad gateway - `source_unreachable` (a database source); on an upload source, when every table failed, `google_unavailable` or `google_sign_in_failed`
         content:
           application/json:
             schema:

@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 81 operations as the description", () => {
+  it("lists the same 87 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(81);
-    expect(Object.keys(found)).toHaveLength(81);
+    expect(blocks).toBe(87);
+    expect(Object.keys(found)).toHaveLength(87);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -190,6 +190,39 @@ describe("operations against the API description", () => {
         (c) => c.uploads.create(new Blob(["a,b\n1,2\n"]), "a.csv"),
       ],
       ["uploads.discard", (c) => c.uploads.discard(ID)],
+      ["uploads.fromLink", (c) => c.uploads.fromLink({ url: "abc" })],
+      [
+        "sources.createMergedTable",
+        (c) =>
+          c.sources.createMergedTable(ID, {
+            name: "m",
+            label_column: "l",
+            members: [
+              { table_id: ID, label: "a" },
+              { table_id: ID2, label: "b" },
+            ],
+            columns: [{ name: "x", from_name: "x", include: true }],
+          }),
+      ],
+      [
+        "sources.updateMergedTable",
+        (c) =>
+          c.sources.updateMergedTable(ID, ID2, {
+            name: "m",
+            label_column: "l",
+            members: [
+              { table_id: ID, label: "a" },
+              { table_id: ID2, label: "b" },
+            ],
+            columns: [{ name: "x", from_name: "x", include: true }],
+          }),
+      ],
+      ["sources.mergedColumns", (c) => c.sources.mergedColumns(ID, [ID, ID2])],
+      ["connections.google.get", (c) => c.connections.google.get()],
+      [
+        "connections.google.put",
+        (c) => c.connections.google.put({ service_account_key: "{}" }),
+      ],
       ["sources.list", (c) => c.sources.list()],
       [
         "sources.create",

@@ -69,6 +69,28 @@ export function isUniqueViolationOn(
   );
 }
 
+/**
+ * True if `err` is a unique violation of the index named `index` (found on its
+ * cause chain, or in a `P2002` target naming all of `columns`).
+ */
+export function isUniqueViolationOfIndex(
+  err: unknown,
+  index: string,
+  columns: string[]
+): boolean {
+  if (!isUniqueConstraintError(err)) return false;
+  return errorChain(err).some((o) => {
+    const constraint = o["constraint"] as
+      { index?: unknown; fields?: unknown } | undefined;
+    if (constraint?.index === index) return true;
+    const target = constraint?.fields ?? o["target"];
+    return (
+      Array.isArray(target) &&
+      columns.every((c) => target.map(String).includes(c))
+    );
+  });
+}
+
 interface AdapterCause {
   kind?: unknown;
   originalCode?: unknown;

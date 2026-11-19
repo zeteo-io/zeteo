@@ -16,6 +16,7 @@ import {
   NotADatabaseSourceError,
   issuesOf,
   NotFoundError,
+  NotSyncedError,
   SourceArchivedError,
   ValidationError,
   WritableLoginError,
@@ -52,7 +53,10 @@ export type CreateSourceInput = Pick<
     type: "postgres" | "azure-sql";
   };
 
-export type UpdateSourceInput = Partial<SourceFields>;
+export type UpdateSourceInput = Partial<SourceFields> & {
+  /** Minutes between syncs; an upload source only (`not_synced` otherwise). */
+  sync_interval_minutes?: number;
+};
 
 /** The per-source limits. */
 const LIMIT_FIELDS: ReadonlySet<keyof SourceFields> = new Set([
@@ -236,11 +240,15 @@ export const updateSource = async (
     isUploadSource(row) &&
     Object.keys(input).some(
       (key) =>
+        key !== "sync_interval_minutes" &&
         !UPLOAD_SOURCE_FIELDS.has(key as keyof SourceFields) &&
         !LIMIT_FIELDS.has(key as keyof SourceFields)
     )
   ) {
     throw new NotADatabaseSourceError();
+  }
+  if (input.sync_interval_minutes !== undefined && !isUploadSource(row)) {
+    throw new NotSyncedError();
   }
   if (row.archivedAt) throw new SourceArchivedError();
   const type = typeOf(row);
@@ -270,6 +278,9 @@ export const updateSource = async (
       where: { id, archivedAt: null },
       data: {
         ...optionalColumns(input),
+        ...(input.sync_interval_minutes !== undefined && {
+          syncIntervalMinutes: input.sync_interval_minutes,
+        }),
         ...(settingsChange && {
           sealedSettings: settingsChange.sealed as Prisma.InputJsonObject,
           writableLoginAllowed: settingsChange.verdict.overridden,

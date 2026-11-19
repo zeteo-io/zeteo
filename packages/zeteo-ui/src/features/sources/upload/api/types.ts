@@ -30,12 +30,19 @@ export interface PreviewTable {
   row_count: number;
   columns: PreviewColumn[];
   warnings: string[];
+  /** A Google Sheet tab that is already a live table of the source being added to. */
+  already_added?: { table_id: string; name: string };
 }
 
 export interface Staging {
   staging_id: string;
   expires_at: string;
   tables: PreviewTable[];
+}
+
+/** `POST /v1/uploads/links`: a staging of a Google Sheet, with the spreadsheet it came from. */
+export interface SheetStaging extends Staging {
+  spreadsheet: { id: string; title: string };
 }
 
 export interface ColumnCorrection {
@@ -58,6 +65,8 @@ export interface CreateUploadSource {
   description?: string;
   slug?: string;
   tables: TableCorrection[];
+  /** A Google Sheet staging: minutes between syncs, 15 to 1440 (zeteo's default is 60). */
+  sync_interval_minutes?: number;
 }
 
 export interface UpdateColumn {

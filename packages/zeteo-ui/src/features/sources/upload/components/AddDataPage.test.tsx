@@ -10,6 +10,11 @@ import {
   STAGING_ID,
   TABLE_ID,
   makePreviewTable,
+  GOOGLE_CONNECTION,
+  ROBOT_EMAIL,
+  SHEET_ID,
+  makeSheetStaging,
+  makeSheetsSource,
   makeStaging,
   makeUploadSource,
   uploadGet,
@@ -25,6 +30,15 @@ vi.mock("@tereo-io/react", async () =>
     api: { get, post, put, delete: del },
   })
 );
+
+// A new discard function on every render, as when the API client is rebuilt
+// after a token refresh: the page must still discard only when it is left.
+vi.mock("../api/uploads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/uploads")>()),
+  useDiscardStaging: () => (stagingId: string) => {
+    void del(`/v1/uploads/${stagingId}`);
+  },
+}));
 
 const renderAt = (route: string) =>
   renderWithProviders(
@@ -44,6 +58,9 @@ const renderAt = (route: string) =>
 type User = ReturnType<typeof userEvent.setup>;
 
 const upload = async (user: User, name = "Q3 sales.xlsx") => {
+  // Add data opens with a choice; Add tables and Re-upload go straight to a file.
+  const choice = screen.queryByRole("button", { name: /Upload a file/ });
+  if (choice) await user.click(choice);
   const input = document.querySelector<HTMLInputElement>('input[type="file"]')!;
   await user.upload(input, new File(["x"], name));
 };
@@ -116,6 +133,47 @@ describe("AddDataPage", () => {
     await user.click(screen.getByRole("button", { name: "Create source" }));
     expect(await screen.findByText("Source page")).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("keeps the staging while the person edits the preview, whatever re-renders", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.type(screen.getAllByLabelText(/^Name/)[0]!, " edited");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("says a preview that is gone has expired, above the form, and starts again", async () => {
+    const user = userEvent.setup();
+    post.mockImplementation(async (url: string) => {
+      if (url === "/v1/uploads") return { data: makeStaging() };
+      throw {
+        status: 404,
+        code: "staging_not_found",
+        message: "Upload not found or expired",
+      };
+    });
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+
+    const notice = await screen.findByText(/no longer available/);
+    const about = screen.getByRole("heading", { name: "About" });
+    expect(
+      notice.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(screen.queryByText("Upload not found or expired")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Start again" }));
+    // Back to the file picker, the preview gone.
+    await waitFor(() =>
+      expect(document.querySelector('input[type="file"]')).not.toBeNull()
+    );
+    expect(screen.queryByRole("heading", { name: "orders" })).toBeNull();
     expect(del).not.toHaveBeenCalled();
   });
 
@@ -464,5 +522,183 @@ describe("AddDataPage", () => {
     expect(screen.getByText("Try again in 5 seconds.")).toBeInTheDocument();
     // Still on the preview, to try again.
     expect(screen.getByRole("button", { name: "Add tables" })).toBeEnabled();
+  });
+});
+
+describe("AddDataPage: Google Sheet", () => {
+  const LINK = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
+  beforeEach(() => {
+    get
+      .mockReset()
+      .mockImplementation(
+        uploadGet(makeSheetsSource, undefined, (url) =>
+          url === "/v1/connections/google"
+            ? { data: GOOGLE_CONNECTION }
+            : undefined
+        )
+      );
+    post
+      .mockReset()
+      .mockImplementation(async (url: string) =>
+        url === "/v1/uploads/links"
+          ? { data: makeSheetStaging() }
+          : { data: makeSheetsSource() }
+      );
+    del.mockReset().mockResolvedValue({});
+  });
+
+  it("offers a file or a Google Sheet first", async () => {
+    renderAt("/my/data/new");
+    expect(
+      await screen.findByRole("button", { name: /Upload a file/ })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Google Sheet/ })
+    ).toBeInTheDocument();
+    expect(document.querySelector('input[type="file"]')).toBeNull();
+  });
+
+  it("shows the share email, posts the link, then creates the source with its interval", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    expect(await screen.findByText(ROBOT_EMAIL)).toBeInTheDocument();
+    expect(screen.getByText(/as a Viewer/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(post).toHaveBeenCalledWith("/v1/uploads/links", { url: LINK });
+    expect(
+      await screen.findByRole("heading", { name: "orders" })
+    ).toBeInTheDocument();
+    // The name comes from the spreadsheet's title; Sync every defaults to 60.
+    expect(screen.getByRole("textbox", { name: /^Name\W*$/ })).toHaveValue(
+      "Budget 2027"
+    );
+    const every = screen.getByLabelText(/Sync every/);
+    expect(every).toHaveValue(60);
+    await user.clear(every);
+    await user.type(every, "30");
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/v1/sources",
+        expect.objectContaining({
+          type: "upload",
+          staging_id: STAGING_ID,
+          name: "Budget 2027",
+          sync_interval_minutes: 30,
+        })
+      )
+    );
+    expect(await screen.findByText("Source page")).toBeInTheDocument();
+  });
+
+  it("blocks an interval outside 15 to 1440", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    await screen.findByText(ROBOT_EMAIL);
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    const every = await screen.findByLabelText(/Sync every/);
+    await user.clear(every);
+    await user.type(every, "2000");
+    expect(
+      screen.getByRole("button", { name: "Create source" })
+    ).toBeDisabled();
+    expect(
+      screen.getByText("Sync every is 15 to 1440 minutes.")
+    ).toBeInTheDocument();
+  });
+
+  it("offers Add tables a file or a Google Sheet, and posts the source with any link", async () => {
+    const user = userEvent.setup();
+    renderAt(`/sources/${FS_ID}/add`);
+    expect(
+      await screen.findByRole("heading", { name: "Add tables to Budget sheet" })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Upload a file/ })
+    ).toBeInTheDocument();
+    // Nothing is staged on its own.
+    expect(post).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Google Sheet/ }));
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/v1/uploads/links", {
+        source_id: FS_ID,
+        url: LINK,
+      })
+    );
+    expect(
+      await screen.findByRole("heading", { name: "orders" })
+    ).toBeInTheDocument();
+  });
+  const stageAdded = (tables: ReturnType<typeof makePreviewTable>[]) =>
+    post.mockImplementation(async (url: string) =>
+      url === "/v1/uploads/links"
+        ? { data: makeSheetStaging(tables) }
+        : { data: makeSheetsSource() }
+    );
+  const addedOrders = () =>
+    makePreviewTable({
+      already_added: { table_id: TABLE_ID, name: "orders_tab" },
+    });
+  const notes = () => makePreviewTable({ key: "sheet:Notes", name: "notes" });
+  const preview = async (user: User) => {
+    await user.click(
+      await screen.findByRole("button", { name: /Google Sheet/ })
+    );
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+  };
+
+  it("shows a tab already in the source as added, off and disabled, and never posts it", async () => {
+    stageAdded([addedOrders(), notes()]);
+    const user = userEvent.setup();
+    renderAt(`/sources/${FS_ID}/add`);
+    await preview(user);
+    expect(
+      await screen.findByRole("tab", { name: /^orders\s*Added/ })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^notes\s*$/ })).toBeInTheDocument();
+    const sec = within(await openSection(user, "orders"));
+    const link = sec.getByRole("link", { name: "orders_tab" });
+    expect(link).toHaveAttribute(
+      "href",
+      `/sources/${FS_ID}/tables/${TABLE_ID}`
+    );
+    expect(sec.getByText(/Already in this source as/)).toBeInTheDocument();
+    const keep = sec.getByLabelText("Keep");
+    expect(keep).toBeDisabled();
+    expect(keep).not.toBeChecked();
+    await openSection(user, "notes");
+    await user.click(screen.getByRole("button", { name: "Add tables" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        `/v1/sources/${FS_ID}/tables`,
+        expect.objectContaining({ tables: [{ key: "sheet:Notes" }] })
+      )
+    );
+  });
+
+  it("says so and disables Add tables when every tab is already added", async () => {
+    stageAdded([addedOrders()]);
+    const user = userEvent.setup();
+    renderAt(`/sources/${FS_ID}/add`);
+    await preview(user);
+    expect(
+      await screen.findByText(
+        "Every tab of this spreadsheet is already in this source."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add tables" })).toBeDisabled();
   });
 });

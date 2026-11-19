@@ -1,5 +1,6 @@
 import type { Source } from "../../../prisma/generated/client/index.js";
 import { prisma } from "./prisma.js";
+import env from "../../env.js";
 
 export const findById = (id: string): Promise<Source | null> =>
   prisma.source.findUnique({ where: { id } });
@@ -34,12 +35,50 @@ export const listPage = async (options: {
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
 };
 
-/** Unarchived sources never refreshed or last refreshed before `olderThan`, the longest-waiting first. */
-export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
-  prisma.source.findMany({
+/**
+ * Whether an upload source has Google Sheets tables (live or missing, not
+ * removed by their owner): only such a source syncs. One whose tables are all
+ * missing keeps syncing, so a restored tab brings its table back.
+ */
+export const hasSheetsTables = async (sourceId: string): Promise<boolean> => {
+  const found = await prisma.$queryRaw<unknown[]>`
+    SELECT 1 FROM "zeteo"."source_tables"
+    WHERE "source_id" = ${sourceId}::uuid
+      AND "origin"->>'kind' = 'google-sheets'
+      AND ("origin"->>'removed') IS DISTINCT FROM 'true'
+    LIMIT 1`;
+  return found.length > 0;
+};
+
+/**
+ * Whether an upload source with Google Sheets tables is due a sync at `now`: it has an interval,
+ * and no attempt (good or failed) within it. A failing source is so retried
+ * once per interval.
+ */
+export const syncIsDue = (
+  row: Pick<Source, "syncIntervalMinutes" | "lastSyncAttemptAt">,
+  now: Date
+): boolean =>
+  row.syncIntervalMinutes !== null &&
+  (row.lastSyncAttemptAt === null ||
+    row.lastSyncAttemptAt.getTime() <
+      now.getTime() - row.syncIntervalMinutes * 60_000);
+
+/**
+ * The unarchived sources due for the scheduled check, the longest-waiting
+ * first: database sources never refreshed or last refreshed before
+ * `olderThan`, then upload sources with Google Sheets tables whose sync interval has passed at
+ * `now` (`syncIsDue`) and that have Sheets tables (`hasSheetsTables`),
+ * while uploads are on (`UPLOADS_READER_URL`). A source of files only never
+ * is: its uploads keep it.
+ */
+export const listDue = async (
+  olderThan: Date,
+  now: Date
+): Promise<Source[]> => {
+  const databases = await prisma.source.findMany({
     where: {
       archivedAt: null,
-      // Upload sources are never refreshed: their uploads keep the catalogue.
       type: { not: "upload" },
       OR: [{ lastRefreshedAt: null }, { lastRefreshedAt: { lt: olderThan } }],
     },
@@ -48,6 +87,29 @@ export const listDueForRefresh = (olderThan: Date): Promise<Source[]> =>
       { id: "asc" },
     ],
   });
+  // Sheets tables are synced only while uploads are on.
+  if (!env.UPLOADS_READER_URL) return databases;
+  // The interval is per source, which Prisma's filters cannot compare with.
+  // Timestamps are stored as UTC without a zone.
+  const due = await prisma.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "zeteo"."sources" s
+    WHERE "type" = 'upload' AND "archived_at" IS NULL
+      AND "sync_interval_minutes" IS NOT NULL
+      AND EXISTS (SELECT 1 FROM "zeteo"."source_tables" t
+        WHERE t."source_id" = s."id"
+          AND t."origin"->>'kind' = 'google-sheets'
+          AND (t."origin"->>'removed') IS DISTINCT FROM 'true')
+      AND ("last_sync_attempt_at" IS NULL
+        OR "last_sync_attempt_at" < (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC') - make_interval(mins => "sync_interval_minutes"))`;
+  const sheets = await prisma.source.findMany({
+    where: { id: { in: due.map((d) => d.id) } },
+    orderBy: [
+      { lastSyncAttemptAt: { sort: "asc", nulls: "first" } },
+      { id: "asc" },
+    ],
+  });
+  return [...databases, ...sheets];
+};
 
 /** The slugs of the unarchived sources among `ids`. */
 export const listSlugs = async (ids: Iterable<string>): Promise<string[]> =>

@@ -27,6 +27,9 @@ Error:
             description: The field, dotted (`settings.port`); empty for the whole value
           message:
             type: string
+    merged_table:
+      type: string
+      description: On `table_in_merged_table`, the name of the live merged table that reads the table
     findings:
       type: array
       description: On `writable_login`, what the login check found; at most 20

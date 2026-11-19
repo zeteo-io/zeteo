@@ -1,3 +1,4 @@
+import { withMergedViews, type Touched } from "./mergedViews.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
 import type { PreviewTable, StagedTable } from "./staging.js";
@@ -367,13 +368,17 @@ export const checkQuota = async (
 
 /**
  * Runs `fn`, which swaps `loaded` in and changes the catalogue, in one audited
- * transaction whose lock waits end after `swapLockTimeoutMs`. If it fails, the
+ * transaction whose lock waits end after `swapLockTimeoutMs`, inside
+ * `withMergedViews`: the merged views over the tables `touched` (ids, or
+ * `"all"`) are dropped before `fn` and created again from the catalogue
+ * after it. If it fails, the
  * loads are dropped and nothing has changed; a lock wait or the transaction
  * running out of time answers `UploadSourceBusyError`.
  */
 export const inSwap = async <T>(
   sourceId: string,
   loaded: Loaded[],
+  touched: Touched,
   fn: (tx: Prisma.TransactionClient, audit: Audit) => Promise<T>
 ): Promise<T> => {
   try {
@@ -383,7 +388,7 @@ export const inSwap = async <T>(
         await tx.$executeRawUnsafe(
           `SET LOCAL lock_timeout = ${Math.floor(LOAD_LOCKING.swapLockTimeoutMs)}`
         );
-        return fn(tx, audit);
+        return withMergedViews(tx, sourceId, touched, () => fn(tx, audit));
       },
       { timeoutMs: LOAD_LOCKING.swapTimeoutMs }
     );

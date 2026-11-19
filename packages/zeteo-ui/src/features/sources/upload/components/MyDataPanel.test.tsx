@@ -89,7 +89,7 @@ describe("My sources", () => {
     expect(get).toHaveBeenCalledWith(
       "/v1/sources",
       expect.objectContaining({
-        params: expect.objectContaining({ type: "upload", owner_id: "me" }),
+        params: expect.objectContaining({ owner_id: "me" }),
       })
     );
     expect(

@@ -1,16 +1,18 @@
 import { Facts, LimitSections, When, type Row } from "../../components/Facts";
+import { Badge, BorderedSection, Button, Tooltip } from "@kosmeo-ui/react";
 import { FILE_COLUMN_TYPES, type UpdateColumn } from "../api/types";
 import { useRemoveTable, useUpdateColumn } from "../api/uploads";
 import { useSourceContext } from "../../components/context";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { sourceHref } from "../../components/sourceLabels";
 import { ConfirmButton } from "@/components/ConfirmButton";
-import { BorderedSection, Button } from "@kosmeo-ui/react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { columnTypeName, RETYPE_WARNING } from "./labels";
 import { PrincipalLabel } from "@/features/principals";
 import { LoadFailure } from "./CastFailedNotice";
 import { nameProblem } from "@/utils/queryName";
 import { useNavigate } from "react-router-dom";
+import { MergedDetail } from "./MergedDetail";
 import { formatBytes } from "./labels";
 import "./styles.css";
 import {
@@ -19,7 +21,90 @@ import {
   useAllTables,
   useTable,
   type ColumnEditing,
+  type Table,
 } from "@/features/tables";
+
+/** A sync interval in words: 60 → "Every hour", 90 → "Every 90 minutes". */
+export const intervalName = (minutes: number): string =>
+  minutes === 60
+    ? "Every hour"
+    : minutes % 60 === 0
+      ? `Every ${minutes / 60} hours`
+      : `Every ${minutes} minutes`;
+
+/**
+ * A tab's (or an xlsx sheet's) name on one line, at most 15rem wide: a longer
+ * one ends in "…" and shows in full in a tooltip; one that fits has none.
+ */
+const OriginTab = ({ name }: { name: string }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setCut(el.scrollWidth > el.clientWidth);
+  }, [name]);
+  return (
+    <Tooltip
+      disabled={!cut}
+      content={<span className="z-wide-tip">{name}</span>}
+    >
+      <span ref={ref} className="z-fs-origin-tab">
+        {name}
+      </span>
+    </Tooltip>
+  );
+};
+
+/** Where a table came from: its file, its spreadsheet tab, or its members; and a failing sync. */
+const OriginCell = ({ table }: { table: Table }) => {
+  const { origin } = table;
+  return (
+    <span className="z-fs-origin">
+      {origin?.kind === "file" ? (
+        <span className="z-fs-origin-name">
+          <Tooltip
+            content={<span className="z-wide-tip">{origin.filename}</span>}
+          >
+            <span>File Upload</span>
+          </Tooltip>
+          {origin.tab_title && <OriginTab name={origin.tab_title} />}
+        </span>
+      ) : origin?.kind === "google-sheets" ? (
+        <span className="z-fs-origin-name">
+          <Tooltip
+            content={
+              <span className="z-wide-tip">{origin.spreadsheet_title}</span>
+            }
+          >
+            <a href={origin.url} target="_blank" rel="noopener noreferrer">
+              Google Sheet
+            </a>
+          </Tooltip>
+          {origin.tab_title && <OriginTab name={origin.tab_title} />}
+        </span>
+      ) : origin?.kind === "merged" ? (
+        `Merged · ${origin.members} ${origin.members === 1 ? "table" : "tables"}`
+      ) : (
+        <span className="z-muted">—</span>
+      )}
+      {table.sync_error && (
+        <Tooltip
+          content={
+            <span className="z-wide-tip">
+              {table.sync_error.message || table.sync_error.code}
+            </span>
+          }
+        >
+          <span>
+            <Badge size="sm" variant="danger">
+              Sync failing
+            </Badge>
+          </span>
+        </Tooltip>
+      )}
+    </span>
+  );
+};
 
 /** An upload's overview: its data and owner, and its limits, laid out as a database source's. */
 export const UploadOverview = () => {
@@ -53,6 +138,19 @@ export const UploadOverview = () => {
                   : formatBytes(source.size_bytes),
               ],
               ["Tables", tables.length.toLocaleString()],
+              ...(source.sync
+                ? [
+                    ["Sync", intervalName(source.sync.interval_minutes)] as Row,
+                    [
+                      "Last synced",
+                      source.last_refreshed_at ? (
+                        <When iso={source.last_refreshed_at} />
+                      ) : (
+                        "Not yet"
+                      ),
+                    ] as Row,
+                  ]
+                : []),
               ["Added", <When iso={source.created_at} />],
               ...(source.archived_at
                 ? [["Deleted", <When iso={source.archived_at} />] as Row]
@@ -75,6 +173,11 @@ export const UploadTables = () => {
       catalogue="upload"
       tableHref={(id) => `${sourceHref(source.id)}/tables/${id}`}
       extraColumns={[
+        {
+          title: "Origin",
+          minWidth: "10rem",
+          cellElement: (t) => <OriginCell table={t} />,
+        },
         {
           title: "Rows",
           minWidth: "5rem",
@@ -111,14 +214,16 @@ const TableActions = ({
   if (!table || table.missing_since) return null;
   return (
     <>
-      <Button
-        size="sm"
-        variant="secondary"
-        fullWidth={false}
-        onClick={() => navigate(`${base}/tables/${table.id}/reupload`)}
-      >
-        Re-upload
-      </Button>
+      {table.origin?.kind !== "google-sheets" && !table.merged && (
+        <Button
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onClick={() => navigate(`${base}/tables/${table.id}/reupload`)}
+        >
+          Re-upload
+        </Button>
+      )}
       {tables.length > 1 && (
         <ConfirmButton
           danger
@@ -148,6 +253,8 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
   const { source, access } = useSourceContext();
   const updateColumn = useUpdateColumn(source.id, tableId);
   const base = sourceHref(source.id);
+  const { data: table } = useTable(source.id, tableId);
+  const merged = table?.merged ?? null;
   const columnEditing: ColumnEditing = {
     types: TYPE_CHOICES,
     nameProblem,
@@ -183,7 +290,18 @@ export const UploadTablePage = ({ tableId }: { tableId: string }) => {
           </span>
         )
       }
-      columnEditing={access.canManage ? columnEditing : undefined}
+      // A merged table's columns come from its definition: edit it there.
+      columnEditing={access.canManage && !merged ? columnEditing : undefined}
+      aside={
+        merged && (
+          <MergedDetail
+            sourceId={source.id}
+            tableId={tableId}
+            merged={merged}
+            canEdit={access.canManage}
+          />
+        )
+      }
     />
   );
 };

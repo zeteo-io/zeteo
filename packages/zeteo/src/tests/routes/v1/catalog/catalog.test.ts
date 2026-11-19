@@ -185,12 +185,12 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     ]);
   });
 
-  it("shows the kind of the source and null last_synced_at for a database table", async () => {
+  it("shows the kind of the source and null last_loaded_at for a database table", async () => {
     const res = await catalog(wide.token, `?source=${source.slug}`);
     expect(res.body.sources[0].kind).toBe("database");
     expect(
       res.body.sources[0].tables.every(
-        (t: { last_synced_at: unknown }) => t.last_synced_at === null
+        (t: { last_loaded_at: unknown }) => t.last_loaded_at === null
       )
     ).toBe(true);
   });

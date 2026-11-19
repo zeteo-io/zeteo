@@ -1,11 +1,13 @@
+import type { FileColumnType, SheetStaging, Staging } from "../api/types";
+import { isUploadType, sourceHref } from "../../components/sourceLabels";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { FileColumnType, Staging } from "../api/types";
-import { sourceHref } from "../../components/sourceLabels";
+import { syncIntervalProblem } from "@/utils/syncInterval";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { NotFound } from "@/components/NotFound";
 import { LoadFailure } from "./CastFailedNotice";
+import { SheetLinkStep } from "./SheetLinkStep";
 import { useSource } from "../../api/useSource";
 import { useNavigate } from "react-router-dom";
 import type { Source } from "../../api/types";
@@ -18,6 +20,7 @@ import {
   DescriptionField,
 } from "../../components/DescriptionField";
 import {
+  Alert,
   BorderedSection,
   Button,
   FileDropZone,
@@ -44,6 +47,9 @@ const ACCEPT = ".csv,.xlsx";
 const FORM_ID = "z-fs-form";
 
 const SLUG = /^[a-z][a-z0-9-]{1,62}$/;
+
+/** How often a Google Sheet is synced: zeteo's default, in minutes. */
+const DEFAULT_INTERVAL = "60";
 
 /** A file's name without its extension: "Q3 sales.xlsx" → "Q3 sales". */
 const baseName = (file: string) => file.replace(/\.[^.]+$/, "");
@@ -100,10 +106,42 @@ const FilePicker = ({
   );
 };
 
+type Origin = "file" | "sheet";
+
+/** The first step of Add data: where the data comes from. */
+const SourceChoice = ({ onChoose }: { onChoose: (origin: Origin) => void }) => (
+  <div className="z-fs-choices">
+    <button
+      type="button"
+      className="z-fs-choice"
+      onClick={() => onChoose("file")}
+    >
+      <span className="z-fs-choice-title">Upload a file</span>
+      <span className="z-fs-choice-note">
+        A CSV or Excel file, loaded once. Re-upload it when it changes.
+      </span>
+    </button>
+    <button
+      type="button"
+      className="z-fs-choice"
+      onClick={() => onChoose("sheet")}
+    >
+      <span className="z-fs-choice-title">Google Sheet</span>
+      <span className="z-fs-choice-note">
+        Zeteo keeps a copy and syncs it from the sheet on a schedule.
+      </span>
+    </button>
+  </div>
+);
+
 /** Upload a file, check its preview, then create a source, add tables or replace one table's data. */
 const AddData = ({ mode }: { mode: Mode }) => {
   const navigate = useNavigate();
   const [staging, setStaging] = useState<Staging | null>(null);
+  // Add data starts with a choice; Add tables follows its source's kind.
+  const [chosen, setChosen] = useState<Origin | null>(null);
+  const [syncEvery, setSyncEvery] = useState(DEFAULT_INTERVAL);
+  const origin: Origin | null = mode.kind === "reupload" ? "file" : chosen;
   const [edits, setEdits] = useState<Edits>({});
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -125,16 +163,41 @@ const AddData = ({ mode }: { mode: Mode }) => {
 
   // A staging the person leaves without using (Cancel, or navigating away)
   // is discarded, so it stops counting against their space.
+  // Only leaving the page discards it: the cleanup runs on unmount alone, with
+  // the latest discard function, so a re-render (a new API client after a
+  // token refresh, say) never throws away the preview the person is editing.
   const discard = useDiscardStaging();
+  const discardRef = useRef(discard);
+  useEffect(() => {
+    discardRef.current = discard;
+  }, [discard]);
   const unused = useRef<string | null>(null);
   useEffect(
     () => () => {
-      if (unused.current) discard(unused.current);
+      if (unused.current) discardRef.current(unused.current);
     },
-    [discard]
+    []
   );
 
-  const onStaged = (s: Staging, fileName: string) => {
+  // A failed create, add or re-upload is shown above the form and brought
+  // into view, wherever the person was in a long preview.
+  const failureRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (mutation.error) {
+      failureRef.current?.scrollIntoView?.({
+        block: "start",
+        behavior: "smooth",
+      });
+    }
+  }, [mutation.error]);
+  const startAgain = () => {
+    unused.current = null;
+    mutation.reset();
+    setStaging(null);
+    setEdits({});
+  };
+
+  const onStaged = (s: Staging, defaultName: string) => {
     setStaging(s);
     unused.current = s.staging_id;
     if (mode.kind === "reupload") {
@@ -150,7 +213,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
     } else {
       setEdits(initialEdits(s.tables));
     }
-    if (mode.kind === "create" && !name) changeName(baseName(fileName));
+    if (mode.kind === "create" && !name) changeName(defaultName);
   };
 
   const back =
@@ -162,7 +225,9 @@ const AddData = ({ mode }: { mode: Mode }) => {
   const ready =
     !!staging &&
     editsValid(staging.tables, edits) &&
-    (mode.kind !== "create" || (name.trim() !== "" && !slugProblem));
+    (mode.kind !== "create" || (name.trim() !== "" && !slugProblem)) &&
+    (!(mode.kind === "create" && origin === "sheet") ||
+      !syncIntervalProblem(syncEvery));
   const descriptionError = descriptionProblem(description);
 
   const submit = () => {
@@ -172,7 +237,7 @@ const AddData = ({ mode }: { mode: Mode }) => {
       return;
     }
     const kept = staging.tables
-      .filter((t) => edits[t.key]?.keep)
+      .filter((t) => edits[t.key]?.keep && !t.already_added)
       .map((t) => correctionOf(t, edits[t.key]!));
     const done = (source: Source) => {
       // The server has used the staging.
@@ -180,14 +245,17 @@ const AddData = ({ mode }: { mode: Mode }) => {
       navigate(sourceHref(source.id));
     };
     if (mode.kind === "create") {
+      const body = {
+        staging_id: staging.staging_id,
+        name: name.trim(),
+        ...(description.trim() && { description: description.trim() }),
+        ...(slug && { slug }),
+        tables: kept,
+      };
       create.mutate(
-        {
-          staging_id: staging.staging_id,
-          name: name.trim(),
-          ...(description.trim() && { description: description.trim() }),
-          ...(slug && { slug }),
-          tables: kept,
-        },
+        origin === "sheet"
+          ? { ...body, sync_interval_minutes: Number(syncEvery) }
+          : body,
         { onSuccess: done }
       );
     } else if (mode.kind === "add") {
@@ -259,7 +327,16 @@ const AddData = ({ mode }: { mode: Mode }) => {
         </p>
       )}
       {!staging ? (
-        <FilePicker onStaged={onStaged} />
+        origin === null ? (
+          <SourceChoice onChoose={setChosen} />
+        ) : origin === "sheet" ? (
+          <SheetLinkStep
+            sourceId={mode.kind === "add" ? mode.source.id : undefined}
+            onStaged={(s: SheetStaging) => onStaged(s, s.spreadsheet.title)}
+          />
+        ) : (
+          <FilePicker onStaged={(s, file) => onStaged(s, baseName(file))} />
+        )
       ) : (
         <form
           id={FORM_ID}
@@ -269,6 +346,29 @@ const AddData = ({ mode }: { mode: Mode }) => {
             submit();
           }}
         >
+          {mutation.error && (
+            <div ref={failureRef}>
+              {mutation.error.code === "staging_not_found" ? (
+                <Alert variant="danger">
+                  <p>
+                    This preview is no longer available: a preview is kept for
+                    an hour. Read the {origin === "sheet" ? "sheet" : "file"}{" "}
+                    again to carry on.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    fullWidth={false}
+                    onClick={startAgain}
+                  >
+                    Start again
+                  </Button>
+                </Alert>
+              ) : (
+                <LoadFailure error={mutation.error} />
+              )}
+            </div>
+          )}
           {mode.kind === "create" && (
             <BorderedSection title="About" as="h2">
               <FormGrid columns={2}>
@@ -299,13 +399,26 @@ const AddData = ({ mode }: { mode: Mode }) => {
               />
             </BorderedSection>
           )}
+          {mode.kind === "create" && origin === "sheet" && (
+            <BorderedSection title="Sync" as="h2">
+              <Input
+                label="Sync every"
+                type="number"
+                value={syncEvery}
+                error={syncIntervalProblem(syncEvery)}
+                helperText="Minutes between syncs, 15 to 1440. Zeteo reads the sheet again at this pace."
+                onChange={(e) => setSyncEvery(e.target.value)}
+              />
+            </BorderedSection>
+          )}
           <PreviewEditor
             tables={staging.tables}
             edits={edits}
             onChange={setEdits}
             mode={mode.kind === "reupload" ? "one" : "many"}
+            origin={origin ?? undefined}
+            sourceId={mode.kind === "add" ? mode.source.id : undefined}
           />
-          <LoadFailure error={mutation.error} />
         </form>
       )}
     </div>
@@ -335,7 +448,7 @@ const SourceLoader = ({
   if (isLoading) return <Spinner size="lg" />;
   if (!data) return <ErrorNotice error={error} />;
   // Only an upload has tables to add or re-upload.
-  if (data.type !== "upload") return <NotFound />;
+  if (!isUploadType(data.type)) return <NotFound />;
   return <>{children(data)}</>;
 };
 

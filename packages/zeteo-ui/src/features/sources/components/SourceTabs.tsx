@@ -1,11 +1,12 @@
 import { TableView, TablesList, useAllTables } from "@/features/tables";
+import { UploadOriginsPage } from "../upload/components/UploadOrigins";
 import { NoAccessSection } from "@/components/NoAccessSection";
+import { isUploadType, sourceHref } from "./sourceLabels";
 import { RelationsList } from "@/features/relations";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { SourceGrants } from "@/features/grants";
 import { NotFound } from "@/components/NotFound";
 import { useSourceContext } from "./context";
-import { sourceHref } from "./sourceLabels";
 import {
   UploadTablePage,
   UploadTables,
@@ -14,7 +15,7 @@ import {
 /** Tables: a database source's, or an upload's with its rows and loads. */
 export const SourceTablesPage = () => {
   const { source, access } = useSourceContext();
-  if (source.type === "upload") return <UploadTables />;
+  if (isUploadType(source.type)) return <UploadTables />;
   return (
     <TablesList
       sourceId={source.id}
@@ -43,7 +44,7 @@ export const SourceTablePage = () => {
   const { source, access } = useSourceContext();
   const tableId = useUuidParam("tableId");
   if (!tableId) return <NotFound />;
-  if (source.type === "upload") return <UploadTablePage tableId={tableId} />;
+  if (isUploadType(source.type)) return <UploadTablePage tableId={tableId} />;
   return (
     <TableView
       key={tableId}
@@ -63,7 +64,7 @@ export const SourceRelationsPage = () => {
     <RelationsList
       sourceId={source.id}
       canEdit={access.canManage}
-      catalogue={source.type === "upload" ? "upload" : "database"}
+      catalogue={isUploadType(source.type) ? "upload" : "database"}
     />
   );
 };
@@ -71,7 +72,7 @@ export const SourceRelationsPage = () => {
 /** Shared with: every grant on the source's tables, an upload owner's own included. */
 export const SourceSharingPage = () => {
   const { source, access } = useSourceContext();
-  const upload = source.type === "upload";
+  const upload = isUploadType(source.type);
   const { tables } = useAllTables(
     access.canSeeSharing ? source.id : undefined,
     {
@@ -101,4 +102,10 @@ export const SourceSharingPage = () => {
       canRemove={access.canRemoveGrants}
     />
   );
+};
+
+/** Upload Sources: only an upload source has one. */
+export const SourceUploadsPage = () => {
+  const { source } = useSourceContext();
+  return isUploadType(source.type) ? <UploadOriginsPage /> : <NotFound />;
 };

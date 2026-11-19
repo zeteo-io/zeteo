@@ -1,11 +1,11 @@
 // @module-tag int
 // @module-tag platform
+import { refreshDatabaseSource as refreshSource } from "../../catalog/refresh.js";
 import { createThrowawayDb, type ThrowawayDb } from "../support/throwawayDb.js";
 import { PostgresConnection } from "../../adapters/postgres/connect.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
-import { refreshSource } from "../../catalog/refresh.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { logger } from "../../utils/logger.js";
 import { randomUUID } from "crypto";

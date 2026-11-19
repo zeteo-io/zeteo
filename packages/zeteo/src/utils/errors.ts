@@ -274,7 +274,9 @@ const UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
 /**
  * A change of an upload source's data that could not start or finish in time:
  * another load of it holds its lock, or queries reading a table kept the swap
- * waiting past its lock timeout. Nothing changed; retry later.
+ * waiting past its lock timeout. The swap that waited changed nothing; in a
+ * sync, which swaps each table on its own, tables already swapped keep their
+ * new data. Retry later.
  */
 export class UploadSourceBusyError extends AppError {
   constructor() {
@@ -366,6 +368,86 @@ export class EmptyFileError extends AppError {
   constructor() {
     super(422, "empty_file", "The file has no data");
     this.name = "EmptyFileError";
+  }
+}
+
+/** A Google Sheets link or id that names no spreadsheet Zeteo can read from. */
+export class InvalidSheetLinkError extends AppError {
+  constructor() {
+    super(
+      422,
+      "invalid_sheet_link",
+      "Paste the link from the sheet's address bar or its Share dialog."
+    );
+    this.name = "InvalidSheetLinkError";
+  }
+}
+
+/** A spreadsheet an unarchived source already reads; says nothing of whose it is. */
+export class SheetInUseError extends AppError {
+  constructor() {
+    super(
+      409,
+      "sheet_in_use",
+      "This spreadsheet is already a Zeteo source. Ask an admin if it should be yours."
+    );
+    this.name = "SheetInUseError";
+  }
+}
+
+/** A spreadsheet tab that already backs a table of the source. */
+export class TabAlreadyAddedError extends AppError {
+  constructor() {
+    super(
+      409,
+      "tab_already_added",
+      "This tab is already a table of the source."
+    );
+    this.name = "TabAlreadyAddedError";
+  }
+}
+
+/**
+ * A re-upload of a table that is not a file's (it syncs from Google Sheets),
+ * or of a file's table from a Google Sheets staging.
+ */
+export class NotAFileUploadError extends AppError {
+  constructor(message = "This table syncs from Google Sheets; use Sync now.") {
+    super(409, "not_a_file_upload", message);
+    this.name = "NotAFileUploadError";
+  }
+}
+
+/** A table a live merged table of its source reads; names the merged table. */
+export class TableInMergedTableError extends AppError {
+  constructor(mergedTable: string) {
+    super(
+      409,
+      "table_in_merged_table",
+      `The merged table ${mergedTable} uses this table; edit the merged table first.`,
+      { details: { merged_table: mergedTable } }
+    );
+    this.name = "TableInMergedTableError";
+  }
+}
+
+/** A sync of an upload source that has no Google Sheets table that isn't removed (live or missing). */
+export class NothingToSyncError extends AppError {
+  constructor() {
+    super(
+      409,
+      "nothing_to_sync",
+      "This source has no Google Sheets tables to sync."
+    );
+    this.name = "NothingToSyncError";
+  }
+}
+
+/** A sync setting on a source that does not sync. */
+export class NotSyncedError extends AppError {
+  constructor() {
+    super(422, "not_synced", "Only an upload source has a sync interval.");
+    this.name = "NotSyncedError";
   }
 }
 
@@ -722,3 +804,59 @@ export const errorHandler = (
 
   writeError(res, response, req.requestId);
 };
+
+/** No Google service-account key has been set yet. */
+export class GoogleNotConfiguredError extends AppError {
+  constructor() {
+    super(
+      404,
+      "google_not_configured",
+      "Google is not connected. An admin can add a service-account key under Admin → Connections."
+    );
+    this.name = "GoogleNotConfiguredError";
+  }
+}
+
+/** Google refused a service-account key at sign-in; says nothing of why beyond that. */
+export class GoogleKeyRejectedError extends AppError {
+  constructor() {
+    super(
+      422,
+      "google_key_rejected",
+      "Google did not accept this service-account key. Check that it is the whole JSON key and that the account is enabled."
+    );
+    this.name = "GoogleKeyRejectedError";
+  }
+}
+
+/** The service account cannot read a spreadsheet: not shared with it, or it does not exist. */
+export class SheetNotAccessibleError extends AppError {
+  constructor(serviceAccountEmail: string) {
+    super(
+      422,
+      "sheet_not_accessible",
+      `Zeteo can't read this spreadsheet. Share it with ${serviceAccountEmail} as a Viewer.`
+    );
+    this.name = "SheetNotAccessibleError";
+  }
+}
+
+/** Google could not be reached or answered something unexpected. */
+export class GoogleUnavailableError extends AppError {
+  constructor() {
+    super(502, "google_unavailable", "Google could not be reached");
+    this.name = "GoogleUnavailableError";
+  }
+}
+
+/** Google refused the stored key at sign-in while reading a sheet. */
+export class GoogleSignInFailedError extends AppError {
+  constructor() {
+    super(
+      502,
+      "google_sign_in_failed",
+      "Zeteo can't sign in to Google. An admin should check the service-account key under Admin → Connections."
+    );
+    this.name = "GoogleSignInFailedError";
+  }
+}

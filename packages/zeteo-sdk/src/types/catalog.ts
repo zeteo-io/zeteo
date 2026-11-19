@@ -32,7 +32,7 @@ export interface DiscoveredTable {
   description: string | null;
   missing: boolean;
   /** When an upload source's table was last loaded (its data is as of then); null for a database table. */
-  last_synced_at: string | null;
+  last_loaded_at: string | null;
   columns: DiscoveredColumn[];
   relations: DiscoveredRelation[];
 }

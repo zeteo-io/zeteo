@@ -101,7 +101,7 @@ describe("POST /v1/sources (upload)", () => {
         name: "my_orders",
         description: null,
         row_count: 2,
-        last_synced_at: expect.any(String),
+        last_loaded_at: expect.any(String),
         missing: false,
         columns: [
           ["order_id", "Order ID", "number"],
@@ -224,9 +224,9 @@ describe("POST /v1/sources (upload)", () => {
   });
 
   it("re-infers the types when the header row differs from the preview's", async () => {
-    // Row 0 is a title; the real header is row 1.
+    // Row 0 is a full-width title; the real header is row 1.
     const csv = csvOf(
-      ["Report", "", ""],
+      ["Report", "of", "sales"],
       [
         ["id", "amount", "note"],
         ["1", "2.5", "x"],

@@ -46,7 +46,7 @@ export interface TableCorrection {
   columns?: ColumnCorrection[];
 }
 
-/** An upload source, made from the caller's staging. */
+/** An upload source, made from the caller's staging of a file or of a spreadsheet. */
 export interface CreateUploadSourceRequest {
   type: "upload";
   staging_id: string;
@@ -57,6 +57,8 @@ export interface CreateUploadSourceRequest {
   slug?: string;
   /** 1 to 100 staged tables, with any corrections. */
   tables: TableCorrection[];
+  /** 15 to 1440; used once the source has Google Sheets tables; the API's default is 60. */
+  sync_interval_minutes?: number;
 }
 
 export interface AddTablesRequest {
@@ -82,4 +84,33 @@ export interface TransferSourceRequest {
   user_id: string;
   /** The previous owner keeps an ordinary all-columns grant; the API's default is true. */
   keep_access?: boolean;
+}
+
+/** A spreadsheet's tabs, staged like a file's. */
+export interface SheetsUploadResponse extends UploadResponse {
+  tables: (StagedTable & {
+    /** With `source_id`: the tab is already this table of that source. */
+    already_added?: { table_id: string; name: string };
+  })[];
+  spreadsheet: { id: string; title: string };
+}
+
+/**
+ * The spreadsheet to stage: its link or id; with `source_id`, an upload
+ * source the caller owns, whose new tables the tabs are to become.
+ */
+export type LinkRequest = { url: string; source_id?: string };
+
+/** Who Zeteo signs in to Google as; never the key. */
+export interface GoogleConnection {
+  provider: "google";
+  /** The address to share a spreadsheet with, as a Viewer. */
+  service_account_email: string;
+  updated_at: string;
+  updated_by: string;
+}
+
+export interface PutGoogleConnectionRequest {
+  /** The service account's JSON key, as the object or as the text of the downloaded file. */
+  service_account_key: Record<string, unknown> | string;
 }
