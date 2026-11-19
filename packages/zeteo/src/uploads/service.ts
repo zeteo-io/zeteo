@@ -5,6 +5,7 @@ import { isUploadSource, typeOf } from "../sources/types.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { discardStaging, getStaging } from "./staging.js";
 import { presentSourceById } from "../sources/present.js";
+import { lockSourceMeasures } from "../measures/lock.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
 import type { SourceView } from "../views/source.js";
@@ -550,6 +551,10 @@ export const deleteUploadSource = async (
         data: { ownerGrant: false },
       });
       await releaseAllClaims(tx, id);
+      // Its measures and their editors go with the source.
+      await lockSourceMeasures(tx, id);
+      const measures = await tx.measure.deleteMany({ where: { sourceId: id } });
+      await tx.measureEditor.deleteMany({ where: { sourceId: id } });
       await dropSourceSchema(id, tx);
       audit({
         action: AUDIT_EVENTS.sourceDeleted,
@@ -561,6 +566,7 @@ export const deleteUploadSource = async (
           type: typeOf(row),
           name: row.name,
           owner_id: row.ownerId,
+          measures_removed: measures.count,
         },
       });
     })
@@ -994,6 +1000,14 @@ export const removeTable = async (
       if (origin?.kind === "google-sheets") {
         await releaseUnusedClaims(tx, id);
       }
+      // A measure lives on its home table: it goes with it.
+      await lockSourceMeasures(tx, id);
+      const measuresRemoved = await tx.measure.findMany({
+        where: { tableId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      });
+      await tx.measure.deleteMany({ where: { tableId } });
       audit({
         action: AUDIT_EVENTS.sourceTableRemoved,
         resourceType: "source",
@@ -1004,6 +1018,7 @@ export const removeTable = async (
           type: typeOf(row),
           changed: ["tables"],
           tables_removed: [{ id: tableId, name: table.name }],
+          measures_removed: measuresRemoved,
         },
       });
     })

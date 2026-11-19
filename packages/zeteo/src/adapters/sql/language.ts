@@ -460,6 +460,13 @@ const calcSchema = calcAt(1, true);
 /** The argument of a select-level aggregate: the aggregate itself is level 1. */
 const aggregateArgSchema = calcAt(2, false);
 
+/** A measure's formula: an expression as a calc select item holds one. */
+export const measureFormulaSchema = calcSchema;
+/** A measure's filter: a filter as a query's `where` holds one. */
+export const measureWhereSchema = filterSchema;
+/** A measure's name: the form of an `as` alias. */
+export const MEASURE_NAME_SCHEMA = measureNameSchema;
+
 /** sum, avg, min, max, count and countDistinct over an expression need a name; over a plain path they do not. */
 const needsAs = (key: string) => (item: object, ctx: z.RefinementCtx) => {
   const { as, [key]: arg } = item as Record<string, unknown>;

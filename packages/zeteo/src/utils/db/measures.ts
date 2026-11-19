@@ -7,7 +7,7 @@ import type {
 } from "../../../prisma/generated/client/index.js";
 
 /** The stored JSON, read as the language's types: validated when saved, and again by `visibleMeasures` when loaded. */
-const toRow = (m: Measure): MeasureRow => ({
+export const toRow = (m: Measure): MeasureRow => ({
   id: m.id,
   sourceId: m.sourceId,
   tableId: m.tableId,
@@ -25,6 +25,13 @@ export const listBySource = async (sourceId: string): Promise<MeasureRow[]> =>
       orderBy: { name: "asc" },
     })
   ).map(toRow);
+
+/** Every stored measure of a source, by name, with who wrote it and when. */
+export const listRecordsBySource = (sourceId: string): Promise<Measure[]> =>
+  prisma.measure.findMany({
+    where: { sourceId },
+    orderBy: { name: "asc" },
+  });
 
 /** One measure of a source; null when there is none. */
 export const findById = async (

@@ -499,6 +499,30 @@ export class OwnerGrantLockedError extends AppError {
   }
 }
 
+/**
+ * A measure that cannot be saved as written: the planner's code and message,
+ * at `path` in the request (`formula`, `where`, `table`).
+ */
+export class InvalidMeasureError extends AppError {
+  constructor(code: string, message: string, path: (string | number)[]) {
+    super(400, code, message, { details: { path } });
+    this.name = "InvalidMeasureError";
+  }
+}
+
+/** A change, rename or delete of a measure other measures use and would break: they are named. */
+export class MeasureInUseError extends AppError {
+  constructor(dependents: string[]) {
+    super(
+      409,
+      "measure_in_use",
+      `Other measures use this one and would break: ${dependents.join(", ")}`,
+      { details: { dependents } }
+    );
+    this.name = "MeasureInUseError";
+  }
+}
+
 export class ConflictError extends AppError {
   constructor(message: string, code = "conflict") {
     super(409, code, message);

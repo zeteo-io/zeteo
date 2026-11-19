@@ -11,6 +11,7 @@ import env from "../../../../../../env.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
+  MEASURES_WRITE,
   UPLOADS_WRITE,
   SOURCES_READ,
   SOURCES_WRITE,
@@ -235,5 +236,59 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
     });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("not_an_upload_source");
+  });
+  it("keeps the measure editors; the new owner edits measures, the previous one only if listed", async () => {
+    const from = await user();
+    const to = await user();
+    const listed = randomUUID();
+    const editorToken = (id: string) =>
+      tokenFor({
+        userId: id,
+        permissions: [DATA_READ, UPLOADS_WRITE, MEASURES_WRITE],
+      });
+    const source = await createUploadSource(
+      app.url,
+      from.token,
+      from.id,
+      csvOf(["id", "amount"], [["1", "5"]])
+    );
+    const put = await call(
+      "PUT",
+      `/${source.id}/measure-editors`,
+      editorToken(from.id),
+      { principals: [{ type: "user", id: listed }] }
+    );
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    const res = await call("POST", `/${source.id}/transfer`, from.token, {
+      user_id: to.id,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+
+    const editors = await prisma.measureEditor.findMany({
+      where: { sourceId: source.id },
+    });
+    expect(editors.map((e) => [e.principalType, e.principalId])).toEqual([
+      ["user", listed],
+    ]);
+    const measure = (name: string) => ({
+      name,
+      description: `The ${name}`,
+      table: "data",
+      formula: { sum: "amount" },
+    });
+    const byNew = await call(
+      "POST",
+      `/${source.id}/measures`,
+      editorToken(to.id),
+      measure("by_new_owner")
+    );
+    expect(byNew.status, JSON.stringify(byNew.body)).toBe(201);
+    const byPrevious = await call(
+      "POST",
+      `/${source.id}/measures`,
+      editorToken(from.id),
+      measure("by_previous_owner")
+    );
+    expect(byPrevious.status).toBe(403);
   });
 });
