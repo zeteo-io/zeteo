@@ -80,6 +80,43 @@ describe("/v1/sources/:sourceId/measures: who may change them", () => {
     await app.close();
   });
 
+  it("tells the list's caller whether they may edit and manage editors", async () => {
+    const flags = async (token: string) => {
+      const res = await api("GET", `/${source.id}/measures`, token);
+      expect(res.status, JSON.stringify(res.body)).toBe(200);
+      return [res.body.can_edit, res.body.can_manage_editors];
+    };
+    expect(await flags(listed.token)).toEqual([true, false]);
+    expect(await flags(grouped.token)).toEqual([true, false]);
+    expect(await flags(unlisted.token)).toEqual([false, false]);
+    expect(
+      await flags(tokenFor({ userId: listed.id, permissions: [DATA_READ] }))
+    ).toEqual([false, false]);
+    // An admin who is not listed manages the editors but cannot edit.
+    expect(await flags(measuresAdminToken())).toEqual([false, true]);
+  });
+
+  it("tells no one they may edit or manage editors once the source is archived", async () => {
+    const archived = await seedQuerySource(ENGINES[0]!, {}, "measures");
+    try {
+      await setEditors(app.url, archived.id, [listed.principal]);
+      const archive = await api(
+        "POST",
+        `/${archived.id}/archive`,
+        measuresAdminToken()
+      );
+      expect(archive.status).toBe(204);
+      for (const token of [listed.token, measuresAdminToken()]) {
+        const res = await api("GET", `/${archived.id}/measures`, token);
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
+        expect(res.body.can_edit).toBe(false);
+        expect(res.body.can_manage_editors).toBe(false);
+      }
+    } finally {
+      await removeSources([archived.id]);
+    }
+  });
+
   it("refuses a zeteo_user who is not listed with 403", async () => {
     const res = await api(
       "POST",

@@ -86,8 +86,18 @@ RedactedMeasure:
 
 ListMeasuresResponse:
   type: object
-  required: [data]
+  required: [data, can_edit, can_manage_editors]
   properties:
+    can_edit:
+      type: boolean
+      description: |
+        Whether the caller may create, change and delete the source's measures now: `zeteo.measures.write`,
+        an editor of the source, and the source not archived.
+    can_manage_editors:
+      type: boolean
+      description: |
+        Whether the caller may replace the source's editor list now: `zeteo.sources.write` or the
+        upload source's owner, and the source not archived.
     data:
       type: array
       description: A `Measure`, or a `RedactedMeasure` (told apart by its `id`, which a redacted one lacks)

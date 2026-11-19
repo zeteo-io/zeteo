@@ -33,9 +33,13 @@ describe("measures", () => {
   const t = useStubbedClient();
 
   it("list sends GET /v1/sources/{id}/measures", async () => {
-    t.stub.respond(() => ({ body: { data: [measure] } }));
+    t.stub.respond(() => ({
+      body: { data: [measure], can_edit: true, can_manage_editors: false },
+    }));
     const out = await t.client.measures.list(SRC);
     expect(out.data).toEqual([measure]);
+    expect(out.can_edit).toBe(true);
+    expect(out.can_manage_editors).toBe(false);
     expect(t.stub.requests[0]).toMatchObject({
       method: "GET",
       path: `/v1/sources/${SRC}/measures`,

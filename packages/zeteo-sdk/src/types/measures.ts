@@ -64,6 +64,10 @@ export interface RedactedMeasure {
 
 export interface ListMeasuresResponse {
   data: (Measure | RedactedMeasure)[];
+  /** Whether the caller may create, change and delete measures now: `zeteo.measures.write`, an editor, and the source not archived. */
+  can_edit: boolean;
+  /** Whether the caller may replace the editor list now: `zeteo.sources.write` or the upload's owner, and the source not archived. */
+  can_manage_editors: boolean;
 }
 
 /** A draft measure, not saved, and the optional date bucket its value is grouped by. */

@@ -1,6 +1,6 @@
 import type { CalcExpr, Filter } from "../../adapters/sql/language.js";
 import type { MeasureRow } from "../../grants/visibleCatalog.js";
-import { prisma } from "./prisma.js";
+import { prisma, type Prisma } from "./prisma.js";
 import type {
   Measure,
   MeasureEditor,
@@ -26,9 +26,12 @@ export const listBySource = async (sourceId: string): Promise<MeasureRow[]> =>
     })
   ).map(toRow);
 
-/** Every stored measure of a source, by name, with who wrote it and when. */
-export const listRecordsBySource = (sourceId: string): Promise<Measure[]> =>
-  prisma.measure.findMany({
+/** Every stored measure of a source, by name, with who wrote it and when; through `client` when given (a transaction). */
+export const listRecordsBySource = (
+  sourceId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma
+): Promise<Measure[]> =>
+  client.measure.findMany({
     where: { sourceId },
     orderBy: { name: "asc" },
   });

@@ -90,6 +90,15 @@ type BucketUnit = (typeof BUCKET_UNITS)[number];
 
 export type MeasureListItem = MeasureView | RedactedMeasureView;
 
+/** The source's measures as the caller sees them, and what the caller may change. */
+export interface MeasureList {
+  items: MeasureListItem[];
+  /** Whether the caller may create, change and delete measures now: an editor, on a source not archived. */
+  canEdit: boolean;
+  /** Whether the caller may replace the editor list now: `zeteo.sources.write` or the upload's owner, on a source not archived. */
+  canManageEditors: boolean;
+}
+
 const NOT_FOUND = "Measure not found";
 const NOUN_TAKEN = "The source already has a measure with this name";
 
@@ -113,16 +122,27 @@ interface Catalogs {
   mine: VisibleCatalog | null;
 }
 
-/** The source's catalogues for the caller, from one read of its rows. `access` is loaded before any transaction. */
-const loadCatalogs = async (
-  source: Source,
-  access: Access
-): Promise<Catalogs> => {
-  const [catalog, calendar, records] = await Promise.all([
+/** What a source's catalogues are built from apart from its measures: read outside any transaction. */
+interface CatalogBase {
+  catalog: Awaited<ReturnType<typeof db.catalog.loadSourceCatalog>>;
+  calendar: Awaited<ReturnType<typeof loadCalendar>>;
+}
+
+const loadCatalogBase = async (source: Source): Promise<CatalogBase> => {
+  const [catalog, calendar] = await Promise.all([
     db.catalog.loadSourceCatalog(source.id),
     loadCalendar(),
-    db.measures.listRecordsBySource(source.id),
   ]);
+  return { catalog, calendar };
+};
+
+/** The source's catalogues for the caller from its tables and calendar and one read of its measures. `access` is loaded before any transaction. */
+const catalogsOf = (
+  source: Source,
+  access: Access,
+  { catalog, calendar }: CatalogBase,
+  records: Measure[]
+): Catalogs => {
   const rows = records.map(toRow);
   const build = (a: Access, measures: MeasureRow[]) =>
     buildVisibleCatalog(
@@ -136,6 +156,38 @@ const loadCatalogs = async (
   const { measures: _none, ...full } = build(allAccess(source.id), []);
   const theirs = !source.archivedAt && access.sourceIds.has(source.id);
   return { records, rows, full, mine: theirs ? build(access, rows) : null };
+};
+
+/** The source's catalogues for the caller, outside any transaction. */
+const loadCatalogs = async (
+  source: Source,
+  access: Access
+): Promise<Catalogs> => {
+  const [base, records] = await Promise.all([
+    loadCatalogBase(source),
+    db.measures.listRecordsBySource(source.id),
+  ]);
+  return catalogsOf(source, access, base, records);
+};
+
+/**
+ * The source's catalogues inside a change: the measures read through `tx`
+ * after the source's measures are locked, so the checks see the rows no one
+ * else can change until the transaction ends; `base` is read beforehand.
+ */
+const lockedCatalogs = async (
+  tx: Prisma.TransactionClient,
+  source: Source,
+  access: Access,
+  base: CatalogBase
+): Promise<Catalogs> => {
+  await lockSourceMeasures(tx, source.id);
+  return catalogsOf(
+    source,
+    access,
+    base,
+    await db.measures.listRecordsBySource(source.id, tx)
+  );
 };
 
 /** The home table's query name: as the caller's catalogue names it, else as the whole one does. */
@@ -302,12 +354,13 @@ const brokenOf = (
  * The source's measures as the caller may see them: every one in full to
  * those who see all (with whether each is usable by them and broken), the
  * ones they may use in full to anyone else, and, to an editor, the rest
- * redacted. A source the caller has nothing of is not found.
+ * redacted. A source the caller has nothing of is not found. With them,
+ * whether the caller may change the measures and their editors.
  */
 export const listMeasures = async (
   caller: Caller,
   sourceId: string
-): Promise<MeasureListItem[]> => {
+): Promise<MeasureList> => {
   const source = await db.sources.findById(sourceId);
   if (!source) throw new NotFoundError("Source not found");
   const all = seesAllMeasures(caller, source);
@@ -336,7 +389,12 @@ export const listMeasures = async (
       });
     })
   );
-  return items.filter((i): i is MeasureListItem => i !== null);
+  const open = !source.archivedAt;
+  return {
+    items: items.filter((i): i is MeasureListItem => i !== null),
+    canEdit: open && editor,
+    canManageEditors: open && mayManageEditors(caller, source),
+  };
 };
 
 /** One measure, to a caller who may see it in full; anyone else gets the 404 a measure that does not exist gives. */
@@ -388,10 +446,12 @@ export const createMeasure = async (
   input: MeasureInput
 ): Promise<MeasureView> => {
   const source = await editableSource(caller, sourceId, "Source not found");
-  const access = await loadAccess(caller);
+  const [access, base] = await Promise.all([
+    loadAccess(caller),
+    loadCatalogBase(source),
+  ]);
   const { record, table } = await withAudit(async (tx, audit) => {
-    await lockSourceMeasures(tx, source.id);
-    const catalogs = await loadCatalogs(source, access);
+    const catalogs = await lockedCatalogs(tx, source, access, base);
     if (catalogs.rows.some((r) => r.name === input.name)) {
       throw new ConflictError(NOUN_TAKEN, "measure_name_taken");
     }
@@ -476,10 +536,12 @@ export const updateMeasure = async (
   patch: Partial<MeasureInput>
 ): Promise<MeasureView> => {
   const source = await editableSource(caller, sourceId, NOT_FOUND);
-  const access = await loadAccess(caller);
+  const [access, base] = await Promise.all([
+    loadAccess(caller),
+    loadCatalogBase(source),
+  ]);
   const { record, table } = await withAudit(async (tx, audit) => {
-    await lockSourceMeasures(tx, source.id);
-    const catalogs = await loadCatalogs(source, access);
+    const catalogs = await lockedCatalogs(tx, source, access, base);
     const before = fullySeen(caller, source, catalogs, id);
     const old = toRow(before);
     if (patch.name !== undefined && patch.name !== old.name) {
@@ -550,10 +612,12 @@ export const deleteMeasure = async (
   id: string
 ): Promise<void> => {
   const source = await editableSource(caller, sourceId, NOT_FOUND);
-  const access = await loadAccess(caller);
+  const [access, base] = await Promise.all([
+    loadAccess(caller),
+    loadCatalogBase(source),
+  ]);
   await withAudit(async (tx, audit) => {
-    await lockSourceMeasures(tx, source.id);
-    const catalogs = await loadCatalogs(source, access);
+    const catalogs = await lockedCatalogs(tx, source, access, base);
     const record = fullySeen(caller, source, catalogs, id);
     const dependents = dependentsOf(record.name, catalogs.rows);
     if (dependents.length > 0) {

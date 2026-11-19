@@ -13,7 +13,12 @@ import {
 
 export const getMeasures = async (req: Request, res: Response) => {
   const { sourceId } = validateParams(SourceParamsSchema, req);
-  res.status(200).json({ data: await listMeasures(callerOf(req), sourceId) });
+  const list = await listMeasures(callerOf(req), sourceId);
+  res.status(200).json({
+    data: list.items,
+    can_edit: list.canEdit,
+    can_manage_editors: list.canManageEditors,
+  });
 };
 
 export const postMeasure = async (req: Request, res: Response) => {

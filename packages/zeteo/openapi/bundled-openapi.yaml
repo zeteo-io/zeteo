@@ -1604,7 +1604,8 @@ paths:
         against their own visible catalogue, in full: a measure whose home table, columns or relations
         they are not granted is absent. A measure editor also sees the ones they cannot use, redacted
         (name, description, home table and `usable: false`, never the formula or filter). Editors and
-        those who see every measure get `used_by`.
+        those who see every measure get `used_by`. `can_edit` and `can_manage_editors` say whether the
+        caller may change the measures and their editors.
 
         A source the caller has nothing of is `404 not_found`.
 
@@ -9923,7 +9924,19 @@ components:
       type: object
       required:
         - data
+        - can_edit
+        - can_manage_editors
       properties:
+        can_edit:
+          type: boolean
+          description: |
+            Whether the caller may create, change and delete the source's measures now: `zeteo.measures.write`,
+            an editor of the source, and the source not archived.
+        can_manage_editors:
+          type: boolean
+          description: |
+            Whether the caller may replace the source's editor list now: `zeteo.sources.write` or the
+            upload source's owner, and the source not archived.
         data:
           type: array
           description: A `Measure`, or a `RedactedMeasure` (told apart by its `id`, which a redacted one lacks)
