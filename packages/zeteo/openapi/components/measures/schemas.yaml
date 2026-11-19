@@ -173,22 +173,20 @@ ReplaceMeasureEditorsRequest:
       items: { $ref: '../saved-queries/schemas.yaml#/SharePrincipal' }
 
 InvalidMeasureError:
-  description: The body of a `400` for a measure that does not plan. Its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]` or `["table"]`).
+  description: The body of a `400`. For a measure that does not plan its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]` or `["table"]`).
   allOf:
     - $ref: '../responses.yaml#/Error'
     - type: object
-      required: [path]
       properties:
         path:
           type: array
           items: { type: string }
 
 MeasureInUseError:
-  description: The body of `409 measure_in_use`
+  description: The body of a `409`; `dependents` is present on `measure_in_use` only (`measure_name_taken` and `source_archived` carry none)
   allOf:
     - $ref: '../responses.yaml#/Error'
     - type: object
-      required: [dependents]
       properties:
         dependents:
           type: array

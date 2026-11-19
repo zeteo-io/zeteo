@@ -33,6 +33,7 @@ export type {
   GetCatalogOptions,
   DiscoveredColumn,
   DiscoveredRelation,
+  DiscoveredMeasure,
   DiscoveredTable,
   DiscoveredSource,
   Catalog,
