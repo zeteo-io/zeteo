@@ -29,6 +29,25 @@ export interface SelectItemRef {
  * The few places where SQL engines differ. Identifier quoting is not one of
  * them: it comes from the dialect's own Kysely instance, which never connects.
  */
+/**
+ * Months a fiscal bucket shifts back before truncating and forward after: its
+ * period starts that many months after the calendar year's (or quarter's)
+ * start. Zero for a calendar unit and when the fiscal year starts in January.
+ */
+export const fiscalShift = (unit: BucketUnit, startMonth: number): number => {
+  if (unit === "fiscal_year") return startMonth - 1;
+  if (unit === "fiscal_quarter") return (startMonth - 1) % 3;
+  return 0;
+};
+
+/** The calendar unit a bucket truncates to once shifted. */
+export const truncUnit = (unit: BucketUnit): string =>
+  unit === "fiscal_year"
+    ? "year"
+    : unit === "fiscal_quarter"
+      ? "quarter"
+      : unit;
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -52,13 +71,16 @@ export interface SqlDialect {
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
    * Truncates a `date` or `timestamp` column to the start of its UTC bucket,
-   * keeping its type. `nativeType` is the column's own type name.
+   * keeping its type. `nativeType` is the column's own type name. A fiscal
+   * unit starts its year at `fiscalStartMonth` (1-12) and returns the
+   * period's first day.
    */
   bucket(
     unit: BucketUnit,
     column: Expression<unknown>,
     type: "date" | "timestamp",
-    nativeType: string
+    nativeType: string,
+    fiscalStartMonth: number
   ): Expression<unknown>;
   /**
    * Case-insensitive match against a pattern whose `\`, `%` and `_` are

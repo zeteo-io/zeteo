@@ -185,7 +185,8 @@ const selectExpression = (
         item.unit,
         column(item.column, dialect),
         item.column.type === "date" ? "date" : "timestamp",
-        item.column.nativeType
+        item.column.nativeType,
+        item.fiscalStartMonth
       );
     case "calc":
       return compileExpr(item.expr, dialect);

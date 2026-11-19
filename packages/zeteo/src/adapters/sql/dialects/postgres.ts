@@ -1,6 +1,7 @@
 import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { postgresBaseType } from "../../postgres/types.js";
 import { invalidValue } from "../../../engine/errors.js";
+import { fiscalShift, truncUnit } from "../dialect.js";
 import type { PlanValue } from "../types.js";
 import {
   DummyDriver,
@@ -102,6 +103,9 @@ const value = (
 
 const ESCAPE = "\\";
 
+/** A whole number of months; the number is the planner's integer, never user text. */
+const months = (n: number) => sql.raw(`interval '${n} months'`);
+
 /**
  * A column as every part of a query reads it. Money compares and sums only
  * with money, and prints with a currency symbol: it is read as numeric. An
@@ -146,9 +150,17 @@ export const postgresDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type) => {
-    const truncated = sql`date_trunc(${unit}, ${column})`;
-    return type === "date" ? sql`${truncated}::date` : truncated;
+  bucket: (unit, column, type, _nativeType, fiscalStartMonth) => {
+    const shift = fiscalShift(unit, fiscalStartMonth);
+    const truncated =
+      shift === 0
+        ? sql`date_trunc(${truncUnit(unit)}, ${column})`
+        : sql`date_trunc(${truncUnit(unit)}, ${column} - ${months(shift)}) + ${months(shift)}`;
+    return type === "date"
+      ? shift === 0
+        ? sql`${truncated}::date`
+        : sql`(${truncated})::date`
+      : truncated;
   },
   like: (expression, pattern, nativeType): Expression<SqlBool> =>
     sql<SqlBool>`${asText(expression, nativeType)} ilike ${pattern} escape ${sql.lit(ESCAPE)}`,

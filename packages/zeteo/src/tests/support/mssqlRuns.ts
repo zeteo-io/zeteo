@@ -238,6 +238,8 @@ export const useMssqlRuns = () => {
   });
 
   return {
+    /** The visible catalogue of the fixture source. */
+    catalog: () => catalog,
     /** The shared connection, pool size 3. */
     connection: () => connection,
     connectWith,

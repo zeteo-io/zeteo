@@ -13,7 +13,14 @@ export type JoinType = "inner" | "left";
 export type AggregateFn =
   "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
 /** Buckets truncate in UTC. */
-export type BucketUnit = "day" | "week" | "month" | "quarter" | "year";
+export type BucketUnit =
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | "fiscal_quarter"
+  | "fiscal_year";
 export type Direction = "asc" | "desc";
 
 export interface TableName {
@@ -97,6 +104,8 @@ export type ResolvedSelect =
   | {
       kind: "bucket";
       unit: BucketUnit;
+      /** The calendar's fiscal year start month (1-12); only a fiscal unit reads it. */
+      fiscalStartMonth: number;
       /** A `date` or `timestamp` column; the bucket keeps its type. */
       column: ColumnRef;
       output: string;

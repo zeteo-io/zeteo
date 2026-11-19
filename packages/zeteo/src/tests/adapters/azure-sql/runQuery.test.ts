@@ -4,10 +4,15 @@ import { AzureSqlPreparedQuery } from "../../../adapters/azure-sql/runQuery.js";
 import { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
 import { HIGH_WATER_ROWS } from "../../../adapters/azure-sql/runQuery.js";
 import type { SourceConnection } from "../../../adapters/types.js";
+import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
+import { planSql } from "../../../adapters/sql/plan.js";
 import { AppError } from "../../../utils/errors.js";
+import { runPlan } from "../../support/runPlan.js";
 import { describe, expect, it, vi } from "vitest";
 import sql from "mssql";
 import {
+  LIMITS,
   OPTIONS,
   drain,
   limitsOf,
@@ -17,6 +22,7 @@ import {
 } from "../../support/mssqlRuns.js";
 
 const {
+  catalog: catalogOf,
   connection,
   connectWith,
   connectWithDriverOptions,
@@ -314,6 +320,59 @@ describe("azure-sql runQuery", () => {
       ["2026-04-01T00:00:00.000Z", "658.50", 1.5],
       ["2026-05-01T00:00:00.000Z", "443.33", 2],
     ]);
+  });
+
+  it.each([
+    [
+      2,
+      [
+        ["2025-02-01T00:00:00.000Z", "2"],
+        ["2026-02-01T00:00:00.000Z", "10"],
+      ],
+    ],
+    [1, [["2026-01-01T00:00:00.000Z", "12"]]],
+  ])("buckets a fiscal year starting in month %s", async (month, expected) => {
+    const fiscal = planSql(
+      sqlQuerySchema.parse({
+        source: catalogOf().source.slug,
+        from: "orders",
+        select: [
+          { bucket: "fiscal_year", column: "created_at", as: "fy" },
+          { count: "*", as: "n" },
+        ],
+        groupBy: ["fy"],
+      }),
+      {
+        ...catalogOf(),
+        calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth: month },
+      }
+    );
+    const result = await runPlan("azure-sql", connection(), fiscal, LIMITS);
+    expect(result.rows).toEqual(expected);
+  });
+
+  it("sums a mixed-kind case like the same sum under where", async () => {
+    const cased = await run({
+      from: "orders",
+      select: [
+        {
+          sum: {
+            case: {
+              when: [{ if: { status: { eq: "paid" } }, then: "total" }],
+              else: 0,
+            },
+          },
+          as: "x",
+        },
+      ],
+    });
+    const filtered = await run({
+      from: "orders",
+      select: [{ sum: "total", as: "x" }],
+      where: { status: { eq: "paid" } },
+    });
+    expect(cased.rows).toEqual(filtered.rows);
+    expect(cased.rows).toEqual([["3585.59"]]);
   });
 
   it("follows a relation two joins deep", async () => {

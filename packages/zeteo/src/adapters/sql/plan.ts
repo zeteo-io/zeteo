@@ -859,6 +859,7 @@ export const planSql = (
       resolved = {
         kind: "bucket",
         unit: item.bucket,
+        fiscalStartMonth: catalog.calendar.fiscalYearStartMonth,
         column: ref,
         output: item.as ?? `${item.bucket}_${item.column.replaceAll(".", "_")}`,
         type: ref.type,

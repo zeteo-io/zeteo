@@ -1,5 +1,6 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
+import { fiscalShift } from "../dialect.js";
 import { plainNumber } from "../values.js";
 import {
   DummyDriver,
@@ -168,6 +169,8 @@ const DATEPART: Record<BucketUnit, string> = {
   month: "month",
   quarter: "quarter",
   year: "year",
+  fiscal_quarter: "quarter",
+  fiscal_year: "year",
 };
 
 /** The sum as SQL Server computes it without overflow or a float: bigint for small integers, decimal(38,0) for bigint. */
@@ -309,15 +312,20 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type, nativeType) => {
+  bucket: (unit, column, type, nativeType, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
-    if (type === "date")
-      return sql`cast(datetrunc(${part}, ${column}) as date)`;
+    const shift = fiscalShift(unit, fiscalStartMonth);
+    // The shift is the planner's integer, so it is written as a literal.
+    const truncated = (input: Expression<unknown>) =>
+      shift === 0
+        ? sql`datetrunc(${part}, ${input})`
+        : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${input})))`;
+    if (type === "date") return sql`cast(${truncated(column)} as date)`;
     const utc =
       baseType(nativeType) === "datetimeoffset"
         ? sql`switchoffset(${column}, '+00:00')`
         : column;
-    return sql`cast(datetrunc(${part}, ${utc}) as datetime2(3))`;
+    return sql`cast(${truncated(utc)} as datetime2(3))`;
   },
   // LOWER on both sides makes the match case-insensitive whatever the
   // column's collation; `[` opens a character class in SQL Server's LIKE.

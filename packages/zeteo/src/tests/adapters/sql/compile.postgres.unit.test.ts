@@ -2,6 +2,7 @@
 // @module-tag platform
 import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -155,6 +156,37 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["month", 1001, 0],
     });
+  });
+
+  it("shifts a fiscal year back to January, truncates and shifts forward", () => {
+    const fiscal = (unit: string, startMonth: number, column: string) =>
+      compileSql(
+        planSql(
+          sqlQuerySchema.parse({
+            source: "shop",
+            from: "orders",
+            select: [{ bucket: unit, column, as: "f" }],
+          }),
+          {
+            ...shopCatalog(),
+            calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth: startMonth },
+          }
+        ),
+        postgresDialect,
+        { limit: 1001, offset: 0 }
+      );
+    expect(fiscal("fiscal_year", 2, "created_at")).toEqual({
+      sql:
+        `select date_trunc($1, "t0"."created_at" - interval '1 months') + interval '1 months' as "c0" from "shop"."orders" as "t0"` +
+        ` order by "c0" asc nulls last limit $2 offset $3`,
+      parameters: ["year", 1001, 0],
+    });
+    expect(fiscal("fiscal_quarter", 5, "ordered_on").sql).toContain(
+      `(date_trunc($1, "t0"."ordered_on" - interval '1 months') + interval '1 months')::date`
+    );
+    expect(fiscal("fiscal_year", 1, "created_at").sql).toContain(
+      `date_trunc($1, "t0"."created_at") as "c0"`
+    );
   });
 
   it("casts a date bucket back to date", () => {

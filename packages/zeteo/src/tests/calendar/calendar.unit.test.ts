@@ -1,4 +1,5 @@
 // @module-tag unit
+// @module-tag platform
 import { describe, expect, it } from "vitest";
 import {
   businessDays,

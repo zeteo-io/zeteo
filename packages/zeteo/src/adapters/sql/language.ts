@@ -174,6 +174,8 @@ export const BUCKET_UNITS = [
   "month",
   "quarter",
   "year",
+  "fiscal_quarter",
+  "fiscal_year",
 ] as const;
 
 export const CALC_OPS = [
