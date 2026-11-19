@@ -322,6 +322,35 @@ describe("calculations", () => {
       },
     ],
     [
+      "date, timestamp and relative literals",
+      {
+        calc: {
+          coalesce: [
+            "a",
+            { date: "2026-01-31" },
+            { relative: { unit: "day", offset: -1 } },
+          ],
+        },
+        as: "d",
+      },
+    ],
+    [
+      "a timestamp literal",
+      { calc: { max: { timestamp: "2026-01-31T10:00:00Z" } }, as: "t" },
+    ],
+    [
+      "dateAdd, dateDiff and datePart",
+      {
+        calc: {
+          add: [
+            { dateDiff: ["month", { dateAdd: ["a", -10000, "year"] }, "b"] },
+            { datePart: ["fiscal_quarter", "c"] },
+          ],
+        },
+        as: "d",
+      },
+    ],
+    [
       "count and countDistinct over an expression",
       { count: { lower: "a" }, as: "n" },
     ],
@@ -396,6 +425,31 @@ describe("calculations", () => {
       "countDistinct of *",
       { calc: { countDistinct: "*" }, as: "x" },
       ["select", 0, "calc", "countDistinct"],
+    ],
+    [
+      "a dateAdd amount of 10,001",
+      { calc: { dateAdd: ["a", 10001, "day"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 1],
+    ],
+    [
+      "a dateAdd amount that is not an integer",
+      { calc: { dateAdd: ["a", 1.5, "day"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 1],
+    ],
+    [
+      "a dateAdd unit that is not a date unit",
+      { calc: { dateAdd: ["a", 1, "hour"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 2],
+    ],
+    [
+      "a datePart part that is unknown",
+      { calc: { datePart: ["century", "a"] }, as: "x" },
+      ["select", 0, "calc", "datePart", 0],
+    ],
+    [
+      "a date literal with a stray key",
+      { calc: { date: "2026-01-01", value: "x" }, as: "x" },
+      ["select", 0, "calc"],
     ],
     [
       "a case with no branches",

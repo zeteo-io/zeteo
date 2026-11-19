@@ -21,6 +21,8 @@ import type {
   CalcExpr,
   CalcOp,
   Compared,
+  DateAddUnit,
+  DatePart,
   Comparison,
   Condition,
   Filter,
@@ -447,8 +449,43 @@ class Planner {
         hasAggregate: false,
       };
     }
+    if ("date" in expr || "timestamp" in expr) {
+      const type = "date" in expr ? "date" : "timestamp";
+      const given = "date" in expr ? expr.date : expr.timestamp;
+      const value = coerce(given, type);
+      if (value === undefined) {
+        throw fail(
+          "invalid_value",
+          `A ${type} literal is ${VALUE_FORMS[type]}`,
+          [...at, type]
+        );
+      }
+      return {
+        resolved: { kind: "literal", value: value as string, type },
+        hasAggregate: false,
+      };
+    }
+    if ("relative" in expr) {
+      return {
+        resolved: {
+          kind: "literal",
+          value: resolveRelativeDate(expr, this.now, this.catalog.calendar),
+          type: "date",
+        },
+        hasAggregate: false,
+      };
+    }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     const keyAt = [...at, key];
+    if (key === "dateAdd" || key === "dateDiff" || key === "datePart") {
+      return this.resolveDateOp(
+        key,
+        operand as unknown[],
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
     if (key === "case") {
       return this.resolveCase(
         operand as CaseOperand,
@@ -528,6 +565,81 @@ class Planner {
       },
       hasAggregate: resolvedOperands.some((o) => o.hasAggregate),
       bareColumn: resolvedOperands.find((o) => o.bareColumn)?.bareColumn,
+    };
+  }
+
+  /**
+   * `dateAdd`, `dateDiff` or `datePart`: the operands that are expressions
+   * must be dates or timestamps; the others were checked by the language.
+   */
+  private resolveDateOp(
+    key: "dateAdd" | "dateDiff" | "datePart",
+    operand: unknown[],
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const exprIndexes =
+      key === "dateAdd" ? [0] : key === "dateDiff" ? [1, 2] : [1];
+    const operands = exprIndexes.map((i) => {
+      const e = operand[i] as CalcExpr;
+      const p = [...at, i];
+      const calc = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(calc.resolved);
+      if (type !== "date" && type !== "timestamp") {
+        throw fail(
+          "invalid_operator",
+          `${key} needs a date or timestamp; ${typeof e === "string" ? `"${e}"` : "the operand"} is ${type}`,
+          p
+        );
+      }
+      return { ...calc, type };
+    });
+    const common = {
+      hasAggregate: operands.some((o) => o.hasAggregate),
+      bareColumn: operands.find((o) => o.bareColumn)?.bareColumn,
+    };
+    const first = operands[0]!;
+    if (key === "dateAdd") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateAdd",
+          arg: first.resolved,
+          amount: operand[1] as number,
+          unit: operand[2] as DateAddUnit,
+          type: first.type,
+        },
+      };
+    }
+    if (key === "dateDiff") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateDiff",
+          unit: operand[0] as DateAddUnit,
+          start: first.resolved,
+          end: operands[1]!.resolved,
+          operand: operands.some((o) => o.type === "timestamp")
+            ? "timestamp"
+            : "date",
+          type: "number",
+        },
+      };
+    }
+    const part = operand[0] as DatePart;
+    return {
+      ...common,
+      resolved: {
+        kind: "datePart",
+        part,
+        arg: first.resolved,
+        // Read only by a fiscal part: a calendar change leaves other plans alone.
+        fiscalStartMonth: part.startsWith("fiscal_")
+          ? this.catalog.calendar.fiscalYearStartMonth
+          : 1,
+        type: "number",
+      },
     };
   }
 

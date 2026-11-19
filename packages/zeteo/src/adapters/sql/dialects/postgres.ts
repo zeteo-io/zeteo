@@ -2,6 +2,7 @@ import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { postgresBaseType } from "../../postgres/types.js";
 import { invalidValue } from "../../../engine/errors.js";
 import { fiscalShift, truncUnit } from "../dialect.js";
+import type { DateAddUnit } from "../language.js";
 import type { PlanValue } from "../types.js";
 import {
   DummyDriver,
@@ -103,6 +104,16 @@ const value = (
 
 const ESCAPE = "\\";
 
+/** `n` units as an interval; the number and unit are the planner's, never user text. */
+const intervalOf = (n: number, unit: DateAddUnit) =>
+  sql.raw(
+    unit === "quarter"
+      ? `interval '${n * 3} months'`
+      : unit === "year"
+        ? `interval '${n * 12} months'`
+        : `interval '${n} ${unit === "week" ? "weeks" : unit === "month" ? "months" : "days"}'`
+  );
+
 /** A whole number of months; the number is the planner's integer, never user text. */
 const months = (n: number) => sql.raw(`interval '${n} months'`);
 
@@ -200,8 +211,58 @@ export const postgresDialect: SqlDialect = {
   // type to pick an operator or function by.
   literal: (v, type) => {
     if (type === "text") return sql`cast(${v} as text)`;
+    if (type === "date") return sql`cast(${v} as date)`;
+    if (type === "timestamp") return sql`cast(${v} as timestamptz)`;
     checkNumeric(v);
     return isBigint(v) ? sql`cast(${v} as bigint)` : sql`cast(${v} as numeric)`;
+  },
+  // The amount and unit are validated, so they are written as an interval
+  // literal. Postgres clamps a month step to the month's last day.
+  dateAdd: (expression, amount, unit, type) => {
+    const shifted = sql`${expression} + ${intervalOf(amount, unit)}`;
+    return type === "date" ? sql`cast(${shifted} as date)` : shifted;
+  },
+  dateDiff: (unit, start, end, type) => {
+    const s =
+      type === "date"
+        ? sql`cast(${start} as date)`
+        : sql`cast(${start} as timestamp)`;
+    const e =
+      type === "date"
+        ? sql`cast(${end} as date)`
+        : sql`cast(${end} as timestamp)`;
+    const days =
+      type === "date"
+        ? sql`(${e} - ${s})`
+        : sql`cast(trunc(extract(epoch from (${e} - ${s})) / 86400) as integer)`;
+    if (unit === "day") return days;
+    if (unit === "week") return sql`(${days} / 7)`;
+    const field = (part: "year" | "month", x: Expression<unknown>) =>
+      sql`cast(extract(${sql.raw(part)} from ${x}) as integer)`;
+    const boundaries = sql`((${field("year", e)} - ${field("year", s)}) * 12 + ${field("month", e)} - ${field("month", s)})`;
+    const shifted = sql`${s} + ${boundaries} * interval '1 month'`;
+    const completed = sql`(case when ${boundaries} > 0 and ${shifted} > ${e} then ${boundaries} - 1 when ${boundaries} < 0 and ${shifted} < ${e} then ${boundaries} + 1 else ${boundaries} end)`;
+    if (unit === "month") return completed;
+    return sql`(${completed} / ${sql.lit(unit === "quarter" ? 3 : 12)})`;
+  },
+  datePart: (part, expression, fiscalStartMonth) => {
+    const field = (name: string) =>
+      sql`cast(extract(${sql.raw(name)} from ${expression}) as integer)`;
+    switch (part) {
+      case "year":
+      case "quarter":
+      case "month":
+      case "day":
+        return field(part);
+      case "weekday":
+        return field("isodow");
+      case "fiscal_year":
+        return fiscalStartMonth === 1
+          ? field("year")
+          : sql`(${field("year")} + case when ${field("month")} >= ${sql.lit(fiscalStartMonth)} then 1 else 0 end)`;
+      case "fiscal_quarter":
+        return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
+    }
   },
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),

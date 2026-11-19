@@ -19,6 +19,9 @@ const MAX_KEYS = MAX_SELECT_ITEMS;
 
 const noNul = (s: string) => !s.includes("\u0000");
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
 /** `(<relation>.)*<column>`: segments of 1–128 characters, any but `.` and NUL. */
 const pathSchema = z
   .string()
@@ -199,12 +202,39 @@ export const MAX_CALC_NODES = 100;
 export const MAX_CALC_OPERANDS = 10;
 export const MAX_ROUND_PLACES = 10;
 export const MAX_CASE_BRANCHES = 10;
+export const MAX_DATE_ADD_AMOUNT = 10_000;
+export const DATE_ADD_UNITS = [
+  "day",
+  "week",
+  "month",
+  "quarter",
+  "year",
+] as const;
+export type DateAddUnit = (typeof DATE_ADD_UNITS)[number];
+export const DATE_PARTS = [
+  "year",
+  "quarter",
+  "month",
+  "day",
+  "weekday",
+  "fiscal_year",
+  "fiscal_quarter",
+] as const;
+export type DatePart = (typeof DATE_PARTS)[number];
+/** The date operations, besides the operations of `CALC_OPS`. */
+export const DATE_OPS = ["dateAdd", "dateDiff", "datePart"] as const;
 const MAX_TEXT_LITERAL_CHARS = 1000;
 
 export type CalcExpr =
   | string
   | number
   | { value: string }
+  | { date: string }
+  | { timestamp: string }
+  | RelativeDate
+  | { dateAdd: [CalcExpr, number, DateAddUnit] }
+  | { dateDiff: [DateAddUnit, CalcExpr, CalcExpr] }
+  | { datePart: [DatePart, CalcExpr] }
   | { add: CalcExpr[] }
   | { sub: [CalcExpr, CalcExpr] }
   | { mul: CalcExpr[] }
@@ -231,6 +261,20 @@ const textLiteralSchema = z.strictObject({
     .max(MAX_TEXT_LITERAL_CHARS)
     .refine(noNul, { error: "A text literal has no NUL" }),
 });
+
+const dateLiteralSchema = z.strictObject({
+  date: z.string().refine(noNul, { error: "A date literal has no NUL" }),
+});
+const timestampLiteralSchema = z.strictObject({
+  timestamp: z
+    .string()
+    .refine(noNul, { error: "A timestamp literal has no NUL" }),
+});
+
+/** The keys of the literal objects, which are expressions with no operation in them. */
+const LITERAL_KEYS = ["value", "date", "timestamp", "relative"] as const;
+const isLiteralObject = (v: unknown): boolean =>
+  isPlainObject(v) && LITERAL_KEYS.some((k) => k in v);
 
 const notStar = (v: unknown) => v !== "*";
 
@@ -265,9 +309,6 @@ const dispatching = <T>(
       }
     })
     .meta({ ...jsonSchema, description }) as unknown as z.ZodType<T>;
-
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
  * An expression whose operation or aggregate object, if it is one, is at
@@ -321,6 +362,21 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
           error: 'countDistinct takes a column or an expression, not "*"',
         })
       ),
+      dateAdd: deeper
+        ? z
+            .tuple([
+              inner,
+              z.int().min(-MAX_DATE_ADD_AMOUNT).max(MAX_DATE_ADD_AMOUNT),
+              z.enum(DATE_ADD_UNITS),
+            ])
+            .optional()
+        : tooDeepCalc.optional(),
+      dateDiff: deeper
+        ? z.tuple([z.enum(DATE_ADD_UNITS), inner, inner]).optional()
+        : tooDeepCalc.optional(),
+      datePart: deeper
+        ? z.tuple([z.enum(DATE_PARTS), inner]).optional()
+        : tooDeepCalc.optional(),
       case: deeper
         ? z
             .strictObject({
@@ -349,9 +405,18 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
       if (isPlainObject(value) && "value" in value) {
         return textLiteralSchema.safeParse(value);
       }
+      if (isPlainObject(value) && "date" in value) {
+        return dateLiteralSchema.safeParse(value);
+      }
+      if (isPlainObject(value) && "timestamp" in value) {
+        return timestampLiteralSchema.safeParse(value);
+      }
+      if (isPlainObject(value) && "relative" in value) {
+        return relativeDateSchema.safeParse(value);
+      }
       return node.safeParse(value);
     },
-    `A column path, a number, { value: "text" }, or an object with exactly one of ${[...CALC_OPS, ...AGGREGATE_KEYS].join(", ")}`,
+    `A column path, a number, { value: "text" }, { date }, { timestamp }, { relative }, or an object with exactly one of ${[...CALC_OPS, ...DATE_OPS, ...AGGREGATE_KEYS].join(", ")}`,
     { $ref: "#/$defs/CalcExpr" }
   );
 };
@@ -504,6 +569,66 @@ const CALC_JSON_SCHEMA_DEFS = {
       ),
       operation("lower", calcRef),
       operation("upper", calcRef),
+      {
+        type: "object",
+        properties: { date: { type: "string", format: "date" } },
+        required: ["date"],
+        additionalProperties: false,
+        description: "A date literal, YYYY-MM-DD",
+      },
+      {
+        type: "object",
+        properties: { timestamp: { type: "string", format: "date-time" } },
+        required: ["timestamp"],
+        additionalProperties: false,
+        description: "A timestamp literal, ISO 8601 with an offset or Z",
+      },
+      {
+        type: "object",
+        properties: { relative: { type: "object" } },
+        required: ["relative"],
+        additionalProperties: false,
+        description:
+          "A date relative to today in the calendar's time zone, as in where: { unit, offset, startOf? }",
+      },
+      operation(
+        "dateAdd",
+        {
+          type: "array",
+          prefixItems: [
+            calcRef,
+            {
+              type: "integer",
+              minimum: -MAX_DATE_ADD_AMOUNT,
+              maximum: MAX_DATE_ADD_AMOUNT,
+            },
+            { enum: [...DATE_ADD_UNITS] },
+          ],
+          minItems: 3,
+          maxItems: 3,
+        },
+        "[date or timestamp, amount, unit]: the moment shifted; a month or year step clamps to the month's last day"
+      ),
+      operation(
+        "dateDiff",
+        {
+          type: "array",
+          prefixItems: [{ enum: [...DATE_ADD_UNITS] }, calcRef, calcRef],
+          minItems: 3,
+          maxItems: 3,
+        },
+        "[unit, start, end]: whole units completed from start to end, negative when end is before start"
+      ),
+      operation(
+        "datePart",
+        {
+          type: "array",
+          prefixItems: [{ enum: [...DATE_PARTS] }, calcRef],
+          minItems: 2,
+          maxItems: 2,
+        },
+        "[part, date or timestamp]: a number; weekday is 1 for Monday to 7 for Sunday; fiscal parts follow the calendar's fiscal year, named by the year it ends in"
+      ),
       operation(
         "coalesce",
         operands(2, MAX_CALC_OPERANDS),
@@ -594,7 +719,7 @@ const CALC_JSON_SCHEMA_DEFS = {
 
 /** Operation and aggregate objects in one expression. */
 const countNodes = (expr: unknown): number => {
-  if (!isPlainObject(expr) || "value" in expr) return 0;
+  if (!isPlainObject(expr) || isLiteralObject(expr)) return 0;
   const [key, operand] = Object.entries(expr)[0] ?? [];
   if (key === undefined) return 0;
   if (key === "case") {

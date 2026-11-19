@@ -48,7 +48,7 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `postgres`    | behaviour specific to the Postgres dialect                            |
   | `mssql`       | behaviour specific to the SQL Server dialect                          |
   | `calc`        | calculations: expression operations, their types and levels           |
-  | `relative`    | relative dates: a moment as an offset from now, in a filter           |
+  | `relative`    | relative dates, in a filter and in a calculation; date operations     |
   | `available`   | saved queries available for dashboards                                |
   | `files`       | upload sources: the same behaviour over an uploaded source              |
   | `size`        | a source's size, measured by a catalogue refresh                      |

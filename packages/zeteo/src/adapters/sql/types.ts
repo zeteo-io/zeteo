@@ -1,5 +1,5 @@
+import type { CalcOp, DateAddUnit, DatePart } from "./language.js";
 import type { ColumnType, QueryPlan } from "../types.js";
-import type { CalcOp } from "./language.js";
 
 // The plan the SQL compiler consumes. It is complete: the compiler never reads
 // the catalogue or the query. Every name in it is a real catalogue name, every
@@ -60,14 +60,46 @@ export interface ResolvedJoin {
  */
 export type ResolvedExpr =
   | { kind: "column"; column: ColumnRef }
-  | { kind: "literal"; value: number | string; type: "number" | "text" }
+  | {
+      kind: "literal";
+      /** A date as `YYYY-MM-DD`, a timestamp as ISO 8601 with an offset or `Z`. */
+      value: number | string;
+      type: "number" | "text" | "date" | "timestamp";
+    }
   | {
       kind: "op";
       op: CalcOp;
       args: ResolvedExpr[];
       /** `round` only: decimal places. */
       places?: number;
-      type: "number" | "text";
+      /** `coalesce` yields its operands' type; every other operation a number or text. */
+      type: QueryableType;
+    }
+  | {
+      kind: "dateAdd";
+      arg: ResolvedExpr;
+      /** A validated integer, -10,000 to 10,000. */
+      amount: number;
+      unit: DateAddUnit;
+      /** The operand's type. */
+      type: "date" | "timestamp";
+    }
+  | {
+      kind: "dateDiff";
+      unit: DateAddUnit;
+      start: ResolvedExpr;
+      end: ResolvedExpr;
+      /** `timestamp` when either operand is one: both are read as that. */
+      operand: "date" | "timestamp";
+      type: "number";
+    }
+  | {
+      kind: "datePart";
+      part: DatePart;
+      arg: ResolvedExpr;
+      /** The calendar's fiscal year start month (1-12); only a fiscal part reads it. */
+      fiscalStartMonth: number;
+      type: "number";
     }
   | {
       kind: "case";

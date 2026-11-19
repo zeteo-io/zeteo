@@ -57,6 +57,9 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
         expr.column.type === "number" && dialect.isFloat(expr.column.nativeType)
       );
     case "literal":
+    case "dateAdd":
+    case "dateDiff":
+    case "datePart":
       return false;
     case "case":
       return [...expr.branches.map((b) => b.then), expr.otherwise].some(
@@ -104,6 +107,26 @@ export const compileExpr = (
       return dialect.literal(
         typeof expr.value === "number" ? plainNumber(expr.value) : expr.value,
         expr.type
+      );
+    case "dateAdd":
+      return dialect.dateAdd(
+        compileExpr(expr.arg, dialect),
+        expr.amount,
+        expr.unit,
+        expr.type
+      );
+    case "dateDiff":
+      return dialect.dateDiff(
+        expr.unit,
+        compileExpr(expr.start, dialect),
+        compileExpr(expr.end, dialect),
+        expr.operand
+      );
+    case "datePart":
+      return dialect.datePart(
+        expr.part,
+        compileExpr(expr.arg, dialect),
+        expr.fiscalStartMonth
       );
     case "case": {
       const whens = expr.branches.map(

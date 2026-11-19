@@ -1,4 +1,5 @@
 import type { Expression, Kysely, SelectQueryBuilder, SqlBool } from "kysely";
+import type { DateAddUnit, DatePart } from "./language.js";
 import type {
   AggregateFn,
   BucketUnit,
@@ -119,7 +120,43 @@ export interface SqlDialect {
    * any other number as an exact decimal where one holds it, text as text.
    * A number comes as plain decimal text (`plainNumber`).
    */
-  literal(value: string, type: "number" | "text"): Expression<unknown>;
+  literal(
+    value: string,
+    type: "number" | "text" | "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A date or timestamp shifted by `amount` (an integer from -10,000 to
+   * 10,000) units, keeping its type. A month, quarter or year step that lands
+   * past the end of a month gives that month's last day.
+   */
+  dateAdd(
+    expression: Expression<unknown>,
+    amount: number,
+    unit: DateAddUnit,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * The whole `unit`s completed from `start` to `end` as an integer,
+   * truncated toward zero (negative when `end` is before `start`). A month
+   * is complete when `start` plus those months, clamped as `dateAdd` clamps,
+   * is not past `end`. Both are read as `type`, the wider of their own.
+   */
+  dateDiff(
+    unit: DateAddUnit,
+    start: Expression<unknown>,
+    end: Expression<unknown>,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A part of a date or timestamp (a timestamp in UTC) as an integer;
+   * `weekday` is 1 for Monday to 7 for Sunday, a fiscal part follows a fiscal
+   * year starting in `fiscalStartMonth` (1-12) and named by the year it ends in.
+   */
+  datePart(
+    part: DatePart,
+    expression: Expression<unknown>,
+    fiscalStartMonth: number
+  ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,
