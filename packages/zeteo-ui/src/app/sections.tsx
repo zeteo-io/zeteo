@@ -5,6 +5,11 @@ export interface Section {
   permission: string;
   /** `admin` sections sit under the top bar's Admin menu; the rest are top-bar items of their own. */
   group?: "admin";
+  /**
+   * When set, the menus list the section only to holders of one of these as
+   * well; the route stays open to `permission`.
+   */
+  listedFor?: string[];
 }
 
 /**
@@ -41,11 +46,14 @@ export const SECTIONS: Section[] = [
     group: "admin",
   },
   {
-    // Read by anyone who can query; changed with `zeteo.calendar.write`.
+    // Read by anyone who can query (the route), changed with
+    // `zeteo.calendar.write`; listed only to those who may change it or
+    // administer sources, so a query-only user gets no Admin menu.
     path: "/calendar",
     label: "Calendar",
     permission: "zeteo.data.read",
     group: "admin",
+    listedFor: ["zeteo.calendar.write", "zeteo.sources.read"],
   },
   {
     path: "/runs",
@@ -72,6 +80,12 @@ export const SECTIONS: Section[] = [
     group: "admin",
   },
 ];
+
+/** Whether the menus list the section to someone holding what `has` says. */
+export const isListed = (
+  section: Section,
+  has: (permission: string) => boolean
+): boolean => has(section.permission) && (section.listedFor?.some(has) ?? true);
 
 /** The top-bar items of their own. */
 export const USER_SECTIONS = SECTIONS.filter((s) => s.group !== "admin");

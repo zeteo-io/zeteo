@@ -75,8 +75,21 @@ describe("TopBar", () => {
     ]);
   });
 
-  it("gives someone who can only query an Admin item with the Calendar alone", async () => {
+  it("shows no Admin item to someone who can only query", () => {
     held.permissions = ["zeteo.data.read"];
+    renderAt("/my");
+    expect(
+      within(nav()).queryByRole("button", { name: /Admin/ })
+    ).not.toBeInTheDocument();
+    expect(
+      within(nav())
+        .getAllByRole("link")
+        .map((l) => l.textContent)
+    ).toEqual(["My Zeteo", "Dashboards"]);
+  });
+
+  it("lists the Calendar to one who may change it", async () => {
+    held.permissions = ["zeteo.data.read", "zeteo.calendar.write"];
     renderAt("/my");
     await userEvent.click(adminButton());
     expect(

@@ -44,6 +44,7 @@ const ENTRY_LABEL: Record<Run["entry_point"], string> = {
   mcp: "MCP",
   export: "Export",
   dashboard: "Dashboard",
+  measure_preview: "Measure preview",
 };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -1,8 +1,8 @@
 import { faChevronDown } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { NavLink, useLocation } from "react-router-dom";
+import { ADMIN_SECTIONS, isListed } from "../sections";
 import { useEffect, useRef, useState } from "react";
-import { ADMIN_SECTIONS } from "../sections";
 import { useAuth } from "@tereo-io/react";
 import "./AdminMenu.css";
 
@@ -13,7 +13,7 @@ export const AdminMenu = () => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const visible = ADMIN_SECTIONS.filter((s) => hasPermission(s.permission));
+  const visible = ADMIN_SECTIONS.filter((s) => isListed(s, hasPermission));
   const isActive = visible.some(
     (s) => pathname === s.path || pathname.startsWith(`${s.path}/`)
   );
