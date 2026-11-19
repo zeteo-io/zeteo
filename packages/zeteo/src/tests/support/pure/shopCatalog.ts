@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import type { ColumnType } from "../../../adapters/types.js";
 import type { Access } from "../../../grants/access.js";
 import type {
@@ -254,6 +255,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
     tables,
     columns,
     relations,
-    access
+    access,
+    { calendar: DEFAULT_CALENDAR, measures: [] }
   );
 };

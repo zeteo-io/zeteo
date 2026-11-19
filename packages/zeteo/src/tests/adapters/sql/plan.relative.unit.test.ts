@@ -2,6 +2,7 @@
 // @module-tag platform
 import { resolveRelative } from "../../../adapters/sql/relative.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { QueryError } from "../../../engine/errors.js";
@@ -80,5 +81,24 @@ describe("planSql: relative dates", () => {
         },
       }).success
     ).toBe(false);
+  });
+});
+
+describe("planSql: relative dates in the calendar's time zone", () => {
+  it("binds a date column's relative value as the local date", () => {
+    const parsed = parse({
+      ordered_on: { gte: { relative: { unit: "day", offset: -1 } } },
+    });
+    if (!parsed.success) throw parsed.error;
+    const catalog = {
+      ...shopCatalog(),
+      calendar: { ...DEFAULT_CALENDAR, timeZone: "America/Chicago" },
+    };
+    const planned = planSql(parsed.data, catalog, {
+      now: new Date("2026-11-19T03:00:00Z"),
+    });
+    expect((planned.where as unknown as { value: unknown }).value).toBe(
+      "2026-11-17"
+    );
   });
 });

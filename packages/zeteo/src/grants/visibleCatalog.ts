@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR, type Calendar } from "../calendar/calendar.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
 import { typeOf } from "../sources/types.js";
 import { db } from "../utils/db/index.js";
@@ -60,6 +61,18 @@ export interface VisibleCatalog {
   };
   tables: VisibleTable[];
   relations: VisibleRelation[];
+  calendar: Calendar;
+}
+
+/** A stored measure (Task 8 narrows `formula` and `where`). */
+export interface MeasureRow {
+  id: string;
+  sourceId: string;
+  tableId: string;
+  name: string;
+  description: string;
+  formula: unknown;
+  where: unknown | null;
 }
 
 export const buildVisibleCatalog = (
@@ -67,7 +80,9 @@ export const buildVisibleCatalog = (
   tables: SourceTable[],
   columns: SourceColumn[],
   relations: Relation[],
-  access: Access
+  access: Access,
+  // `measures` is consumed once measures reach the planner.
+  extras: { calendar: Calendar; measures: MeasureRow[] }
 ): VisibleCatalog => {
   const columnsByTable = new Map<string, SourceColumn[]>();
   for (const column of columns) {
@@ -153,8 +168,11 @@ export const buildVisibleCatalog = (
     },
     tables: visibleTables,
     relations: visibleRelations,
+    calendar: extras.calendar,
   };
 };
+
+const defaultExtras = { calendar: DEFAULT_CALENDAR, measures: [] };
 
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
 export const loadVisibleCatalog = async (
@@ -168,7 +186,14 @@ export const loadVisibleCatalog = async (
   const { tables, columns, relations } = await db.catalog.loadSourceCatalog(
     source.id
   );
-  return buildVisibleCatalog(source, tables, columns, relations, access);
+  return buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    access,
+    defaultExtras
+  );
 };
 
 /**
@@ -192,7 +217,8 @@ export const loadSourceVisibleCatalog = async (
     tables,
     columns,
     relations,
-    access
+    access,
+    defaultExtras
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
   return visible ? catalog : { ...catalog, tables: [], relations: [] };

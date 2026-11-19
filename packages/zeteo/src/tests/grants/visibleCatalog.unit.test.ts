@@ -1,6 +1,7 @@
 // @module-tag unit
 // @module-tag platform
 import { buildVisibleCatalog } from "../../grants/visibleCatalog.js";
+import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import type { Access } from "../../grants/access.js";
 import { describe, expect, it } from "vitest";
 import type {
@@ -102,7 +103,8 @@ describe("buildVisibleCatalog", () => {
       tables,
       columns,
       [],
-      accessFor({ orders: ["o1", "o3"] })
+      accessFor({ orders: ["o1", "o3"] }),
+      { calendar: DEFAULT_CALENDAR, measures: [] }
     );
     expect(catalog.tables.map((t) => t.name)).toEqual(["orders"]);
     expect(catalog.tables[0].columns.map((c) => c.name)).toEqual([
@@ -131,7 +133,8 @@ describe("buildVisibleCatalog", () => {
       tables,
       added,
       [],
-      accessFor({ orders: ["o1", "o2", "o3"] })
+      accessFor({ orders: ["o1", "o2", "o3"] }),
+      { calendar: DEFAULT_CALENDAR, measures: [] }
     );
     expect(listed.tables[0].columns.map((c) => c.name)).not.toContain(
       "discount"
@@ -141,7 +144,8 @@ describe("buildVisibleCatalog", () => {
       tables,
       added,
       [],
-      accessFor({ orders: "all" })
+      accessFor({ orders: "all" }),
+      { calendar: DEFAULT_CALENDAR, measures: [] }
     );
     expect(all.tables[0].columns.map((c) => c.name)).toContain("discount");
   });
@@ -150,8 +154,10 @@ describe("buildVisibleCatalog", () => {
     const rels = [relation()];
     const granted = { orders: ["o2"], customers: ["c1"] };
     expect(
-      buildVisibleCatalog(source, tables, columns, rels, accessFor(granted))
-        .relations
+      buildVisibleCatalog(source, tables, columns, rels, accessFor(granted), {
+        calendar: DEFAULT_CALENDAR,
+        measures: [],
+      }).relations
     ).toHaveLength(1);
     expect(
       buildVisibleCatalog(
@@ -159,7 +165,8 @@ describe("buildVisibleCatalog", () => {
         tables,
         columns,
         rels,
-        accessFor({ ...granted, orders: ["o3"] })
+        accessFor({ ...granted, orders: ["o3"] }),
+        { calendar: DEFAULT_CALENDAR, measures: [] }
       ).relations
     ).toEqual([]);
     expect(
@@ -168,7 +175,8 @@ describe("buildVisibleCatalog", () => {
         tables,
         columns,
         rels,
-        accessFor({ ...granted, customers: ["c2"] })
+        accessFor({ ...granted, customers: ["c2"] }),
+        { calendar: DEFAULT_CALENDAR, measures: [] }
       ).relations
     ).toEqual([]);
   });
@@ -180,7 +188,8 @@ describe("buildVisibleCatalog", () => {
         tables,
         columns,
         [relation()],
-        accessFor({ orders: "all" })
+        accessFor({ orders: "all" }),
+        { calendar: DEFAULT_CALENDAR, measures: [] }
       ).relations
     ).toEqual([]);
   });
@@ -193,7 +202,8 @@ describe("buildVisibleCatalog", () => {
         tables,
         columns,
         rels,
-        accessFor({ orders: "all", customers: "all" })
+        accessFor({ orders: "all", customers: "all" }),
+        { calendar: DEFAULT_CALENDAR, measures: [] }
       ).relations
     ).toEqual([]);
   });
@@ -213,7 +223,8 @@ describe("buildVisibleCatalog", () => {
           missingSince: new Date(),
         }),
       ],
-      accessFor({ orders: "all", customers: "all" })
+      accessFor({ orders: "all", customers: "all" }),
+      { calendar: DEFAULT_CALENDAR, measures: [] }
     );
     expect(catalog.tables.find((t) => t.name === "orders")).toMatchObject({
       missing: true,

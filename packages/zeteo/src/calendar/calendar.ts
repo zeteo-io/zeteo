@@ -147,10 +147,24 @@ const offsetAt = (instant: Date, timeZone: string): number => {
   );
 };
 
-/** The instant local midnight starts on `date` in `timeZone`. */
-export const zonedMidnight = (date: string, timeZone: string): Date => {
-  const wall = toMs(date);
+/** The instant at which the wall clock in `timeZone` reads `wall` (as if UTC ms). */
+export const zonedInstant = (wall: number, timeZone: string): Date => {
   let instant = new Date(wall - offsetAt(new Date(wall), timeZone));
   instant = new Date(wall - offsetAt(instant, timeZone));
+  return instant;
+};
+
+const HOUR_MS = 3_600_000;
+
+/**
+ * The instant local midnight starts on `date` in `timeZone`; where a DST jump
+ * skips midnight, the first instant of that local day.
+ */
+export const zonedMidnight = (date: string, timeZone: string): Date => {
+  let instant = zonedInstant(toMs(date), timeZone);
+  // Landed on the previous local day: midnight was skipped. Walk forward.
+  while (localDate(instant, timeZone) < date) {
+    instant = new Date(instant.getTime() + HOUR_MS);
+  }
   return instant;
 };

@@ -6,6 +6,7 @@ import { toMssqlConfig } from "../../adapters/azure-sql/settings.js";
 import { azureSqlAdapter } from "../../adapters/azure-sql/index.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
@@ -210,11 +211,18 @@ export const useMssqlRuns = () => {
     const source = (await db.sources.findById(id))!;
     const { tables, columns, relations } =
       await db.catalog.loadSourceCatalog(id);
-    catalog = buildVisibleCatalog(source, tables, columns, relations, {
-      sourceIds: new Set([id]),
-      allows: () => true,
-      tableAccess: () => "all",
-    });
+    catalog = buildVisibleCatalog(
+      source,
+      tables,
+      columns,
+      relations,
+      {
+        sourceIds: new Set([id]),
+        allows: () => true,
+        tableAccess: () => "all",
+      },
+      { calendar: DEFAULT_CALENDAR, measures: [] }
+    );
     connection = await connectWith();
   });
 

@@ -86,4 +86,13 @@ describe("calendar", () => {
       "2026-03-09T05:00:00.000Z"
     );
   });
+
+  it("returns the first instant of the day where DST skips midnight", () => {
+    expect(zonedMidnight("2026-09-06", "America/Santiago").toISOString()).toBe(
+      "2026-09-06T04:00:00.000Z"
+    );
+    expect(zonedMidnight("2026-03-08", "America/Havana").toISOString()).toBe(
+      "2026-03-08T05:00:00.000Z"
+    );
+  });
 });

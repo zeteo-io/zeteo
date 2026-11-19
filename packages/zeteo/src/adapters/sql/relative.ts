@@ -1,4 +1,12 @@
 import { z } from "zod";
+import {
+  DEFAULT_CALENDAR,
+  fiscalPeriodStart,
+  localDate,
+  zonedInstant,
+  zonedMidnight,
+  type Calendar,
+} from "../../calendar/calendar.js";
 
 export const RELATIVE_UNITS = [
   "minute",
@@ -8,6 +16,8 @@ export const RELATIVE_UNITS = [
   "month",
   "quarter",
   "year",
+  "fiscal_quarter",
+  "fiscal_year",
 ] as const;
 export type RelativeUnit = (typeof RELATIVE_UNITS)[number];
 
@@ -44,57 +54,89 @@ const addMonths = (d: Date, months: number): Date => {
   return out;
 };
 
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
 /**
- * `r` resolved against `now`, in UTC: shifted by `offset` units, then cut back
- * to the start of the unit when `startOf` is set. A week starts on Monday.
+ * `r` resolved against `now`: shifted by `offset` units, then cut back to the
+ * start of the unit when `startOf` is set. Minutes and hours shift the instant;
+ * every larger unit works on the wall clock in `calendar.timeZone` and returns
+ * the instant that local moment starts (or the shifted local moment). A week
+ * starts on Monday; fiscal units follow `calendar.fiscalYearStartMonth`.
  */
-export const resolveRelative = (r: RelativeDate, now: Date): Date => {
+export const resolveRelative = (
+  r: RelativeDate,
+  now: Date,
+  calendar: Calendar = DEFAULT_CALENDAR
+): Date => {
   const { unit, offset, startOf } = r.relative;
-  let d: Date;
+  if (unit === "minute" || unit === "hour") {
+    const step = unit === "minute" ? MINUTE_MS : 60 * MINUTE_MS;
+    const d = new Date(now.getTime() + offset * step);
+    return startOf ? new Date(Math.floor(d.getTime() / step) * step) : d;
+  }
+  const tz = calendar.timeZone;
+  // The wall clock now, as if it were UTC.
+  const wallNow = Date.parse(
+    `${localDate(now, tz)}T${new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz,
+      hourCycle: "h23",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    }).format(now)}.${String(now.getUTCMilliseconds()).padStart(3, "0")}Z`
+  );
+  let wall: Date;
   switch (unit) {
-    case "minute":
-      d = new Date(now.getTime() + offset * MINUTE_MS);
-      break;
-    case "hour":
-      d = new Date(now.getTime() + offset * 60 * MINUTE_MS);
-      break;
     case "day":
-      d = new Date(now.getTime() + offset * 24 * 60 * MINUTE_MS);
+      wall = new Date(wallNow + offset * DAY_MS);
       break;
     case "week":
-      d = new Date(now.getTime() + offset * 7 * 24 * 60 * MINUTE_MS);
+      wall = new Date(wallNow + offset * 7 * DAY_MS);
       break;
     case "month":
-      d = addMonths(now, offset);
+      wall = addMonths(new Date(wallNow), offset);
       break;
     case "quarter":
-      d = addMonths(now, offset * 3);
+    case "fiscal_quarter":
+      wall = addMonths(new Date(wallNow), offset * 3);
       break;
     case "year":
-      d = addMonths(now, offset * 12);
+    case "fiscal_year":
+      wall = addMonths(new Date(wallNow), offset * 12);
       break;
   }
-  if (!startOf) return d;
-  const y = d.getUTCFullYear();
-  const m = d.getUTCMonth();
+  if (!startOf) return zonedInstant(wall.getTime(), tz);
+  const date = wall.toISOString().slice(0, 10);
+  const y = wall.getUTCFullYear();
+  const m = wall.getUTCMonth();
+  const pad = (n: number): string => String(n).padStart(2, "0");
   switch (unit) {
-    case "minute":
-      return floorToMinute(d);
-    case "hour":
-      return new Date(
-        Math.floor(d.getTime() / (60 * MINUTE_MS)) * 60 * MINUTE_MS
-      );
     case "day":
-      return new Date(Date.UTC(y, m, d.getUTCDate()));
+      return zonedMidnight(date, tz);
     case "week": {
-      const sinceMonday = (d.getUTCDay() + 6) % 7;
-      return new Date(Date.UTC(y, m, d.getUTCDate() - sinceMonday));
+      const sinceMonday = (wall.getUTCDay() + 6) % 7;
+      return zonedMidnight(
+        new Date(Date.UTC(y, m, wall.getUTCDate() - sinceMonday))
+          .toISOString()
+          .slice(0, 10),
+        tz
+      );
     }
     case "month":
-      return new Date(Date.UTC(y, m, 1));
+      return zonedMidnight(`${date.slice(0, 7)}-01`, tz);
     case "quarter":
-      return new Date(Date.UTC(y, m - (m % 3), 1));
+      return zonedMidnight(`${y}-${pad(m - (m % 3) + 1)}-01`, tz);
     case "year":
-      return new Date(Date.UTC(y, 0, 1));
+      return zonedMidnight(`${y}-01-01`, tz);
+    case "fiscal_quarter":
+    case "fiscal_year":
+      return zonedMidnight(fiscalPeriodStart(calendar, date, unit), tz);
   }
 };
+
+/** `r` as the local `YYYY-MM-DD` in `calendar.timeZone`, for date columns. */
+export const resolveRelativeDate = (
+  r: RelativeDate,
+  now: Date,
+  calendar: Calendar = DEFAULT_CALENDAR
+): string => localDate(resolveRelative(r, now, calendar), calendar.timeZone);

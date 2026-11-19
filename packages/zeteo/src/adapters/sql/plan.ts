@@ -1,4 +1,4 @@
-import { floorToMinute, isRelativeDate, resolveRelative } from "./relative.js";
+import type { Calendar } from "../../calendar/calendar.js";
 import type { SqlQueryErrorCode } from "./errors.js";
 import type {
   VisibleCatalog,
@@ -11,6 +11,12 @@ import {
   notFoundMessage,
   type QueryPath,
 } from "../../engine/errors.js";
+import {
+  floorToMinute,
+  isRelativeDate,
+  resolveRelative,
+  resolveRelativeDate,
+} from "./relative.js";
 import type {
   CalcExpr,
   CalcOp,
@@ -551,7 +557,8 @@ const resolveCondition = <S>(
   label: string,
   condition: Condition,
   path: QueryPath,
-  now: Date
+  now: Date,
+  calendar: Calendar
 ): ResolvedFilter<S> => {
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
@@ -567,8 +574,9 @@ const resolveCondition = <S>(
       // A relative moment is only for a date or a timestamp; elsewhere it is
       // the value error for the operator and path.
       if (type === "date" || type === "timestamp") {
-        const iso = resolveRelative(v, now).toISOString();
-        return type === "date" ? iso.slice(0, 10) : iso;
+        return type === "date"
+          ? resolveRelativeDate(v, now, calendar)
+          : resolveRelative(v, now, calendar).toISOString();
       }
       throw fail(
         "invalid_value",
@@ -627,13 +635,14 @@ const resolveFilter = <S>(
     key: string,
     path: QueryPath
   ) => { subject: S; type: QueryableType },
-  now: Date
+  now: Date,
+  calendar: Calendar
 ): ResolvedFilter<S> => {
   if ("and" in filter && Array.isArray(filter.and)) {
     return {
       kind: "and",
       filters: (filter.and as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "and", i], subjectOf, now)
+        resolveFilter(f, [...path, "and", i], subjectOf, now, calendar)
       ),
     };
   }
@@ -641,7 +650,7 @@ const resolveFilter = <S>(
     return {
       kind: "or",
       filters: (filter.or as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "or", i], subjectOf, now)
+        resolveFilter(f, [...path, "or", i], subjectOf, now, calendar)
       ),
     };
   }
@@ -652,7 +661,8 @@ const resolveFilter = <S>(
         filter.not as Filter,
         [...path, "not"],
         subjectOf,
-        now
+        now,
+        calendar
       ),
     };
   }
@@ -660,7 +670,7 @@ const resolveFilter = <S>(
     ([key, condition]) => {
       const at = [...path, key];
       const { subject, type } = subjectOf(key, at);
-      return resolveCondition(subject, type, key, condition, at, now);
+      return resolveCondition(subject, type, key, condition, at, now, calendar);
     }
   );
   return leaves.length === 1 ? leaves[0] : { kind: "and", filters: leaves };
@@ -897,7 +907,8 @@ export const planSql = (
         const { ref } = planner.resolveColumn(key, at);
         return { subject: ref, type: ref.type };
       },
-      now
+      now,
+      catalog.calendar
     );
 
   const grouped = hasAggregate || (query.groupBy?.length ?? 0) > 0;
@@ -967,7 +978,8 @@ export const planSql = (
           type: select[index].type,
         };
       },
-      now
+      now,
+      catalog.calendar
     );
 
   const orderBy: ResolvedOrder[] = query.orderBy
