@@ -222,7 +222,15 @@ export const DATE_PARTS = [
 ] as const;
 export type DatePart = (typeof DATE_PARTS)[number];
 /** The date operations, besides the operations of `CALC_OPS`. */
-export const DATE_OPS = ["dateAdd", "dateDiff", "datePart"] as const;
+export const DATE_OPS = [
+  "dateAdd",
+  "dateDiff",
+  "datePart",
+  "businessDays",
+  "businessDaysInMonth",
+  "businessDaysElapsed",
+  "businessDaysRemaining",
+] as const;
 const MAX_TEXT_LITERAL_CHARS = 1000;
 
 export type CalcExpr =
@@ -235,6 +243,10 @@ export type CalcExpr =
   | { dateAdd: [CalcExpr, number, DateAddUnit] }
   | { dateDiff: [DateAddUnit, CalcExpr, CalcExpr] }
   | { datePart: [DatePart, CalcExpr] }
+  | { businessDays: [CalcExpr, CalcExpr] }
+  | { businessDaysInMonth: CalcExpr }
+  | { businessDaysElapsed: CalcExpr }
+  | { businessDaysRemaining: CalcExpr }
   | { add: CalcExpr[] }
   | { sub: [CalcExpr, CalcExpr] }
   | { mul: CalcExpr[] }
@@ -377,6 +389,10 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
       datePart: deeper
         ? z.tuple([z.enum(DATE_PARTS), inner]).optional()
         : tooDeepCalc.optional(),
+      businessDays: two,
+      businessDaysInMonth: (deeper ? inner : tooDeepCalc).optional(),
+      businessDaysElapsed: (deeper ? inner : tooDeepCalc).optional(),
+      businessDaysRemaining: (deeper ? inner : tooDeepCalc).optional(),
       case: deeper
         ? z
             .strictObject({
@@ -628,6 +644,38 @@ const CALC_JSON_SCHEMA_DEFS = {
           maxItems: 2,
         },
         "[part, date or timestamp]: a number; weekday is 1 for Monday to 7 for Sunday; fiscal parts follow the calendar's fiscal year, named by the year it ends in"
+      ),
+      operation(
+        "businessDays",
+        {
+          type: "array",
+          prefixItems: [calcRef, calcRef],
+          minItems: 2,
+          maxItems: 2,
+        },
+        "[start, end]: the calendar's business days from start to end, both inclusive; each a date, timestamp or relative date literal"
+      ),
+      ...(
+        [
+          [
+            "businessDaysInMonth",
+            "The calendar's business days in the month of the date",
+          ],
+          [
+            "businessDaysElapsed",
+            "The calendar's business days from the 1st of the date's month through the date, inclusive",
+          ],
+          [
+            "businessDaysRemaining",
+            "The calendar's business days after the date through the end of its month",
+          ],
+        ] as const
+      ).map(([key, description]) =>
+        operation(
+          key,
+          calcRef,
+          `${description}; the date is a date, timestamp or relative date literal`
+        )
       ),
       operation(
         "coalesce",

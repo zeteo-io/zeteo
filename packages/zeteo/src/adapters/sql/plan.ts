@@ -1,10 +1,17 @@
-import type { Calendar } from "../../calendar/calendar.js";
 import type { SqlQueryErrorCode } from "./errors.js";
 import type {
   VisibleCatalog,
   VisibleColumn,
   VisibleTable,
 } from "../../grants/visibleCatalog.js";
+import {
+  businessDays,
+  businessDaysElapsed,
+  businessDaysInMonth,
+  businessDaysRemaining,
+  localDate,
+  type Calendar,
+} from "../../calendar/calendar.js";
 import {
   QueryError,
   notFound,
@@ -486,6 +493,14 @@ class Planner {
         insideAggregate
       );
     }
+    if (
+      key === "businessDays" ||
+      key === "businessDaysInMonth" ||
+      key === "businessDaysElapsed" ||
+      key === "businessDaysRemaining"
+    ) {
+      return this.resolveCalendarFn(key, operand, keyAt);
+    }
     if (key === "case") {
       return this.resolveCase(
         operand as CaseOperand,
@@ -565,6 +580,76 @@ class Planner {
       },
       hasAggregate: resolvedOperands.some((o) => o.hasAggregate),
       bareColumn: resolvedOperands.find((o) => o.bareColumn)?.bareColumn,
+    };
+  }
+
+  /**
+   * A business-day function: its arguments are date, timestamp or relative
+   * literals, and the planner computes the number from the calendar, so the
+   * result is a bound number literal.
+   */
+  private resolveCalendarFn(
+    key:
+      | "businessDays"
+      | "businessDaysInMonth"
+      | "businessDaysElapsed"
+      | "businessDaysRemaining",
+    operand: unknown,
+    at: QueryPath
+  ): ResolvedCalc {
+    const calendar = this.catalog.calendar;
+    const args = (key === "businessDays" ? operand : [operand]) as CalcExpr[];
+    const dates = args.map((arg, i) => {
+      const argAt = key === "businessDays" ? [...at, i] : at;
+      if (typeof arg !== "object" || arg === null) {
+        throw fail(
+          "invalid_operator",
+          "calendar functions take a date or a relative date in this version",
+          argAt
+        );
+      }
+      if ("date" in arg) {
+        const value = coerce(arg.date, "date");
+        if (value === undefined) {
+          throw fail("invalid_value", `A date literal is ${VALUE_FORMS.date}`, [
+            ...argAt,
+            "date",
+          ]);
+        }
+        return value as string;
+      }
+      if ("timestamp" in arg) {
+        const value = coerce(arg.timestamp, "timestamp");
+        if (value === undefined) {
+          throw fail(
+            "invalid_value",
+            `A timestamp literal is ${VALUE_FORMS.timestamp}`,
+            [...argAt, "timestamp"]
+          );
+        }
+        return localDate(new Date(value as string), calendar.timeZone);
+      }
+      if ("relative" in arg) {
+        return resolveRelativeDate(arg, this.now, calendar);
+      }
+      throw fail(
+        "invalid_operator",
+        "calendar functions take a date or a relative date in this version",
+        argAt
+      );
+    });
+    const first = dates[0] as string;
+    const value =
+      key === "businessDays"
+        ? businessDays(calendar, first, dates[1] as string)
+        : key === "businessDaysInMonth"
+          ? businessDaysInMonth(calendar, first)
+          : key === "businessDaysElapsed"
+            ? businessDaysElapsed(calendar, first)
+            : businessDaysRemaining(calendar, first);
+    return {
+      resolved: { kind: "literal", value, type: "number" },
+      hasAggregate: false,
     };
   }
 
