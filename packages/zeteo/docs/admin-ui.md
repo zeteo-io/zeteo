@@ -98,8 +98,8 @@ page and no sections.
   filter, validated live against the server with plan errors shown at their paths, and **Preview**
   of the draft; who may edit measures (users and groups, changed with `zeteo.sources.write` or by an
   upload source's owner). Details: [measures.md](measures.md).
-- **Calendar** (`/calendar`, in the Admin menu for anyone with `zeteo.data.read`, changed with
-  `zeteo.calendar.write`): working days, fiscal year start month, time zone, and holidays by year
+- **Calendar** (`/calendar`, open to anyone with `zeteo.data.read`, listed in the Admin menu only
+  for `zeteo.calendar.write` or `zeteo.sources.read`, changed with `zeteo.calendar.write`): working days, fiscal year start month, time zone, and holidays by year
   with add, remove and CSV paste, showing which years have holidays entered. Details:
   [calendar.md](calendar.md).
 - **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
@@ -172,19 +172,23 @@ page and no sections.
 
 - **Measures** tab on a source (`/sources/<id>/measures`): name, table, description, used-by counts and a
   Broken pill with the server's message; rows an editor may not use show "Not usable by you" and no
-  formula. `zeteo.measures.write` adds New and Edit (a dialog with JSON editors for `formula` and
-  `where`, the server's plan errors shown under the field at their path, and Preview, which runs the
-  draft) and Delete (confirmed with what uses it). A sources admin or an upload's owner also gets
-  **Editors**, the users and groups who may manage the source's measures.
+  formula. `zeteo.measures.write`, for an editor of the source (the list's `can_edit`), adds New and
+  Edit (a dialog with JSON editors for `formula` and `where`, the server's plan errors, the
+  preview's included, shown under the field at their path, and Preview, which runs the draft and is
+  cleared when the draft changes; renaming a measure that saved queries or panels use warns they
+  will stop working) and Delete (confirmed with what uses it; refused with the measures that use
+  it). A sources admin or an upload's owner also gets **Editors**, the users and groups who may
+  manage the source's measures, and, while not an editor themselves, a hint to add themselves.
 - **Calendar** under Admin (`/calendar`): working days, fiscal year start month, time zone, and
   holidays by year (add, remove, paste `date,name` lines; a year with none says so). Anyone who can
-  query reads it; `zeteo.calendar.write` changes it, and Save replaces the whole calendar.
+  query may open it, read-only; the menu lists it only to those with `zeteo.calendar.write` or
+  `zeteo.sources.read`. `zeteo.calendar.write` changes it, and Save replaces the whole calendar.
 - My Zeteo's catalogue lists each table's measures with their descriptions where the catalogue has them.
 
 The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that
 lists the admin sections the person may see (Sources, Grants, Limits, Calendar, Runs, Saved queries,
-Dashboards, Saved panels) and is absent when they may see none (the Calendar is read by anyone who can
-query, so it is there for them); it is marked active under any of
+Dashboards, Saved panels) and is absent when they may see none (so someone who can only query has
+no Admin menu); it is marked active under any of
 their paths. `/` lands on My Zeteo for anyone holding `zeteo.data.read`, admins included, and
 otherwise on their first admin section. The sections are listed once, in `src/app/sections.tsx`.
 

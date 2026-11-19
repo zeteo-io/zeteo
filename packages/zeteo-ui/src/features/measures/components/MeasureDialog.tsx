@@ -1,5 +1,4 @@
 import type { Measure, MeasureInput, PreviewResult } from "../api/types";
-import { fieldErrors, type MeasureField } from "./fieldErrors";
 import { usePreviewMeasure } from "../api/usePreviewMeasure";
 import { useMemo, useState, type ReactNode } from "react";
 import { useSaveMeasure } from "../api/useSaveMeasure";
@@ -16,6 +15,11 @@ import {
   SearchSelect,
   TextArea,
 } from "@kosmeo-ui/react";
+import {
+  fieldErrors,
+  previewFieldErrors,
+  type MeasureField,
+} from "./fieldErrors";
 
 const FORM_ID = "measure-form";
 const NAME = /^[a-z][a-z0-9_]{0,62}$/;
@@ -115,11 +119,25 @@ export const MeasureDialog = ({
   } = useAllTables(sourceId, {
     includeMissing: false,
   });
-  const [name, setName] = useState(measure?.name ?? "");
-  const [table, setTable] = useState(measure?.table ?? "");
-  const [description, setDescription] = useState(measure?.description ?? "");
-  const [formula, setFormula] = useState(pretty(measure?.formula));
-  const [where, setWhere] = useState(pretty(measure?.where));
+  const [name, setNameText] = useState(measure?.name ?? "");
+  const [table, setTableName] = useState(measure?.table ?? "");
+  const [description, setDescriptionText] = useState(
+    measure?.description ?? ""
+  );
+  const [formula, setFormulaText] = useState(pretty(measure?.formula));
+  const [where, setWhereText] = useState(pretty(measure?.where));
+  // A preview is of the draft it ran; any change to the draft clears it.
+  const changing =
+    <T,>(set: (value: T) => void) =>
+    (value: T) => {
+      preview.reset();
+      set(value);
+    };
+  const setName = changing(setNameText);
+  const setTable = changing(setTableName);
+  const setDescription = changing(setDescriptionText);
+  const setFormula = changing(setFormulaText);
+  const setWhere = changing(setWhereText);
   const [local, setLocal] = useState<Partial<Record<MeasureField, string>>>({});
   const [failure, setFailure] = useState<ApiError | null>(null);
 
@@ -212,7 +230,14 @@ export const MeasureDialog = ({
   };
 
   const server = fieldErrors(failure);
-  const err = (f: MeasureField) => local[f] ?? server[f];
+  const previewed = previewFieldErrors(preview.error);
+  const err = (f: MeasureField) => local[f] ?? server[f] ?? previewed[f];
+  const used = measure?.used_by;
+  const renaming =
+    !!measure &&
+    name !== measure.name &&
+    !!used &&
+    (used.saved_queries > 0 || used.panels > 0);
 
   return (
     <Modal
@@ -262,6 +287,14 @@ export const MeasureDialog = ({
               helperText="Unique in the source; queries refer to it as { measure: name }."
               onChange={(e) => setName(e.target.value)}
             />
+            {renaming && used && (
+              <p className="z-muted" role="status">
+                {measure.name} is used by {used.saved_queries}{" "}
+                {used.saved_queries === 1 ? "saved query" : "saved queries"} and{" "}
+                {used.panels} {used.panels === 1 ? "panel" : "panels"}; they
+                will stop working under the new name.
+              </p>
+            )}
           </Field>
           <Field name="table" error={err("table")}>
             <SearchSelect<string>
@@ -308,7 +341,8 @@ export const MeasureDialog = ({
               />
             </div>
           </Field>
-          {(preview.data || preview.error) && (
+          {(preview.data ||
+            (preview.error && Object.keys(previewed).length === 0)) && (
             <BorderedSection title="Preview" as="h3">
               {preview.data && <Preview result={preview.data} />}
               <ErrorNotice error={preview.error} />

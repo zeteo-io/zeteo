@@ -23,13 +23,17 @@ const measures = [
   makeRedactedMeasure(),
 ];
 
+const respond = (flags: { can_edit: boolean; can_manage_editors: boolean }) =>
+  get.mockReset().mockImplementation(async (url: string) => {
+    if (url.endsWith("/measures"))
+      return { data: { data: measures, ...flags } };
+    return { data: { data: [], next_cursor: null } };
+  });
+
 describe("MeasuresTab", () => {
   beforeEach(() => {
     del.mockReset().mockResolvedValue({});
-    get.mockReset().mockImplementation(async (url: string) => {
-      if (url.endsWith("/measures")) return { data: { data: measures } };
-      return { data: { data: [], next_cursor: null } };
-    });
+    respond({ can_edit: true, can_manage_editors: true });
   });
 
   it("lists measures, flags a broken one and marks a redacted one", async () => {
@@ -79,5 +83,57 @@ describe("MeasuresTab", () => {
     expect(del).toHaveBeenCalledWith(
       `/v1/sources/${SOURCE_ID}/measures/${makeMeasure().id}`
     );
+  });
+
+  it("hides write actions from one who is not an editor, with a hint for a manager", async () => {
+    respond({ can_edit: false, can_manage_editors: true });
+    renderWithProviders(
+      <MeasuresTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    await screen.findByText("paid_revenue");
+    expect(screen.queryByRole("button", { name: "New measure" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Editors" })).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Add yourself as an editor to create or change measures."
+      )
+    ).toBeInTheDocument();
+  });
+
+  it("gives no hint to one who may not manage the editors", async () => {
+    respond({ can_edit: false, can_manage_editors: false });
+    renderWithProviders(
+      <MeasuresTab sourceId={SOURCE_ID} canWrite canManageEditors={false} />
+    );
+    await screen.findByText("paid_revenue");
+    expect(screen.queryByText(/Add yourself as an editor/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "New measure" })).toBeNull();
+  });
+
+  it("does not claim a measure is unused, and shows why a delete is refused", async () => {
+    del.mockReset().mockRejectedValue({
+      status: 409,
+      code: "measure_in_use",
+      message: "Other measures use this one and would break: margin",
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MeasuresTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    const net = (await screen.findByText("net_revenue")).closest("tr")!;
+    await user.click(net.querySelector("button[aria-label='Delete']")!);
+    expect(
+      await screen.findByText(
+        /No saved query or panel uses net_revenue\. A measure other measures use cannot be deleted\./
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/is not used by/)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Delete measure" }));
+    expect(
+      await screen.findByText(
+        "Other measures use this one and would break: margin"
+      )
+    ).toBeInTheDocument();
   });
 });

@@ -40,6 +40,15 @@ export interface RedactedMeasure {
 
 export type MeasureListItem = Measure | RedactedMeasure;
 
+/** The list, and what the caller may change. */
+export interface MeasureList {
+  data: MeasureListItem[];
+  /** Creating, changing and deleting: an editor holding `zeteo.measures.write`, on a source not archived. */
+  can_edit: boolean;
+  /** Replacing the editor list: a sources admin or the upload's owner, on a source not archived. */
+  can_manage_editors: boolean;
+}
+
 export const isRedacted = (m: MeasureListItem): m is RedactedMeasure =>
   !("id" in m);
 

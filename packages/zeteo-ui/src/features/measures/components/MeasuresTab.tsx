@@ -34,7 +34,10 @@ const usedText = (m: Measure) =>
 
 interface MeasuresTabProps {
   sourceId: string;
-  /** Creates, changes and deletes: `zeteo.measures.write` on a source that is not archived. */
+  /**
+   * May hold `zeteo.measures.write` on a source that is not archived; the
+   * list's `can_edit` (being an editor) decides whether the actions show.
+   */
   canWrite: boolean;
   /** Replaces the editor list: a sources admin, or an upload's owner. */
   canManageEditors: boolean;
@@ -48,7 +51,12 @@ export const MeasuresTab = ({
   canWrite,
   canManageEditors,
 }: MeasuresTabProps) => {
-  const { data, isLoading, error } = useMeasures(sourceId);
+  const { data: list, isLoading, error } = useMeasures(sourceId);
+  const data = list?.data;
+  // The server knows whether the caller is on the editor list.
+  const canEdit = canWrite && !!list?.can_edit;
+  const joinHint =
+    canWrite && !!list && !list.can_edit && list.can_manage_editors;
   const del = useDeleteMeasure(sourceId);
   const [params, setParams] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState<Measure | "new" | null>(null);
@@ -81,7 +89,7 @@ export const MeasuresTab = ({
                 Editors
               </Button>
             )}
-            {canWrite && (
+            {canEdit && (
               <Button
                 size="sm"
                 fullWidth={false}
@@ -91,6 +99,11 @@ export const MeasuresTab = ({
               </Button>
             )}
           </div>
+          {joinHint && (
+            <small className="z-muted">
+              Add yourself as an editor to create or change measures.
+            </small>
+          )}
         </div>
       </div>
       {editing && (
@@ -159,7 +172,7 @@ export const MeasuresTab = ({
                     <span className="z-muted">—</span>
                   ),
               },
-              ...(canWrite
+              ...(canEdit
                 ? [
                     {
                       title: "",
@@ -177,8 +190,8 @@ export const MeasuresTab = ({
                                 m.used_by &&
                                 (m.used_by.saved_queries > 0 ||
                                   m.used_by.panels > 0)
-                                  ? `${m.name} is used by ${usedText(m)}. They will stop working.`
-                                  : `${m.name} is not used by any saved query or panel.`
+                                  ? `${m.name} is used by ${usedText(m)}; they will stop working. A measure other measures use cannot be deleted.`
+                                  : `No saved query or panel uses ${m.name}. A measure other measures use cannot be deleted.`
                               }
                               confirmLabel="Delete measure"
                               onConfirm={() => del.mutateAsync(m.id)}
