@@ -58,6 +58,9 @@ export const UPLOADS_WRITE = "zeteo.uploads.write";
 /** Changes the calendar: working days, holidays, fiscal year start and time zone. */
 export const CALENDAR_WRITE = "zeteo.calendar.write";
 
+/** Creates, changes and deletes measures on sources the holder may edit measures of. */
+export const MEASURES_WRITE = "zeteo.measures.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -99,6 +102,10 @@ export const AUDIT_EVENTS = {
   savedPanelTransferred: "zeteo.saved_panel.transferred",
   savedPanelCopied: "zeteo.saved_panel.copied",
   calendarUpdated: "zeteo.calendar.updated",
+  measureCreated: "zeteo.measure.created",
+  measureUpdated: "zeteo.measure.updated",
+  measureDeleted: "zeteo.measure.deleted",
+  measureEditorsUpdated: "zeteo.measure_editors.updated",
   queryRun: "zeteo.query.run",
   exportStarted: "zeteo.export.started",
   exportRun: "zeteo.export.run",
@@ -162,6 +169,11 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedPanelCopied]: "A saved panel was copied",
   [AUDIT_EVENTS.calendarUpdated]:
     "The calendar's working days, holidays, fiscal year or time zone were changed",
+  [AUDIT_EVENTS.measureCreated]: "A measure was created",
+  [AUDIT_EVENTS.measureUpdated]: "A measure was changed",
+  [AUDIT_EVENTS.measureDeleted]: "A measure was deleted",
+  [AUDIT_EVENTS.measureEditorsUpdated]:
+    "The people and groups who may change a source's measures were changed",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
   [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
   [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
@@ -207,6 +219,10 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedPanelTransferred]: DASHBOARDS_READ,
   [AUDIT_EVENTS.savedPanelCopied]: DASHBOARDS_READ,
   [AUDIT_EVENTS.calendarUpdated]: SOURCES_READ,
+  [AUDIT_EVENTS.measureCreated]: SOURCES_READ,
+  [AUDIT_EVENTS.measureUpdated]: SOURCES_READ,
+  [AUDIT_EVENTS.measureDeleted]: SOURCES_READ,
+  [AUDIT_EVENTS.measureEditorsUpdated]: SOURCES_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
   [AUDIT_EVENTS.exportStarted]: RUNS_READ,
   [AUDIT_EVENTS.exportRun]: RUNS_READ,
@@ -319,6 +335,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         orgAssignable: false,
       },
       {
+        name: MEASURES_WRITE,
+        displayName: "Manage measures",
+        description:
+          "Create, change and delete measures: named group-level calculations that queries on a source can use",
+        orgAssignable: false,
+      },
+      {
         name: CALENDAR_WRITE,
         displayName: "Manage the calendar",
         description:
@@ -347,6 +370,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           DASHBOARDS_READ,
           DASHBOARDS_WRITE,
           UPLOADS_WRITE,
+          MEASURES_WRITE,
           CALENDAR_WRITE,
         ],
       },
@@ -354,7 +378,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
         name: "zeteo_user",
         displayName: "Zeteo user",
         description: "Queries the data they are granted",
-        permissions: [DATA_READ],
+        permissions: [DATA_READ, MEASURES_WRITE],
       },
       {
         name: "zeteo_mcp_user",

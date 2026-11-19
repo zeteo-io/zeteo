@@ -130,11 +130,13 @@ model Source {
   lastSyncAttemptAt    DateTime?    @map("last_sync_attempt_at") @db.Timestamp(3)
   lastSyncError        Json?        @map("last_sync_error")
 
-  tables       SourceTable[]
-  relations    Relation[]
-  runs         QueryRun[]
-  savedQueries SavedQuery[]
-  uploadClaims UploadClaim[]
+  tables         SourceTable[]
+  relations      Relation[]
+  runs           QueryRun[]
+  savedQueries   SavedQuery[]
+  uploadClaims   UploadClaim[]
+  measures       Measure[]
+  measureEditors MeasureEditor[]
 
   @@index([ownerId])
   @@map("sources")
@@ -166,6 +168,7 @@ model SourceTable {
   relationsFrom Relation[]     @relation("RelationFrom")
   relationsTo   Relation[]     @relation("RelationTo")
   grants        Grant[]
+  measures      Measure[]
 
   @@unique([sourceId, schemaName, name])
   @@map("source_tables")
@@ -586,5 +589,44 @@ model CalendarHoliday {
   name String
 
   @@map("calendar_holidays")
+  @@schema("zeteo")
+}
+
+// A named group-level expression on one home table of a source. CHECK in the
+// migration: description is 1..2000 characters.
+model Measure {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  tableId     String   @map("table_id") @db.Uuid
+  name        String
+  description String
+  formula     Json
+  where       Json?
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedBy   String   @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  source Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  table  SourceTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, name])
+  @@index([tableId])
+  @@map("measures")
+  @@schema("zeteo")
+}
+
+// Who besides the admins may change a source's measures.
+model MeasureEditor {
+  sourceId      String        @map("source_id") @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, principalType, principalId])
+  @@map("measure_editors")
   @@schema("zeteo")
 }

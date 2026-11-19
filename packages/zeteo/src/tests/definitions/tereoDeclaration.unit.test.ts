@@ -6,6 +6,7 @@ import { readFileSync } from "fs";
 import {
   AUDIT_EVENTS,
   CALENDAR_WRITE,
+  MEASURES_WRITE,
   DATA_EXPORT,
   DATA_READ,
   GRANTS_READ,
@@ -70,6 +71,7 @@ describe("buildTereoDocument", () => {
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
         UPLOADS_WRITE,
+        MEASURES_WRITE,
         CALENDAR_WRITE,
       ].sort()
     );
@@ -120,10 +122,11 @@ describe("buildTereoDocument", () => {
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
         UPLOADS_WRITE,
+        MEASURES_WRITE,
         CALENDAR_WRITE,
       ].sort()
     );
-    expect(roles.zeteo_user).toEqual([DATA_READ]);
+    expect(roles.zeteo_user).toEqual([DATA_READ, MEASURES_WRITE].sort());
     expect(roles.zeteo_mcp_user).toEqual([DATA_READ, MCP_USE].sort());
   });
 
@@ -255,6 +258,10 @@ describe("buildTereoDocument", () => {
       "zeteo.grant.created",
       "zeteo.grant.removed",
       "zeteo.grant.updated",
+      "zeteo.measure.created",
+      "zeteo.measure.deleted",
+      "zeteo.measure.updated",
+      "zeteo.measure_editors.updated",
       "zeteo.principal_limit.created",
       "zeteo.principal_limit.removed",
       "zeteo.principal_limit.updated",
@@ -366,5 +373,43 @@ describe("the calendar", () => {
         "The calendar's working days, holidays, fiscal year or time zone were changed",
       readPermission: SOURCES_READ,
     });
+  });
+});
+
+describe("measures", () => {
+  const roleHolding = (permission: string) =>
+    service
+      .systemRoles!.filter((r) => r.permissions!.includes(permission))
+      .map((r) => r.name)
+      .sort();
+
+  it("declares zeteo.measures.write for zeteo_admin and zeteo_user, not assignable in an organization", () => {
+    expect(MEASURES_WRITE).toBe("zeteo.measures.write");
+    const permission = service.permissions!.find(
+      (p) => p.name === MEASURES_WRITE
+    );
+    expect(permission).toMatchObject({
+      displayName: "Manage measures",
+      orgAssignable: false,
+    });
+    expect(roleHolding(MEASURES_WRITE)).toEqual(["zeteo_admin", "zeteo_user"]);
+  });
+
+  it("leaves the calendar to zeteo_admin", () => {
+    expect(roleHolding(CALENDAR_WRITE)).toEqual(["zeteo_admin"]);
+  });
+
+  it("declares the four measure audit events, readable with zeteo.sources.read", () => {
+    const events = {
+      [AUDIT_EVENTS.measureCreated]: "zeteo.measure.created",
+      [AUDIT_EVENTS.measureUpdated]: "zeteo.measure.updated",
+      [AUDIT_EVENTS.measureDeleted]: "zeteo.measure.deleted",
+      [AUDIT_EVENTS.measureEditorsUpdated]: "zeteo.measure_editors.updated",
+    };
+    for (const type of Object.values(events)) {
+      const declared = service.eventTypes!.find((e) => e.eventType === type);
+      expect(declared?.readPermission).toBe(SOURCES_READ);
+      expect(declared?.description).toBeTruthy();
+    }
   });
 });

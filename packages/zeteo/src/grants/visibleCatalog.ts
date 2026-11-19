@@ -196,11 +196,19 @@ export const buildVisibleCatalog = (
   };
 };
 
-/** What a catalogue carries besides the source's own rows: the stored calendar, and measures once there are any. */
-const loadExtras = async (): Promise<{
+/** What a catalogue carries besides the source's own rows: the stored calendar and the source's measures. */
+const loadExtras = async (
+  sourceId: string
+): Promise<{
   calendar: Calendar;
   measures: MeasureRow[];
-}> => ({ calendar: await loadCalendar(), measures: [] });
+}> => {
+  const [calendar, measures] = await Promise.all([
+    loadCalendar(),
+    db.measures.listBySource(sourceId),
+  ]);
+  return { calendar, measures };
+};
 
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
 export const loadVisibleCatalog = async (
@@ -220,7 +228,7 @@ export const loadVisibleCatalog = async (
     columns,
     relations,
     access,
-    await loadExtras()
+    await loadExtras(source.id)
   );
 };
 
@@ -246,7 +254,7 @@ export const loadSourceVisibleCatalog = async (
     columns,
     relations,
     access,
-    await loadExtras()
+    await loadExtras(source.id)
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
   return visible
