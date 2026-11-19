@@ -107,7 +107,9 @@ const OriginCell = ({ table }: { table: Table }) => {
     <span className="z-fs-origin">
       {origin?.kind === "file" ? (
         <span className="z-fs-origin-name">
-          <Tooltip content={origin.filename}>
+          <Tooltip
+            content={<span className="z-wide-tip">{origin.filename}</span>}
+          >
             <span>File Upload</span>
           </Tooltip>
           {origin.tab_title && (
@@ -116,7 +118,11 @@ const OriginCell = ({ table }: { table: Table }) => {
         </span>
       ) : origin?.kind === "google-sheets" ? (
         <span className="z-fs-origin-name">
-          <Tooltip content={origin.spreadsheet_title}>
+          <Tooltip
+            content={
+              <span className="z-wide-tip">{origin.spreadsheet_title}</span>
+            }
+          >
             <a href={origin.url} target="_blank" rel="noopener noreferrer">
               Google Sheet
             </a>
@@ -131,7 +137,13 @@ const OriginCell = ({ table }: { table: Table }) => {
         <span className="z-muted">—</span>
       )}
       {table.sync_error && (
-        <Tooltip content={table.sync_error.message || table.sync_error.code}>
+        <Tooltip
+          content={
+            <span className="z-wide-tip">
+              {table.sync_error.message || table.sync_error.code}
+            </span>
+          }
+        >
           <span>
             <Badge size="sm" variant="danger">
               Sync failing

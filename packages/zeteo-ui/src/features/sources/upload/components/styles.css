@@ -294,3 +294,9 @@
   gap: 1.25rem;
   margin-bottom: 1.25rem;
 }
+
+/* The Origin cell's tooltips (a spreadsheet's or file's name, a sync error)
+   are wider than kosmeo's 12.5rem default, so long names read in a line or two. */
+.k-tooltip-content:has(.z-wide-tip) {
+  max-width: 24rem;
+}
