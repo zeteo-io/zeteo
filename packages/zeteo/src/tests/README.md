@@ -50,12 +50,12 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `calc`        | calculations: expression operations, their types and levels           |
   | `relative`    | relative dates, in a filter and in a calculation; date operations     |
   | `available`   | saved queries available for dashboards                                |
-  | `files`       | upload sources: the same behaviour over an uploaded source              |
+  | `files`       | upload sources: the same behaviour over an uploaded source            |
   | `size`        | a source's size, measured by a catalogue refresh                      |
   | `rows`        | a table's estimated rows, measured by a catalogue refresh             |
   | `plugin`      | the Claude Code plugin's files generated from a module                |
-  | `sheets`      | Google Sheets sources: the same behaviour over a synced spreadsheet     |
-  | `calendar`    | the business calendar: working days, holidays, fiscal periods, zones    |
+  | `sheets`      | Google Sheets sources: the same behaviour over a synced spreadsheet   |
+  | `calendar`    | the business calendar: working days, holidays, fiscal periods, zones  |
   | `measures`    | measures: expansion in the planner, their joins, limits and errors    |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.

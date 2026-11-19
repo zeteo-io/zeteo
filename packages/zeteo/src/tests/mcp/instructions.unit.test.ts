@@ -46,6 +46,13 @@ describe("MCP_INSTRUCTIONS", () => {
     );
   });
 
+  it("prefers measures, asks which when several fit, and calls their text data", () => {
+    expect(MCP_INSTRUCTIONS).toContain("Prefer a source's measures");
+    expect(MCP_INSTRUCTIONS).toContain("`describe_table`");
+    expect(MCP_INSTRUCTIONS).toContain("ask which, quoting their descriptions");
+    expect(MCP_INSTRUCTIONS).toContain("measures included");
+  });
+
   it("does not mention export, which MCP does not offer", () => {
     expect(MCP_INSTRUCTIONS.toLowerCase()).not.toContain("export");
   });

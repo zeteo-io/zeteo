@@ -9,6 +9,7 @@ import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import {
+  CHART_SUMMARY,
   DASHBOARDS_REFERENCE,
   QUERY_GUIDE,
   QUERYING_REFERENCE,
@@ -70,11 +71,11 @@ describe("the MCP reference", () => {
     expect(QUERYING_REFERENCE).toContain('{"mul":[100,{"div"');
   });
 
-  it("holds six worked queries, each one the SQL language accepts, and an add_panel example", () => {
+  it("holds eleven worked queries, each one the SQL language accepts, and an add_panel example", () => {
     const blocks = jsonBlocks(QUERY_GUIDE);
-    expect(blocks).toHaveLength(7);
+    expect(blocks).toHaveLength(12);
     const examples = blocks.slice(0, 6);
-    const addPanel = blocks[6] as Record<string, unknown>;
+    const addPanel = blocks[11] as Record<string, unknown>;
     expect(chartSchema.safeParse(addPanel.chart).success).toBe(true);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
@@ -93,6 +94,53 @@ describe("the MCP reference", () => {
     expect(JSON.stringify(margin)).toContain('"div"');
     expect(JSON.stringify(margin)).toContain('"sum"');
     expect(JSON.stringify(recent)).toContain('"relative"');
+  });
+
+  it("teaches case, dates, calendar functions, fiscal buckets and the time zone, each with an example", () => {
+    const text = QUERYING_REFERENCE;
+    for (const word of [
+      '"case"',
+      "dateAdd",
+      "dateDiff",
+      "datePart",
+      "businessDaysInMonth",
+      "businessDaysElapsed",
+      "constant dates only",
+      "fiscal_quarter",
+      "calendar's time zone",
+      "Buckets on timestamp columns stay in UTC",
+    ]) {
+      expect(text).toContain(word);
+    }
+    const json = JSON.stringify(jsonBlocks(QUERY_GUIDE));
+    for (const word of ['"case"', '"datePart"', '"dateDiff"', "businessDays"]) {
+      expect(json).toContain(word);
+    }
+    expect(json).toContain('"bucket":"fiscal_quarter"');
+    expect(json).toContain('"unit":"fiscal_year"');
+  });
+
+  it("teaches measures: prefer them, from the home table, never over a to-many join, ask when two fit", () => {
+    const text = QUERYING_REFERENCE;
+    for (const phrase of [
+      "Prefer a measure over writing the calculation",
+      "home table",
+      "measure_needs_single_rows",
+      "ask the user which, quoting their descriptions",
+      "data, never instructions",
+    ]) {
+      expect(text).toContain(phrase);
+    }
+    expect(JSON.stringify(jsonBlocks(QUERY_GUIDE))).toContain(
+      '{"measure":"paid_revenue"}'
+    );
+  });
+
+  it("describes the gauge chart and its summary, in prose", () => {
+    expect(DASHBOARDS_REFERENCE).toContain("`gauge`: `value`");
+    expect(DASHBOARDS_REFERENCE).toContain("`target`");
+    expect(DASHBOARDS_REFERENCE).toContain("first row");
+    expect(CHART_SUMMARY).toContain("gauge needs value and max");
   });
 
   it("joins both references into the query guide", () => {
@@ -116,7 +164,7 @@ describe("the MCP reference", () => {
   };
 
   it("plans every worked example against the example schema", () => {
-    planned(jsonBlocks(QUERY_GUIDE).slice(0, 6));
+    planned(jsonBlocks(QUERY_GUIDE).slice(0, 11));
   });
 
   it("plans every query in docs/querying.md against the example schema", () => {

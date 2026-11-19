@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { seedMeasures, measureBody } from "../../../support/measures.js";
 import { DATA_READ } from "../../../../definitions/tereoDeclaration.js";
 import { describeEachEngine } from "../../../support/engines.js";
 import { BASE_URL, fetchJson } from "../../../support/http.js";
@@ -21,6 +22,12 @@ interface Table {
   schema_name: string;
   columns: Array<{ name: string }>;
   relations: Array<{ name: string; to: string }>;
+  measures: Array<{
+    name: string;
+    description: string;
+    formula: unknown;
+    where: unknown;
+  }>;
 }
 interface Listed {
   sources: Array<{ slug: string; tables: Table[] }>;
@@ -49,6 +56,21 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     await grantTo(wide.principal, source.tables.customers!, ["id", "region"]);
     await grantTo(narrow.principal, source.tables.orders!, ["id", "status"]);
     await grantTo(wide.principal, other.tables.accounts!, "all");
+    await seedMeasures(BASE_URL, source, [
+      {
+        ...measureBody(
+          "paid_orders",
+          { count: "*" },
+          { status: { eq: "paid" } }
+        ),
+        description: "Orders that are paid",
+      },
+      {
+        ...measureBody("a_order_count", { count: "*" }),
+        description: "All orders",
+      },
+      measureBody("total_revenue", { sum: "total" }),
+    ]);
   });
   afterAll(async () => {
     await removeRunsOf([wide.id, narrow.id]);
@@ -107,6 +129,35 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     expect(tableOf(res.body, source.slug, "customers").relations).toEqual([
       { name: "orders", to: "orders", to_many: true, missing: false },
     ]);
+  });
+
+  it("lists the visible measures of each table by name, with description, formula and filter, and no id", async () => {
+    for (const user of [wide, narrow]) {
+      const res = await catalog(user.token, `?source=${source.slug}`);
+      const orders = tableOf(res.body, source.slug, "orders");
+      expect(orders.measures).toEqual([
+        {
+          name: "a_order_count",
+          description: "All orders",
+          formula: { count: "*" },
+          where: null,
+        },
+        {
+          name: "paid_orders",
+          description: "Orders that are paid",
+          formula: { count: "*" },
+          where: { status: { eq: "paid" } },
+        },
+      ]);
+      // total_revenue reads `total`, which neither user is granted.
+      expect(JSON.stringify(res.body)).not.toContain("total_revenue");
+    }
+    const customers = tableOf(
+      (await catalog(wide.token, `?source=${source.slug}`)).body,
+      source.slug,
+      "customers"
+    );
+    expect(customers.measures).toEqual([]);
   });
 
   it("shows a column-list grant exactly, and drops a relation whose key is not granted", async () => {

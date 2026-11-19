@@ -42,7 +42,7 @@ const view = {
   name: "Sales",
   type: "postgres",
   description: "Orders and customers",
-  tables: [{}, {}],
+  tables: [{ measures: [{}, {}] }, { measures: [{}] }],
 };
 
 afterEach(() => {
@@ -87,6 +87,7 @@ describe("callerInstructions", () => {
             type: "postgres",
             description: "Orders and customers",
             tables: 2,
+            measures: 3,
           },
         ])
       )

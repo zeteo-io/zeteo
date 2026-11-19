@@ -116,6 +116,17 @@ export const salesCatalog = (): VisibleCatalog => {
   };
   return buildVisibleCatalog(SOURCE, tables, columns, relations, access, {
     calendar: DEFAULT_CALENDAR,
-    measures: [],
+    // The example's one measure: paid revenue of an order.
+    measures: [
+      {
+        id: "paid_revenue",
+        sourceId: SOURCE.id,
+        tableId: "orders",
+        name: "paid_revenue",
+        description: "Revenue of paid orders",
+        formula: { sum: "total" },
+        where: { status: { eq: "paid" } },
+      },
+    ],
   });
 };

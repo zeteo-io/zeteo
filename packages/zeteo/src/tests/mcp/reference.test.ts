@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag platform
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
+import { STANDARD_MEASURES, seedMeasures } from "../support/measures.js";
 import { removeDashboardsOf } from "../support/panelDecisions.js";
 import { describeEachEngine } from "../support/engines.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
@@ -8,6 +9,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
 import { QUERY_GUIDE } from "../../mcp/reference.js";
 import { tokenFor } from "../support/tokens.js";
+import { BASE_URL } from "../support/http.js";
 import { randomUUID } from "crypto";
 import {
   grantTo,
@@ -36,6 +38,8 @@ describeEachEngine("the query guide", (engine) => {
     for (const table of ["orders", "customers"]) {
       await grantTo(principal, source.tables[table]!, "all");
     }
+    // The measure examples use paid_revenue.
+    await seedMeasures(BASE_URL, source, STANDARD_MEASURES);
     session = await connectMcp(mcpToken([MCP_USE, DATA_READ], userId));
   });
   afterAll(async () => {
@@ -50,8 +54,11 @@ describeEachEngine("the query guide", (engine) => {
     // The later query examples (calculations) use tables of the examples'
     // schema (order_lines, products) that the fixture lacks; the unit tests in
     // src/tests/mcp/ check they parse. The last block is the add_panel call.
-    expect(examples).toHaveLength(7);
-    for (const example of examples.slice(0, 3)) {
+    expect(examples).toHaveLength(12);
+    // The first three, and the five on case, dates, the calendar and measures
+    // (orders only); the two on order_lines are left to the unit tests.
+    const runnable = [...examples.slice(0, 3), ...examples.slice(6, 11)];
+    for (const example of runnable) {
       expect(example.source).toBe("sales-db");
       const body = { ...example, source: source.slug };
       const call = await callTool(session.client, "query", body);

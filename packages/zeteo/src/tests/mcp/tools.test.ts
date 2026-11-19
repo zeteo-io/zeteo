@@ -2,9 +2,11 @@
 // @module-tag platform
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { seedMeasures, measureBody } from "../support/measures.js";
 import { removeSources } from "../support/sources.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { ENGINES } from "../support/engines.js";
+import { BASE_URL } from "../support/http.js";
 import { randomUUID } from "crypto";
 import {
   grantTo,
@@ -38,6 +40,18 @@ describe("MCP discovery tools", () => {
       "status",
     ]);
     await grantTo(principal, source.tables.customers!, ["id", "region"]);
+    // One measure over granted columns (visible), one over `total` (never).
+    await seedMeasures(BASE_URL, source, [
+      {
+        ...measureBody(
+          "paid_orders",
+          { count: "*" },
+          { status: { eq: "paid" } }
+        ),
+        description: "Orders that are paid",
+      },
+      measureBody("total_revenue", { sum: "total" }),
+    ]);
     session = await connectMcp(mcpToken([MCP_USE, DATA_READ], userId));
   });
   afterAll(async () => {
@@ -58,6 +72,7 @@ describe("MCP discovery tools", () => {
       kind: "database",
       language: expect.any(String),
       tables: 2,
+      measures: 1,
       limits: {
         default_rows: 100,
         // The profile's 5,000, under the source's own cap.
@@ -131,6 +146,7 @@ describe("MCP discovery tools", () => {
           missing: false,
           last_loaded_at: null,
           columns: 2,
+          measures: 0,
         },
         {
           name: "orders",
@@ -140,6 +156,7 @@ describe("MCP discovery tools", () => {
           missing: false,
           last_loaded_at: null,
           columns: 3,
+          measures: 1,
         },
       ],
     });
@@ -191,8 +208,19 @@ describe("MCP discovery tools", () => {
             missing: false,
           },
         ],
+        measures: [
+          {
+            name: "paid_orders",
+            description: "Orders that are paid",
+            formula: { count: "*" },
+            where: { status: { eq: "paid" } },
+          },
+        ],
       },
     });
+    // Never an id, and nothing of the measure over the ungranted `total`.
+    expect(call.text).not.toContain("total_revenue");
+    expect(call.text).not.toContain('"total"');
   });
 
   it("answers an unknown table with not_found_or_not_accessible, suggesting only visible names", async () => {

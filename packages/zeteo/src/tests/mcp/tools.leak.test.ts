@@ -3,9 +3,11 @@
 // @module-tag security
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { seedMeasures, measureBody } from "../support/measures.js";
 import { removeSources } from "../support/sources.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { ENGINES } from "../support/engines.js";
+import { BASE_URL } from "../support/http.js";
 import { randomUUID } from "crypto";
 import {
   grantTo,
@@ -58,6 +60,10 @@ describe("MCP discovery tools: what the caller may not see", () => {
       "id",
       "status",
     ]);
+    await seedMeasures(BASE_URL, visible, [
+      measureBody("hidden_revenue", { sum: "total" }),
+      measureBody("hidden_chain", { measure: "hidden_revenue" }),
+    ]);
     session = await connectMcp(mcpToken([MCP_USE, DATA_READ], userId));
   });
   afterAll(async () => {
@@ -101,6 +107,31 @@ describe("MCP discovery tools: what the caller may not see", () => {
     expect(normalised(ungranted.text, "customers")).toBe(
       normalised(nonexistent.text, "qustomers")
     );
+  });
+
+  it("shows no measure over an ungranted column anywhere: counts, listings, descriptions", async () => {
+    const sources = await callTool(session.client, "list_sources");
+    expect(sources.json.sources[0].measures).toBe(0);
+    const tables = await callTool(session.client, "list_tables", {
+      source: visible.slug,
+    });
+    expect(tables.json.tables[0].measures).toBe(0);
+    const described = await callTool(session.client, "describe_table", {
+      source: visible.slug,
+      table: "orders",
+    });
+    expect(described.json.table.measures).toEqual([]);
+    for (const text of [sources.text, tables.text, described.text]) {
+      expect(text).not.toContain("hidden_revenue");
+      expect(text).not.toContain("hidden_chain");
+    }
+    const used = await callTool(session.client, "query", {
+      source: visible.slug,
+      from: "orders",
+      select: [{ measure: "hidden_revenue" }],
+    });
+    expect(used.isError).toBe(true);
+    expect(used.json.error).toBe("not_found_or_not_accessible");
   });
 
   it("names no ungranted table, column or relation in any result", async () => {

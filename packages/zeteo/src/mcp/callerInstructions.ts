@@ -38,6 +38,8 @@ export interface ListedSource {
   type: string;
   description: string;
   tables: number;
+  /** Zero when the source has none; the line then says nothing of measures. */
+  measures?: number;
 }
 
 /** `text` on one line, at most `max` characters, cut after a whole word and ending in "…" when cut. */
@@ -51,7 +53,10 @@ const cutAtWord = (text: string, max: number): string => {
 
 const lineOf = (source: ListedSource): string => {
   const tables = `${source.tables} ${source.tables === 1 ? "table" : "tables"}`;
-  const head = `- \`${source.slug}\`: ${cutAtWord(source.name, NAME_MAX)} (${source.type}, ${tables})`;
+  const measures = source.measures
+    ? `, ${source.measures} ${source.measures === 1 ? "measure" : "measures"}`
+    : "";
+  const head = `- \`${source.slug}\`: ${cutAtWord(source.name, NAME_MAX)} (${source.type}, ${tables}${measures})`;
   const description = cutAtWord(source.description, DESCRIPTION_MAX);
   return description ? `${head}: ${description}` : head;
 };
@@ -114,6 +119,7 @@ const build = async (ctx: InstructionsContext): Promise<string> => {
         type: view.type,
         description: view.description,
         tables: view.tables.length,
+        measures: view.tables.reduce((sum, t) => sum + t.measures.length, 0),
       }))
     )
   );

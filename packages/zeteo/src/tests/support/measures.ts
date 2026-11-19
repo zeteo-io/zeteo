@@ -1,3 +1,4 @@
+import { grantTo, removeRunsOf, type SeededSource } from "./queries.js";
 import { fetchJson, type JsonResponse } from "./http.js";
 import { tokenFor } from "./tokens.js";
 import { randomUUID } from "crypto";
@@ -119,4 +120,26 @@ export const withoutRequestId = (res: JsonResponse) => {
     unknown
   >;
   return { status: res.status, body: rest };
+};
+
+/**
+ * Creates `bodies` on `source` through the shared server's API, as a fresh
+ * editor granted every table of the source (so each measure is visible to
+ * them); returns the ids by name.
+ */
+export const seedMeasures = async (
+  baseUrl: string,
+  source: SeededSource,
+  bodies: unknown[]
+): Promise<Record<string, string>> => {
+  const editor = measureUser();
+  for (const table of Object.values(source.tables)) {
+    await grantTo(editor.principal, table, "all");
+  }
+  await setEditors(baseUrl, source.id, [editor.principal]);
+  try {
+    return await createMeasures(baseUrl, source.id, editor.token, bodies);
+  } finally {
+    await removeRunsOf([editor.id]);
+  }
 };
