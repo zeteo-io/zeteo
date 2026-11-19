@@ -1,6 +1,5 @@
 import { runQuery, type RunQueryResult } from "../engine/index.js";
 import { notFoundMessage, QueryError } from "../engine/errors.js";
-import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import type { SharePrincipal } from "../sharing/principals.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { loadAccess, type Access } from "../grants/access.js";
@@ -8,6 +7,7 @@ import { MeasureError } from "../adapters/sql/measures.js";
 import { diffPrincipals } from "../sharing/principals.js";
 import { hasPermission } from "../utils/permissions.js";
 import { loadCalendar } from "../calendar/service.js";
+import { toMetricRow } from "../utils/db/metrics.js";
 import type { Caller } from "../middleware/auth.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Prisma } from "../utils/db/prisma.js";
@@ -19,6 +19,7 @@ import { overlayDraft } from "./draft.js";
 import {
   Prisma as PrismaRuntime,
   type Measure,
+  type Metric,
   type Source,
 } from "../../prisma/generated/client/index.js";
 import {
@@ -34,9 +35,16 @@ import type {
 import {
   buildVisibleCatalog,
   type MeasureRow,
+  type MetricRow,
   type VisibleCatalog,
   type VisibleMeasure,
 } from "../grants/visibleCatalog.js";
+import {
+  Planner,
+  newQueryState,
+  planSql,
+  queryNameOf,
+} from "../adapters/sql/plan.js";
 import {
   assertGroupsChecked,
   groupsInReach,
@@ -56,12 +64,15 @@ import {
   GroupNotAllowedError,
   InvalidMeasureError,
   MeasureInUseError,
+  type MeasureDependent,
   NotFoundError,
   SourceArchivedError,
 } from "../utils/errors.js";
 import {
   checkMeasureSet,
+  checkMetricSet,
   dependentsOf,
+  metricsUsing,
   usedBy,
   type MeasureProblem,
 } from "./dependents.js";
@@ -84,6 +95,10 @@ export interface MeasureInput {
   table: string;
   formula: CalcExpr;
   where?: Filter | null;
+  /** Computed over its whole home table, ignoring the query it is used in. */
+  fixed?: boolean;
+  /** A date or timestamp column path from the home table, for metric queries. */
+  date_column?: string | null;
 }
 
 type BucketUnit = (typeof BUCKET_UNITS)[number];
@@ -100,10 +115,15 @@ export interface MeasureList {
 }
 
 const NOT_FOUND = "Measure not found";
-const NOUN_TAKEN = "The source already has a measure with this name";
+export const NOUN_TAKEN =
+  "The source already has a measure or metric with this name";
+
+/** The 409 for a name a measure or metric of the source has already. */
+export const nameTaken = () =>
+  new ConflictError(NOUN_TAKEN, "measure_name_taken");
 
 /** The 403 for a caller who is not an editor of the source's measures. */
-const notEditor = () =>
+export const notEditor = () =>
   new ForbiddenError("Requires being an editor of this source's measures");
 
 /** Every column of every table, as the structural checks see the source. */
@@ -113,22 +133,24 @@ const allAccess = (sourceId: string): Access => ({
   tableAccess: () => "all",
 });
 
-interface Catalogs {
+export interface Catalogs {
   records: Measure[];
   rows: MeasureRow[];
-  /** The whole catalogue, every column granted, without measures. */
+  metricRecords: Metric[];
+  metricRows: MetricRow[];
+  /** The whole catalogue, every column granted, without measures or metrics. */
   full: Omit<VisibleCatalog, "measures">;
   /** The caller's catalogue with the measures they may use; null when the source is not theirs to query. */
   mine: VisibleCatalog | null;
 }
 
 /** What a source's catalogues are built from apart from its measures: read outside any transaction. */
-interface CatalogBase {
+export interface CatalogBase {
   catalog: Awaited<ReturnType<typeof db.catalog.loadSourceCatalog>>;
   calendar: Awaited<ReturnType<typeof loadCalendar>>;
 }
 
-const loadCatalogBase = async (source: Source): Promise<CatalogBase> => {
+export const loadCatalogBase = async (source: Source): Promise<CatalogBase> => {
   const [catalog, calendar] = await Promise.all([
     db.catalog.loadSourceCatalog(source.id),
     loadCalendar(),
@@ -136,38 +158,48 @@ const loadCatalogBase = async (source: Source): Promise<CatalogBase> => {
   return { catalog, calendar };
 };
 
-/** The source's catalogues for the caller from its tables and calendar and one read of its measures. `access` is loaded before any transaction. */
+/** The source's catalogues for the caller from its tables and calendar and one read of its measures and metrics. `access` is loaded before any transaction. */
 const catalogsOf = (
   source: Source,
   access: Access,
   { catalog, calendar }: CatalogBase,
-  records: Measure[]
+  records: Measure[],
+  metricRecords: Metric[]
 ): Catalogs => {
   const rows = records.map(toRow);
-  const build = (a: Access, measures: MeasureRow[]) =>
+  const metricRows = metricRecords.map(toMetricRow);
+  const build = (a: Access, measures: MeasureRow[], metrics: MetricRow[]) =>
     buildVisibleCatalog(
       source,
       catalog.tables,
       catalog.columns,
       catalog.relations,
       a,
-      { calendar, measures }
+      { calendar, measures, metrics }
     );
-  const { measures: _none, ...full } = build(allAccess(source.id), []);
+  const { measures: _none, ...full } = build(allAccess(source.id), [], []);
   const theirs = !source.archivedAt && access.sourceIds.has(source.id);
-  return { records, rows, full, mine: theirs ? build(access, rows) : null };
+  return {
+    records,
+    rows,
+    metricRecords,
+    metricRows,
+    full,
+    mine: theirs ? build(access, rows, metricRows) : null,
+  };
 };
 
 /** The source's catalogues for the caller, outside any transaction. */
-const loadCatalogs = async (
+export const loadCatalogs = async (
   source: Source,
   access: Access
 ): Promise<Catalogs> => {
-  const [base, records] = await Promise.all([
+  const [base, records, metricRecords] = await Promise.all([
     loadCatalogBase(source),
     db.measures.listRecordsBySource(source.id),
+    db.metrics.listRecordsBySource(source.id),
   ]);
-  return catalogsOf(source, access, base, records);
+  return catalogsOf(source, access, base, records, metricRecords);
 };
 
 /**
@@ -175,7 +207,7 @@ const loadCatalogs = async (
  * after the source's measures are locked, so the checks see the rows no one
  * else can change until the transaction ends; `base` is read beforehand.
  */
-const lockedCatalogs = async (
+export const lockedCatalogs = async (
   tx: Prisma.TransactionClient,
   source: Source,
   access: Access,
@@ -186,9 +218,19 @@ const lockedCatalogs = async (
     source,
     access,
     base,
-    await db.measures.listRecordsBySource(source.id, tx)
+    await db.measures.listRecordsBySource(source.id, tx),
+    await db.metrics.listRecordsBySource(source.id, tx)
   );
 };
+
+/** Whether a measure or metric of the source other than `exceptId` is named `name`. */
+export const nameInUse = (
+  catalogs: Pick<Catalogs, "rows" | "metricRows">,
+  name: string,
+  exceptId?: string
+): boolean =>
+  catalogs.rows.some((r) => r.name === name && r.id !== exceptId) ||
+  catalogs.metricRows.some((m) => m.name === name && m.id !== exceptId);
 
 /** The home table's query name: as the caller's catalogue names it, else as the whole one does. */
 const tableNameOf = (
@@ -230,6 +272,23 @@ const resolveTable = (mine: VisibleCatalog | null, name: string): string => {
   }
   return table.id;
 };
+
+/** A new measure's row from the request, its table resolved in the editor's catalogue. */
+const draftOf = (
+  source: Source,
+  catalogs: Catalogs,
+  input: MeasureInput
+): MeasureRow => ({
+  id: "",
+  sourceId: source.id,
+  tableId: resolveTable(catalogs.mine, input.table),
+  name: input.name,
+  description: input.description,
+  formula: input.formula,
+  where: input.where ?? null,
+  fixed: input.fixed ?? false,
+  dateColumn: input.date_column ?? null,
+});
 
 /**
  * The draft planned alone from its home table against the editor's
@@ -283,16 +342,67 @@ const checkDraft = (mine: VisibleCatalog | null, draft: MeasureRow): void => {
   };
   plan({ ...draft, where: null }, "formula");
   if (draft.where) plan(draft, "where");
+  if (draft.dateColumn !== null) {
+    checkDateColumn({ ...base, measures: others }, home, draft.dateColumn);
+  }
 };
 
 /**
- * The draft, and every measure that uses it (or used it as `previousName`),
- * planned against the source's whole catalogue. A dependent that planned
- * before and would not now refuses the save; one already broken does not.
+ * The draft's date column resolved from its home table against the editor's
+ * catalogue as a metric query resolves it: a path through to-one relations
+ * to a date or timestamp column. Refused at `date_column` with the planner's
+ * code otherwise; an ungranted column is not found, exactly as a nonexistent one.
+ */
+const checkDateColumn = (
+  catalog: VisibleCatalog,
+  home: VisibleCatalog["tables"][number],
+  dateColumn: string
+): void => {
+  const at = ["date_column"];
+  const planner = new Planner(catalog, new Date(), newQueryState());
+  let type: string;
+  try {
+    planner.fromTable(home, ["table"]);
+    type = planner.resolveMeasureColumn(dateColumn, at).ref.type;
+  } catch (err) {
+    if (err instanceof QueryError || err instanceof MeasureError) {
+      throw new InvalidMeasureError(err.code, err.message, at);
+    }
+    throw err;
+  }
+  if (type !== "date" && type !== "timestamp") {
+    throw new InvalidMeasureError(
+      "invalid_operator",
+      `A date column is a date or timestamp column; "${dateColumn}" is ${type}`,
+      at
+    );
+  }
+};
+
+/** The measures and metrics that use the measure `name` at all, as a 409 names them. */
+const usersOf = (
+  name: string,
+  catalogs: Pick<Catalogs, "rows" | "metricRows">
+): MeasureDependent[] => {
+  const measures = dependentsOf(name, catalogs.rows);
+  return [
+    ...measures.map((d) => ({ kind: "measure" as const, name: d.name })),
+    ...metricsUsing(
+      new Set([name, ...measures.map((d) => d.name)]),
+      catalogs.metricRows
+    ).map((m) => ({ kind: "metric" as const, name: m.name })),
+  ];
+};
+
+/**
+ * The draft, and every measure and metric that uses it (or used it as
+ * `previousName`), planned against the source's whole catalogue. A dependent
+ * that planned before and would not now refuses the save (a metric planned
+ * alone and bucketed by month, so a date column it needs is kept); one
+ * already broken does not.
  */
 const checkSet = (
-  full: Omit<VisibleCatalog, "measures">,
-  rows: readonly MeasureRow[],
+  { full, rows, metricRows }: Catalogs,
   draft: MeasureRow,
   previousName?: string
 ): void => {
@@ -314,11 +424,32 @@ const checkSet = (
     .filter((p) => !brokenBefore.has(p.name))
     .map((p) => p.name)
     .sort();
-  if (breaking.length > 0) throw new MeasureInUseError(breaking);
+  const usingMetrics = new Set(
+    metricsUsing(affected, metricRows).map((m) => m.name)
+  );
+  const metricsBefore = new Map(
+    checkMetricSet(metricRows, rows, full, usingMetrics).map((c) => [c.name, c])
+  );
+  const breakingMetrics = checkMetricSet(metricRows, after, full, usingMetrics)
+    .filter((c) => {
+      const before = metricsBefore.get(c.name);
+      return (
+        (before?.plain === null && c.plain !== null) ||
+        (before?.bucketed === null && c.bucketed !== null)
+      );
+    })
+    .map((c) => c.name)
+    .sort();
+  if (breaking.length > 0 || breakingMetrics.length > 0) {
+    throw new MeasureInUseError([
+      ...breaking.map((name) => ({ kind: "measure" as const, name })),
+      ...breakingMetrics.map((name) => ({ kind: "metric" as const, name })),
+    ]);
+  }
 };
 
 /** The source, or the 404 (to those who may read sources) or 403 a caller who could not edit it gets. */
-const findSourceFor = async (
+export const findSourceFor = async (
   caller: Caller,
   sourceId: string,
   notFound: string
@@ -333,7 +464,7 @@ const findSourceFor = async (
 };
 
 /** The source the caller edits the measures of: 403 for anyone else, 409 once archived. */
-const editableSource = async (
+export const editableSource = async (
   caller: Caller,
   sourceId: string,
   notFound: string
@@ -454,22 +585,10 @@ export const createMeasure = async (
   ]);
   const { record, table } = await withAudit(async (tx, audit) => {
     const catalogs = await lockedCatalogs(tx, source, access, base);
-    if (catalogs.rows.some((r) => r.name === input.name)) {
-      throw new ConflictError(NOUN_TAKEN, "measure_name_taken");
-    }
-    const draft: MeasureRow = {
-      id: "",
-      sourceId: source.id,
-      tableId: resolveTable(catalogs.mine, input.table),
-      name: input.name,
-      description: input.description,
-      formula: input.formula,
-      where: input.where ?? null,
-      fixed: false,
-      dateColumn: null,
-    };
+    if (nameInUse(catalogs, input.name)) throw nameTaken();
+    const draft = draftOf(source, catalogs, input);
     checkDraft(catalogs.mine, draft);
-    checkSet(catalogs.full, catalogs.rows, draft);
+    checkSet(catalogs, draft);
     const created = await mapUniqueViolation(
       () =>
         tx.measure.create({
@@ -482,6 +601,8 @@ export const createMeasure = async (
             ...(draft.where && {
               where: draft.where as Prisma.InputJsonValue,
             }),
+            fixed: draft.fixed,
+            dateColumn: draft.dateColumn,
             createdBy: caller.userId,
             updatedBy: caller.userId,
           },
@@ -549,13 +670,9 @@ export const updateMeasure = async (
     const before = fullySeen(caller, source, catalogs, id);
     const old = toRow(before);
     if (patch.name !== undefined && patch.name !== old.name) {
-      const dependents = dependentsOf(old.name, catalogs.rows);
-      if (dependents.length > 0) {
-        throw new MeasureInUseError(dependents.map((d) => d.name));
-      }
-      if (catalogs.rows.some((r) => r.name === patch.name)) {
-        throw new ConflictError(NOUN_TAKEN, "measure_name_taken");
-      }
+      const dependents = usersOf(old.name, catalogs);
+      if (dependents.length > 0) throw new MeasureInUseError(dependents);
+      if (nameInUse(catalogs, patch.name, id)) throw nameTaken();
     }
     const draft: MeasureRow = {
       ...old,
@@ -567,9 +684,12 @@ export const updateMeasure = async (
           : resolveTable(catalogs.mine, patch.table),
       formula: patch.formula ?? old.formula,
       where: patch.where === undefined ? old.where : patch.where,
+      fixed: patch.fixed ?? old.fixed,
+      dateColumn:
+        patch.date_column === undefined ? old.dateColumn : patch.date_column,
     };
     checkDraft(catalogs.mine, draft);
-    checkSet(catalogs.full, catalogs.rows, draft, old.name);
+    checkSet(catalogs, draft, old.name);
     const updated = await mapUniqueViolation(
       () =>
         tx.measure.update({
@@ -583,6 +703,8 @@ export const updateMeasure = async (
               draft.where === null
                 ? PrismaRuntime.DbNull
                 : (draft.where as Prisma.InputJsonValue),
+            fixed: draft.fixed,
+            dateColumn: draft.dateColumn,
             updatedBy: caller.userId,
           },
         }),
@@ -623,10 +745,8 @@ export const deleteMeasure = async (
   await withAudit(async (tx, audit) => {
     const catalogs = await lockedCatalogs(tx, source, access, base);
     const record = fullySeen(caller, source, catalogs, id);
-    const dependents = dependentsOf(record.name, catalogs.rows);
-    if (dependents.length > 0) {
-      throw new MeasureInUseError(dependents.map((d) => d.name));
-    }
+    const dependents = usersOf(record.name, catalogs);
+    if (dependents.length > 0) throw new MeasureInUseError(dependents);
     await tx.measure.delete({ where: { id } });
     audit({
       action: AUDIT_EVENTS.measureDeleted,
@@ -658,17 +778,10 @@ export const previewMeasure = async (
   const source = await editableSource(caller, sourceId, "Source not found");
   const catalogs = await loadCatalogs(source, await loadAccess(caller));
   const stored = catalogs.rows.find((r) => r.name === input.name);
-  const draft: MeasureRow = {
-    id: stored?.id ?? "",
-    sourceId: source.id,
-    tableId: resolveTable(catalogs.mine, input.table),
-    name: input.name,
-    description: input.description,
-    formula: input.formula,
-    where: input.where ?? null,
-    fixed: false,
-    dateColumn: null,
-  };
+  if (catalogs.metricRows.some((m) => m.name === input.name)) {
+    throw nameTaken();
+  }
+  const draft = { ...draftOf(source, catalogs, input), id: stored?.id ?? "" };
   checkDraft(catalogs.mine, draft);
   // The bucket's column is named so it cannot be the measure's.
   const period = draft.name === "period" ? "period_start" : "period";

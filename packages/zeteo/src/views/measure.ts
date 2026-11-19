@@ -29,6 +29,8 @@ export const measureView = (
   table,
   formula: row.formula,
   where: row.where ?? null,
+  fixed: row.fixed,
+  date_column: row.dateColumn,
   created_at: row.createdAt.toISOString(),
   updated_at: row.updatedAt.toISOString(),
   usable: extra.usable,

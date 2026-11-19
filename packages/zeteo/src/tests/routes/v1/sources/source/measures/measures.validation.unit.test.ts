@@ -43,10 +43,26 @@ describe("CreateMeasureSchema", () => {
     ["a formula with two keys", { formula: { sum: "a", max: "b" } }],
     ["a filter with an unknown operator", { where: { status: { is: 1 } } }],
     ["an unknown field", { joins: ["customers"] }],
+    ["fixed that is not a boolean", { fixed: "yes" }],
+    ["an empty date column", { date_column: "" }],
+    ["a date column holding NUL", { date_column: "a\u0000b" }],
+    ["a date column too long", { date_column: "x".repeat(257) }],
   ])("refuses %s", (_, change) => {
     expect(CreateMeasureSchema.safeParse({ ...VALID, ...change }).success).toBe(
       false
     );
+  });
+
+  it("accepts fixed and a date column, or a null date column", () => {
+    for (const change of [
+      { fixed: true, date_column: "created_at" },
+      { date_column: "customers.signed_up_on" },
+      { date_column: null },
+    ]) {
+      expect(
+        CreateMeasureSchema.safeParse({ ...VALID, ...change }).success
+      ).toBe(true);
+    }
   });
 
   it.each([["name"], ["description"], ["table"], ["formula"]])(

@@ -59,6 +59,8 @@ describe("/v1/sources/:sourceId/measures", () => {
       table: "orders",
       formula: { count: "*" },
       where: null,
+      fixed: false,
+      date_column: null,
       created_at: expect.any(String),
       updated_at: expect.any(String),
       usable: true,

@@ -16,9 +16,14 @@ export const MeasureFieldsShape = {
   table: noNul(z.string().min(1).max(256)),
   formula: measureFormulaSchema,
   where: measureWhereSchema.nullable(),
+  fixed: z.boolean(),
+  /** A column path from the home table, through to-one relations; null for none. */
+  date_column: noNul(z.string().min(1).max(256)).nullable(),
 };
 
 export const CreateMeasureSchema = z.strictObject({
   ...MeasureFieldsShape,
   where: MeasureFieldsShape.where.optional(),
+  fixed: MeasureFieldsShape.fixed.optional(),
+  date_column: MeasureFieldsShape.date_column.optional(),
 });

@@ -1,4 +1,4 @@
-import type { MeasureRow, VisibleCatalog } from "../grants/visibleCatalog.js";
+import { withDraftMeasure, withDraftMetric } from "../measures/draft.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
@@ -7,7 +7,6 @@ import { stampSavedQueryRun } from "../saved-queries/stamps.js";
 import { coalesce, waitForLeases } from "./dashboardRun.js";
 import { withSourceConnection } from "../sources/pools.js";
 import { invalidRequest } from "../utils/validateReq.js";
-import { withDraftMeasure } from "../measures/draft.js";
 import { loadUserLimits } from "../limits/resolve.js";
 import type { CachedResult } from "./resultCache.js";
 import type { Caller } from "../middleware/auth.js";
@@ -21,6 +20,11 @@ import { notFound } from "./errors.js";
 import { collect } from "./collect.js";
 import env from "../env.js";
 import { z } from "zod";
+import type {
+  MeasureRow,
+  MetricRow,
+  VisibleCatalog,
+} from "../grants/visibleCatalog.js";
 import type {
   ColumnType,
   PlanContext,
@@ -84,6 +88,12 @@ export interface RunQueryInput {
    * the stored measure of its id or name. Never with `savedQuery`.
    */
   draftMeasure?: MeasureRow;
+  /**
+   * Set only by src/measures/ for a metric's preview: the catalogue's metrics
+   * for this one run are decided again with this draft in place of the stored
+   * metric of its id or name. Never with `savedQuery` or `draftMeasure`.
+   */
+  draftMetric?: MetricRow;
 }
 
 /** A dashboard's run of one panel's query. */
@@ -324,13 +334,14 @@ const execute = async (
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
-  const { caller, body, savedQuery, draftMeasure } = input;
+  const { caller, body, savedQuery, draftMeasure, draftMetric } = input;
   const planned = savedQuery
     ? await loadAndPlanSaved(caller, savedQuery, body, progress)
     : await loadCatalogFor(caller, slug, progress).then(async (loaded) => {
-        const catalog = draftMeasure
-          ? await withDraftMeasure(loaded.catalog, draftMeasure)
-          : loaded.catalog;
+        let catalog = loaded.catalog;
+        if (draftMeasure)
+          catalog = await withDraftMeasure(catalog, draftMeasure);
+        if (draftMetric) catalog = await withDraftMetric(catalog, draftMetric);
         return {
           ...loaded,
           catalog,
@@ -420,8 +431,14 @@ export async function runQuery(
       "a dashboard run needs the dashboard entry point, the dashboard option and a saved query, all three"
     );
   }
-  if (input.draftMeasure && (input.savedQuery || input.dashboard)) {
+  if (
+    (input.draftMeasure || input.draftMetric) &&
+    (input.savedQuery || input.dashboard)
+  ) {
     throw new Error("a draft measure is previewed in a query of its own");
+  }
+  if (input.draftMeasure && input.draftMetric) {
+    throw new Error("a preview has one draft, a measure or a metric");
   }
   if (input.dashboard && input.savedQuery) {
     return runDashboardQuery(input, input.dashboard, input.savedQuery);

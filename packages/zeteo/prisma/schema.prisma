@@ -137,6 +137,7 @@ model Source {
   uploadClaims   UploadClaim[]
   measures       Measure[]
   measureEditors MeasureEditor[]
+  metrics        Metric[]
 
   @@index([ownerId])
   @@map("sources")
@@ -603,6 +604,10 @@ model Measure {
   description String
   formula     Json
   where       Json?
+  // Computed over its whole home table, ignoring the query it is used in.
+  fixed       Boolean  @default(false)
+  // A date or timestamp column path from the home table, for metric queries.
+  dateColumn  String?  @map("date_column")
   createdBy   String   @map("created_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
   updatedBy   String   @map("updated_by") @db.Uuid
@@ -614,6 +619,27 @@ model Measure {
   @@unique([sourceId, name])
   @@index([tableId])
   @@map("measures")
+  @@schema("zeteo")
+}
+
+// A named formula over measures of any tables of one source. Its name is
+// unique per source across measures and metrics (checked by the service under
+// the source's measures lock).
+model Metric {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  name        String
+  description String
+  formula     Json
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedBy   String   @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, name])
+  @@map("metrics")
   @@schema("zeteo")
 }
 

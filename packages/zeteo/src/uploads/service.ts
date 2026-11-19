@@ -6,8 +6,10 @@ import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { discardStaging, getStaging } from "./staging.js";
 import { presentSourceById } from "../sources/present.js";
 import { lockSourceMeasures } from "../measures/lock.js";
+import { metricsUsing } from "../measures/dependents.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
+import { toMetricRow } from "../utils/db/metrics.js";
 import type { SourceView } from "../views/source.js";
 import type { Caller } from "../middleware/auth.js";
 import type { UploadColumnType } from "./types.js";
@@ -551,9 +553,10 @@ export const deleteUploadSource = async (
         data: { ownerGrant: false },
       });
       await releaseAllClaims(tx, id);
-      // Its measures and their editors go with the source.
+      // Its measures, metrics and their editors go with the source.
       await lockSourceMeasures(tx, id);
       const measures = await tx.measure.deleteMany({ where: { sourceId: id } });
+      const metrics = await tx.metric.deleteMany({ where: { sourceId: id } });
       await tx.measureEditor.deleteMany({ where: { sourceId: id } });
       await dropSourceSchema(id, tx);
       audit({
@@ -567,6 +570,7 @@ export const deleteUploadSource = async (
           name: row.name,
           owner_id: row.ownerId,
           measures_removed: measures.count,
+          metrics_removed: metrics.count,
         },
       });
     })
@@ -1008,6 +1012,17 @@ export const removeTable = async (
         orderBy: { name: "asc" },
       });
       await tx.measure.deleteMany({ where: { tableId } });
+      // So does a metric using one of those measures.
+      const gone = new Set(measuresRemoved.map((m) => m.name));
+      const metricsRemoved = metricsUsing(
+        gone,
+        (await tx.metric.findMany({ where: { sourceId: id } })).map(toMetricRow)
+      ).map((m) => ({ id: m.id, name: m.name }));
+      if (metricsRemoved.length > 0) {
+        await tx.metric.deleteMany({
+          where: { id: { in: metricsRemoved.map((m) => m.id) } },
+        });
+      }
       audit({
         action: AUDIT_EVENTS.sourceTableRemoved,
         resourceType: "source",
@@ -1019,6 +1034,7 @@ export const removeTable = async (
           changed: ["tables"],
           tables_removed: [{ id: tableId, name: table.name }],
           measures_removed: measuresRemoved,
+          metrics_removed: metricsRemoved,
         },
       });
     })

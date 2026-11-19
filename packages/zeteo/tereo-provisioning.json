@@ -362,6 +362,21 @@
         "readPermission": "zeteo.sources.read"
       },
       {
+        "eventType": "zeteo.metric.created",
+        "description": "A metric was created",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.metric.updated",
+        "description": "A metric was changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.metric.deleted",
+        "description": "A metric was deleted",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
         "eventType": "zeteo.query.run",
         "description": "A query was run, refused or failed",
         "readPermission": "zeteo.runs.read"

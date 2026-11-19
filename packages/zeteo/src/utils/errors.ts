@@ -510,13 +510,24 @@ export class InvalidMeasureError extends AppError {
   }
 }
 
-/** A change, rename or delete of a measure other measures use and would break: they are named. */
+/** A measure or metric that uses the measure being changed. */
+export interface MeasureDependent {
+  kind: "measure" | "metric";
+  name: string;
+}
+
+/**
+ * A change, rename or delete of a measure other measures or metrics use and
+ * would break: they are named, measures first, each kind by name.
+ */
 export class MeasureInUseError extends AppError {
-  constructor(dependents: string[]) {
+  constructor(dependents: MeasureDependent[]) {
     super(
       409,
       "measure_in_use",
-      `Other measures use this one and would break: ${dependents.join(", ")}`,
+      `Other measures or metrics use this one and would break: ${dependents
+        .map((d) => `${d.kind} ${d.name}`)
+        .join(", ")}`,
       { details: { dependents } }
     );
     this.name = "MeasureInUseError";

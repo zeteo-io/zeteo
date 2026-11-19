@@ -27,6 +27,8 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
   const editor = measureUser();
   /** An editor granted every column of orders but status. */
   const limited = measureUser();
+  /** An editor granted orders' id and total only: no date column. */
+  const dateless = measureUser();
   let ids: Record<string, string>;
 
   const create = (body: unknown, on: SeededSource = source) =>
@@ -46,7 +48,11 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
       ]) {
         await grantTo(editor.principal, on.tables[table]!, "all");
       }
-      await setEditors(app.url, on.id, [editor.principal, limited.principal]);
+      await setEditors(app.url, on.id, [
+        editor.principal,
+        limited.principal,
+        dateless.principal,
+      ]);
     }
     await grantTo(limited.principal, source.tables.orders!, [
       "id",
@@ -54,6 +60,7 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
       "created_at",
       "customer_id",
     ]);
+    await grantTo(dateless.principal, source.tables.orders!, ["id", "total"]);
     ids = await createMeasures(
       app.url,
       source.id,
@@ -183,7 +190,10 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
     expect(res.status).toBe(409);
     expect(res.body).toMatchObject({
       error: "measure_in_use",
-      dependents: ["paid_revenue", "paid_ytd"],
+      dependents: [
+        { kind: "measure", name: "paid_revenue" },
+        { kind: "measure", name: "paid_ytd" },
+      ],
     });
   });
 
@@ -195,11 +205,17 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
     expect(renamed.status).toBe(409);
     expect(renamed.body).toMatchObject({
       error: "measure_in_use",
-      dependents: ["paid_revenue", "paid_ytd"],
+      dependents: [
+        { kind: "measure", name: "paid_revenue" },
+        { kind: "measure", name: "paid_ytd" },
+      ],
     });
     const deleted = await api("DELETE", path, editor.token);
     expect(deleted.status).toBe(409);
-    expect(deleted.body.dependents).toEqual(["paid_revenue", "paid_ytd"]);
+    expect(deleted.body.dependents).toEqual([
+      { kind: "measure", name: "paid_revenue" },
+      { kind: "measure", name: "paid_ytd" },
+    ]);
   });
 
   it("allows a change its dependents still plan with", async () => {
@@ -210,5 +226,69 @@ describe("POST and PATCH /v1/sources/:sourceId/measures: checks of a definition"
       { formula: { sum: { mul: ["total", 1] } } }
     );
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+  });
+
+  it("stores a fixed measure and a date column through a to-one relation", async () => {
+    const res = await create({
+      ...measureBody("line_qty_by_order_day", { sum: "qty" }),
+      table: "order_lines",
+      date_column: "orders.created_at",
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body).toMatchObject({
+      fixed: false,
+      date_column: "orders.created_at",
+    });
+    const fixed = await create({
+      ...measureBody("last_order_at", { max: "created_at" }),
+      fixed: true,
+      date_column: "created_at",
+    });
+    expect(fixed.status, JSON.stringify(fixed.body)).toBe(201);
+    expect(fixed.body).toMatchObject({
+      fixed: true,
+      date_column: "created_at",
+    });
+    const cleared = await api(
+      "PATCH",
+      `/${source.id}/measures/${fixed.body.id}`,
+      editor.token,
+      { fixed: false, date_column: null }
+    );
+    expect(cleared.status, JSON.stringify(cleared.body)).toBe(200);
+    expect(cleared.body).toMatchObject({ fixed: false, date_column: null });
+  });
+
+  it.each([
+    ["a column that is not a date", "status", "invalid_operator"],
+    ["a to-many relation", "order_lines.qty", "measure_reads_to_many"],
+    [
+      "a column that does not exist",
+      "no_such_column",
+      "not_found_or_not_accessible",
+    ],
+  ])("refuses a date column on %s, at date_column", async (_, column, code) => {
+    const res = await create({
+      ...measureBody("dated_total", { sum: "total" }),
+      date_column: column,
+    });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: code, path: ["date_column"] });
+  });
+
+  it("refuses a date column the editor is not granted exactly as one that does not exist", async () => {
+    const as = (column: string) =>
+      api("POST", `/${source.id}/measures`, dateless.token, {
+        ...measureBody("dated_total", { sum: "total" }),
+        date_column: column,
+      });
+    const hidden = await as("created_at");
+    const missing = await as("no_such_col");
+    expect(hidden.status).toBe(400);
+    const { request_id: _a, ...h } = hidden.body;
+    const { request_id: _b, ...m } = missing.body;
+    expect(JSON.stringify(h).replaceAll("created_at", "<column>")).toBe(
+      JSON.stringify(m).replaceAll("no_such_col", "<column>")
+    );
   });
 });

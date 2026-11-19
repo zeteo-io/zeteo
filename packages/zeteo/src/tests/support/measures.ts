@@ -113,6 +113,38 @@ export const createMeasures = async (
   return ids;
 };
 
+/** A metric's body. */
+export const metricBody = (name: string, formula: unknown) => ({
+  name,
+  description: `The ${name.replaceAll("_", " ")}`,
+  formula,
+});
+
+/** Creates each metric through the API as `token`, in order; returns their ids by name. */
+export const createMetrics = async (
+  baseUrl: string,
+  sourceId: string,
+  token: string,
+  bodies: unknown[]
+): Promise<Record<string, string>> => {
+  const ids: Record<string, string> = {};
+  for (const body of bodies) {
+    const res = await fetchJson(
+      "POST",
+      `${baseUrl}/v1/sources/${sourceId}/metrics`,
+      token,
+      body
+    );
+    if (res.status !== 201) {
+      throw new Error(
+        `metric not created: ${res.status} ${JSON.stringify(res.body)}`
+      );
+    }
+    ids[res.body.name as string] = res.body.id as string;
+  }
+  return ids;
+};
+
 /** A response without its `request_id`: what two refusals are compared by. */
 export const withoutRequestId = (res: JsonResponse) => {
   const { request_id: _id, ...rest } = (res.body ?? {}) as Record<

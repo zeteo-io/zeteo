@@ -7,7 +7,7 @@ import { describeEachEngine } from "../support/engines.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
-import { db, prisma } from "../../utils/db/index.js";
+import { prisma } from "../../utils/db/index.js";
 import { runQuery } from "../../engine/index.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -36,9 +36,6 @@ describeEachEngine("runQuery: fixed measures", (engine) => {
   };
   const author = randomUUID();
   let source: SeededSource;
-  /** The stored measures that are fixed, until the column exists. */
-  const fixedNames = new Set<string>();
-  const listBySource = db.measures.listBySource;
 
   const addMeasure = async (
     name: string,
@@ -55,11 +52,11 @@ describeEachEngine("runQuery: fixed measures", (engine) => {
         description: `The ${name}`,
         formula,
         ...(where ? { where } : {}),
+        fixed,
         createdBy: author,
         updatedBy: author,
       },
     });
-    if (fixed) fixedNames.add(name);
   };
 
   const run = async (from: string, select: unknown[], extra: object = {}) =>
@@ -73,14 +70,6 @@ describeEachEngine("runQuery: fixed measures", (engine) => {
 
   beforeAll(async () => {
     await initializeTereo();
-    db.measures = {
-      ...db.measures,
-      listBySource: async (sourceId: string) =>
-        (await listBySource(sourceId)).map((row) => ({
-          ...row,
-          fixed: fixedNames.has(row.name),
-        })),
-    };
     source = await seedQuerySource(engine, {}, "fixed");
     for (const table of ["orders", "customers", "accounts", "order_lines"]) {
       await grantTo(user.principal, source.tables[table]!, "all");
@@ -107,7 +96,6 @@ describeEachEngine("runQuery: fixed measures", (engine) => {
     });
   });
   afterAll(async () => {
-    db.measures = { ...db.measures, listBySource };
     await removeRunsOf([user.id]);
     await removeSources([source.id]);
     await closeAllSourcePools();

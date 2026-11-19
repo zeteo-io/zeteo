@@ -14,8 +14,8 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import { uniqueName } from "../support/savedQueries.js";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
-import { db, prisma } from "../../utils/db/index.js";
 import { runExport } from "../../engine/export.js";
+import { prisma } from "../../utils/db/index.js";
 import { runQuery } from "../../engine/index.js";
 import { randomUUID } from "node:crypto";
 import {
@@ -55,11 +55,6 @@ describeEachEngine("runQuery: metric queries", (engine) => {
   };
   const author = randomUUID();
   let source: SeededSource;
-  /** What the stored measures would carry once the columns exist. */
-  const extra = new Map<string, { fixed?: boolean; dateColumn?: string }>();
-  let metrics: Omit<MetricRow, "sourceId">[] = [];
-  const listMeasures = db.measures.listBySource;
-  const listMetrics = db.metrics.listBySource;
 
   const addMeasure = async (
     name: string,
@@ -75,11 +70,28 @@ describeEachEngine("runQuery: metric queries", (engine) => {
         description: `The ${name}`,
         formula,
         ...(options.where ? { where: options.where } : {}),
+        fixed: options.fixed ?? false,
+        dateColumn: options.dateColumn ?? null,
         createdBy: author,
         updatedBy: author,
       },
     });
-    extra.set(name, { fixed: options.fixed, dateColumn: options.dateColumn });
+  };
+
+  /** Stores `list` as the source's metrics, in place of any stored before. */
+  const storeMetrics = async (list: typeof ALL_METRICS) => {
+    await prisma.metric.deleteMany({ where: { sourceId: source.id } });
+    await prisma.metric.createMany({
+      data: list.map((m) => ({
+        id: m.id,
+        sourceId: source.id,
+        name: m.name,
+        description: m.description,
+        formula: m.formula as object,
+        createdBy: author,
+        updatedBy: author,
+      })),
+    });
   };
 
   const metric = (name: string, formula: unknown) => ({
@@ -139,20 +151,6 @@ describeEachEngine("runQuery: metric queries", (engine) => {
 
   beforeAll(async () => {
     await initializeTereo();
-    db.measures = {
-      ...db.measures,
-      listBySource: async (sourceId: string) =>
-        (await listMeasures(sourceId)).map((row) => ({
-          ...row,
-          fixed: extra.get(row.name)?.fixed ?? false,
-          dateColumn: extra.get(row.name)?.dateColumn ?? null,
-        })),
-    };
-    db.metrics = {
-      ...db.metrics,
-      listBySource: async (sourceId: string) =>
-        sourceId === source.id ? metrics.map((m) => ({ ...m, sourceId })) : [],
-    };
     source = await seedQuerySource(
       engine,
       { export_enabled: true, export_row_cap: 1000 },
@@ -215,11 +213,9 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       { countDistinct: "channel" },
       { dateColumn: "day" }
     );
-    metrics = ALL_METRICS;
+    await storeMetrics(ALL_METRICS);
   });
   afterAll(async () => {
-    db.measures = { ...db.measures, listBySource: listMeasures };
-    db.metrics = { ...db.metrics, listBySource: listMetrics };
     await removeRunsOf([user.id]);
     await removeSources([source.id]);
     await closeAllSourcePools();
@@ -360,7 +356,7 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       details: { path: ["metrics", 1] },
     });
     const hiddenMeasure = await refusal({ metrics: ["secret_spend"] });
-    metrics = ALL_METRICS.filter((m) => m.name !== "secret_roas");
+    await storeMetrics(ALL_METRICS.filter((m) => m.name !== "secret_roas"));
     await prisma.measure.deleteMany({
       where: { sourceId: source.id, name: "secret_spend" },
     });
@@ -372,7 +368,7 @@ describeEachEngine("runQuery: metric queries", (engine) => {
         hiddenMeasure
       );
     } finally {
-      metrics = ALL_METRICS;
+      await storeMetrics(ALL_METRICS);
       await addMeasure(
         "secret_spend",
         "ad_spend",

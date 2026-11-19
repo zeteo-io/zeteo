@@ -1,9 +1,14 @@
-import type { MeasureRow, VisibleCatalog } from "../grants/visibleCatalog.js";
+import { metricFormulaMeasures, planMetrics } from "../adapters/sql/metrics.js";
 import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { MeasureError } from "../adapters/sql/measures.js";
 import { QueryError } from "../engine/errors.js";
 import { prisma } from "../utils/db/prisma.js";
+import type {
+  MeasureRow,
+  MetricRow,
+  VisibleCatalog,
+} from "../grants/visibleCatalog.js";
 
 // What a change to one measure does to the others: which measures use it,
 // directly or through others, and whether every measure of a source still
@@ -126,25 +131,121 @@ export const checkMeasureSet = (
   return problems;
 };
 
+/** The metrics of `metrics` whose formula names any of `names`, by name. */
+export const metricsUsing = (
+  names: ReadonlySet<string>,
+  metrics: readonly MetricRow[]
+): MetricRow[] =>
+  metrics
+    .filter((m) => metricFormulaMeasures(m.formula).some((n) => names.has(n)))
+    .sort((a, b) => (a.name < b.name ? -1 : 1));
+
+/** How a metric plans against the source's whole catalogue: alone, and bucketed by month. */
+export interface MetricCheck {
+  name: string;
+  /** Why it does not plan alone; null when it does. */
+  plain: { code: string; message: string } | null;
+  /** Why it does not plan bucketed by month (so its measures' date columns); null when it does. */
+  bucketed: { code: string; message: string } | null;
+}
+
 /**
- * The saved queries of the source whose JSON uses the measure `name`
- * anywhere, and the dashboard panels showing one of them, directly or
- * through a saved panel.
+ * The metrics of `metrics` (or those `only` names) planned against
+ * `fullCatalog` with `measures`, every column granted: alone, and bucketed by
+ * month, which needs every non-fixed measure it uses to have a usable date
+ * column. A metric that used to plan in either way and would not now is one
+ * a change breaks.
+ */
+export const checkMetricSet = (
+  metrics: readonly MetricRow[],
+  measures: readonly MeasureRow[],
+  fullCatalog: Omit<VisibleCatalog, "measures" | "metrics">,
+  only?: ReadonlySet<string>
+): MetricCheck[] => {
+  const catalog: VisibleCatalog = {
+    ...fullCatalog,
+    measures: measures.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description,
+      tableId: r.tableId,
+      formula: r.formula,
+      where: r.where,
+      fixed: r.fixed,
+      dateColumn: r.dateColumn,
+    })),
+    metrics: metrics.map((m) => ({
+      id: m.id,
+      name: m.name,
+      description: m.description,
+      formula: m.formula,
+    })),
+  };
+  const now = new Date();
+  const attempt = (name: string, bucketed: boolean) => {
+    try {
+      planMetrics(
+        {
+          source: catalog.source.slug,
+          metrics: [name],
+          ...(bucketed && { bucket: "month" as const }),
+        },
+        catalog,
+        { now }
+      );
+      return null;
+    } catch (err) {
+      if (err instanceof QueryError || err instanceof MeasureError) {
+        return { code: err.code, message: err.message };
+      }
+      return {
+        code: "invalid_metric",
+        message: "The stored metric could not be read",
+      };
+    }
+  };
+  return metrics
+    .filter((m) => !only || only.has(m.name))
+    .map((m) => ({
+      name: m.name,
+      plain: attempt(m.name, false),
+      bucketed: attempt(m.name, true),
+    }));
+};
+
+/** The saved queries' JSON conditions for a use of a measure or a metric named `n`. */
+const IN_METRICS = `$.metrics[*] ? (@ == $n)`;
+const AS_MEASURE = `$.** ? (@.measure == $n)`;
+
+/**
+ * The saved queries of the source whose JSON uses the measure or metric
+ * `name` (a measure anywhere as `{ measure }` or by name in a metric query's
+ * `metrics`; a metric in `metrics`), and the dashboard panels showing one of
+ * them, directly or through a saved panel.
  */
 export const usedBy = async (
   sourceId: string,
-  name: string
+  name: string,
+  kind: "measure" | "metric" = "measure"
 ): Promise<{ saved_queries: number; panels: number }> => {
+  const asMeasure = kind === "measure";
   const [row] = await prisma.$queryRaw<
     { saved_queries: number; panels: number }[]
   >`
     WITH used AS (
       SELECT q."id" FROM "zeteo"."saved_queries" q
        WHERE q."source_id" = ${sourceId}::uuid
-         AND jsonb_path_exists(
-           q."query",
-           '$.** ? (@.measure == $n)',
-           jsonb_build_object('n', ${name}::text)
+         AND (
+           jsonb_path_exists(
+             q."query",
+             ${IN_METRICS}::jsonpath,
+             jsonb_build_object('n', ${name}::text)
+           )
+           OR (${asMeasure} AND jsonb_path_exists(
+             q."query",
+             ${AS_MEASURE}::jsonpath,
+             jsonb_build_object('n', ${name}::text)
+           ))
          )
     )
     SELECT

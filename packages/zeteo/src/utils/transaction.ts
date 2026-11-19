@@ -68,6 +68,9 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.measureUpdated]: "UPDATE",
   [AUDIT_EVENTS.measureDeleted]: "DELETE",
   [AUDIT_EVENTS.measureEditorsUpdated]: "UPDATE",
+  [AUDIT_EVENTS.metricCreated]: "CREATE",
+  [AUDIT_EVENTS.metricUpdated]: "UPDATE",
+  [AUDIT_EVENTS.metricDeleted]: "DELETE",
   [AUDIT_EVENTS.queryRun]: "CREATE",
   [AUDIT_EVENTS.exportStarted]: "CREATE",
   // Ends the run its start created; an export refused before it started
