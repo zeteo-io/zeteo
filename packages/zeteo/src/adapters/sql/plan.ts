@@ -859,7 +859,10 @@ export const planSql = (
       resolved = {
         kind: "bucket",
         unit: item.bucket,
-        fiscalStartMonth: catalog.calendar.fiscalYearStartMonth,
+        // Read only by a fiscal unit: a calendar change leaves other plans alone.
+        fiscalStartMonth: item.bucket.startsWith("fiscal_")
+          ? catalog.calendar.fiscalYearStartMonth
+          : 1,
         column: ref,
         output: item.as ?? `${item.bucket}_${item.column.replaceAll(".", "_")}`,
         type: ref.type,

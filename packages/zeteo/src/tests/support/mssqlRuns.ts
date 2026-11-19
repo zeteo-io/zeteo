@@ -1,4 +1,5 @@
 import { AzureSqlPreparedQuery } from "../../adapters/azure-sql/runQuery.js";
+import { DEFAULT_CALENDAR, type Calendar } from "../../calendar/calendar.js";
 import { AzureSqlConnection } from "../../adapters/azure-sql/connect.js";
 import { buildVisibleCatalog } from "../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../grants/visibleCatalog.js";
@@ -6,7 +7,6 @@ import { toMssqlConfig } from "../../adapters/azure-sql/settings.js";
 import { azureSqlAdapter } from "../../adapters/azure-sql/index.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
-import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
@@ -158,6 +158,18 @@ export const useMssqlRuns = () => {
     conn: SourceConnection = connection
   ) => runPlan("azure-sql", conn, plan(query), { ...LIMITS, ...limits });
 
+  /** A run of `query` under a catalogue whose calendar is `calendar`. */
+  const runWithCalendar = (calendar: Calendar, query: object) =>
+    runPlan(
+      "azure-sql",
+      connection,
+      planSql(sqlQuerySchema.parse({ source: catalog.source.slug, ...query }), {
+        ...catalog,
+        calendar,
+      }),
+      LIMITS
+    );
+
   /** Opens `query` as a row stream, prepared for every row it has. */
   const open = (
     query: object,
@@ -248,5 +260,6 @@ export const useMssqlRuns = () => {
     open,
     plan,
     run,
+    runWithCalendar,
   };
 };

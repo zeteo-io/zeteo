@@ -4,6 +4,7 @@ import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import type { SqlDialect } from "../../../adapters/sql/dialect.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -504,5 +505,31 @@ describe("compileSql: case", () => {
         orderBy: [],
       }).sql
     ).toContain('count(case when "t0"."id" = $1 then cast($2 as bigint) end)');
+  });
+});
+
+describe("planSql: bucket calendars", () => {
+  const planWith = (unit: string, fiscalYearStartMonth: number) =>
+    planSql(
+      sqlQuerySchema.parse({
+        source: "shop",
+        from: "orders",
+        select: [{ bucket: unit, column: "created_at", as: "b" }],
+      }),
+      {
+        ...shopCatalog(),
+        calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth },
+      }
+    );
+
+  it("plans a fiscal bucket differently when the fiscal year starts in another month", () => {
+    expect(planWith("fiscal_year", 2)).not.toEqual(planWith("fiscal_year", 4));
+    expect(planWith("fiscal_quarter", 2)).not.toEqual(
+      planWith("fiscal_quarter", 3)
+    );
+  });
+
+  it("plans a calendar bucket the same whatever the fiscal year start", () => {
+    expect(planWith("month", 2)).toEqual(planWith("month", 4));
   });
 });

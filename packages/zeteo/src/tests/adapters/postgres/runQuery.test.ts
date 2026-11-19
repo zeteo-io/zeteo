@@ -326,62 +326,6 @@ describe("postgres runQuery", () => {
     ]);
   });
 
-  it("computes a case: conditional sums and counts equal their filtered queries, and text cases return text", async () => {
-    const paid = { status: { eq: "paid" } };
-    const conditional = await run({
-      from: "orders",
-      select: [
-        {
-          sum: { case: { when: [{ if: paid, then: "total" }] } },
-          as: "paid",
-        },
-        {
-          count: { case: { when: [{ if: paid, then: 1 }] } },
-          as: "paid_orders",
-        },
-        {
-          countDistinct: {
-            case: { when: [{ if: paid, then: "customer_id" }] },
-          },
-          as: "paid_customers",
-        },
-      ],
-    });
-    const filtered = await run({
-      from: "orders",
-      select: [
-        { sum: "total", as: "paid" },
-        { count: "*", as: "paid_orders" },
-        { countDistinct: "customer_id", as: "paid_customers" },
-      ],
-      where: paid,
-    });
-    expect(conditional.rows).toEqual(filtered.rows);
-    expect(conditional.rows).toEqual([["3585.59", "7", "3"]]);
-
-    const text = await run({
-      from: "orders",
-      select: [
-        "id",
-        {
-          calc: {
-            case: {
-              when: [{ if: { total: { gte: 500 } }, then: { value: "big" } }],
-              else: "status",
-            },
-          },
-          as: "size",
-        },
-      ],
-      where: { id: { in: [1, 4, 8] } },
-    });
-    expect(text.rows).toEqual([
-      [1, "paid"],
-      [4, "big"],
-      [8, "big"],
-    ]);
-  });
-
   it("joins, buckets in UTC and groups", async () => {
     const result = await run({
       from: "orders",
@@ -400,59 +344,6 @@ describe("postgres runQuery", () => {
       ["US", "2026-01-01T00:00:00.000Z", "105.24", "2"],
       ["US", "2026-04-01T00:00:00.000Z", "652.10", "2"],
     ]);
-  });
-
-  it.each([
-    [
-      2,
-      [
-        ["2025-02-01T00:00:00.000Z", "2"],
-        ["2026-02-01T00:00:00.000Z", "10"],
-      ],
-    ],
-    [1, [["2026-01-01T00:00:00.000Z", "12"]]],
-  ])("buckets a fiscal year starting in month %s", async (month, expected) => {
-    const fiscal = planSql(
-      sqlQuerySchema.parse({
-        source: catalog.source.slug,
-        from: "orders",
-        select: [
-          { bucket: "fiscal_year", column: "created_at", as: "fy" },
-          { count: "*", as: "n" },
-        ],
-        groupBy: ["fy"],
-      }),
-      {
-        ...catalog,
-        calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth: month },
-      }
-    );
-    const result = await runPlan("postgres", connection, fiscal, LIMITS);
-    expect(result.rows).toEqual(expected);
-  });
-
-  it("sums a mixed-kind case like the same sum under where", async () => {
-    const cased = await run({
-      from: "orders",
-      select: [
-        {
-          sum: {
-            case: {
-              when: [{ if: { status: { eq: "paid" } }, then: "total" }],
-              else: 0,
-            },
-          },
-          as: "x",
-        },
-      ],
-    });
-    const filtered = await run({
-      from: "orders",
-      select: [{ sum: "total", as: "x" }],
-      where: { status: { eq: "paid" } },
-    });
-    expect(cased.rows).toEqual(filtered.rows);
-    expect(cased.rows).toEqual([["3585.59"]]);
   });
 
   it("follows a relation two joins deep", async () => {

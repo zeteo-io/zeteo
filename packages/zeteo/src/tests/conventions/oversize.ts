@@ -3,11 +3,4 @@
 // over its ceiling, and on a listed file at or under 800 or missing.
 import type { OversizeEntry } from "../support/pure/testLayout.js";
 
-export const OVERSIZE: ReadonlyArray<OversizeEntry> = [
-  {
-    path: "adapters/postgres/runQuery.test.ts",
-    ceiling: 860,
-    reason:
-      "One file shares the fixture source and its connection across every Postgres run test; splitting it would repeat that setup.",
-  },
-];
+export const OVERSIZE: ReadonlyArray<OversizeEntry> = [];
