@@ -17,7 +17,7 @@ interface Props {
 
 /** Whether the members of a union column disagree on its type. */
 export const clashes = (column: UnionColumn): boolean =>
-  (column.types?.length ?? 0) > 1;
+  column.types.length > 1;
 
 /** The editor's columns table: the members' column union, what to include and what to call it. */
 export const MergedColumns = ({

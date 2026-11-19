@@ -37,9 +37,9 @@ const tables = [
 
 const union = {
   columns: [
-    { name: "sku", type: "text", members: [A, B] },
+    { name: "sku", type: "text", types: ["text"], members: [A, B] },
     { name: "price", type: "text", members: [A, B], types: ["number", "text"] },
-    { name: "vivo_sku", type: "text", members: [A] },
+    { name: "vivo_sku", type: "text", types: ["text"], members: [A] },
   ],
   labels: { [A]: "Watermelon Ball", [B]: "ChomChom" },
 };
@@ -207,6 +207,7 @@ describe("the merged table editor", () => {
             {
               id: "x1",
               name: "sku",
+              from_name: "sku",
               type: "text",
               members: [A, B],
               missing: false,
@@ -248,6 +249,76 @@ describe("the merged table editor", () => {
     expect(put.mock.calls[0]![1].members).toEqual([
       { table_id: A, label: "WM" },
       { table_id: B, label: "CC" },
+    ]);
+  });
+
+  const detailWith = (over: object) => ({
+    ...makeTableDetail({ id: M, name: "all_brands" }),
+    merged: {
+      label_column: "brand",
+      members: [
+        { table_id: A, name: "watermelon", label: "WM", missing: false },
+        { table_id: C, name: "gone", label: "Gone", missing: true },
+      ],
+      columns: [
+        {
+          id: "x1",
+          name: "item",
+          from_name: "sku",
+          type: "text",
+          members: [A],
+          missing: false,
+        },
+      ],
+      available: [],
+      warnings: [],
+      ...over,
+    },
+  });
+  const renderEdit = () =>
+    renderWithProviders(
+      <Routes>
+        <Route
+          path="/sources/:sourceId/tables/:tableId/merged/edit"
+          element={<MergedTableEditPage />}
+        />
+        <Route
+          path="/sources/:sourceId/tables/:tableId"
+          element={<p>Table page</p>}
+        />
+      </Routes>,
+      { route: `/sources/${FS_ID}/tables/${M}/merged/edit` }
+    );
+
+  it("shows a renamed column ticked under its member name with the new name", async () => {
+    get.mockImplementation(answer(detailWith({})));
+    renderEdit();
+    await screen.findByText("vivo_sku");
+    expect(screen.getByLabelText("Include sku")).toBeChecked();
+    expect(screen.getByLabelText("Name of column sku")).toHaveValue("item");
+    expect(screen.getByLabelText("Include price")).not.toBeChecked();
+  });
+
+  it("keeps a missing member selected, flagged, with its label editable", async () => {
+    const user = userEvent.setup();
+    get.mockImplementation(answer(detailWith({})));
+    renderEdit();
+    const box = await screen.findByLabelText(/^gone/);
+    expect(box).toBeChecked();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
+    const label = screen.getByLabelText("Label for gone");
+    await user.clear(label);
+    await user.type(label, "G2");
+    await screen.findByText("vivo_sku");
+    // Unticking it on purpose leaves one member: Save is off.
+    await user.click(box);
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(box);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0]![1].members).toEqual([
+      { table_id: A, label: "WM" },
+      { table_id: C, label: "G2" },
     ]);
   });
 });

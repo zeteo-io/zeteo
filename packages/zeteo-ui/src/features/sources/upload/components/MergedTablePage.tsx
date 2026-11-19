@@ -1,4 +1,3 @@
-import { BorderedSection, Button, Input, Spinner } from "@kosmeo-ui/react";
 import { useMergedColumns, useSaveMergedTable } from "../api/merged";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isUploadType } from "../../components/sourceLabels";
@@ -14,6 +13,13 @@ import { useSource } from "../../api/useSource";
 import { useNavigate } from "react-router-dom";
 import type { Source } from "../../api/types";
 import "./styles.css";
+import {
+  Badge,
+  BorderedSection,
+  Button,
+  Input,
+  Spinner,
+} from "@kosmeo-ui/react";
 
 const FORM_ID = "z-merged-form";
 const DEFAULT_LABEL_COLUMN = "source";
@@ -34,13 +40,24 @@ interface EditorProps {
 export const MergedTableEditor = ({ source, existing }: EditorProps) => {
   const navigate = useNavigate();
   const { tables } = useAllTables(source.id, { includeMissing: false });
-  const candidates = tables.filter(
-    (t: Table) => !t.missing_since && t.origin?.kind !== "merged"
+  // Live tables that are not merged, and the definition's members whose
+  // table is missing: they stay until the owner unticks them, and rejoin
+  // by themselves when their table comes back.
+  const missingMembers = (existing?.merged.members ?? []).filter(
+    (m) => m.missing
   );
+  const candidates: { id: string; name: string; missing: boolean }[] = [
+    ...tables
+      .filter((t: Table) => !t.missing_since && t.origin?.kind !== "merged")
+      .map((t) => ({ id: t.id, name: t.name, missing: false })),
+    ...missingMembers.map((m) => ({
+      id: m.table_id,
+      name: m.name,
+      missing: true,
+    })),
+  ];
   const startLabels = Object.fromEntries(
-    (existing?.merged.members ?? [])
-      .filter((m) => !m.missing)
-      .map((m) => [m.table_id, m.label])
+    (existing?.merged.members ?? []).map((m) => [m.table_id, m.label])
   );
 
   const [name, setName] = useState(existing?.name ?? "");
@@ -60,17 +77,19 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
 
   const labelOf = (id: string) =>
     labels[id] ?? startLabels[id] ?? union.data?.labels[id] ?? "";
-  const existingNames = new Set(
+  // Existing columns by the member column they map from.
+  const existingByFrom = new Map(
     (existing?.merged.columns ?? [])
       .filter((c) => !c.missing)
-      .map((c) => c.name)
+      .map((c) => [c.from_name, c.name])
   );
   const isIncluded = (c: { name: string; members: string[] }) =>
     included[c.name] ??
     (existing
-      ? existingNames.has(c.name)
+      ? existingByFrom.has(c.name)
       : c.members.length === memberIds.length);
-  const nameOf = (c: { name: string }) => names[c.name] ?? c.name;
+  const nameOf = (c: { name: string }) =>
+    names[c.name] ?? existingByFrom.get(c.name) ?? c.name;
 
   const nameProblems = new Map<string, string>();
   const seen = new Set<string>();
@@ -207,6 +226,11 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
                       onChange={(e) => toggle(t.id, e.target.checked)}
                     />
                     <span>{t.name}</span>
+                    {t.missing && (
+                      <Badge size="sm" variant="warning">
+                        Missing
+                      </Badge>
+                    )}
                   </label>
                   {chosen.has(t.id) && (
                     <Input

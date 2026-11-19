@@ -45,6 +45,8 @@ export interface MergedDetail {
   columns: {
     id: string;
     name: string;
+    /** The member column name it maps from. */
+    from_name: string;
     type: string;
     members: string[];
     missing: boolean;

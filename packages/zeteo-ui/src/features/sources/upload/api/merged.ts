@@ -13,10 +13,11 @@ export interface MergedTableBody {
 /** One column of the members' union: which members have it, and its type. */
 export interface UnionColumn {
   name: string;
+  /** The resolved type: text when the members disagree. */
   type: string;
   members: string[];
   /** The distinct types its members give it; more than one means they disagree. */
-  types?: string[];
+  types: string[];
 }
 
 /** `GET /v1/sources/:id/merged-tables/columns`: the union and each member's suggested label. */
