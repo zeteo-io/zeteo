@@ -1,10 +1,10 @@
+import { Alert, Badge, Input } from "@kosmeo-ui/react";
 import type { UnionColumn } from "../api/merged";
-import { Alert, Input } from "@kosmeo-ui/react";
 
 export const TYPE_CLASH = "Members disagree on the type; it will be text";
 
 interface Props {
-  columns: UnionColumn[];
+  columns: (UnionColumn & { missing?: boolean })[];
   /** How many members are chosen: the "m" of "n of m". */
   memberCount: number;
   isIncluded: (column: UnionColumn) => boolean;
@@ -44,7 +44,16 @@ export const MergedColumns = ({
         const included = isIncluded(c);
         return (
           <tr key={c.name}>
-            <td>{c.name}</td>
+            <td>
+              <span className="z-tables-name">
+                {c.name}
+                {c.missing && (
+                  <Badge size="sm" variant="warning">
+                    Missing
+                  </Badge>
+                )}
+              </span>
+            </td>
             <td>{`${c.members.length} of ${memberCount}`}</td>
             <td>
               <span className="z-column-type">{c.type}</span>

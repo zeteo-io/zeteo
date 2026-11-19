@@ -8,6 +8,7 @@ import { clashes, MergedColumns } from "./MergedColumns";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
+import type { UnionColumn } from "../api/merged";
 import { NotFound } from "@/components/NotFound";
 import { useSource } from "../../api/useSource";
 import { useNavigate } from "react-router-dom";
@@ -30,6 +31,8 @@ interface Existing {
   name: string;
   merged: MergedDetail;
 }
+
+type ShownColumn = UnionColumn & { missing?: boolean };
 
 interface EditorProps {
   source: Source;
@@ -73,15 +76,28 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
 
   const memberIds = candidates.filter((t) => chosen.has(t.id)).map((t) => t.id);
   const union = useMergedColumns(source.id, memberIds);
-  const columns = memberIds.length >= 2 ? (union.data?.columns ?? []) : [];
+  // A merged column no member has now stays in the definition (ticked,
+  // flagged), so it comes back by itself when a member has it again.
+  const unionColumns = memberIds.length >= 2 ? (union.data?.columns ?? []) : [];
+  const gone: ShownColumn[] =
+    memberIds.length >= 2 && union.data
+      ? (existing?.merged.columns ?? [])
+          .filter((c) => !unionColumns.some((u) => u.name === c.from_name))
+          .map((c) => ({
+            name: c.from_name,
+            type: c.type,
+            types: [c.type],
+            members: [],
+            missing: true,
+          }))
+      : [];
+  const columns: ShownColumn[] = [...unionColumns, ...gone];
 
   const labelOf = (id: string) =>
     labels[id] ?? startLabels[id] ?? union.data?.labels[id] ?? "";
   // Existing columns by the member column they map from.
   const existingByFrom = new Map(
-    (existing?.merged.columns ?? [])
-      .filter((c) => !c.missing)
-      .map((c) => [c.from_name, c.name])
+    (existing?.merged.columns ?? []).map((c) => [c.from_name, c.name])
   );
   const isIncluded = (c: { name: string; members: string[] }) =>
     included[c.name] ??
@@ -90,6 +106,25 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
       : c.members.length === memberIds.length);
   const nameOf = (c: { name: string }) =>
     names[c.name] ?? existingByFrom.get(c.name) ?? c.name;
+
+  const LONGEST = 100;
+  const labelProblems = new Map<string, string>();
+  const usedLabels = new Set<string>();
+  for (const id of memberIds) {
+    const l = labelOf(id).trim();
+    if (l === "") labelProblems.set(id, "Give the member a label.");
+    else if (l.length > LONGEST)
+      labelProblems.set(id, `At most ${LONGEST} characters.`);
+    else if (usedLabels.has(l))
+      labelProblems.set(id, "Each member needs its own label");
+    usedLabels.add(l);
+  }
+  const labelColumnProblem =
+    labelColumn.trim() === ""
+      ? "Give the label column a name."
+      : labelColumn.trim().length > LONGEST
+        ? `At most ${LONGEST} characters.`
+        : undefined;
 
   const nameProblems = new Map<string, string>();
   const seen = new Set<string>();
@@ -115,9 +150,9 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
 
   const ready =
     name.trim() !== "" &&
-    labelColumn.trim() !== "" &&
+    !labelColumnProblem &&
     memberIds.length >= 2 &&
-    memberIds.every((id) => labelOf(id).trim() !== "") &&
+    labelProblems.size === 0 &&
     columns.length > 0 &&
     nameProblems.size === 0;
 
@@ -203,6 +238,8 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
             <Input
               label="Label column"
               value={labelColumn}
+              maxLength={LONGEST}
+              error={labelColumnProblem}
               helperText="Each row carries the label of the table it came from in this column."
               onChange={(e) => setLabelColumn(e.target.value)}
             />
@@ -236,6 +273,8 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
                     <Input
                       aria-label={`Label for ${t.name}`}
                       value={labelOf(t.id)}
+                      maxLength={LONGEST}
+                      error={labelProblems.get(t.id)}
                       onChange={(e) =>
                         setLabels((l) => ({ ...l, [t.id]: e.target.value }))
                       }

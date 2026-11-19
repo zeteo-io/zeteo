@@ -1,8 +1,8 @@
 import { makeTable, makeTableDetail } from "@/features/tables/testFixtures";
 import { MergedTableEditPage, MergedTableNewPage } from "./MergedTablePage";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FS_ID, makeUploadSource } from "../testFixtures";
-import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
@@ -320,5 +320,79 @@ describe("the merged table editor", () => {
       { table_id: A, label: "WM" },
       { table_id: C, label: "G2" },
     ]);
+  });
+
+  it("keeps a missing merged column ticked and flagged, and sends it", async () => {
+    const user = userEvent.setup();
+    get.mockImplementation(
+      answer(
+        detailWith({
+          members: [
+            { table_id: A, name: "watermelon", label: "WM", missing: false },
+            { table_id: B, name: "chomchom", label: "CC", missing: false },
+          ],
+          columns: [
+            {
+              id: "x1",
+              name: "sku",
+              from_name: "sku",
+              type: "text",
+              members: [A, B],
+              missing: false,
+            },
+            {
+              id: "x2",
+              name: "old_code",
+              from_name: "old",
+              type: "number",
+              members: [],
+              missing: true,
+            },
+          ],
+        })
+      )
+    );
+    renderEdit();
+    await screen.findByText("vivo_sku");
+    expect(screen.getByLabelText("Include old")).toBeChecked();
+    expect(screen.getByLabelText("Name of column old")).toHaveValue("old_code");
+    expect(screen.getAllByText("Missing")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(put).toHaveBeenCalled());
+    expect(put.mock.calls[0]![1].columns).toContainEqual({
+      name: "old_code",
+      from_name: "old",
+      include: true,
+    });
+  });
+
+  it("refuses a duplicate member label", async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await pickMembers(user);
+    await screen.findByText("vivo_sku");
+    await user.type(screen.getByLabelText("Name"), "all");
+    const second = screen.getByLabelText("Label for chomchom");
+    await waitFor(() => expect(second).toHaveValue("ChomChom"));
+    await user.clear(second);
+    await user.type(second, "Watermelon Ball");
+    expect(
+      screen.getByText("Each member needs its own label")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("refuses a label over 100 characters", async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await pickMembers(user);
+    await screen.findByText("vivo_sku");
+    await user.type(screen.getByLabelText("Name"), "all");
+    const first = screen.getByLabelText("Label for watermelon");
+    expect(first).toHaveAttribute("maxlength", "100");
+    await waitFor(() => expect(first).toHaveValue("Watermelon Ball"));
+    fireEvent.change(first, { target: { value: "x".repeat(101) } });
+    expect(screen.getByText("At most 100 characters.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 });
