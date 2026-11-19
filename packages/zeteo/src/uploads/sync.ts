@@ -1,11 +1,12 @@
 import { Prisma as PrismaRuntime } from "../../prisma/generated/client/index.js";
 import { dropStagingTables, stageTable, toUnreadable } from "./staging.js";
+import { readSpreadsheet, type SpreadsheetTab } from "../google/sheets.js";
+import { assertUploadsOn, matchColumns, writeColumns } from "./service.js";
 import { dropStoredTable, CastFailedError, swapIn } from "./storage.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
+import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { originOf, type SheetsOrigin } from "./origin.js";
-import { readSpreadsheet } from "../google/sheets.js";
 import { isUploadSource } from "../sources/types.js";
-import { prisma } from "../utils/db/prisma.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import { redis } from "../utils/redis.js";
@@ -19,16 +20,11 @@ import {
   FileUnreadableError,
   NotASheetsSourceError,
   NotFoundError,
+  NothingToSyncError,
   SourceArchivedError,
   TooManyRequestsError,
   UploadSourceBusyError,
 } from "../utils/errors.js";
-import {
-  assertUploadsOn,
-  matchColumns,
-  writeColumns,
-  type ColumnMatches,
-} from "./service.js";
 import {
   checkQuota,
   inSwap,
@@ -40,15 +36,29 @@ import {
 } from "./loading.js";
 
 /**
- * Syncing an upload source's Google Sheets tables: each read again from its tab, each
- * loaded as a re-upload would be (columns matched to the sheet's headers),
- * and all swapped in at once. A sync that fails changes no table; its error
- * is kept on the source for its owner to see. Syncs are logged, not audited.
+ * Syncing an upload source's Google Sheets tables: each spreadsheet read once,
+ * then each table loaded as a re-upload would be (columns matched to the
+ * sheet's headers) and swapped in in its own transaction. A table that fails
+ * (its spreadsheet unshared, a value that no longer casts, an emptied tab)
+ * keeps its data and its error, which its owner sees; the others sync. Syncs
+ * are logged, not audited.
  */
+
+/** Why a table's sync failed, as its owner sees it. */
+export interface TableSyncError {
+  code: string;
+  message: string;
+}
 
 export interface SyncSummary {
   synced_at: string;
-  tables: { id: string; name: string; row_count: number; missing: boolean }[];
+  tables: {
+    id: string;
+    name: string;
+    row_count: number;
+    missing: boolean;
+    error: TableSyncError | null;
+  }[];
 }
 
 /** How long after a Sync now the source refuses another. */
@@ -57,7 +67,7 @@ export const SYNC_NOW_SECONDS = 60;
 const syncNowKey = (sourceId: string) => `zeteo:sync-now:${sourceId}`;
 
 /** A Sheets table's origin: where its data is in its spreadsheet, or null for another table. */
-const sheetsOriginOf = (table: SourceTable): SheetsOrigin | null => {
+const sheetsOriginOf = (table: { origin: unknown }): SheetsOrigin | null => {
   const origin = originOf(table);
   return origin?.kind === "google-sheets" ? origin : null;
 };
@@ -71,8 +81,8 @@ const locatorOf = (table: SourceTable) => {
   return { sheetId: origin.sheetId, headerRow: origin.headerRow };
 };
 
-/** What a failed sync keeps on the source: the error's code, and a message for the owner. */
-const syncErrorOf = (err: unknown): { code: string; message: string } => {
+/** What a failed table sync keeps on the table: the error's code, and a message for the owner. */
+const syncErrorOf = (err: unknown): TableSyncError => {
   if (err instanceof CastFailedError) {
     const rows = err.rows.join(", ");
     return {
@@ -84,29 +94,33 @@ const syncErrorOf = (err: unknown): { code: string; message: string } => {
   return { code: "sync_failed", message: "The sync failed" };
 };
 
-/** Records a failed sync on the source in its own write; a failure to record is logged. */
-const recordFailure = async (sourceId: string, err: unknown) => {
-  const error = syncErrorOf(err);
+/** Records a table's failed sync on the table in its own write; a failure to record is logged. */
+const recordTableFailure = async (
+  table: SourceTable,
+  error: TableSyncError,
+  at: Date
+) => {
   logger.warn(
-    { source_id: sourceId, code: error.code },
-    "a Google Sheets sync failed"
+    { source_id: table.sourceId, table_id: table.id, code: error.code },
+    "a Google Sheets table's sync failed"
   );
-  await prisma.source
+  await prisma.sourceTable
     .update({
-      where: { id: sourceId },
-      data: { lastSyncAttemptAt: new Date(), lastSyncError: error },
+      where: { id: table.id },
+      data: { lastSyncAttemptAt: at, lastSyncError: { ...error } },
     })
     .catch((recordErr: unknown) => {
       logger.error(
-        { err: recordErr, source_id: sourceId },
-        "recording a failed sync failed"
+        { err: recordErr, source_id: table.sourceId, table_id: table.id },
+        "recording a failed table sync failed"
       );
     });
 };
 
 /**
- * The source row a sync starts from: 404 for none, 409 for a database source,
- * an upload source with no Google Sheets tables, or an archived one.
+ * The source row a sync starts from: 404 for none, 409 for a database source
+ * (`not_a_sheets_source`), an archived one, or an upload source with no
+ * Google Sheets table, live or missing (`nothing_to_sync`).
  */
 const sheetsSource = async (sourceId: string) => {
   const row = await prisma.source.findUnique({ where: { id: sourceId } });
@@ -114,18 +128,10 @@ const sheetsSource = async (sourceId: string) => {
   if (!isUploadSource(row)) throw new NotASheetsSourceError();
   if (row.archivedAt) throw new SourceArchivedError();
   if (!(await db.sources.hasSheetsTables(sourceId))) {
-    throw new NotASheetsSourceError();
+    throw new NothingToSyncError();
   }
   return row;
 };
-
-interface TableSync {
-  table: SourceTable;
-  planned: PlannedTable;
-  columns: ColumnMatches;
-  /** A missing table whose tab is back: it is no longer missing once swapped in. */
-  revived: boolean;
-}
 
 type CatalogTable = SourceTable & { columns: SourceColumn[] };
 
@@ -159,87 +165,6 @@ const revivable = (live: CatalogTable[], missing: CatalogTable[]) => {
   return [...latest.values()];
 };
 
-/**
- * Reads the source's spreadsheet and stages and plans each live table, and
- * each missing table whose tab is back (`revivable`). A live table whose tab
- * is gone is in `gone`; a missing one whose tab is still gone, or empty, stays
- * as it is. Staging tables made go in `created`.
- */
-const readTables = async (
-  spreadsheetId: string,
-  live: CatalogTable[],
-  missing: CatalogTable[],
-  created: string[]
-): Promise<{ syncs: TableSync[]; gone: SourceTable[] }> => {
-  const located = [
-    ...live.map((table) => ({
-      table,
-      locator: locatorOf(table),
-      revived: false,
-    })),
-    ...revivable(live, missing).map((table) => ({
-      table,
-      locator: locatorOf(table),
-      revived: true,
-    })),
-  ];
-  const read = await readSpreadsheet(
-    spreadsheetId,
-    { maxRows: env.UPLOAD_MAX_ROWS, maxColumns: env.UPLOAD_MAX_COLUMNS },
-    located.map((l) => l.locator.sheetId)
-  );
-  const tabs = new Map(read.tabs.map((t) => [t.sheetId, t]));
-  const syncs: TableSync[] = [];
-  const gone: SourceTable[] = [];
-  for (const { table, locator, revived } of located) {
-    const tab = tabs.get(locator.sheetId);
-    if (!tab) {
-      if (!revived) gone.push(table);
-      continue;
-    }
-    const key = `sheet:${locator.sheetId}`;
-    const staged = await stageTable(
-      tab.rows,
-      {
-        key,
-        fallbackName: table.name,
-        kind: "sheet",
-        trimUnusedColumns: true,
-      },
-      new Set(),
-      created
-    );
-    if (
-      !staged ||
-      (locator.headerRow !== null &&
-        locator.headerRow >= staged.staged.rowCount)
-    ) {
-      if (revived) continue;
-      throw new FileUnreadableError(
-        "empty_file",
-        `The tab of table "${table.name}" has no data; the last synced data is kept`
-      );
-    }
-    const staging: StagingRecord = {
-      preview: [staged.preview],
-      tables: [staged.staged],
-    };
-    const planned = await planTable(
-      staging,
-      { key, header_row: locator.headerRow },
-      "",
-      table.name
-    );
-    syncs.push({
-      table,
-      planned,
-      columns: matchColumns(table.columns, planned.columns, "original_name"),
-      revived,
-    });
-  }
-  return { syncs, gone };
-};
-
 /** The source's Sheets tables (not those their owner removed), by the spreadsheet they come from. */
 const bySpreadsheet = (tables: CatalogTable[]) => {
   const groups = new Map<string, CatalogTable[]>();
@@ -253,6 +178,239 @@ const bySpreadsheet = (tables: CatalogTable[]) => {
   return groups;
 };
 
+/** What a sync did to one table. */
+type Outcome =
+  | { table: SourceTable; kind: "synced"; rowCount: number }
+  | { table: SourceTable; kind: "missing" }
+  | { table: SourceTable; kind: "failed"; err: unknown; error: TableSyncError };
+
+/**
+ * A failure that stops the whole sync rather than one table: the swap kept
+ * waiting (busy, not the sync's fault) or the source archived meanwhile.
+ */
+const stopsTheSync = (err: unknown) =>
+  err instanceof UploadSourceBusyError || err instanceof SourceArchivedError;
+
+/**
+ * Stages, plans, loads and swaps in one table from its tab, in its own
+ * transaction that checks the owner's quota. Null when a missing table's tab
+ * turns out empty (it stays missing); a live table's empty tab fails.
+ */
+const syncTable = async (
+  sourceId: string,
+  table: CatalogTable,
+  tab: SpreadsheetTab,
+  revived: boolean,
+  now: Date
+): Promise<number | null> => {
+  const locator = locatorOf(table);
+  const key = `sheet:${locator.sheetId}`;
+  const created: string[] = [];
+  try {
+    let planned: PlannedTable;
+    try {
+      const staged = await stageTable(
+        tab.rows,
+        {
+          key,
+          fallbackName: table.name,
+          kind: "sheet",
+          trimUnusedColumns: true,
+        },
+        new Set(),
+        created
+      );
+      if (
+        !staged ||
+        (locator.headerRow !== null &&
+          locator.headerRow >= staged.staged.rowCount)
+      ) {
+        if (revived) return null;
+        throw new FileUnreadableError(
+          "empty_file",
+          `The tab of table "${table.name}" has no data; the last synced data is kept`
+        );
+      }
+      const staging: StagingRecord = {
+        preview: [staged.preview],
+        tables: [staged.staged],
+      };
+      planned = await planTable(
+        staging,
+        { key, header_row: locator.headerRow },
+        "",
+        table.name
+      );
+    } catch (err) {
+      throw toUnreadable(err);
+    }
+    const columns = matchColumns(
+      table.columns,
+      planned.columns,
+      "original_name"
+    );
+    const loaded = await loadTables(sourceId, [planned]);
+    const rowCount = loaded[0]!.rowCount;
+    await inSwap(sourceId, loaded, async (tx) => {
+      const row = await lockSyncedSource(tx, sourceId);
+      await swapIn(tx, sourceId, planned.name, loaded[0]!.physicalName);
+      await writeColumns(tx, table.id, planned.columns, columns, now);
+      await tx.sourceTable.update({
+        where: { id: table.id },
+        data: {
+          rowCount,
+          lastSyncedAt: now,
+          lastSeenAt: now,
+          lastSyncAttemptAt: now,
+          lastSyncError: PrismaRuntime.DbNull,
+          ...(revived && { missingSince: null }),
+        },
+      });
+      await checkQuota(tx, row.ownerId!);
+    });
+    return rowCount;
+  } finally {
+    await dropStagingTables(created);
+  }
+};
+
+/** Locks the source's row for a swap; an archived source stops the sync. */
+const lockSyncedSource = async (
+  tx: Prisma.TransactionClient,
+  sourceId: string
+) => {
+  await tx.$queryRaw`SELECT "id" FROM "zeteo"."sources" WHERE "id" = ${sourceId}::uuid FOR UPDATE`;
+  const row = await tx.source.findUniqueOrThrow({ where: { id: sourceId } });
+  if (row.archivedAt) throw new SourceArchivedError();
+  return row;
+};
+
+/** Marks missing a table whose tab is gone, dropping its data, in its own transaction. */
+const markGone = async (sourceId: string, table: SourceTable, now: Date) => {
+  await inSwap(sourceId, [], async (tx) => {
+    await lockSyncedSource(tx, sourceId);
+    await dropStoredTable(tx, sourceId, table.name);
+    await tx.sourceTable.update({
+      where: { id: table.id },
+      data: {
+        missingSince: now,
+        lastSyncAttemptAt: now,
+        lastSyncError: PrismaRuntime.DbNull,
+      },
+    });
+    await tx.sourceColumn.updateMany({
+      where: { tableId: table.id, missingSince: null },
+      data: { missingSince: now },
+    });
+  });
+};
+
+/**
+ * Syncs every table of one spreadsheet: one read, then each live table (and
+ * each missing one whose tab is back) on its own. A read that fails fails
+ * each of its live tables.
+ */
+const syncSpreadsheet = async (
+  sourceId: string,
+  spreadsheetId: string,
+  group: CatalogTable[],
+  now: Date
+): Promise<Outcome[]> => {
+  const live = group.filter((t) => t.missingSince === null);
+  const missing = group.filter((t) => t.missingSince !== null);
+  const located = [
+    ...live.map((table) => ({ table, revived: false })),
+    ...revivable(live, missing).map((table) => ({ table, revived: true })),
+  ];
+  // Recorded on the table at once, so a later stop (busy) keeps it.
+  const failed = async (table: SourceTable, err: unknown): Promise<Outcome> => {
+    const error = syncErrorOf(err);
+    await recordTableFailure(table, error, now);
+    return { table, kind: "failed", err, error };
+  };
+  let tabs: Map<number, SpreadsheetTab>;
+  try {
+    const read = await readSpreadsheet(
+      spreadsheetId,
+      { maxRows: env.UPLOAD_MAX_ROWS, maxColumns: env.UPLOAD_MAX_COLUMNS },
+      located.map((l) => locatorOf(l.table).sheetId)
+    );
+    tabs = new Map(read.tabs.map((t) => [t.sheetId, t]));
+  } catch (err) {
+    const unreadable = toUnreadable(err);
+    const outcomes: Outcome[] = [];
+    for (const table of live) outcomes.push(await failed(table, unreadable));
+    return outcomes;
+  }
+  const outcomes: Outcome[] = [];
+  for (const { table, revived } of located) {
+    const tab = tabs.get(locatorOf(table).sheetId);
+    try {
+      if (!tab) {
+        if (revived) continue;
+        await markGone(sourceId, table, now);
+        outcomes.push({ table, kind: "missing" });
+        continue;
+      }
+      const rowCount = await syncTable(sourceId, table, tab, revived, now);
+      if (rowCount !== null) outcomes.push({ table, kind: "synced", rowCount });
+    } catch (err) {
+      if (stopsTheSync(err)) throw err;
+      // A missing table that cannot be brought back simply stays missing.
+      if (revived) {
+        logger.warn(
+          { err, source_id: sourceId, table_id: table.id },
+          "a missing Google Sheets table could not be brought back"
+        );
+        continue;
+      }
+      outcomes.push(await failed(table, err));
+    }
+  }
+  return outcomes;
+};
+
+/**
+ * Keeps the run on the source: when it was attempted, the failing tables
+ * (null for none), and as its last refresh the oldest good sync among its
+ * live Sheets tables (what a reader can trust; null while one has never
+ * synced). Each failing table was recorded on the table as it failed.
+ */
+const recordRun = async (sourceId: string, outcomes: Outcome[], now: Date) => {
+  const failing = outcomes.flatMap((o) =>
+    o.kind === "failed"
+      ? [{ table_id: o.table.id, name: o.table.name, ...o.error }]
+      : []
+  );
+  const live = await prisma.sourceTable.findMany({
+    where: { sourceId, missingSince: null },
+    select: { origin: true, lastSyncedAt: true },
+  });
+  const synced = live
+    .filter((t) => sheetsOriginOf(t) !== null)
+    .map((t) => t.lastSyncedAt);
+  // Null while a live Sheets table has never synced.
+  const oldest = synced.includes(null)
+    ? null
+    : new Date(Math.min(...synced.map((d) => d!.getTime())));
+  await prisma.source
+    .update({
+      where: { id: sourceId },
+      data: {
+        lastSyncAttemptAt: now,
+        lastSyncError:
+          failing.length > 0 ? { tables: failing } : PrismaRuntime.DbNull,
+        ...(synced.length > 0 && { lastRefreshedAt: oldest }),
+        ...(outcomes.some((o) => o.kind !== "failed") && {
+          status: "active" as const,
+        }),
+      },
+    })
+    .catch((err: unknown) => {
+      logger.error({ err, source_id: sourceId }, "recording a sync failed");
+    });
+};
+
 const sync = async (
   sourceId: string,
   actorId: string
@@ -263,115 +421,63 @@ const sync = async (
     include: { columns: { orderBy: { position: "asc" } } },
     orderBy: { name: "asc" },
   });
-  const created: string[] = [];
-  try {
-    // TODO(C3): each table in its own transaction, errors per table.
-    const syncs: TableSync[] = [];
-    const gone: SourceTable[] = [];
-    try {
-      for (const [spreadsheetId, group] of bySpreadsheet(tables)) {
-        const read = await readTables(
-          spreadsheetId,
-          group.filter((t) => t.missingSince === null),
-          group.filter((t) => t.missingSince !== null),
-          created
-        );
-        syncs.push(...read.syncs);
-        gone.push(...read.gone);
-      }
-    } catch (err) {
-      throw toUnreadable(err);
-    }
-    const loaded = await loadTables(
-      sourceId,
-      syncs.map((s) => s.planned)
+  const now = new Date();
+  const outcomes: Outcome[] = [];
+  for (const [spreadsheetId, group] of bySpreadsheet(tables)) {
+    outcomes.push(
+      ...(await syncSpreadsheet(sourceId, spreadsheetId, group, now))
     );
-    const now = new Date();
-    await inSwap(sourceId, loaded, async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "zeteo"."sources" WHERE "id" = ${sourceId}::uuid FOR UPDATE`;
-      const row = await tx.source.findUniqueOrThrow({
-        where: { id: sourceId },
-      });
-      if (row.archivedAt) throw new SourceArchivedError();
-      for (const [i, s] of syncs.entries()) {
-        await swapIn(tx, sourceId, s.planned.name, loaded[i]!.physicalName);
-        await writeColumns(tx, s.table.id, s.planned.columns, s.columns, now);
-        await tx.sourceTable.update({
-          where: { id: s.table.id },
-          data: {
-            rowCount: loaded[i]!.rowCount,
-            lastSyncedAt: now,
-            lastSeenAt: now,
-            ...(s.revived && { missingSince: null }),
-          },
-        });
-      }
-      for (const table of gone) {
-        await dropStoredTable(tx, sourceId, table.name);
-        await tx.sourceTable.update({
-          where: { id: table.id },
-          data: { missingSince: now },
-        });
-        await tx.sourceColumn.updateMany({
-          where: { tableId: table.id, missingSince: null },
-          data: { missingSince: now },
-        });
-      }
-      await checkQuota(tx, row.ownerId!);
-      await tx.source.update({
-        where: { id: sourceId },
-        data: {
-          status: "active",
-          lastRefreshedAt: now,
-          lastSyncAttemptAt: now,
-          lastSyncError: PrismaRuntime.DbNull,
-        },
-      });
-    });
-    logger.info(
-      {
-        source_id: sourceId,
-        actor_id: actorId,
-        tables: syncs.length,
-        revived: syncs.filter((s) => s.revived).length,
-        missing: gone.length,
-      },
-      "a Google Sheets source synced"
-    );
-    return {
-      synced_at: now.toISOString(),
-      tables: [
-        ...syncs.map((s, i) => ({
-          id: s.table.id,
-          name: s.table.name,
-          row_count: loaded[i]!.rowCount,
-          missing: false,
-        })),
-        ...gone.map((t) => ({
-          id: t.id,
-          name: t.name,
-          row_count: Number(t.rowCount ?? 0),
-          missing: true,
-        })),
-      ],
-    };
-  } finally {
-    await dropStagingTables(created);
   }
+  await recordRun(sourceId, outcomes, now);
+  const failures = outcomes.filter((o) => o.kind === "failed");
+  logger.info(
+    {
+      source_id: sourceId,
+      actor_id: actorId,
+      tables: outcomes.filter((o) => o.kind === "synced").length,
+      revived: outcomes.filter(
+        (o) => o.kind === "synced" && o.table.missingSince !== null
+      ).length,
+      missing: outcomes.filter((o) => o.kind === "missing").length,
+      failed: failures.length,
+    },
+    "a Google Sheets source synced"
+  );
+  // Every table failed: the sync failed, with the first table's error.
+  if (failures.length > 0 && failures.length === outcomes.length) {
+    throw failures[0]!.err;
+  }
+  return {
+    synced_at: now.toISOString(),
+    tables: outcomes
+      .map((o) => ({
+        id: o.table.id,
+        name: o.table.name,
+        row_count:
+          o.kind === "synced" ? o.rowCount : Number(o.table.rowCount ?? 0),
+        missing: o.kind === "missing",
+        error: o.kind === "failed" ? o.error : null,
+      }))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)),
+  };
 };
 
 /**
  * Syncs an upload source's Google Sheets tables under its load lock (its file
- * tables are left as they are): reads every tab backing a
- * table that is not missing (and brings back a missing table whose tab has
- * returned, keeping its id and grants), loads each table again (columns matched to the
- * sheet's headers by `original_name`, keeping their ids, grants and types;
- * new headers added, removed ones marked missing), marks missing the tables
- * whose tab is gone, and swaps everything in in one transaction that checks
- * the owner's quota. On any failure nothing is swapped; the error is kept on
- * the source (`last_sync_error`, with the attempt's time) and thrown.
+ * tables are left as they are). Each spreadsheet its tables come from is read
+ * once; then each live table is loaded again (columns matched to the sheet's
+ * headers by `original_name`, then name, keeping their ids, grants and types;
+ * new headers added, removed ones marked missing) and swapped in in its own
+ * transaction that checks the owner's quota; a missing table whose tab has
+ * returned is brought back (keeping its id and grants), never one its owner
+ * removed; a table whose tab is gone is marked missing. A table that fails
+ * keeps its data, and its error (`last_sync_error`, with the attempt's time)
+ * is kept on it; the source keeps the attempt's time and its failing tables.
+ * When every table failed the first one's error is thrown; when some synced
+ * the summary carries each one's error. A swap kept waiting
+ * (`upload_source_busy`) stops the sync and is recorded nowhere.
  */
-export const syncSheetsSource = async (
+export const syncSource = async (
   sourceId: string,
   actorId: string
 ): Promise<SyncSummary> => {
@@ -380,24 +486,16 @@ export const syncSheetsSource = async (
   return withLoadLock(sourceId, async () => {
     // Read again under the lock: a delete may have landed while it waited.
     await sheetsSource(sourceId);
-    try {
-      return await sync(sourceId, actorId);
-    } catch (err) {
-      // Busy (a swap kept waiting) is not a failure of the sync: nothing was
-      // read wrong, and the next sync will do.
-      if (!(err instanceof UploadSourceBusyError)) {
-        await recordFailure(sourceId, err);
-      }
-      throw err;
-    }
+    return sync(sourceId, actorId);
   });
 };
 
 /**
  * Sync now: a sync the caller asked for, refused with 429 `sync_too_soon`
- * within `SYNC_NOW_SECONDS` of the last one asked for the source (one refused
- * as `upload_source_busy` does not count). Call it only for a caller already
- * allowed to sync the source.
+ * within `SYNC_NOW_SECONDS` of the last one asked for the source. A sync
+ * stopped as `upload_source_busy` frees the window again, so the caller can
+ * retry at once. `nothing_to_sync` is answered before the window is taken.
+ * Call it only for a caller already allowed to sync the source.
  */
 export const syncNow = async (
   sourceId: string,
@@ -418,7 +516,7 @@ export const syncNow = async (
     );
   }
   try {
-    return await syncSheetsSource(sourceId, actorId);
+    return await syncSource(sourceId, actorId);
   } catch (err) {
     // Busy: nothing was synced, so the window is not used up.
     if (err instanceof UploadSourceBusyError) {

@@ -2,7 +2,7 @@
 // @module-tag platform
 import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { dropStoredTable, schemaFor } from "../../uploads/storage.js";
-import { syncSheetsSource } from "../../uploads/sync.js";
+import { syncSource } from "../../uploads/sync.js";
 import type { Caller } from "../../middleware/auth.js";
 import { startV1Routes } from "../support/v1App.js";
 import { inSwap } from "../../uploads/loading.js";
@@ -258,7 +258,7 @@ describe("merged tables", () => {
     await merge(id, tables, ["A", "B"], ["sku"]);
     made[1]!.tab(7).rows.push(["c"]);
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     expect(await viewRows(id, "all_inventory", "sku")).toEqual([
       { brand: "A", sku: "a" },
@@ -308,7 +308,7 @@ describe("merged tables", () => {
     const tab = made[1]!.tab(7);
     made[1]!.tabs = [];
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     expect(await viewRows(id, "all_inventory", "sku")).toEqual([
       { brand: "A", sku: "a" },
@@ -324,7 +324,7 @@ describe("merged tables", () => {
     ]);
 
     made[1]!.tabs = [tab];
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     expect(await viewRows(id, "all_inventory", "sku")).toEqual([
       { brand: "A", sku: "a" },
@@ -411,7 +411,7 @@ describe("merged tables", () => {
     )!;
     for (const s of made) s.tab(7).rows = s.tab(7).rows.map((r) => [r[0]!]);
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     let note = (await mergedTable(id)).columns.find((c) => c.name === "note")!;
     expect(note).toMatchObject({ id: before.id, missing: true });
@@ -424,7 +424,7 @@ describe("merged tables", () => {
       ["sku", "note"],
       ["a", "back"],
     ];
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     note = (await mergedTable(id)).columns.find((c) => c.name === "note")!;
     expect(note).toMatchObject({ id: before.id, missing: false });

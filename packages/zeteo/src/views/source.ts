@@ -26,18 +26,36 @@ export interface SourceViewExtras {
   shareCount: number;
   /** An upload source's stored bytes now (0 once deleted); unused for a database source. */
   storedBytes: number;
-  /** An upload source: its latest load, which it reports as its last refresh. */
+  /**
+   * An upload source: what it reports as its last refresh, its latest load,
+   * or with live Google Sheets tables the oldest good sync among them.
+   */
   lastLoadedAt?: Date | null;
-  /** An upload source: the spreadsheets its Google Sheets tables come from, sorted. */
-  spreadsheetIds?: string[];
+  /** An upload source with Google Sheets tables (their owner's removed left out): their sync state. */
+  sheetsSync?: SheetsSyncState | null;
 }
 
-/** How long after its last good sync a failing Google Sheets source is called stale. */
-const STALE_AFTER_MS = 24 * 3600_000;
+/** A failing Google Sheets table, as the source's sync state lists it. */
+export interface FailingTable {
+  table_id: string;
+  name: string;
+  code: string;
+  message: string;
+}
 
-/** A stored sync error as the view shows it. */
-const syncError = (
-  value: Source["lastSyncError"]
+/** The sync state of an upload source's Google Sheets tables, from its live ones. */
+export interface SheetsSyncState {
+  failing: FailingTable[];
+  /** A live Sheets table fails, and has had no good sync for `STALE_AFTER_MS`. */
+  stale: boolean;
+}
+
+/** How long after its last good sync a failing Google Sheets table makes its source stale. */
+export const STALE_AFTER_MS = 24 * 3600_000;
+
+/** A stored table sync error as the views show it; null for none. */
+export const tableSyncError = (
+  value: unknown
 ): { code: string; message: string } | null => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
@@ -54,26 +72,16 @@ const syncError = (
  * table's spreadsheet is in its `origin`). Only the source's own view (its
  * owner, or `zeteo.sources.read`) carries it; no catalogue does.
  */
-const syncBlock = (row: Source, now: Date) => {
-  const lastError = syncError(row.lastSyncError);
-  return {
-    sync: {
-      interval_minutes: row.syncIntervalMinutes,
-      last_attempt_at: row.lastSyncAttemptAt?.toISOString() ?? null,
-      last_error: lastError,
-      stale:
-        lastError !== null &&
-        (row.lastRefreshedAt === null ||
-          now.getTime() - row.lastRefreshedAt.getTime() > STALE_AFTER_MS),
-    },
-  };
-};
+const syncBlock = (row: Source, state: SheetsSyncState) => ({
+  sync: {
+    interval_minutes: row.syncIntervalMinutes,
+    last_attempt_at: row.lastSyncAttemptAt?.toISOString() ?? null,
+    failing: state.failing,
+    stale: state.stale,
+  },
+});
 
-export const sourceView = (
-  row: Source,
-  extras: SourceViewExtras,
-  now: Date = new Date()
-) => ({
+export const sourceView = (row: Source, extras: SourceViewExtras) => ({
   id: row.id,
   slug: row.slug,
   name: row.name,
@@ -93,8 +101,8 @@ export const sourceView = (
   /** An upload source's owner; null for a database source. */
   owner_id: row.ownerId,
   status: row.status,
-  // A database source's last catalogue refresh; an upload source's last load
-  // (it has no refresh: its data changes when a file is loaded).
+  // A database source's last catalogue refresh; an upload source's last load,
+  // or with live Google Sheets tables the oldest good sync among them.
   last_refreshed_at:
     (extras.lastLoadedAt !== undefined
       ? extras.lastLoadedAt
@@ -117,9 +125,7 @@ export const sourceView = (
   share_count: extras.shareCount,
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
-  ...(extras.spreadsheetIds !== undefined &&
-    extras.spreadsheetIds.length > 0 &&
-    syncBlock(row, now)),
+  ...(extras.sheetsSync && syncBlock(row, extras.sheetsSync)),
 });
 
 export type SourceView = ReturnType<typeof sourceView>;

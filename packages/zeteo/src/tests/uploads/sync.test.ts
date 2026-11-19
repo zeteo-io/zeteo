@@ -3,12 +3,12 @@
 import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { postQuery, removeRunsOf } from "../support/queries.js";
 import { presentSourceById } from "../../sources/present.js";
-import { syncSheetsSource } from "../../uploads/sync.js";
 import { LOAD_LOCKING } from "../../uploads/loading.js";
 import type { Caller } from "../../middleware/auth.js";
 import { schemaFor } from "../../uploads/storage.js";
 import { storedTables } from "../support/uploads.js";
 import { startV1Routes } from "../support/v1App.js";
+import { syncSource } from "../../uploads/sync.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "crypto";
@@ -114,7 +114,7 @@ const storedRows = async (sourceId: string, table: string) =>
 const tableNamed = async (sourceId: string, name: string) =>
   (await uploadTablesOf(sourceId)).find((t) => t.name === name)!;
 
-describe("syncSheetsSource", () => {
+describe("syncSource", () => {
   it("sync loads new rows and keeps column ids, grants and types", async () => {
     const { sheet, id } = await makeSource();
     const before = await tableNamed(id, "costs");
@@ -134,11 +134,19 @@ describe("syncSheetsSource", () => {
     const source = await prisma.source.findUniqueOrThrow({ where: { id } });
 
     sheet.tab(1).rows.push(["food", "300.5"]);
-    const summary = await syncSheetsSource(id, ownerId);
+    const summary = await syncSource(id, ownerId);
 
     expect(summary).toEqual({
       synced_at: expect.any(String),
-      tables: [{ id: before.id, name: "costs", row_count: 2, missing: false }],
+      tables: [
+        {
+          id: before.id,
+          name: "costs",
+          row_count: 2,
+          missing: false,
+          error: null,
+        },
+      ],
     });
     const after = await tableNamed(id, "costs");
     expect(after.columns.map((c) => [c.id, c.name, c.type, c.missing])).toEqual(
@@ -177,7 +185,7 @@ describe("syncSheetsSource", () => {
     sheet.tab(1).rows.push(["food", "300"]);
     sheet.tabs.unshift({ sheetId: 9, title: "Other", rows: [["x"], ["1"]] });
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     const tables = await uploadTablesOf(id);
     expect(tables.map((t) => [t.id, t.name, t.row_count])).toEqual([
@@ -193,11 +201,17 @@ describe("syncSheetsSource", () => {
     const notes = await tableNamed(id, "notes");
     sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== 2);
 
-    const summary = await syncSheetsSource(id, ownerId);
+    const summary = await syncSource(id, ownerId);
 
     expect(summary.tables).toEqual(
       expect.arrayContaining([
-        { id: notes.id, name: "notes", row_count: 1, missing: true },
+        {
+          id: notes.id,
+          name: "notes",
+          row_count: 1,
+          missing: true,
+          error: null,
+        },
         expect.objectContaining({ name: "costs", missing: false }),
       ])
     );
@@ -208,7 +222,7 @@ describe("syncSheetsSource", () => {
 
     // A missing table is not read again.
     google.getSpreadsheet.mockClear();
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
     expect(await storedTables(id)).toEqual(["costs"]);
   });
 
@@ -229,18 +243,19 @@ describe("syncSheetsSource", () => {
     });
     const restored = sheet.tab(2);
     sheet.tabs = sheet.tabs.filter((t) => t.sheetId !== 2);
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
     expect((await tableNamed(id, "notes")).missing).toBe(true);
 
     // Undo in Sheets brings the tab back with its sheetId.
     sheet.tabs.push({ ...restored, rows: [["note"], ["hello"], ["again"]] });
-    const summary = await syncSheetsSource(id, ownerId);
+    const summary = await syncSource(id, ownerId);
 
     expect(summary.tables).toContainEqual({
       id: notes.id,
       name: "notes",
       row_count: 2,
       missing: false,
+      error: null,
     });
     const after = await tableNamed(id, "notes");
     expect(after.missing).toBe(false);
@@ -280,7 +295,7 @@ describe("syncSheetsSource", () => {
     });
     await removeTable(owner, id, notes.id);
 
-    const summary = await syncSheetsSource(id, ownerId);
+    const summary = await syncSource(id, ownerId);
 
     expect(summary.tables.map((t) => t.name)).toEqual(["costs"]);
     expect((await tableNamed(id, "notes")).missing).toBe(true);
@@ -310,7 +325,7 @@ describe("syncSheetsSource", () => {
       tables: [{ key: "sheet:2", name: "notes_again" }],
     });
     sheet.tab(2).rows.push(["again"]);
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     const again = await tableNamed(id, "notes_again");
     expect(again).toMatchObject({ missing: false, row_count: 2 });
@@ -325,7 +340,7 @@ describe("syncSheetsSource", () => {
     const timeout = LOAD_LOCKING.swapTimeoutMs;
     LOAD_LOCKING.swapTimeoutMs = 1;
     try {
-      await expect(syncSheetsSource(id, ownerId)).rejects.toMatchObject({
+      await expect(syncSource(id, ownerId)).rejects.toMatchObject({
         code: "upload_source_busy",
       });
     } finally {
@@ -334,6 +349,75 @@ describe("syncSheetsSource", () => {
     const row = await prisma.source.findUniqueOrThrow({ where: { id } });
     expect(row.lastSyncError).toBeNull();
     expect(row.lastSyncAttemptAt).toEqual(before.lastSyncAttemptAt);
+    const table = await prisma.sourceTable.findFirstOrThrow({
+      where: { sourceId: id },
+    });
+    expect(table.lastSyncError).toBeNull();
+    expect(table.lastSyncAttemptAt).toBeNull();
+  });
+
+  it("a table that failed before a later table's swap was busy keeps its recorded error", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const costsTable = await tableNamed(id, "costs");
+    sheet.tab(1).rows.push(["food", "lots"]);
+    sheet.tab(2).rows.push(["again"]);
+    // A reader of notes keeps its swap waiting past the lock timeout.
+    let locked!: () => void;
+    let release!: () => void;
+    const isLocked = new Promise<void>((r) => (locked = r));
+    const held = new Promise<void>((r) => (release = r));
+    const reader = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(
+          `LOCK TABLE "${schemaFor(id)}"."notes" IN ACCESS SHARE MODE`
+        );
+        locked();
+        await held;
+      },
+      { timeout: 30_000 }
+    );
+    await isLocked;
+    const wait = LOAD_LOCKING.swapLockTimeoutMs;
+    LOAD_LOCKING.swapLockTimeoutMs = 200;
+    try {
+      await expect(syncSource(id, ownerId)).rejects.toMatchObject({
+        code: "upload_source_busy",
+      });
+    } finally {
+      LOAD_LOCKING.swapLockTimeoutMs = wait;
+      release();
+      await reader;
+    }
+    const stored = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: costsTable.id },
+    });
+    expect(stored.lastSyncError).toEqual({
+      code: "cast_failed",
+      message: expect.stringMatching(/"amount".*"costs"/),
+    });
+    expect(stored.lastSyncAttemptAt).toBeInstanceOf(Date);
+    expect(await storedRows(id, "notes")).toEqual([{ note: "hello" }]);
+  });
+
+  it("a live Sheets table never synced leaves the source's last refresh null", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const notes = await tableNamed(id, "notes");
+    await prisma.sourceTable.update({
+      where: { id: notes.id },
+      data: { lastSyncedAt: null },
+    });
+    sheet.tab(2).rows = [];
+
+    await syncSource(id, ownerId);
+
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastRefreshedAt).toBeNull();
   });
 
   it("a new header column is added; a removed one is marked missing", async () => {
@@ -344,7 +428,7 @@ describe("syncSheetsSource", () => {
       ["rent", "true"],
     ];
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     const after = await tableNamed(id, "costs");
     const byName = new Map(after.columns.map((c) => [c.name, c]));
@@ -372,7 +456,7 @@ describe("syncSheetsSource", () => {
     await changeColumn(owner, id, before.id, amount.id, { name: "cost" });
     sheet.tab(1).rows.push(["food", "300"]);
 
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
 
     const after = await tableNamed(id, "costs");
     expect(after.columns.map((c) => [c.id, c.name, c.missing])).toEqual([
@@ -391,7 +475,8 @@ describe("syncSheetsSource", () => {
     const table = await tableNamed(id, "costs");
     sheet.tab(1).rows.push(["food", "lots"]);
 
-    await expect(syncSheetsSource(id, ownerId)).rejects.toMatchObject({
+    // Every table failed: the sync answers the (first) table's error.
+    await expect(syncSource(id, ownerId)).rejects.toMatchObject({
       code: "cast_failed",
     });
 
@@ -399,48 +484,208 @@ describe("syncSheetsSource", () => {
       { item: "rent", amount: 1200 },
     ]);
     expect(await tableNamed(id, "costs")).toEqual(table);
-    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
-    expect(row.lastSyncError).toEqual({
+    const error = {
       code: "cast_failed",
       message: expect.stringMatching(/"amount".*"costs".*rows? 3/),
+    };
+    const stored = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: table.id },
+    });
+    expect(stored.lastSyncError).toEqual(error);
+    expect(stored.lastSyncAttemptAt).toBeInstanceOf(Date);
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastSyncError).toEqual({
+      tables: [{ table_id: table.id, name: "costs", ...error }],
     });
     expect(row.lastSyncAttemptAt!.getTime()).toBeGreaterThanOrEqual(
       before.lastSyncAttemptAt!.getTime()
     );
-    expect(row.lastRefreshedAt).toEqual(before.lastRefreshedAt);
+    expect(row.lastRefreshedAt).toEqual(stored.lastSyncedAt);
     expect(await storedTables(id)).toEqual(["costs"]);
+  });
+
+  it("two spreadsheets in one source: one unshared, the other still syncs", async () => {
+    const { sheet, id } = await makeSource();
+    const other = new FakeSpreadsheet(`sheet-${randomUUID()}`, [
+      { sheetId: 1, title: "Stock", rows: [["sku"], ["a1"]] },
+    ]);
+    sheets.set(other.id, other);
+    const staged = await stageFakeSheet(ownerId, other);
+    await addTables(owner, id, {
+      staging_id: staged.stagingId,
+      tables: [{ key: "sheet:1", name: "stock" }],
+    });
+    const costsTable = await tableNamed(id, "costs");
+    const stock = await tableNamed(id, "stock");
+    sheet.failWith = "GGL_0009";
+    sheet.tab(1).rows.push(["food", "300"]);
+    other.tab(1).rows.push(["b2"]);
+
+    const summary = await syncSource(id, ownerId);
+
+    expect(summary.tables).toEqual([
+      {
+        id: costsTable.id,
+        name: "costs",
+        row_count: 1,
+        missing: false,
+        error: { code: "sheet_not_accessible", message: expect.any(String) },
+      },
+      {
+        id: stock.id,
+        name: "stock",
+        row_count: 2,
+        missing: false,
+        error: null,
+      },
+    ]);
+    expect(await storedRows(id, "stock")).toEqual([
+      { sku: "a1" },
+      { sku: "b2" },
+    ]);
+    expect(await storedRows(id, "costs")).toEqual([
+      { item: "rent", amount: 1200 },
+    ]);
+    const tables = await prisma.sourceTable.findMany({
+      where: { sourceId: id },
+      orderBy: { name: "asc" },
+    });
+    expect(tables.map((t) => [t.name, t.lastSyncError])).toEqual([
+      ["costs", { code: "sheet_not_accessible", message: expect.any(String) }],
+      ["stock", null],
+    ]);
+    expect(tables[1]!.lastSyncedAt!.toISOString()).toBe(summary.synced_at);
+    const row = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(row.lastSyncAttemptAt!.toISOString()).toBe(summary.synced_at);
+    expect(row.lastSyncError).toEqual({
+      tables: [
+        {
+          table_id: costsTable.id,
+          name: "costs",
+          code: "sheet_not_accessible",
+          message: expect.any(String),
+        },
+      ],
+    });
+    // The source's last refresh is the oldest good sync among its Sheets tables.
+    expect(row.lastRefreshedAt).toEqual(tables[0]!.lastSyncedAt);
+    expect((await presentSourceById(id)).sync).toMatchObject({
+      failing: [{ table_id: costsTable.id, name: "costs" }],
+      stale: false,
+    });
+
+    // Shared again: the next sync clears the table's error.
+    sheet.failWith = null;
+    await syncSource(id, ownerId);
+    const cleared = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: costsTable.id },
+    });
+    expect(cleared.lastSyncError).toBeNull();
+    expect(
+      (await prisma.source.findUniqueOrThrow({ where: { id } })).lastSyncError
+    ).toBeNull();
+    expect(await storedRows(id, "costs")).toEqual([
+      { item: "rent", amount: 1200 },
+      { item: "food", amount: 300 },
+    ]);
+  });
+
+  it("one tab with an uncastable value keeps its data while the spreadsheet's other tab syncs", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    const costsTable = await tableNamed(id, "costs");
+    sheet.tab(1).rows.push(["food", "lots"]);
+    sheet.tab(2).rows.push(["again"]);
+
+    const summary = await syncSource(id, ownerId);
+
+    expect(summary.tables).toEqual([
+      expect.objectContaining({
+        name: "costs",
+        row_count: 1,
+        error: {
+          code: "cast_failed",
+          message: expect.stringMatching(/"amount".*"costs"/),
+        },
+      }),
+      expect.objectContaining({ name: "notes", row_count: 2, error: null }),
+    ]);
+    expect(await storedRows(id, "costs")).toEqual([
+      { item: "rent", amount: 1200 },
+    ]);
+    expect(await storedRows(id, "notes")).toEqual([
+      { note: "hello" },
+      { note: "again" },
+    ]);
+    expect(await tableNamed(id, "costs")).toEqual(costsTable);
+    expect(await storedTables(id)).toEqual(["costs", "notes"]);
+  });
+
+  it("an emptied tab fails on its own and keeps its data", async () => {
+    const { sheet, id } = await makeSource([
+      costs(),
+      { sheetId: 2, title: "Notes", rows: [["note"], ["hello"]] },
+    ]);
+    sheet.tab(1).rows = [];
+    sheet.tab(2).rows.push(["again"]);
+
+    const summary = await syncSource(id, ownerId);
+
+    expect(summary.tables).toEqual([
+      expect.objectContaining({
+        name: "costs",
+        missing: false,
+        error: { code: "empty_file", message: expect.any(String) },
+      }),
+      expect.objectContaining({ name: "notes", row_count: 2, error: null }),
+    ]);
+    expect(await storedRows(id, "costs")).toEqual([
+      { item: "rent", amount: 1200 },
+    ]);
   });
 
   it("stale after 24h of failures", async () => {
     const { sheet, id } = await makeSource();
+    const table = await tableNamed(id, "costs");
     sheet.failWith = "GGL_0009";
 
-    await expect(syncSheetsSource(id, ownerId)).rejects.toMatchObject({
+    await expect(syncSource(id, ownerId)).rejects.toMatchObject({
       code: "sheet_not_accessible",
     });
     const fresh = await presentSourceById(id);
-    expect(fresh.sync).toMatchObject({
-      last_error: { code: "sheet_not_accessible" },
+    expect(fresh.sync).toEqual({
+      interval_minutes: 60,
+      last_attempt_at: expect.any(String),
+      failing: [
+        {
+          table_id: table.id,
+          name: "costs",
+          code: "sheet_not_accessible",
+          message: expect.any(String),
+        },
+      ],
       stale: false,
     });
 
-    await prisma.source.update({
-      where: { id },
-      data: { lastRefreshedAt: new Date(Date.now() - 25 * 3600_000) },
+    await prisma.sourceTable.update({
+      where: { id: table.id },
+      data: { lastSyncedAt: new Date(Date.now() - 25 * 3600_000) },
     });
-    await expect(syncSheetsSource(id, ownerId)).rejects.toMatchObject({
+    await expect(syncSource(id, ownerId)).rejects.toMatchObject({
       code: "sheet_not_accessible",
     });
     expect((await presentSourceById(id)).sync).toMatchObject({
-      last_error: { code: "sheet_not_accessible" },
+      failing: [{ table_id: table.id, code: "sheet_not_accessible" }],
       stale: true,
     });
 
     // A good sync clears both.
     sheet.failWith = null;
-    await syncSheetsSource(id, ownerId);
+    await syncSource(id, ownerId);
     expect((await presentSourceById(id)).sync).toMatchObject({
-      last_error: null,
+      failing: [],
       stale: false,
     });
   });

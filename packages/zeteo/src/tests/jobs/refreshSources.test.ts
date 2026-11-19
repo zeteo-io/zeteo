@@ -1,7 +1,6 @@
 // @module-tag int
 // @module-tag job
 // @module-tag platform
-import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { createUploadSource } from "../../uploads/service.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
@@ -26,6 +25,11 @@ import {
   serveSheets,
   stageFakeSheet,
 } from "../support/googleSheets.js";
+import {
+  removeUploadSourcesOf,
+  seedUploadSource,
+  uploadTablesOf,
+} from "../support/uploads.js";
 import {
   removeSources,
   sourceSettings,
@@ -347,7 +351,7 @@ describe("refreshStaleSources of Google Sheets sources", () => {
     await refreshStaleSources(now);
     const failed = await prisma.source.findUniqueOrThrow({ where: { id } });
     expect(failed.lastSyncError).toMatchObject({
-      code: "sheet_not_accessible",
+      tables: [{ name: "costs", code: "sheet_not_accessible" }],
     });
     expect(await rowCount(healthy.id)).toBe(2);
 
@@ -357,6 +361,71 @@ describe("refreshStaleSources of Google Sheets sources", () => {
     expect(spy.mock.calls.map(([called]) => called)).not.toContain(id);
     await refreshStaleSources(new Date(attempt + 61 * MINUTE));
     expect(spy.mock.calls.map(([called]) => called)).toContain(id);
+  });
+
+  it("a file-only source: the job skips it", async () => {
+    const now = new Date();
+    const file = await seedUploadSource({
+      ownerId,
+      tables: [
+        { name: "t", columns: [{ name: "a", type: "text" }], rows: [["1"]] },
+      ],
+    });
+    made.push(file.id);
+    await prisma.source.update({
+      where: { id: file.id },
+      data: { syncIntervalMinutes: 60, lastSyncAttemptAt: null },
+    });
+    const cutoff = new Date(now.getTime() - 24 * HOUR);
+    expect(
+      (await db.sources.listDue(cutoff, now)).map((s) => s.id)
+    ).not.toContain(file.id);
+    const spy = vi.spyOn(refresh, "refreshSource");
+    vi.spyOn(db.sources, "listDue").mockResolvedValue([
+      await prisma.source.findUniqueOrThrow({ where: { id: file.id } }),
+    ]);
+    await refreshStaleSources(now);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("a source whose only Sheets tab was deleted keeps syncing, and the tab's table revives when the tab returns", async () => {
+    const now = new Date();
+    const { sheet, id } = await makeSheets(61, now);
+    const [table] = await uploadTablesOf(id);
+    const tab = sheet.tab(1);
+    sheet.tabs = [];
+
+    await refreshStaleSources(now);
+    expect((await uploadTablesOf(id))[0]).toMatchObject({
+      id: table!.id,
+      missing: true,
+    });
+
+    // Still due once its interval has passed, though its only table is missing.
+    const attempt = (await prisma.source.findUniqueOrThrow({ where: { id } }))
+      .lastSyncAttemptAt!;
+    const later = new Date(attempt.getTime() + 61 * MINUTE);
+    const cutoff = new Date(later.getTime() - 24 * HOUR);
+    expect(
+      (await db.sources.listDue(cutoff, later)).map((s) => s.id)
+    ).toContain(id);
+
+    // A run that finds it still gone ends cleanly.
+    await redis.del(`zeteo:refresh:${id}`);
+    await refreshStaleSources(later);
+    const quiet = await prisma.source.findUniqueOrThrow({ where: { id } });
+    expect(quiet.lastSyncError).toBeNull();
+    expect((await uploadTablesOf(id))[0]!.missing).toBe(true);
+
+    // Undo in Sheets: the tab returns with its sheetId.
+    sheet.tabs = [{ ...tab, rows: [...tab.rows, ["food", "300"]] }];
+    const again = new Date(quiet.lastSyncAttemptAt!.getTime() + 61 * MINUTE);
+    await refreshStaleSources(again);
+    expect((await uploadTablesOf(id))[0]).toMatchObject({
+      id: table!.id,
+      missing: false,
+      row_count: 2,
+    });
   });
 
   it("still refreshes database sources after 24h", async () => {

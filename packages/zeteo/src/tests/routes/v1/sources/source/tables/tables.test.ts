@@ -92,6 +92,7 @@ describe("/v1/sources/:sourceId/tables", () => {
         row_count: 2,
         last_loaded_at: null,
         origin: null,
+        sync_error: null,
       });
       expect(
         res.body.data.find((t: { name: string }) => t.name === "paid_orders")

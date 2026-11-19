@@ -274,7 +274,9 @@ const UPLOAD_SOURCE_BUSY_RETRY_AFTER_SECONDS = 5;
 /**
  * A change of an upload source's data that could not start or finish in time:
  * another load of it holds its lock, or queries reading a table kept the swap
- * waiting past its lock timeout. Nothing changed; retry later.
+ * waiting past its lock timeout. The swap that waited changed nothing; in a
+ * sync, which swaps each table on its own, tables already swapped keep their
+ * new data. Retry later.
  */
 export class UploadSourceBusyError extends AppError {
   constructor() {
@@ -438,6 +440,18 @@ export class NotASheetsSourceError extends AppError {
       "Only a Google Sheets source has a spreadsheet to read."
     );
     this.name = "NotASheetsSourceError";
+  }
+}
+
+/** A sync of an upload source that has no Google Sheets table that isn't removed (live or missing). */
+export class NothingToSyncError extends AppError {
+  constructor() {
+    super(
+      409,
+      "nothing_to_sync",
+      "This source has no Google Sheets tables to sync."
+    );
+    this.name = "NothingToSyncError";
   }
 }
 
