@@ -13,9 +13,11 @@ import { schemaFor } from "./storage.js";
 import {
   NotAnUploadSourceError,
   NotFoundError,
+  SourceArchivedError,
   ValidationError,
 } from "../utils/errors.js";
 import {
+  createMergedViews,
   isLiveMember,
   resolveMemberColumn,
   type CatalogTable,
@@ -159,6 +161,7 @@ export const mergedColumns = async (sourceId: string, memberIds: string[]) => {
   const source = await prisma.source.findUnique({ where: { id: sourceId } });
   if (!source) throw new NotFoundError("Source not found");
   if (!isUploadSource(source)) throw new NotAnUploadSourceError();
+  if (source.archivedAt) throw new SourceArchivedError();
   assertUploadsOn();
   const tables = await membersOf(prisma, sourceId, memberIds, () => "member");
   let titles = tables.map(titleOf);
@@ -270,203 +273,215 @@ export const saveMergedTable = async (
   const { members, included } = checkInput(input);
   await findChangeable(caller, sourceId);
   const savedId = await withLoadLock(sourceId, () =>
-    inDrop(sourceId, async (tx, audit) => {
-      const row = await lockChangeable(tx, caller, sourceId);
-      const existing =
-        tableId === undefined
-          ? null
-          : await tx.sourceTable.findFirst({
-              where: { id: tableId, sourceId, missingSince: null },
-              include: { columns: true },
-            });
-      const oldOrigin = existing ? originOf(existing) : null;
-      if (tableId !== undefined && oldOrigin?.kind !== "merged") {
-        throw new NotFoundError("Merged table not found");
-      }
-      const oldDef = oldOrigin?.kind === "merged" ? oldOrigin.definition : null;
-
-      const tables = await membersOf(
-        tx,
-        sourceId,
-        members.map((m) => m.tableId),
-        (i) => `members.${i}.table_id`
-      );
-      tables.forEach((t, i) => {
-        if (
-          !isLiveMember(t) &&
-          !oldDef?.members.some((m) => m.tableId === t.id)
-        ) {
-          throw invalid(
-            `members.${i}.table_id`,
-            "Not a table of the source that can be merged"
-          );
+    // An edit changes this merged table's view only; a new one has none yet.
+    inDrop(
+      sourceId,
+      tableId === undefined ? [] : [tableId],
+      async (tx, audit) => {
+        const row = await lockChangeable(tx, caller, sourceId);
+        const existing =
+          tableId === undefined
+            ? null
+            : await tx.sourceTable.findFirst({
+                where: { id: tableId, sourceId, missingSince: null },
+                include: { columns: true },
+              });
+        const oldOrigin = existing ? originOf(existing) : null;
+        if (tableId !== undefined && oldOrigin?.kind !== "merged") {
+          throw new NotFoundError("Merged table not found");
         }
-      });
-      const union = new Map(unionOf(tables).map((u) => [u.name, u]));
-      const own = existing?.columns ?? [];
-      const ownById = new Map(own.map((c) => [c.id, c]));
-      const old = new Map(
-        (oldDef?.columns ?? []).flatMap((c) => {
-          const catalog = ownById.get(c.columnId);
-          return catalog ? [[fromNameOf(catalog), c] as const] : [];
-        })
-      );
-      const memberIds = new Set(members.map((m) => m.tableId));
-      const selected = included.map((c) => {
-        const u = union.get(c.fromName);
-        const kept = old.get(c.fromName);
-        if (!u && !kept) {
-          throw invalid(
-            `columns.${c.at}.from_name`,
-            "No member has this column"
-          );
-        }
-        return {
-          ...c,
-          type: u?.type ?? (kept!.type as UploadColumnType),
-          from: u
-            ? u.columnIdByMember
-            : Object.fromEntries(
-                Object.entries(kept!.from).filter(([m]) => memberIds.has(m))
-              ),
-        };
-      });
+        const oldDef =
+          oldOrigin?.kind === "merged" ? oldOrigin.definition : null;
 
-      const clash = await tx.sourceTable.findFirst({
-        where: {
+        const tables = await membersOf(
+          tx,
           sourceId,
-          name: input.name,
-          ...(existing && { NOT: { id: existing.id } }),
-        },
-      });
-      if (clash) throw tableNameTaken();
-
-      const now = new Date();
-      const table = existing
-        ? await tx.sourceTable.update({
-            where: { id: existing.id },
-            data: { name: input.name, lastSyncedAt: now, lastSeenAt: now },
+          members.map((m) => m.tableId),
+          (i) => `members.${i}.table_id`
+        );
+        tables.forEach((t, i) => {
+          if (
+            !isLiveMember(t) &&
+            !oldDef?.members.some((m) => m.tableId === t.id)
+          ) {
+            throw invalid(
+              `members.${i}.table_id`,
+              "Not a table of the source that can be merged"
+            );
+          }
+        });
+        const union = new Map(unionOf(tables).map((u) => [u.name, u]));
+        const own = existing?.columns ?? [];
+        const ownById = new Map(own.map((c) => [c.id, c]));
+        const old = new Map(
+          (oldDef?.columns ?? []).flatMap((c) => {
+            const catalog = ownById.get(c.columnId);
+            return catalog ? [[fromNameOf(catalog), c] as const] : [];
           })
-        : await tx.sourceTable.create({
-            data: {
-              sourceId,
-              schemaName: schemaFor(sourceId),
-              name: input.name,
-              kind: "view",
-              lastSeenAt: now,
-              lastSyncedAt: now,
-              rowCount: 0,
-              origin: {
-                kind: "merged",
-                definition: { labelColumnId: "", members: [], columns: [] },
-              },
-            },
-          });
+        );
+        const memberIds = new Set(members.map((m) => m.tableId));
+        const selected = included.map((c) => {
+          const u = union.get(c.fromName);
+          const kept = old.get(c.fromName);
+          if (!u && !kept) {
+            throw invalid(
+              `columns.${c.at}.from_name`,
+              "No member has this column"
+            );
+          }
+          return {
+            ...c,
+            type: u?.type ?? (kept!.type as UploadColumnType),
+            from: u
+              ? u.columnIdByMember
+              : Object.fromEntries(
+                  Object.entries(kept!.from).filter(([m]) => memberIds.has(m))
+                ),
+          };
+        });
 
-      // Every name moves at once: first out of the way, then to its place.
-      await tx.$executeRaw`
+        const clash = await tx.sourceTable.findFirst({
+          where: {
+            sourceId,
+            name: input.name,
+            ...(existing && { NOT: { id: existing.id } }),
+          },
+        });
+        if (clash) throw tableNameTaken();
+
+        const now = new Date();
+        const table = existing
+          ? await tx.sourceTable.update({
+              where: { id: existing.id },
+              data: { name: input.name, lastSyncedAt: now, lastSeenAt: now },
+            })
+          : await tx.sourceTable.create({
+              data: {
+                sourceId,
+                schemaName: schemaFor(sourceId),
+                name: input.name,
+                kind: "view",
+                lastSeenAt: now,
+                lastSyncedAt: now,
+                rowCount: 0,
+                origin: {
+                  kind: "merged",
+                  definition: { labelColumnId: "", members: [], columns: [] },
+                },
+              },
+            });
+
+        // Every name moves at once: first out of the way, then to its place.
+        await tx.$executeRaw`
         UPDATE "zeteo"."source_columns" SET "name" = '~' || "id"::text
         WHERE "table_id" = ${table.id}::uuid`;
-      const labelRow = oldDef ? ownById.get(oldDef.labelColumnId) : undefined;
-      const labelData = {
-        name: input.label_column,
-        type: "text" as const,
-        nativeType: NATIVE_TYPE.text,
-        position: 1,
-        originalName: null,
-        missingSince: null,
-      };
-      const label = labelRow
-        ? await tx.sourceColumn.update({
-            where: { id: labelRow.id },
-            data: labelData,
-          })
-        : await tx.sourceColumn.create({
-            data: {
-              ...labelData,
-              tableId: table.id,
-              nullable: false,
-              isPrimaryKey: false,
-            },
-          });
-      const byFrom = new Map(
-        own.filter((c) => c.id !== labelRow?.id).map((c) => [fromNameOf(c), c])
-      );
-      const columns: MergedDefinition["columns"] = [];
-      for (const [i, s] of selected.entries()) {
-        const data = {
-          name: s.name,
-          type: s.type,
-          nativeType: NATIVE_TYPE[s.type],
-          position: i + 2,
-          originalName: s.fromName,
+        const labelRow = oldDef ? ownById.get(oldDef.labelColumnId) : undefined;
+        const labelData = {
+          name: input.label_column,
+          type: "text" as const,
+          nativeType: NATIVE_TYPE.text,
+          position: 1,
+          originalName: null,
           missingSince: null,
         };
-        const match = byFrom.get(s.fromName);
-        byFrom.delete(s.fromName);
-        const column = match
-          ? await tx.sourceColumn.update({ where: { id: match.id }, data })
+        const label = labelRow
+          ? await tx.sourceColumn.update({
+              where: { id: labelRow.id },
+              data: labelData,
+            })
           : await tx.sourceColumn.create({
               data: {
-                ...data,
+                ...labelData,
                 tableId: table.id,
-                nullable: true,
+                nullable: false,
                 isPrimaryKey: false,
               },
             });
-        columns.push({ columnId: column.id, type: s.type, from: s.from });
-      }
-      // Columns no longer included keep their name where it is free.
-      const taken = new Set([
-        input.label_column,
-        ...selected.map((s) => s.name),
-      ]);
-      let position = selected.length + 2;
-      for (const c of byFrom.values()) {
-        let name = c.name;
-        for (let n = 2; taken.has(name); n += 1) {
-          name = `${c.name.slice(0, 58)}_${n}`;
+        const byFrom = new Map(
+          own
+            .filter((c) => c.id !== labelRow?.id)
+            .map((c) => [fromNameOf(c), c])
+        );
+        const columns: MergedDefinition["columns"] = [];
+        for (const [i, s] of selected.entries()) {
+          const data = {
+            name: s.name,
+            type: s.type,
+            nativeType: NATIVE_TYPE[s.type],
+            position: i + 2,
+            originalName: s.fromName,
+          };
+          const match = byFrom.get(s.fromName);
+          byFrom.delete(s.fromName);
+          // A kept column keeps its `missing_since`: the view's rebuild clears
+          // it when a member has the column, and leaves it when none does.
+          const column = match
+            ? await tx.sourceColumn.update({ where: { id: match.id }, data })
+            : await tx.sourceColumn.create({
+                data: {
+                  ...data,
+                  missingSince: null,
+                  tableId: table.id,
+                  nullable: true,
+                  isPrimaryKey: false,
+                },
+              });
+          columns.push({ columnId: column.id, type: s.type, from: s.from });
         }
-        taken.add(name);
-        await tx.sourceColumn.update({
-          where: { id: c.id },
-          data: { name, position, missingSince: c.missingSince ?? now },
-        });
-        position += 1;
-      }
+        // Columns no longer included keep their name where it is free.
+        const taken = new Set([
+          input.label_column,
+          ...selected.map((s) => s.name),
+        ]);
+        let position = selected.length + 2;
+        for (const c of byFrom.values()) {
+          let name = c.name;
+          for (let n = 2; taken.has(name); n += 1) {
+            name = `${c.name.slice(0, 58)}_${n}`;
+          }
+          taken.add(name);
+          await tx.sourceColumn.update({
+            where: { id: c.id },
+            data: { name, position, missingSince: c.missingSince ?? now },
+          });
+          position += 1;
+        }
 
-      const definition: MergedDefinition = {
-        labelColumnId: label.id,
-        members,
-        columns,
-        warnings: [],
-      };
-      await tx.sourceTable.update({
-        where: { id: table.id },
-        data: { origin: { kind: "merged", definition } },
-      });
-      if (!existing) {
-        await giveOwnerGrant(tx, table.id, row.ownerId!, caller.userId);
+        const definition: MergedDefinition = {
+          labelColumnId: label.id,
+          members,
+          columns,
+          warnings: [],
+        };
+        await tx.sourceTable.update({
+          where: { id: table.id },
+          data: { origin: { kind: "merged", definition } },
+        });
+        if (!existing) {
+          await giveOwnerGrant(tx, table.id, row.ownerId!, caller.userId);
+          // Nothing dropped a view of a new table: it is made here.
+          await createMergedViews(tx, sourceId, [table.id]);
+        }
+        audit({
+          action: AUDIT_EVENTS.sourceMergedTableSaved,
+          resourceType: "source",
+          resourceId: sourceId,
+          actorId: caller.userId,
+          metadata: {
+            slug: row.slug,
+            type: "upload",
+            table: { id: table.id, name: input.name },
+            created: !existing,
+            members: members.map((m) => m.tableId),
+            columns: selected.length,
+            ...(!existing && {
+              owner_grant: { user_id: row.ownerId, table_ids: [table.id] },
+            }),
+          },
+        });
+        return table.id;
       }
-      audit({
-        action: AUDIT_EVENTS.sourceMergedTableSaved,
-        resourceType: "source",
-        resourceId: sourceId,
-        actorId: caller.userId,
-        metadata: {
-          slug: row.slug,
-          type: "upload",
-          table: { id: table.id, name: input.name },
-          created: !existing,
-          members: members.map((m) => m.tableId),
-          columns: selected.length,
-          ...(!existing && {
-            owner_grant: { user_id: row.ownerId, table_ids: [table.id] },
-          }),
-        },
-      });
-      return table.id;
-    })
+    )
   );
   return tableView(
     await prisma.sourceTable.findUniqueOrThrow({ where: { id: savedId } })

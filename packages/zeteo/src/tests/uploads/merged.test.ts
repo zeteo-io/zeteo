@@ -2,9 +2,9 @@
 // @module-tag platform
 import { removeUploadSourcesOf, uploadTablesOf } from "../support/uploads.js";
 import { dropStoredTable, schemaFor } from "../../uploads/storage.js";
-import { syncSource } from "../../uploads/sync.js";
 import type { Caller } from "../../middleware/auth.js";
 import { startV1Routes } from "../support/v1App.js";
+import { syncSource } from "../../uploads/sync.js";
 import { inSwap } from "../../uploads/loading.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
@@ -344,7 +344,7 @@ describe("merged tables", () => {
     await merge(id, tables, ["A", "B"], ["sku"]);
 
     // As a sync's "tab gone" path does it, in its own swap with nothing loaded.
-    await inSwap(id, [], async (tx) => {
+    await inSwap(id, [], [tables[1]!.id], async (tx) => {
       const now = new Date();
       await dropStoredTable(tx, id, "t1");
       await tx.sourceTable.update({
@@ -419,6 +419,29 @@ describe("merged tables", () => {
       { brand: "A", sku: "a", note: null },
       { brand: "B", sku: "b", note: null },
     ]);
+    // Saving the merged table with the column still ticked keeps its time.
+    const since = async () =>
+      (
+        await prisma.sourceColumn.findUniqueOrThrow({
+          where: { id: before.id },
+        })
+      ).missingSince;
+    const wentMissing = await since();
+    await saveMergedTable(
+      owner,
+      id,
+      {
+        name: "all_inventory",
+        label_column: "brand",
+        members: tables.map((t, i) => ({ table_id: t.id, label: "AB"[i]! })),
+        columns: [
+          { name: "sku", from_name: "sku", include: true },
+          { name: "note", from_name: "note", include: true },
+        ],
+      },
+      (await mergedTable(id)).id
+    );
+    expect(await since()).toEqual(wentMissing);
 
     made[0]!.tab(7).rows = [
       ["sku", "note"],

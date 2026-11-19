@@ -251,7 +251,7 @@ const syncTable = async (
     );
     const loaded = await loadTables(sourceId, [planned]);
     const rowCount = loaded[0]!.rowCount;
-    await inSwap(sourceId, loaded, async (tx) => {
+    await inSwap(sourceId, loaded, [table.id], async (tx) => {
       const row = await lockSyncedSource(tx, sourceId);
       await swapIn(tx, sourceId, planned.name, loaded[0]!.physicalName);
       await writeColumns(tx, table.id, planned.columns, columns, now);
@@ -287,7 +287,7 @@ const lockSyncedSource = async (
 
 /** Marks missing a table whose tab is gone, dropping its data, in its own transaction. */
 const markGone = async (sourceId: string, table: SourceTable, now: Date) => {
-  await inSwap(sourceId, [], async (tx) => {
+  await inSwap(sourceId, [], [table.id], async (tx) => {
     await lockSyncedSource(tx, sourceId);
     await dropStoredTable(tx, sourceId, table.name);
     await tx.sourceTable.update({

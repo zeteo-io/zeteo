@@ -11,6 +11,7 @@ import type { SourceView } from "../views/source.js";
 import type { Caller } from "../middleware/auth.js";
 import type { UploadColumnType } from "./types.js";
 import { normalizeName } from "./parse/names.js";
+import type { Touched } from "./mergedViews.js";
 import { logger } from "../utils/logger.js";
 import { lacking } from "./ownership.js";
 import { randomUUID } from "crypto";
@@ -361,7 +362,8 @@ export const createUploadSource = async (
   await withLoadLock(id, async () => {
     try {
       const loaded = await loadTables(id, planned);
-      await inSwap(id, loaded, async (tx, audit) => {
+      // New tables only: no merged view reads them yet.
+      await inSwap(id, loaded, [], async (tx, audit) => {
         const now = new Date();
         await mapUniqueViolation(
           () =>
@@ -504,8 +506,9 @@ export const changeUploadSource = async (
  */
 export const inDrop = <T>(
   sourceId: string,
+  touched: Touched,
   fn: (tx: Prisma.TransactionClient, audit: Audit) => Promise<T>
-) => inSwap(sourceId, [], fn);
+) => inSwap(sourceId, [], touched, fn);
 
 /**
  * Deletes an upload source: archives it, drops its schema (waiting for queries
@@ -520,7 +523,7 @@ export const deleteUploadSource = async (
 ): Promise<void> => {
   await findChangeable(caller, id);
   await withLoadLock(id, () =>
-    inDrop(id, async (tx, audit) => {
+    inDrop(id, "all", async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
       const now = new Date();
       await tx.source.update({ where: { id }, data: { archivedAt: now } });
@@ -611,7 +614,8 @@ export const addTables = async (
 
   await withLoadLock(id, async () => {
     const loaded = await loadTables(id, planned);
-    await inSwap(id, loaded, async (tx, audit) => {
+    // New tables only: no merged view reads them yet.
+    await inSwap(id, loaded, [], async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
       if (vendorFileId) await claimSpreadsheet(tx, id, vendorFileId);
       await assertTabsFree(tx, id, origins);
@@ -836,7 +840,7 @@ export const reuploadTable = async (
     });
     const matches = matchColumns(columns, planned.columns, "name");
     const [loaded] = await loadTables(id, [planned]);
-    await inSwap(id, [loaded!], async (tx, audit) => {
+    await inSwap(id, [loaded!], [tableId], async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
       const now = new Date();
       // Read again under the lock: a rename may have landed since.
@@ -921,7 +925,7 @@ export const removeTable = async (
   if (!found || !removable(found)) throw new NotFoundError("Table not found");
   await assertNotMerged(prisma, id, tableId);
   await withLoadLock(id, () =>
-    inDrop(id, async (tx, audit) => {
+    inDrop(id, [tableId], async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
       const table = await tx.sourceTable.findFirst({
         where: { id: tableId, sourceId: id },
@@ -1099,7 +1103,7 @@ export const changeColumn = async (
   // A merged table's column is renamed in the catalogue; its view is made
   // again from it.
   if (merged) {
-    await withLoadLock(id, () => inDrop(id, record));
+    await withLoadLock(id, () => inDrop(id, [tableId], record));
     return viewOf(id);
   }
 
@@ -1137,7 +1141,7 @@ export const changeColumn = async (
         }),
       };
       const [loaded] = await loadTables(id, [planned]);
-      await inSwap(id, [loaded!], async (tx, audit) => {
+      await inSwap(id, [loaded!], [tableId], async (tx, audit) => {
         const row = await record(tx, audit);
         await swapIn(tx, id, table.name, loaded!.physicalName);
         const now = new Date();

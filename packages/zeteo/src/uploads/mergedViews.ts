@@ -66,17 +66,56 @@ export const resolveMemberColumn = (
 export const isLiveMember = (table: SourceTable | undefined) =>
   table !== undefined && table.missingSince === null && table.kind === "table";
 
-/** Drops every view in the source's schema (only merged tables are views there). */
-const dropMergedViews = async (
+/** The tables a change of stored tables touches, or all the source's. */
+export type Touched = readonly string[] | "all";
+
+/** The source's live merged tables that are in `touched` or read a table in it. */
+const dependents = async (
   tx: Prisma.TransactionClient,
-  sourceId: string
+  sourceId: string,
+  touched: Touched
+): Promise<CatalogTable[]> => {
+  if (touched !== "all" && touched.length === 0) return [];
+  const merged = await tx.sourceTable.findMany({
+    where: {
+      sourceId,
+      missingSince: null,
+      origin: { path: ["kind"], equals: "merged" },
+    },
+    include: { columns: true },
+    orderBy: { name: "asc" },
+  });
+  if (touched === "all") return merged;
+  const ids = new Set(touched);
+  return merged.filter((t) => {
+    if (ids.has(t.id)) return true;
+    const origin = originOf(t);
+    return (
+      origin?.kind === "merged" &&
+      origin.definition.members.some((m) => ids.has(m.tableId))
+    );
+  });
+};
+
+/** Drops the views of `tables`, or, for `"all"`, every view in the source's schema. */
+const dropViews = async (
+  tx: Prisma.TransactionClient,
+  sourceId: string,
+  touched: Touched,
+  tables: CatalogTable[]
 ) => {
   const schema = schemaFor(sourceId);
-  const views = await tx.$queryRaw<{ viewname: string }[]>`
-    SELECT viewname FROM pg_views WHERE schemaname = ${schema}`;
-  for (const v of views) {
+  const names =
+    touched === "all"
+      ? (
+          await tx.$queryRaw<{ viewname: string }[]>`
+            SELECT viewname FROM pg_views WHERE schemaname = ${schema}
+            ORDER BY viewname`
+        ).map((v) => v.viewname)
+      : tables.map((t) => t.name);
+  for (const name of names) {
     await tx.$executeRawUnsafe(
-      `DROP VIEW IF EXISTS ${quote(schema)}.${quote(v.viewname)}`
+      `DROP VIEW IF EXISTS ${quote(schema)}.${quote(name)}`
     );
   }
 };
@@ -192,20 +231,12 @@ const rebuildOne = async (
   });
 };
 
-/** Creates the view of every live merged table of the source from the catalogue. */
-const rebuildMergedViews = async (
+/** Creates the views of `merged` (live merged tables of the source) from the catalogue. */
+const rebuild = async (
   tx: Prisma.TransactionClient,
-  sourceId: string
+  sourceId: string,
+  merged: CatalogTable[]
 ) => {
-  const merged = await tx.sourceTable.findMany({
-    where: {
-      sourceId,
-      missingSince: null,
-      origin: { path: ["kind"], equals: "merged" },
-    },
-    include: { columns: true },
-    orderBy: { name: "asc" },
-  });
   if (merged.length === 0) return;
   const memberIds = new Set<string>();
   for (const t of merged) {
@@ -223,19 +254,41 @@ const rebuildMergedViews = async (
 };
 
 /**
- * Runs `fn`, a change of the source's stored tables or of its catalogue, in
- * `tx` with the source's merged views out of the way: drops them all, runs
- * `fn`, then creates each live merged table's view again from the
- * catalogue `fn` left (members missing left out; member columns gone or no
- * longer fitting give NULL and a warning) and grants the reader SELECT.
+ * Creates the views of the source's live merged tables of `ids` (a merged
+ * table just created, whose view nothing has dropped).
+ */
+export const createMergedViews = async (
+  tx: Prisma.TransactionClient,
+  sourceId: string,
+  ids: string[]
+): Promise<void> => {
+  const merged = await dependents(tx, sourceId, ids);
+  await rebuild(
+    tx,
+    sourceId,
+    merged.filter((t) => ids.includes(t.id))
+  );
+};
+
+/**
+ * Runs `fn`, a change of the stored tables `touched` (their ids; a merged
+ * table's own id when it is the one changed; `"all"` for the whole source),
+ * in `tx` with the merged views that depend on them out of the way: drops
+ * the views of the live merged tables in `touched` or reading a table in it,
+ * runs `fn`, then creates them again from the catalogue `fn` left (members
+ * missing left out; member columns gone or no longer fitting give NULL and a
+ * warning) and grants the reader SELECT. Other merged views are left alone,
+ * so a query on one never holds up a change of tables it does not read.
  */
 export const withMergedViews = async <T>(
   tx: Prisma.TransactionClient,
   sourceId: string,
+  touched: Touched,
   fn: () => Promise<T>
 ): Promise<T> => {
-  await dropMergedViews(tx, sourceId);
+  const before = await dependents(tx, sourceId, touched);
+  await dropViews(tx, sourceId, touched, before);
   const result = await fn();
-  await rebuildMergedViews(tx, sourceId);
+  await rebuild(tx, sourceId, await dependents(tx, sourceId, touched));
   return result;
 };

@@ -151,6 +151,15 @@ describe("merged tables", () => {
         )
       ).status
     ).toBe(403);
+
+    expect((await call("DELETE", `/${s.id}`, owner)).status).toBe(204);
+    const archived = await call(
+      "GET",
+      `/${s.id}/merged-tables/columns?member=${s.east.id}&member=${s.west.id}`,
+      owner
+    );
+    expect(archived.status).toBe(409);
+    expect(archived.body.error).toBe("source_archived");
   });
 
   it("POST creates the merged table: 201, its detail, the audit entry and the owner's query", async () => {
