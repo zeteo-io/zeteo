@@ -90,4 +90,22 @@ describe("MCP preview_panel over a metric query", () => {
       problems: [{ setting: "time_column", problem: "wrong_type" }],
     });
   });
+
+  it("refuses time_column range on a table query", async () => {
+    const wrong = await callTool(session.client, "preview_panel", {
+      query: {
+        source: source.slug,
+        from: "orders",
+        select: ["id"],
+        limit: 5,
+      },
+      chart: { type: "table", version: 1 },
+      time_column: "range",
+      time_range: "previous_month",
+    });
+    expect(wrong.isError, wrong.text).toBe(false);
+    expect(wrong.json).toMatchObject({
+      problems: [{ setting: "time_column", problem: "wrong_type" }],
+    });
+  });
 });

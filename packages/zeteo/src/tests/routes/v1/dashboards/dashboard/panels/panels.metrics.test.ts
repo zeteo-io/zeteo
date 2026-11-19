@@ -120,7 +120,7 @@ describe("panels over metric queries", () => {
     }
   });
 
-  it("refuses time_column range on a table query, as for a column it lacks", async () => {
+  it("refuses time_column range on a table query, as any other wrong time column", async () => {
     const id = await dashboardOf(owner.token, { time_range: "last_year" });
     const res = await addPanel(
       owner.token,
@@ -130,7 +130,7 @@ describe("panels over metric queries", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("invalid_panel");
     expect(res.body.problems).toEqual([
-      { setting: "time_column", problem: "missing_column" },
+      { setting: "time_column", problem: "wrong_type" },
     ]);
   });
 
@@ -158,7 +158,7 @@ describe("panels over metric queries", () => {
     });
     expect(table.status).toBe(400);
     expect(table.body.problems).toEqual([
-      { setting: "time_column", problem: "missing_column" },
+      { setting: "time_column", problem: "wrong_type" },
     ]);
   });
 
