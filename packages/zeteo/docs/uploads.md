@@ -4,9 +4,11 @@ An upload source is a source whose data Zeteo stores: a person uploads a CSV or 
 checks and corrects a preview, and gets a source of type `upload` that they own. Its tables live in
 Zeteo's own Postgres database, one schema per source (`zu_<id without dashes>`), and are queried
 through the same query language, planner, limits, saved queries and exports as any Postgres source,
-under grants. A file upload never refreshes by itself and changes only when its owner uploads again.
-A Google Sheet is the other kind of upload source, of type `google-sheets`: it is read from Google
-and synced on an interval ([Google Sheets](#google-sheets)). SharePoint does not exist yet.
+under grants. A file table never refreshes by itself and changes only when its owner uploads it again.
+There is one type of upload source, and its tables can come from different places: each table has an
+**origin**, a file, a Google spreadsheet tab (synced on an interval, [Google Sheets](#google-sheets)) or
+a merged table (a view over other tables of the source, [Merged tables](#merged-tables)), so one source
+can mix them. SharePoint does not exist yet.
 
 Uploads are **off** until `UPLOADS_READER_URL` is set. While it is unset `/v1/uploads`,
 `POST /v1/sources` with `type: "upload"` and the upload-only routes on an upload source answer
@@ -54,7 +56,7 @@ Anyone who is neither the owner nor holds the admin permission a route needs get
 forbidden` of a caller without it, whether the source exists or not. On a database source the
 upload-only routes (`DELETE`, `transfer`, adding, re-uploading and removing tables, changing a
 column) answer `409 not_an_upload_source`; on an upload source the database-only ones (`archive`,
-`test`, `refresh`, and `PATCH` with `settings` or `schemas`) answer `409 not_a_database_source`.
+`test`, and `PATCH` with `settings` or `schemas`) answer `409 not_a_database_source`; `refresh` is Sync now there, `409 nothing_to_sync` without Sheets tables.
 
 The reference is `openapi/openapi.yaml`; the SDK has the same calls (`client.sources`, and
 `client.uploads.create` and `.discard`).
@@ -245,9 +247,12 @@ database holds. Count them against `max_connections`.
 
 ## Google Sheets
 
-A source of type `google-sheets` (kind `upload`) backs its tables with a Google spreadsheet. It needs
-`zeteo.uploads.write` and, like file uploads, `UPLOADS_READER_URL` (off while unset). It is made
-with the plugin `@dianemo/plugin-google@^2.1.0`, and Zeteo reads sheets with one service account.
+A table can be backed by one tab of a Google spreadsheet. It needs `zeteo.uploads.write` and, like
+file uploads, `UPLOADS_READER_URL` (off while unset). It is made with the plugin
+`@dianemo/plugin-google@^2.1.0`, and Zeteo reads sheets with one service account. There is no
+Sheets source type: a source of type `upload` gains Sheets tables beside file tables, and each table's
+`origin` says which it is (`file`, `google-sheets` with the spreadsheet, tab id and tab title, or
+`merged`).
 
 ### Setting up Google (admins)
 
@@ -263,21 +268,29 @@ with the plugin `@dianemo/plugin-google@^2.1.0`, and Zeteo reads sheets with one
 A Google Workspace admin setting can block sharing files with addresses outside the domain, and a
 service account is outside it. Allow it, or share each sheet explicitly.
 
-Until a key is saved, creating or syncing a Sheets source is `google_not_configured`.
+Until a key is saved, reading a spreadsheet or syncing is `google_not_configured`.
 
-### Adding a sheet
+### Adding a spreadsheet
 
-Share the spreadsheet with the service account's email as **Viewer**, then in Add data choose Google
-Sheet and paste its link (`docs.google.com/spreadsheets/d/<id>` or the bare id; a published-to-web
-link is refused, `invalid_sheet_link`). `POST /v1/uploads/links` reads it and returns the same
-preview as a file: one table per grid tab (chart tabs are skipped), the header row, and each column's
-name and type to correct. A sheet not shared with the email is `sheet_not_accessible`, naming the
-email. Creating sends `sync_interval_minutes` (default 60, 15 to 1440).
+Share the spreadsheet with the service account's email as **Viewer**. Add data (a new source) and Add
+tables (an existing one) take a file or **any spreadsheet link** (`docs.google.com/spreadsheets/d/<id>`
+or the bare id; a published-to-web link is refused, `invalid_sheet_link`). `POST /v1/uploads/links`
+(`{ url }` to add data, `{ source_id, url }` to add tables) reads it and returns the same preview as a
+file: one table per grid tab (chart tabs are skipped), the header row, and each column's name and
+type to correct. A sheet not shared with the email is `sheet_not_accessible`, naming the email. A
+preview made for another kind of staging is `staging_kind_mismatch`. Adding a tab that already backs a
+table of the source is `tab_already_added`.
 
-**First claim wins.** One spreadsheet backs at most one unarchived source; anyone else adding it
-gets `sheet_in_use`, without being told who owns it. An admin fixes a wrong claim by transferring the
-source. The risk, stated: someone who has the link and the share and registers first gets the
-sheet. Share a sheet only with people who should be able to register it.
+**First claim wins, per spreadsheet.** A spreadsheet backs tables in at most one source (`upload_claims`).
+A source claims it when it first gains one of its tabs, in the same transaction; another source adding a
+tab of it gets `409 sheet_in_use`, without being told who owns it. The claim is released when the source
+is deleted or when its last non-removed table of that spreadsheet is removed. A table that is only
+missing (its tab was deleted) keeps the claim, since a restored tab revives it; the owner may delete a
+table that is missing from a sync to release it. An admin fixes a wrong claim by transferring the source
+(the claim moves with it). The risk, stated: someone who has the link and the share and registers first
+gets the sheet. Share a sheet only with people who should be able to register it. Known edge: a claim
+racing a long swap on the same source can answer `503 upload_source_busy` instead of `409`; a retry gives
+the right answer.
 
 ### How values load
 
@@ -302,29 +315,35 @@ preview.
 
 ### Syncing
 
-A sync is a refresh of the source. A Sheets source loads on its interval, by the `refreshSources`
-job, which checks every five minutes (the interval is measured from the last attempt; nothing syncs
-while uploads are off). **Sync now** is `POST /v1/sources/:sourceId/refresh` (the owner, or
-`zeteo.sources.write`), at most once a minute: sooner is `429 sync_too_soon` with `Retry-After`.
-A busy `503 upload_source_busy` does not use the window and is not recorded as a failed sync. The
-answer is a `SyncSummary`. An admin may change the interval (`sync_interval_minutes`) in the same
-`PATCH` as the source's limits; on any other type of source it is `422 not_synced`.
+A source has one sync interval (`sync_interval_minutes`, 15 to 1440, default 60) for all its Sheets
+tables, set when a source is created from a sheet and changed by an admin in the same `PATCH` as the
+source's limits (`422 not_synced` for a source that has never had a Sheets table). The `refreshSources`
+job checks every five minutes and syncs a source whose interval has passed since its last attempt
+(nothing syncs while uploads are off). **Sync now** is `POST /v1/sources/:sourceId/refresh` (the owner,
+or `zeteo.sources.write`), at most once a minute: sooner is `429 sync_too_soon` with `Retry-After`. A
+source with no non-removed Sheets table answers `409 nothing_to_sync`. A busy `503 upload_source_busy`
+does not use the window and is not recorded as a failed sync. The answer is a `SyncSummary`.
+
+**Each Sheets table loads in its own transaction**: one spreadsheet's or tab's failure never holds back
+the others, and a failed table keeps its last good data. A source whose Sheets tables are all missing keeps
+syncing, so a restored tab revives its table.
 
 - Columns match by header text (`original_name`), then by name, so a column renamed in Zeteo keeps
   syncing. New header columns are added (an `all_columns` grant covers them, a grant on named columns
   does not); a column gone from the header gets `missing_since`.
-- Tabs match by sheet id, so renaming or reordering tabs is fine. A deleted tab's table goes missing;
-  restoring the tab revives it with its id and grants. A table the owner removed stays removed:
-  a sync never revives it, and its tab can be added again (under a new name) as a new table. Adding
-  a tab that already backs a table of the source is `tab_already_added`.
-- A value that no longer casts to its column's type fails the sync (`cast_failed`); the owner retypes
-  the column, for instance to text, and syncs again. A tab emptied of rows fails it too
-  (`empty_file`). The upload limits (rows, columns, quota) apply, and the limit errors fail a sync
-  as they fail an upload.
-- A failed sync keeps the last good data and records `last_error` under the source's `sync` (seen by
-  the owner and `zeteo.sources.read` only). After 24 hours of failures the source shows **Stale**.
-- Re-uploading a Sheets table is `not_a_file_upload`; its other routes (rename, retype, grants,
-  transfer, delete) work as for a file.
+- Tabs match by sheet id, so renaming or reordering tabs is fine, and the tab title kept in the table's
+  origin refreshes on each sync. A deleted tab's table goes missing; restoring the tab revives it with
+  its id and grants. A table the owner removed stays removed: a sync never revives it, and its tab can be
+  added again (under a new name) as a new table.
+- A value that no longer casts to its column's type fails that table (`cast_failed`); the owner retypes
+  the column, for instance to text, and syncs again. A tab emptied of rows fails it too (`empty_file`).
+  The upload limits (rows, columns, quota) apply, and the limit errors fail a sync as they fail an upload.
+- A failed table records `sync_error` on itself (seen by the owner and `zeteo.sources.read` only). The
+  source's `sync` is `{ interval_minutes, last_attempt_at, failing, stale }`: `failing` lists the
+  failing tables, and `stale` is true when a live Sheets table has failed for 24 hours without a good
+  sync (the UI shows **Stale**; a failing source shows a **Sync failing** badge).
+- Re-uploading a Sheets table is `not_a_file_upload`; **re-upload is for file tables only**. Its other
+  routes (rename, retype, grants, delete) work as for a file; a source's `transfer` moves everything.
 
 Readers see `last_loaded_at` per table in the catalogue and over MCP, never a sync error.
 
@@ -336,9 +355,40 @@ an admin saves the key again. The key check registers a short-lived client
 (`validate-<epoch ms>-<uuid>`); a starting replica removes those left behind more than five minutes
 old.
 
+## Merged tables
+
+A merged table stacks two or more tables of one source (file or Sheets tables, any mix) into one, for
+data that is split across files or tabs, a sheet per month for instance. It is a live Postgres view in
+the source's schema, so it is never loaded or synced itself: it reads its members' current rows.
+`origin` is `merged`, and the UI shows "Merged · N tables".
+
+- **Create:** `POST /v1/sources/:sourceId/merged-tables` (the owner, or `zeteo.sources.write`) with
+  `{ name, label_column, members: [{ table_id, label }], columns: [{ name, from_name, include }] }`
+  (2 to 100 members). **Change:** `PUT /v1/sources/:sourceId/tables/:tableId/merged`, the same body.
+  `GET /v1/sources/:sourceId/merged-tables/columns?member=<tableId>&member=...` lists the columns the
+  chosen members offer, for the editor.
+- **Label column:** a text column added to every row holding its member's label, so rows tell their
+  member apart. Labels are suggested from the part of the members' titles that differs (the prefix and
+  suffix they share are dropped; a title with nothing left keeps its full title), and are editable (at
+  most 100 characters). They are written into the view as escaped SQL literals.
+- **Columns:** the union of the members' columns by name, each included or not. The type is fixed when
+  the table is saved: members that disagree give `text`. A member lacking a column contributes NULL, and
+  so does one whose column no longer casts to the fixed type, with a warning.
+- **Live behaviour:** a member that goes missing drops out of the view with a warning and rejoins when
+  it is revived. A selected column that no member has any more is marked missing, and comes back with its
+  id and grants when a member has it again; columns never selected are listed as available. The row
+  count is the sum of the members' rows.
+- **Grants:** a merged table has its own grants and catalogue entries, like any table; its creator gets
+  an owner grant on create. Granting a member does not grant the merged table, nor the reverse.
+- **Removal:** removing a table that a merged table reads is `409 table_in_merged_table`; change or
+  remove the merged table first. A merged table is removed like any table.
+- **Rebuilding:** a view is rebuilt only when a change touches its members, so a long read of a merged
+  table does not stall unrelated loads.
+
 Error codes: `invalid_sheet_link`, `sheet_in_use`, `sheet_not_accessible`, `google_not_configured`,
 `google_key_rejected`, `google_unavailable`, `google_sign_in_failed`, `staging_kind_mismatch`,
-`tab_already_added`, `not_a_file_upload`, `not_synced`, `not_a_sheets_source`, `sync_too_soon`.
+`tab_already_added`, `not_a_file_upload`, `not_synced`, `not_a_sheets_source`, `sync_too_soon`,
+`nothing_to_sync`, `table_in_merged_table`.
 
 ## Not supported yet
 
