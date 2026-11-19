@@ -94,6 +94,12 @@ time column has it filtered: an own panel's `time_column`, or for a linked panel
 in UTC and against one `now`, floored to the minute, for all of a run's panels. A week starts on
 Monday.
 
+A panel over a **metric query** ([measures.md](measures.md#metric-queries)) uses the time column
+`"range"`: the time range then replaces the query's `range` (each measure is cut on its own date
+column), instead of adding a `where`. Any other time column on a metric query is a `wrong_type`
+problem at `time_column` (`needs_update` for a viewer); a panel without a time column keeps the
+query's own `range`.
+
 ## Running a dashboard
 
 `POST /v1/dashboards/{id}/run` (permission `zeteo.data.read`) takes `{ panels?, time_range? }`

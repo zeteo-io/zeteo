@@ -114,9 +114,14 @@ and changes write audit entries to tereo's outbox.
   query language gains `case`, date arithmetic (`dateAdd`, `dateDiff`, `datePart`), business-day
   functions over dates and relative dates, and fiscal buckets and relative units. One calendar for
   the install (`/v1/calendar`, `zeteo.calendar.write`) keeps working days, holidays, the fiscal
-  year start and the time zone that relative dates follow. Dashboards gain a gauge chart. Not
-  there: metrics that combine measures from different tables, fixed values that ignore a query's
-  filters, and calendar functions over columns.
+  year start and the time zone that relative dates follow. `businessDaysInMonth` also takes a
+  column. A measure can be **fixed** (one value that ignores the query's filters, usable from any
+  table and as a comparison value in filters) and can name a date column; a **metric** is a named
+  formula over measures of different tables (`roas`), asked for by name in a metric query
+  (`{ "metrics": [...], "bucket"?, "range"? }`) that lines each measure up per period by its own
+  date column, also from dashboards (time column `"range"`), saved queries and MCP. Dashboards gain
+  a gauge chart. Not there: filters on non-date dimensions in metric queries, metrics using
+  metrics, and elapsed or remaining business days over columns.
   ([docs/measures.md](packages/zeteo/docs/measures.md), [docs/calendar.md](packages/zeteo/docs/calendar.md))
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).

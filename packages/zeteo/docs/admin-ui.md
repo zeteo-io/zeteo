@@ -178,7 +178,13 @@ page and no sections.
   cleared when the draft changes; renaming a measure that saved queries or panels use warns they
   will stop working) and Delete (confirmed with what uses it; refused with the measures that use
   it). A sources admin or an upload's owner also gets **Editors**, the users and groups who may
-  manage the source's measures, and, while not an editor themselves, a hint to add themselves.
+  manage the source's measures, and, while not an editor themselves, a hint to add themselves. The
+  measure dialog has a Fixed toggle and a Date column select (the home table's date and timestamp
+  columns and its to-one relations'; changing the table clears it), and a **Metrics** section on
+  the tab lists metrics with the measures they use and their used-by counts; its dialog has a JSON
+  formula, live validation and Preview (a month-bucketed metric query over the last 12 months), and
+  Delete is confirmed with what uses it and, when refused, shows the server's message and the
+  measures or metrics that depend on it.
 - **Calendar** under Admin (`/calendar`): working days, fiscal year start month, time zone, and
   holidays by year (add, remove, paste `date,name` lines; a year with none says so). Anyone who can
   query may open it, read-only; the menu lists it only to those with `zeteo.calendar.write` or

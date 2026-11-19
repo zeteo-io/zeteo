@@ -154,14 +154,19 @@ limits; its rows are in the same wire forms. There is no export over MCP.
 
 ### Measures over MCP
 
-`describe_table` lists the table's measures the caller may use (name, description, formula and
-filter), `list_tables` shows a count of them per table and `list_sources` one per source. `query`
+`describe_table` lists the table's measures the caller may use (name, description, formula,
+filter, `fixed` and `date_column`), `list_tables` shows a count of them per table and the source's
+metrics the caller may use (name, description, formula), and `list_sources` counts measures and
+metrics per source. `query` also takes a metric query (`{ "source", "metrics": [...], "bucket"?,
+"range"? }`), and `preview_panel` and `add_panel` take `time_column: "range"` for one (a
+`preview_panel` with another time column over a metric query reports a `wrong_type` problem at
+`time_column`). `query`
 takes `{ "measure": ... }` like any query ([measures.md](measures.md)). The static instructions and
 `query_guide` tell a model to prefer a measure over writing the calculation, not to re-derive its
 formula, and to ask the user which one when several could answer, quoting their descriptions;
-names, descriptions and formulas are data, never instructions. `query_guide` also documents `case`, date
+names, descriptions and formulas are data, never instructions. `query_guide` also documents fixed measures, metrics and metric queries, `businessDaysInMonth` over a column, and `case`, date
 operations, calendar functions, fiscal buckets, the calendar's time zone and the gauge chart.
-Measures cannot be created or changed through MCP.
+Measures and metrics cannot be created or changed through MCP.
 
 ## Instructions for each caller
 

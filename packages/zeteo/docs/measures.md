@@ -19,6 +19,8 @@ column, and both SQL dialects, the caps and the dashboard cache work unchanged.
 | `table` | The home table, by its query name. |
 | `formula` | An expression of the query language that is group-level: every column it reads sits inside an aggregate, or comes from other measures. It may use `case`, date operations, calendar functions and `{ "measure": name }` of other measures **on the same home table**. |
 | `where` | Optional filter over the home table's columns and its to-one relation paths, with literal or relative values. It applies to every aggregate in the formula, including those of measures it uses. |
+| `fixed` | Optional boolean, default false. See [Fixed measures](#fixed-measures). |
+| `date_column` | Optional path to a date or timestamp column on the home table or through its to-one relations (`created_at`, `customer.signup_date`). Metric queries bucket and cut the measure by it. |
 
 The joins a measure needs are derived from the paths the formula and `where` read; each must be a
 to-one relation path from the home table.
@@ -61,6 +63,55 @@ to-one relation path from the home table.
   measure's path in the query.
 - A measure whose column a catalogue refresh marked missing is `missing_in_source` where used.
 
+## Fixed measures
+
+A measure with `fixed: true` ignores the query it is used in: it is computed over its whole home
+table (its own `where` still applies) and is one value, such as `last_actuals_month`
+(`{ "max": "month" }` over a SAP table). Its formula must be group-level like any measure's.
+
+- **Usable from any table** of the source: the home-table rule does not apply, and neither does
+  `measure_needs_single_rows`, as it reads none of the query's rows. It compiles to a scalar
+  subquery (`(SELECT agg FROM home LEFT JOIN ... WHERE ...)`), so it adds no join to the query and
+  never changes its rows.
+- Usable wherever an expression can appear: a select item, an operand of a `calc`, inside other
+  measures (also inside their aggregates), and as a **comparison value** in `where`, `having` and a
+  `case`'s `if`: `{ "month": { "gt": { "measure": "last_actuals_month" } } }`.
+- **At group level** it is the same value on every group and row; the query's filters and `groupBy`
+  do not change it, and in a metric query `bucket` and `range` do not cut it.
+- A query holds at most 10 fixed-measure subqueries, and a fixed measure's own joins must fit the
+  source's `max_joins`.
+- Visible under the grant rule below, planned alone against the caller's catalogue.
+
+## Date columns
+
+`date_column` is checked when saved: it must resolve, through to-one relations, to a date or
+timestamp column (refused at `date_column` otherwise). A caller who cannot read that column sees
+the measure with `date_column: null` (a sources admin or an upload's owner sees it as stored), and
+in a bucketed or ranged metric query it is `measure_has_no_date`. An editor who cannot read a
+measure's date column and changes something else with `PATCH` keeps it as stored: it is checked
+only when the change sets `date_column` or moves the measure to another table.
+
+## Metrics
+
+A **metric** is a named, described formula over measures of different tables of one source, such
+as `roas` (`revenue` over `ad_spend`). Fields: `name` (`^[a-z][a-z0-9_]{0,62}$`, unique per source
+across measures **and** metrics), `description` (1 to 2,000 characters, data, never instructions)
+and `formula`: numbers, `{ "measure": name }` (fixed or not), `add`, `sub`, `mul`, `div`, `abs`,
+`round`, `coalesce` and the constant calendar functions (such as `businessDaysInMonth` of a relative
+date). It reads no column and has no `case`; a metric does not use another metric.
+
+```json
+{ "name": "roas", "description": "Revenue per unit of ad spend.",
+  "formula": { "div": [{ "measure": "revenue" }, { "measure": "ad_spend" }] } }
+```
+
+A metric is visible to a caller only if every measure it uses is; otherwise it is absent and using
+it is `not_found_or_not_accessible`. The calls are `GET` and `POST /v1/sources/{id}/metrics`,
+`GET`, `PATCH` and `DELETE .../metrics/{metricId}` and `POST .../metrics/preview` (entry point
+`measure_preview`), with the measures' permissions, editors and redaction (an editor sees a metric
+they cannot fully see as name, description and `usable: false`, never `formula`), `used_by` and
+`broken`. Audit events: `zeteo.metric.created`, `.updated`, `.deleted`.
+
 ## Metric queries
 
 A second query shape, told apart by its `metrics` key, combines measures of different tables of one
@@ -72,8 +123,8 @@ source per period:
   "orderBy": [{ "period": "asc" }], "limit": 100 }
 ```
 
-- `metrics`: 1–20 names, each asked for once. A measure named here is the trivial metric. Stored
-  metrics (formulas over measures) are not in this version yet, so every name is a measure's.
+- `metrics`: 1–20 names, each asked for once, each a metric or a measure (a measure alone is the
+  trivial metric).
 - `bucket` (optional, any bucket unit, fiscal ones included) and `range` (optional, `gte`, `lt` or
   both, each `{ "date" }`, `{ "timestamp" }` or `{ "relative" }`, half-open) apply to each non-fixed
   measure's own date column (`date_column`, through its to-one relations). A measure without one, or
@@ -84,13 +135,20 @@ source per period:
 - Result: `period` (the bucket start, when bucketed) then one column per name, in order. `period`
   is a date when every date column is a date, else a timestamp (date buckets read as UTC
   midnight). Periods are those any measure has; a measure with no rows in a period gives null.
-  Without `bucket` there is one row.
+  Without `bucket` there is one row. Arithmetic on a missing period's null is null (a metric's
+  `coalesce` gives a default); it is never 0.
+- The `range` follows the calendar's time zone while `bucket` stays in UTC, as in table queries.
+- Rows whose date column is null form a null `period` when bucketed, and have no place in a `range`.
+- A Postgres `real` measure is read as `float8` in metric queries, so periods of different
+  measures line up in one column type.
 - Fixed measures read no periods: they are one value on every row, and a `bucket` over fixed
   measures only is `invalid_operator`. A non-fixed measure must be a number (`invalid_operator`).
 - `orderBy` names `period` or a requested name (`invalid_order` otherwise); `limit` and `offset`
   as usual. No `where`, `join`, `groupBy` or `having`.
-- At most 20 distinct non-fixed measures (`too_complex`); fixed-measure subqueries count toward 10
-  as in a table query.
+- At most 20 non-fixed measures in all, those a metric uses included (`too_complex`);
+  fixed-measure subqueries count toward 10 as in a table query. With `bucket`, no name may be
+  `period` and at least one measure must be non-fixed.
+- Not in a metric query: filters on other dimensions, and metrics using metrics.
 - A dashboard panel over a metric query with time column `"range"` takes the dashboard's time
   range as its `range`, replacing the stored one.
 - Compiled, on both engines, as one aggregate subquery per non-fixed measure (its home table and
@@ -127,12 +185,16 @@ measure they cannot fully see redacted (name, table, description, `usable: false
 
 On every save the measure and every measure using it, transitively, are re-checked against the
 source's whole catalogue (home table, result type, loops, nesting, node limits, missing columns). If
-a dependent would break, the save is refused with `409 measure_in_use` naming the dependents;
-renaming or deleting a measure other measures use is refused the same way. Saved queries and panels
+a dependent (a measure or a metric) would break, the save is refused with `409 measure_in_use` and
+`dependents: [{ "kind": "measure" | "metric", "name": ... }]`; renaming or deleting a measure other
+measures or metrics use is refused the same way. Saved queries and panels
 do not block a change: `used_by` (`saved_queries`, `panels`) shows how many use a measure so an
 editor knows before changing it. Once a measure they use is renamed or deleted, those saved queries
 fail with `saved_query_not_accessible`, like any saved query the caller cannot run, and their panels
 show a state other than `ok`; a direct query naming it fails with `not_found_or_not_accessible`.
+
+Removing an upload table deletes the measures on it and, directly, the metrics that use any of
+them; deleting the source deletes all its measures and metrics.
 
 An upload source's owner retyping, renaming or re-uploading a table, or a column, is not checked
 against the measures that read it: a measure it breaks is kept and shows `broken` (and stops being
@@ -146,17 +208,22 @@ usable) until an editor fixes it.
 | `POST /v1/sources/{id}/measures` | `zeteo.measures.write`, an editor | the created measure |
 | `GET`, `PATCH`, `DELETE /v1/sources/{id}/measures/{measureId}` | read as above; changes `zeteo.measures.write`, an editor | the measure; `409 measure_in_use` when a dependent would break |
 | `POST /v1/sources/{id}/measures/preview` | `zeteo.measures.write`, an editor | runs an unsaved draft grouped by nothing or by an optional bucket, as a normal query (limits, run log with entry point `measure_preview`) |
+| `GET`, `POST /v1/sources/{id}/metrics`; `GET`, `PATCH`, `DELETE .../metrics/{metricId}`; `POST .../metrics/preview` | as measures | see [Metrics](#metrics) |
 | `GET`, `PUT /v1/sources/{id}/measure-editors` | read as above; `PUT` as described above | the editors, users and groups |
 
 Audit events: `zeteo.measure.created`, `.updated`, `.deleted`, `zeteo.measure_editors.updated`. The
 SDK has `zeteo.measures` (`list`, `create`, `get`, `update`, `delete`, `preview`, `editors`,
-`replaceEditors`).
+`replaceEditors`) and `zeteo.metrics` (`list`, `create`, `get`, `update`, `delete`, `preview`).
 
 ## In the admin UI
 
 A source's page has a **Measures** tab: the list (name, table, description, used-by counts, broken
 flag), a dialog with JSON editors for `formula` and `where` validated live against the server (plan
-errors with their paths shown inline), **Preview**, and the editor list for those who may change it.
+errors with their paths shown inline), **Preview**, and the editor list for those who may change it. The dialog has a **Fixed** toggle and a **Date
+column** select (the table's date and timestamp columns and its to-one relations'; changing the
+table clears it). A **Metrics** section lists metrics with the measures they use; its dialog has a
+JSON formula and Preview (a month-bucketed metric query over the last 12 months). A refused delete
+shows the server's message and what depends on it.
 My Zeteo shows measures with their descriptions under what a person can query.
 
 ## Gauge chart
@@ -168,10 +235,9 @@ and `max` the end of the scale. A null value or `max` shows "No data"; a null ta
 
 ## Not supported
 
-- **Stored metrics**: named formulas combining measures of different tables. Metric queries combine
-  measures by name; there is no stored metric yet.
-- **Fixed values** that ignore the query's filters and grouping.
-- **Calendar functions over columns** (business days per row): the calendar functions take a date or
-  relative date only ([calendar.md](calendar.md)).
-- Using a measure from a query whose `from` is not its home table, row-level reusable calculations,
-  authoring measures through MCP, and a text formula syntax: measures are written as JSON.
+- Filters on non-date dimensions in metric queries, and metrics using other metrics.
+- Elapsed and remaining business days over columns: `businessDaysInMonth` takes a column, the other
+  calendar functions a date or relative date only ([calendar.md](calendar.md)).
+- Using a non-fixed measure from a query whose `from` is not its home table, row-level reusable
+  calculations, authoring measures or metrics through MCP, and a text formula syntax: they are
+  written as JSON.

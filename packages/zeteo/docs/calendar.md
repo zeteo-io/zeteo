@@ -27,7 +27,8 @@ behaves as it did before the calendar existed.
 ## What the calendar changes in queries
 
 - **Business-day functions** (`businessDays`, `businessDaysInMonth`, `businessDaysElapsed`,
-  `businessDaysRemaining`) count with the working days and holidays.
+  `businessDaysRemaining`) count with the working days and holidays. `businessDaysInMonth` also takes
+  a column (or any date or timestamp expression, a bucket included): see below.
 - **Fiscal buckets and relative units**: `fiscal_quarter` and `fiscal_year` as a `bucket` return
   the start date of the fiscal period; as a relative date `unit` they offset in those units, and
   `startOf` cuts to the period's start. `datePart` `fiscal_year` is the calendar year in which the
@@ -40,10 +41,18 @@ behaves as it did before the calendar existed.
 The calendar's values are folded into the plan as bound values, so changing the calendar changes
 plans and with them the dashboard cache's identity: nothing else is invalidated.
 
+## `businessDaysInMonth` over a column
+
+Given a date or timestamp expression, `businessDaysInMonth` is the business days in that value's
+month, per row: for a daily budget charted per month, `{ "div": [{ "sum": "aop" }, { "businessDaysInMonth": "month" }] }`.
+Zeteo sends the calendar's per-month counts for a window of 25 years either side of now as bound
+parameters (Postgres arrays, SQL Server one JSON parameter) and looks the month up; a month
+outside the window, or a null value, gives null. A timestamp is read as its UTC date, as buckets are.
+
 ## Not supported
 
-- Calendar functions take a date literal or a relative date. A column argument is refused with
-  `invalid_operator`; business days per row or per group are not available.
+- `businessDays`, `businessDaysElapsed` and `businessDaysRemaining` take a date literal or a
+  relative date; a column is refused with `invalid_operator`.
 - The admin UI keeps the holiday list by year and shows which years have holidays entered; queries
   give no warning when a year has none.
 

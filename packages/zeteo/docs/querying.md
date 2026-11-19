@@ -363,8 +363,9 @@ Dates and timestamps are allowed in expressions:
 [calendar](calendar.md): `{ "businessDays": [start, end] }` (both inclusive), `{ "businessDaysInMonth":
 date }`, `{ "businessDaysElapsed": date }` (the month's first day to `date`, inclusive) and `{
 "businessDaysRemaining": date }` (after `date` to month end). Their arguments are constant, a date
-or relative literal; a column is refused with `invalid_operator`. They are not supported over
-columns. `bucket` also takes `fiscal_quarter` and `fiscal_year` (the period's start date), and
+or relative literal; a column is refused with `invalid_operator`, except for `businessDaysInMonth`,
+which also takes a column or any date or timestamp expression (months within 25 years of now, else
+null; see [calendar.md](calendar.md)). `bucket` also takes `fiscal_quarter` and `fiscal_year` (the period's start date), and
 relative dates follow the calendar's time zone (UTC by default); buckets and `datePart` on
 timestamp columns stay in UTC.
 
@@ -374,8 +375,19 @@ timestamp columns stay in UTC.
 aggregate on one table that an editor defined, expanded by the planner so grants, filters and
 grouping apply as to an inline aggregate. `from` must be its home table; a query that joins a
 to-many relation cannot use one (`measure_needs_single_rows`). A caller who lacks any column a
-measure reads does not see it (`not_found_or_not_accessible`). Cross-table metrics and fixed values
-(measures that ignore the query's filters) do not exist. Details: [measures.md](measures.md).
+measure reads does not see it (`not_found_or_not_accessible`). A **fixed** measure ignores the
+query's filters and grouping, is usable from any table and as a comparison value in filters.
+
+### Metric queries
+
+A second query shape, told apart by `metrics`: `{ "source", "metrics": [names], "bucket"?,
+"range"?, "orderBy"?, "limit"?, "offset"? }`, with no `from`, `join`, `select`, `where`, `groupBy`
+or `having`. Each name is a metric (a stored formula over measures of different tables) or a
+measure; the result is one column per name, preceded by `period` when `bucket` is given, a row per
+period, null where a measure has no rows. `bucket` and `range` cut each measure by its own date
+column (`measure_has_no_date` when it has none). The run, caps, saved queries, exports and
+dashboards treat it as any query. Filters on other dimensions and metrics using metrics do not
+exist. Details: [measures.md](measures.md).
 
 ## Discovering what you can query
 
