@@ -231,8 +231,13 @@ function gaugeOption(
   const row = result.rows[0];
   if (!row) throw new Error("The result has no rows.");
   const at = (name: string) => toNumber(row[indexOfColumn(result, name)]);
-  const value = at(chart.value) ?? 0;
-  const max = at(chart.max) ?? 100;
+  // Without a value or an end of scale there is nothing to draw: the
+  // chart's note says so rather than drawing 0 of 100. A null target only
+  // drops the marker.
+  const value = at(chart.value);
+  const max = at(chart.max);
+  if (value === null) throw new Error("No data: the value is empty.");
+  if (max === null) throw new Error("No data: the maximum is empty.");
   const target = chart.target === undefined ? null : at(chart.target);
   const min =
     typeof chart.min === "number"

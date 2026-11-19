@@ -735,4 +735,56 @@ describe("toOption gauge", () => {
       )
     ).toThrow(/no rows/);
   });
+
+  const nulls = result(
+    [
+      ["spend", "number"],
+      ["pace", "number"],
+      ["budget", "number"],
+    ],
+    [[null, null, null]]
+  );
+  const withBudget = result(
+    [
+      ["spend", "number"],
+      ["pace", "number"],
+      ["budget", "number"],
+    ],
+    [[42, null, 100]]
+  );
+
+  it("says No data for a null value or a null max, never 0 of 100", () => {
+    expect(() =>
+      toOption(
+        { version: 1, type: "gauge", value: "spend", max: "budget" },
+        nulls,
+        theme
+      )
+    ).toThrow(/^No data: the value is empty/);
+    expect(() =>
+      toOption(
+        { version: 1, type: "gauge", value: "budget", max: "pace" },
+        withBudget,
+        theme
+      )
+    ).toThrow(/^No data: the maximum is empty/);
+  });
+
+  it("drops only the marker for a null target", () => {
+    const o = opt(
+      toOption(
+        {
+          version: 1,
+          type: "gauge",
+          value: "spend",
+          max: "budget",
+          target: "pace",
+        },
+        withBudget,
+        theme
+      )
+    );
+    expect(o.series).toHaveLength(1);
+    expect(o.series[0].data[0].value).toBe(42);
+  });
 });
