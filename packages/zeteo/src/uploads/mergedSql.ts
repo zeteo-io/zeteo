@@ -17,13 +17,19 @@ export interface ResolvedMerged {
   }[];
 }
 
-/** Text as a SQL string literal: quotes doubled, no NUL, at most 100 characters. */
+/**
+ * Text as a SQL string literal: no NUL, at most 100 characters. Always an
+ * escape-string literal (`E'...'`) with backslashes and quotes doubled, so it
+ * reads the same whatever `standard_conforming_strings` is: with it off, a
+ * plain literal treats `\'` as an escaped quote and `\'; drop table t; --`
+ * would close the literal early.
+ */
 export const sqlLiteral = (text: string): string => {
   if (text.includes("\0")) throw new Error("A label cannot contain NUL");
   if ([...text].length > MAX_LABEL_LENGTH) {
     throw new Error(`A label is at most ${MAX_LABEL_LENGTH} characters`);
   }
-  return `'${text.replace(/'/g, "''")}'`;
+  return `E'${text.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`;
 };
 
 /** `CREATE VIEW` over the members of a merged table, as a UNION ALL. */

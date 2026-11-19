@@ -22,14 +22,22 @@ const def = (over: Partial<ResolvedMerged> = {}): ResolvedMerged => ({
 
 describe("sqlLiteral", () => {
   it("sqlLiteral doubles quotes", () => {
-    expect(sqlLiteral("it's")).toBe("'it''s'");
+    expect(sqlLiteral("it's")).toBe("E'it''s'");
   });
   it("sqlLiteral refuses NUL", () => {
     expect(() => sqlLiteral("a\0b")).toThrow();
   });
   it("sqlLiteral refuses a label over 100 characters", () => {
     expect(() => sqlLiteral("a".repeat(101))).toThrow(/100/);
-    expect(sqlLiteral("a".repeat(100))).toHaveLength(102);
+    expect(sqlLiteral("a".repeat(100))).toHaveLength(103);
+  });
+});
+
+describe("sqlLiteral backslashes", () => {
+  it("a backslash-quote label stays one literal", () => {
+    expect(sqlLiteral("\\'; drop table t; --")).toBe(
+      "E'\\\\''; drop table t; --'"
+    );
   });
 });
 
@@ -37,9 +45,9 @@ describe("mergedViewSql", () => {
   it("mergedViewSql emits UNION ALL with NULL for a member lacking a column", () => {
     expect(mergedViewSql("zu_x", "v", def())).toBe(
       `CREATE VIEW "zu_x"."v" AS ` +
-        `SELECT 'A'::text AS "store", "sku"::text AS "sku", "qty"::numeric AS "qty" FROM "zu_x"."t1" ` +
+        `SELECT E'A'::text AS "store", "sku"::text AS "sku", "qty"::numeric AS "qty" FROM "zu_x"."t1" ` +
         `UNION ALL ` +
-        `SELECT 'B'::text AS "store", "sku"::text AS "sku", NULL::numeric AS "qty" FROM "zu_x"."t2"`
+        `SELECT E'B'::text AS "store", "sku"::text AS "sku", NULL::numeric AS "qty" FROM "zu_x"."t2"`
     );
   });
   it(`labels with "x'); drop table t; --" stay a literal`, () => {
@@ -56,7 +64,7 @@ describe("mergedViewSql", () => {
         ],
       })
     );
-    expect(sql).toContain("'x''); drop table t; --'");
+    expect(sql).toContain("E'x''); drop table t; --'");
   });
   it("identifiers with a double quote are quoted safely", () => {
     const sql = mergedViewSql(
