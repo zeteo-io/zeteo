@@ -285,6 +285,31 @@ const drain = async (stream: { next(n: number): Promise<unknown[][]> }) => {
 
 const ACCOUNTS = [[1], [2]];
 
+describe("postgres openQuery: a date shifted out of range", () => {
+  it("is refused as an invalid value, with none of the server's text (22008)", async () => {
+    const conn = await connectWith();
+    const refused = await conn
+      .openQuery(
+        new PostgresPreparedQuery(
+          idsOf("sales", "accounts"),
+          "SELECT cast(cast($1 as date) + interval '4000000 months' as date) AS c0",
+          ["9999-12-01"]
+        ),
+        limitsOf()
+      )
+      .then(
+        (rows) => rows.next(1).then(() => undefined),
+        (e: unknown) => e
+      );
+    expect(refused).toMatchObject({
+      code: "invalid_value",
+      message:
+        "A value in the query could not be converted to its column's type",
+    });
+    expect(JSON.stringify(refused)).not.toMatch(/out of range/i);
+  });
+});
+
 describe("postgres openQuery: the row stream", () => {
   it("knows its columns once open and returns [] after the end, however often asked", async () => {
     const conn = await connectWith();

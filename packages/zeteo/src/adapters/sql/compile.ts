@@ -99,8 +99,11 @@ export const compileExpr = (
   switch (expr.kind) {
     case "column": {
       const read = column(expr.column, dialect);
-      return expr.column.type === "text"
-        ? dialect.text(read, expr.column.nativeType)
+      if (expr.column.type === "text") {
+        return dialect.text(read, expr.column.nativeType);
+      }
+      return expr.column.type === "timestamp"
+        ? dialect.timestampUtc(read, expr.column.nativeType)
         : read;
     }
     case "literal":

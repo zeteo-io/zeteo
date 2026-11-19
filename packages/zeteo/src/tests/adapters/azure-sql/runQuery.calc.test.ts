@@ -277,4 +277,43 @@ describe("azure-sql runQuery: calculations", () => {
     });
     expect(result.rows).toEqual(plain.rows);
   });
+
+  it("reads an offset timestamp as its UTC instant in every date operation", async () => {
+    // probe/typed_values row 1: aware is 2026-03-31 23:59:59.98 at +02:00,
+    // which is 21:59:59.98 UTC; read as wall time it would be two hours later.
+    const aware = (calc: unknown) =>
+      runWithCalendar(DEFAULT_CALENDAR, {
+        from: "typed_values",
+        select: [{ calc, as: "x" }],
+        where: { id: { eq: 1 } },
+      }).then((r) => r.rows[0]![0]);
+    expect(
+      await aware({
+        dateDiff: ["day", "aware", { timestamp: "2026-04-01T22:00:00Z" }],
+      })
+    ).toBe(1);
+    expect(
+      await aware({
+        dateDiff: ["day", { timestamp: "2026-03-31T22:00:00Z" }, "aware"],
+      })
+    ).toBe(0);
+    expect(await aware({ datePart: ["day", "aware"] })).toBe(31);
+    expect(
+      await aware({
+        dateDiff: ["day", "aware", { dateAdd: ["aware", 1, "month"] }],
+      })
+    ).toBe(30);
+    const shifted = (await aware({ dateAdd: ["aware", 1, "day"] })) as string;
+    expect(shifted.slice(0, 19)).toBe("2026-04-01T21:59:59");
+  });
+
+  it("refuses a date shifted out of range as an invalid value", async () => {
+    await expect(
+      over({ dateAdd: [day("9999-12-01"), 10_000, "year"] })
+    ).rejects.toMatchObject({
+      code: "invalid_value",
+      message:
+        "A value in the query could not be converted to its column's type",
+    });
+  });
 });

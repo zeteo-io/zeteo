@@ -445,6 +445,12 @@ export const mssqlDialect: SqlDialect = {
         return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
     }
   },
+  // A datetimeoffset keeps its own offset; date parts and differences are
+  // taken on the UTC wall clock, as a bucket's are.
+  timestampUtc: (expression, nativeType) =>
+    baseType(nativeType) === "datetimeoffset"
+      ? sql`cast(switchoffset(${expression}, '+00:00') as datetime2(7))`
+      : expression,
   // Lower-case, as Postgres prints a uuid.
   text: (expression, nativeType) =>
     baseType(nativeType) === "uniqueidentifier"

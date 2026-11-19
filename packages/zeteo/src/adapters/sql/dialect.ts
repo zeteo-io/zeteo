@@ -157,6 +157,15 @@ export interface SqlDialect {
     expression: Expression<unknown>,
     fiscalStartMonth: number
   ): Expression<unknown>;
+  /**
+   * A timestamp column as a calculation reads it: the instant in UTC, so a
+   * column with an offset (SQL Server's datetimeoffset) is not read as its
+   * local wall time. Other columns are returned as they are.
+   */
+  timestampUtc(
+    expression: Expression<unknown>,
+    nativeType: string
+  ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,

@@ -264,6 +264,8 @@ export const postgresDialect: SqlDialect = {
         return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
     }
   },
+  // timestamptz is an instant, and the session runs in UTC.
+  timestampUtc: (expression) => expression,
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),
   // The casts match SQL Server's, which keeps only 8 places of this quotient
