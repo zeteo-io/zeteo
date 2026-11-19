@@ -6,17 +6,26 @@ import type { VisibleMeasure } from "../../grants/visibleCatalog.js";
 // measures it uses are substituted in turn, and each measure's `where` is
 // pushed into every aggregate beneath it as a `case`, so the expansion is an
 // ordinary expression that grants, types and both dialects take as they are.
+// A fixed measure is the exception: it ignores the query it is used in, so it
+// is left as `{ measure: name }` wherever it appears, never expanded or given
+// another measure's `where`, and the planner makes it a scalar subquery.
 
 /** Measures a measure may reach through others: one using another is one level. */
 export const MAX_MEASURE_NESTING = 8;
 /** Operations and aggregates the measures of one query expand to. */
 export const MAX_EXPANDED_NODES = 500;
+/** Fixed-measure subqueries in one query, nested ones included; a fixed measure used twice is one. */
+export const MAX_FIXED_MEASURES = 10;
 
 export interface Expansion {
   expr: CalcExpr;
   /** Every relation path the expansion reads, parents before children. */
   relationPaths: string[];
-  /** Every measure it uses, besides itself, at any depth. */
+  /**
+   * Every measure it uses, besides itself, at any depth: fixed ones it names
+   * (in its formula, or as a comparison value in a filter) included, though
+   * not what they use in turn.
+   */
   uses: string[];
   /** Its operations and aggregates, counted as the language counts them. */
   nodes: number;
@@ -68,6 +77,23 @@ const filterPaths = (filter: Filter, out: (path: string) => void): void => {
     else if (Array.isArray(value)) {
       for (const f of value as Filter[]) filterPaths(f, out);
     } else filterPaths(value as Filter, out);
+  }
+};
+
+/** Every measure a filter names as a comparison value, in order. */
+const filterMeasures = (filter: Filter, out: (name: string) => void): void => {
+  for (const [key, value] of Object.entries(filter)) {
+    if (LOGICAL.has(key)) {
+      for (const f of (Array.isArray(value) ? value : [value]) as Filter[]) {
+        filterMeasures(f, out);
+      }
+      continue;
+    }
+    for (const compared of Object.values(value as Record<string, unknown>)) {
+      for (const v of Array.isArray(compared) ? compared : [compared]) {
+        if (isObject(v) && typeof v.measure === "string") out(v.measure);
+      }
+    }
   }
 };
 
@@ -140,11 +166,15 @@ export const expandMeasure = (
     }
   };
 
-  /** An aggregate's argument: no aggregate or measure inside it. */
+  /** An aggregate's argument: no aggregate or measure inside it, but for a fixed measure. */
   const checkArgument = (expr: CalcExpr): void => {
     if (!isObject(expr) || isLiteralObject(expr)) return;
     const [key, operand] = Object.entries(expr)[0] ?? [];
     if (key === undefined) return;
+    if (key === "measure" && measures.get(operand as string)?.fixed) {
+      uses.add(operand as string);
+      return;
+    }
     if (AGGREGATES.has(key) || key === "measure") {
       throw new MeasureError(
         "invalid_operator",
@@ -154,10 +184,13 @@ export const expandMeasure = (
     counted();
     if (key === "case") {
       const { when, else: otherwise } = operand as {
-        when: { then: CalcExpr }[];
+        when: { if: Filter; then: CalcExpr }[];
         else?: CalcExpr;
       };
-      for (const branch of when) checkArgument(branch.then);
+      for (const branch of when) {
+        filterMeasures(branch.if, (n) => uses.add(n));
+        checkArgument(branch.then);
+      }
       if (otherwise !== undefined) checkArgument(otherwise);
     } else if (Array.isArray(operand)) {
       const indexes = EXPRESSION_INDEXES[key];
@@ -191,11 +224,10 @@ export const expandMeasure = (
     }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     if (key === "measure") {
-      return {
-        expr: measure(operand as string, wheres, stack),
-        grouped: true,
-        bare: false,
-      };
+      const done = measure(operand as string, wheres, stack);
+      // A fixed measure is one value: neither an aggregate nor a column.
+      const fixed = isObject(done) && "measure" in done;
+      return { expr: done, grouped: !fixed, bare: false };
     }
     counted();
     if (AGGREGATES.has(key)) {
@@ -222,6 +254,7 @@ export const expandMeasure = (
       let bare = when.length > 0;
       let grouped = false;
       const branches = when.map((branch) => {
+        filterMeasures(branch.if, (n) => uses.add(n));
         const then = expand(branch.then, wheres, stack);
         grouped ||= then.grouped;
         bare ||= then.bare;
@@ -264,6 +297,12 @@ export const expandMeasure = (
     stack: readonly string[]
   ): CalcExpr => {
     const found = measures.get(ref);
+    // A fixed measure inside another is one value from any table: left for
+    // the planner, without this measure's wheres.
+    if (found?.fixed && stack.length > 0) {
+      uses.add(ref);
+      return { measure: ref };
+    }
     if (!found || found.tableId !== homeTableId) {
       throw new MeasureError(
         "not_found_or_not_accessible",
@@ -283,6 +322,7 @@ export const expandMeasure = (
       );
     }
     if (stack.length > 0) uses.add(ref);
+    if (found.where) filterMeasures(found.where, (n) => uses.add(n));
     // The measure's own `where` is the innermost condition.
     const inner = found.where ? [found.where, ...wheres] : wheres;
     const done = expand(found.formula, inner, [...stack, ref]);

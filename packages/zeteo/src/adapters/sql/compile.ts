@@ -4,11 +4,14 @@ import { plainNumber } from "./values.js";
 import type {
   ColumnRef,
   CompareOp,
+  FilterValue,
   HavingSubject,
   PlanValue,
   ResolvedExpr,
   ResolvedFilter,
+  ResolvedJoin,
   ResolvedSelect,
+  ScalarPlan,
   SqlPlan,
   TableName,
   WhereSubject,
@@ -49,6 +52,70 @@ const column = (c: ColumnRef, dialect: SqlDialect) =>
 
 const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
 
+/**
+ * Where an expression is compiled. A fixed measure's value is read per row
+ * (`row`: in where, a row-level calc, inside an aggregate) as column `v` of a
+ * one-row derived table joined on `1 = 1`, since SQL Server aggregates no
+ * subquery and groups by none; elsewhere (group-level, outside any aggregate)
+ * as a scalar subquery, which needs no grouping. `fixed` collects the derived
+ * tables the current query level joins, by alias.
+ */
+export interface ExprContext {
+  row: boolean;
+  fixed: Map<string, ScalarPlan>;
+}
+
+const rowContext = (): ExprContext => ({ row: true, fixed: new Map() });
+
+/** Joins `joins` in order: inner or left, on their key equalities. */
+const withJoins = (
+  qb: AnySelect,
+  joins: readonly ResolvedJoin[]
+): AnySelect => {
+  for (const join of joins) {
+    const target = sql`${table(join.table)}`.as(join.alias);
+    const on = (j: JoinBuilder<never, never>) =>
+      j.on(
+        sql<SqlBool>`${sql.join(
+          join.on.map(
+            ([parent, parentColumn, col]) =>
+              sql`${sql.id(parent, parentColumn)} = ${sql.id(join.alias, col)}`
+          ),
+          AND
+        )}`
+      );
+    qb =
+      join.type === "inner"
+        ? qb.innerJoin(target, on)
+        : qb.leftJoin(target, on);
+  }
+  return qb;
+};
+
+/** Joins each one-row derived table of `fixed` on `1 = 1`, which keeps every row. */
+const withFixed = (
+  qb: AnySelect,
+  fixed: ReadonlyMap<string, ScalarPlan>,
+  dialect: SqlDialect
+): AnySelect => {
+  for (const plan of fixed.values()) {
+    qb = qb.innerJoin(scalarQuery(plan, dialect).as(plan.alias), (j) =>
+      j.on(sql<SqlBool>`1 = 1`)
+    );
+  }
+  return qb;
+};
+
+/** A fixed measure's own query: one row, its value as `v`. */
+const scalarQuery = (plan: ScalarPlan, dialect: SqlDialect): AnySelect => {
+  const ctx: ExprContext = { row: false, fixed: new Map() };
+  const value = compileExpr(plan.expr, dialect, ctx);
+  const qb = withJoins(
+    dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
+    plan.joins
+  ).select(sql`${value}`.as("v"));
+  return withFixed(qb, ctx.fixed, dialect);
+};
 /** Whether an expression's value is a binary float on the engine (a float column, an average, arithmetic over either). */
 const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
   switch (expr.kind) {
@@ -69,6 +136,8 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
       if (expr.fn === "avg") return true;
       if (expr.fn === "count" || expr.fn === "countDistinct") return false;
       return expr.arg !== "*" && isApproximate(expr.arg, dialect);
+    case "scalar":
+      return isApproximate(expr.plan.expr, dialect);
     case "op":
       return (
         (expr.op === "add" ||
@@ -94,9 +163,18 @@ const columnSubject = (dialect: SqlDialect) => (c: ColumnRef) => ({
 /** A planned calculation as SQL; literals are bound by the dialect. */
 export const compileExpr = (
   expr: ResolvedExpr,
-  dialect: SqlDialect
+  dialect: SqlDialect,
+  ctx: ExprContext = rowContext()
 ): Expression<unknown> => {
+  const inner = (e: ResolvedExpr) => compileExpr(e, dialect, ctx);
   switch (expr.kind) {
+    case "scalar":
+      if (ctx.row) {
+        ctx.fixed.set(expr.plan.alias, expr.plan);
+        return sql.id(expr.plan.alias, "v");
+      }
+      // Kysely puts a subquery inside an expression in parentheses.
+      return sql`${scalarQuery(expr.plan, dialect)}`;
     case "column": {
       const read = column(expr.column, dialect);
       if (expr.column.type === "text") {
@@ -113,7 +191,7 @@ export const compileExpr = (
       );
     case "dateAdd":
       return dialect.dateAdd(
-        compileExpr(expr.arg, dialect),
+        inner(expr.arg),
         expr.amount,
         expr.unit,
         expr.type
@@ -121,23 +199,23 @@ export const compileExpr = (
     case "dateDiff":
       return dialect.dateDiff(
         expr.unit,
-        compileExpr(expr.start, dialect),
-        compileExpr(expr.end, dialect),
+        inner(expr.start),
+        inner(expr.end),
         expr.operand
       );
     case "datePart":
       return dialect.datePart(
         expr.part,
-        compileExpr(expr.arg, dialect),
+        inner(expr.arg),
         expr.fiscalStartMonth
       );
     case "case": {
       const whens = expr.branches.map(
         (b) =>
-          sql`when ${compileFilter(b.when, dialect, columnSubject(dialect))} then ${compileExpr(b.then, dialect)}`
+          sql`when ${compileFilter(b.when, dialect, columnSubject(dialect), ctx)} then ${inner(b.then)}`
       );
       const otherwise = expr.otherwise
-        ? sql` else ${compileExpr(expr.otherwise, dialect)}`
+        ? sql` else ${inner(expr.otherwise)}`
         : sql``;
       return sql`case ${sql.join(whens, sql` `)}${otherwise} end`;
     }
@@ -151,12 +229,12 @@ export const compileExpr = (
           )
         : dialect.aggregate(
             expr.fn,
-            compileExpr(expr.arg, dialect),
+            compileExpr(expr.arg, dialect, { ...ctx, row: true }),
             undefined,
             expr.arg
           );
     case "op": {
-      const args = expr.args.map((arg) => compileExpr(arg, dialect));
+      const args = expr.args.map(inner);
       switch (expr.op) {
         case "add":
         case "sub":
@@ -191,9 +269,37 @@ export const compileExpr = (
 const perGroup = (item: ResolvedSelect) =>
   item.kind === "aggregate" || (item.kind === "calc" && item.level === "group");
 
+/** Whether an expression aggregates the query's own rows; a fixed measure's aggregates are its own. */
+const exprAggregates = (expr: ResolvedExpr): boolean => {
+  switch (expr.kind) {
+    case "aggregate":
+      return true;
+    case "column":
+    case "literal":
+    case "scalar":
+      return false;
+    case "dateAdd":
+    case "datePart":
+      return exprAggregates(expr.arg);
+    case "dateDiff":
+      return exprAggregates(expr.start) || exprAggregates(expr.end);
+    case "case":
+      return [...expr.branches.map((b) => b.then), expr.otherwise].some(
+        (e) => e !== undefined && exprAggregates(e)
+      );
+    case "op":
+      return expr.args.some(exprAggregates);
+  }
+};
+
+const holdsAggregate = (item: ResolvedSelect): boolean =>
+  item.kind === "aggregate" ||
+  (item.kind === "calc" && exprAggregates(item.expr));
+
 const selectExpression = (
   item: ResolvedSelect,
-  dialect: SqlDialect
+  dialect: SqlDialect,
+  fixed: Map<string, ScalarPlan>
 ): Expression<unknown> => {
   switch (item.kind) {
     case "column":
@@ -215,7 +321,10 @@ const selectExpression = (
         item.fiscalStartMonth
       );
     case "calc":
-      return compileExpr(item.expr, dialect);
+      return compileExpr(item.expr, dialect, {
+        row: item.level === "row",
+        fixed,
+      });
   }
 };
 
@@ -224,8 +333,12 @@ const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
 const compileFilter = <S>(
   filter: ResolvedFilter<S>,
   dialect: SqlDialect,
-  subject: (s: S) => ValueSubject & { expression: Expression<unknown> }
+  subject: (s: S) => ValueSubject & { expression: Expression<unknown> },
+  ctx: ExprContext
 ): Expression<SqlBool> => {
+  /** A value bound for the subject, or a fixed measure's value. */
+  const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
+    typeof v === "object" ? compileExpr(v, dialect, ctx) : dialect.value(v, s);
   const go = (f: ResolvedFilter<S>): Expression<SqlBool> => {
     switch (f.kind) {
       case "and":
@@ -238,11 +351,11 @@ const compileFilter = <S>(
         return sql<SqlBool>`not (${go(f.filter)})`;
       case "compare": {
         const s = subject(f.subject);
-        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${dialect.value(f.value, s)}`;
+        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${valueOf(f.value, s)}`;
       }
       case "between": {
         const s = subject(f.subject);
-        return sql<SqlBool>`${s.expression} between ${dialect.value(f.low, s)} and ${dialect.value(f.high, s)}`;
+        return sql<SqlBool>`${s.expression} between ${valueOf(f.low, s)} and ${valueOf(f.high, s)}`;
       }
       case "in": {
         const s = subject(f.subject);
@@ -281,28 +394,16 @@ export const compileSql = (
   dialect: SqlDialect,
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
 ): CompiledQuery => {
-  let qb: AnySelect = dialect.kysely.selectFrom(
-    sql`${table(plan.from)}`.as(plan.from.alias)
+  let qb: AnySelect = withJoins(
+    dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
+    plan.joins
   );
-  for (const join of plan.joins) {
-    const target = sql`${table(join.table)}`.as(join.alias);
-    const on = (j: JoinBuilder<never, never>) =>
-      j.on(
-        sql<SqlBool>`${sql.join(
-          join.on.map(
-            ([parent, parentColumn, col]) =>
-              sql`${sql.id(parent, parentColumn)} = ${sql.id(join.alias, col)}`
-          ),
-          AND
-        )}`
-      );
-    qb =
-      join.type === "inner"
-        ? qb.innerJoin(target, on)
-        : qb.leftJoin(target, on);
-  }
+  // The fixed measures read per row, joined once all is compiled.
+  const fixed = new Map<string, ScalarPlan>();
 
-  const selected = plan.select.map((item) => selectExpression(item, dialect));
+  const selected = plan.select.map((item) =>
+    selectExpression(item, dialect, fixed)
+  );
   qb = qb.select(
     selected.map((e, i) =>
       sql`${dialect.output(plan.select[i]!, e)}`.as(`c${i}`)
@@ -318,10 +419,14 @@ export const compileSql = (
 
   if (plan.where) {
     qb = qb.where(
-      compileFilter(plan.where, dialect, (s: WhereSubject) =>
-        "index" in s
-          ? { expression: selected[s.index]!, type: s.type }
-          : columnSubject(dialect)(s)
+      compileFilter(
+        plan.where,
+        dialect,
+        (s: WhereSubject) =>
+          "index" in s
+            ? { expression: selected[s.index]!, type: s.type }
+            : columnSubject(dialect)(s),
+        { row: true, fixed }
       )
     );
   }
@@ -331,14 +436,23 @@ export const compileSql = (
       qb,
       plan.groupBy.map((index) => ({ expression: selected[index]!, index }))
     );
+  } else if (plan.select.some(perGroup) && !plan.select.some(holdsAggregate)) {
+    // Group-level items with no aggregate, only fixed measures: one group
+    // over all rows, so one row, as an aggregate would give.
+    qb = qb.groupBy(sql`()`);
   }
 
   if (plan.having) {
     qb = qb.having(
-      compileFilter(plan.having, dialect, (h: HavingSubject) => ({
-        expression: selected[h.index]!,
-        type: h.type,
-      }))
+      compileFilter(
+        plan.having,
+        dialect,
+        (h: HavingSubject) => ({
+          expression: selected[h.index]!,
+          type: h.type,
+        }),
+        { row: false, fixed }
+      )
     );
   }
 
@@ -367,6 +481,7 @@ export const compileSql = (
     qb = dialect.orderBy(qb, sorted, direction);
   }
 
+  qb = withFixed(qb, fixed, dialect);
   qb = dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
   const { sql: text, parameters } = qb.compile();
   if (parameters.length > dialect.maxParameters) {

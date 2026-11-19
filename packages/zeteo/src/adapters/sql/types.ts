@@ -55,6 +55,28 @@ export interface ResolvedJoin {
 }
 
 /**
+ * A fixed measure's own query: one row, one value, computed over its home
+ * table whatever query it is used in. Its aliases (`f1_t0`, `f1_t1`…) are its
+ * own, so they never meet the outer query's.
+ */
+export interface ScalarPlan {
+  /** `f1`…: its alias when it is read per row, as a joined one-row table with column `v`. */
+  alias: string;
+  from: TableName & { alias: string };
+  /** Left joins along to-one relations, each parent before its children. */
+  joins: ResolvedJoin[];
+  /** Group-level: the subquery has no GROUP BY, so it yields exactly one row. */
+  expr: ResolvedExpr;
+}
+
+/** A fixed measure's value: a scalar subquery. */
+export interface ScalarExpr {
+  kind: "scalar";
+  plan: ScalarPlan;
+  type: QueryableType;
+}
+
+/**
  * A calculation. Aggregates may appear only inside `group`-level calcs, and a
  * calc's `type` is the type its value has.
  */
@@ -116,7 +138,8 @@ export type ResolvedExpr =
       /** `"*"` only for `count`. */
       arg: ResolvedExpr | "*";
       type: QueryableType;
-    };
+    }
+  | ScalarExpr;
 
 /**
  * One result column. `output` is its name in the result, unique in the plan;
@@ -164,6 +187,9 @@ export type ResolvedSelect =
  */
 export type PlanValue = string | number | boolean;
 
+/** What a comparison compares with: a value, or a fixed measure of the subject's type. */
+export type FilterValue = PlanValue | ScalarExpr;
+
 export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 
 /**
@@ -173,9 +199,9 @@ export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 export type ResolvedFilter<S> =
   | { kind: "and" | "or"; filters: ResolvedFilter<S>[] }
   | { kind: "not"; filter: ResolvedFilter<S> }
-  | { kind: "compare"; op: CompareOp; subject: S; value: PlanValue }
+  | { kind: "compare"; op: CompareOp; subject: S; value: FilterValue }
   /** Inclusive at both ends. */
-  | { kind: "between"; subject: S; low: PlanValue; high: PlanValue }
+  | { kind: "between"; subject: S; low: FilterValue; high: FilterValue }
   /** One to 1,000 values. */
   | { kind: "in"; op: "in" | "notIn"; subject: S; values: PlanValue[] }
   /** Case-insensitive; `value` is the raw text, `%` and `_` not yet escaped. Text only. */

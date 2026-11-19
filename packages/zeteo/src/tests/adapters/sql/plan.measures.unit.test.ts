@@ -481,8 +481,9 @@ describe("sqlQuerySchema: measures", () => {
     ).toBe(true);
   });
 
-  it("refuses a measure inside an aggregate, a bad name and extra keys", () => {
-    expect(parse([{ sum: { measure: "a" }, as: "x" }]).success).toBe(false);
+  it("refuses a bad name and extra keys", () => {
+    // A measure inside an aggregate parses: only a fixed one plans there.
+    expect(parse([{ sum: { measure: "a" }, as: "x" }]).success).toBe(true);
     expect(parse([{ measure: "Total" }]).success).toBe(false);
     expect(parse([{ measure: "a", calc: 1 }]).success).toBe(false);
     expect(

@@ -126,6 +126,8 @@ export const salesCatalog = (): VisibleCatalog => {
         description: "Revenue of paid orders",
         formula: { sum: "total" },
         where: { status: { eq: "paid" } },
+        fixed: false,
+        dateColumn: null,
       },
     ],
   });

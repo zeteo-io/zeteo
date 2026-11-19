@@ -38,6 +38,8 @@ const toVisible = (row: MeasureRow): VisibleMeasure => ({
   tableId: row.tableId,
   formula: row.formula,
   where: row.where,
+  fixed: row.fixed,
+  dateColumn: row.dateColumn,
 });
 
 /**

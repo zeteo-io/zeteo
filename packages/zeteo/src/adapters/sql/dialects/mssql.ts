@@ -256,6 +256,8 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
     case "dateDiff":
     case "datePart":
       return "integer";
+    case "scalar":
+      return exprKind(expr.plan.expr);
     case "op":
       if (expr.type !== "number") return undefined;
       if (expr.op === "div" || expr.op === "round") return "decimal";

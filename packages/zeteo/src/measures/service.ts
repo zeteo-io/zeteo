@@ -213,6 +213,8 @@ const toVisible = (row: MeasureRow): VisibleMeasure => ({
   tableId: row.tableId,
   formula: row.formula,
   where: row.where,
+  fixed: row.fixed,
+  dateColumn: row.dateColumn,
 });
 
 /** The table `name` names in the editor's catalogue: not found otherwise, whether it exists or not. */
@@ -463,6 +465,8 @@ export const createMeasure = async (
       description: input.description,
       formula: input.formula,
       where: input.where ?? null,
+      fixed: false,
+      dateColumn: null,
     };
     checkDraft(catalogs.mine, draft);
     checkSet(catalogs.full, catalogs.rows, draft);
@@ -662,6 +666,8 @@ export const previewMeasure = async (
     description: input.description,
     formula: input.formula,
     where: input.where ?? null,
+    fixed: false,
+    dateColumn: null,
   };
   checkDraft(catalogs.mine, draft);
   // The bucket's column is named so it cannot be the measure's.

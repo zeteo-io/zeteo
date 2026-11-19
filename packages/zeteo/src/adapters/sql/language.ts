@@ -53,8 +53,19 @@ const scalarSchema = z.union([
   z.boolean(),
 ]);
 
-/** A value a comparison takes: a literal, or a moment relative to now. */
-const comparedSchema = z.union([scalarSchema, relativeDateSchema]);
+/** A measure's name: the form of an `as` alias. */
+const measureNameSchema = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/, {
+  error:
+    "A measure's name is a lowercase letter then up to 62 of a-z, 0-9 and _",
+});
+const measureRefSchema = z.strictObject({ measure: measureNameSchema });
+
+/** A value a comparison takes: a literal, a moment relative to now, or a fixed measure. */
+const comparedSchema = z.union([
+  scalarSchema,
+  relativeDateSchema,
+  measureRefSchema,
+]);
 
 export const OPERATORS = [
   "eq",
@@ -99,7 +110,8 @@ const conditionSchema = z.union(
 const LOGICAL_KEYS = new Set(["and", "or", "not"]);
 
 export type Scalar = string | number | boolean;
-export type Compared = Scalar | RelativeDate;
+/** `{ measure }` names a fixed measure; the planner refuses any other. */
+export type Compared = Scalar | RelativeDate | { measure: string };
 export type Condition =
   | { eq: Compared }
   | { ne: Compared }
@@ -298,13 +310,6 @@ const nestedAggregate = z.never({
   error: "An aggregate does not contain another aggregate",
 });
 
-/** A measure's name: the form of an `as` alias. */
-const measureNameSchema = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/, {
-  error:
-    "A measure's name is a lowercase letter then up to 62 of a-z, 0-9 and _",
-});
-const measureRefSchema = z.strictObject({ measure: measureNameSchema });
-
 /**
  * An expression and a nested schema's issues, forwarded with their paths: a
  * union here would bury the exact path of a bad operand under invalid_union.
@@ -438,15 +443,10 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
       if (isPlainObject(value) && "relative" in value) {
         return relativeDateSchema.safeParse(value);
       }
-      // A measure is group-level: one operation, never inside an aggregate.
+      // One operation. Only a fixed measure may be inside an aggregate, which
+      // the planner decides, knowing which measures are fixed.
       if (isPlainObject(value) && "measure" in value) {
-        return (
-          !deeper
-            ? tooDeepCalc
-            : aggregates
-              ? measureRefSchema
-              : nestedAggregate
-        ).safeParse(value);
+        return (deeper ? measureRefSchema : tooDeepCalc).safeParse(value);
       }
       return node.safeParse(value);
     },
@@ -761,7 +761,7 @@ const CALC_JSON_SCHEMA_DEFS = {
       operation(
         "measure",
         asJson,
-        "A measure of the from table, by name: group-level, so not inside an aggregate"
+        "A measure by name: of the from table, group-level, so not inside an aggregate; or a fixed measure of any table, one value, anywhere"
       ),
     ],
   },

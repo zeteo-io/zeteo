@@ -79,6 +79,10 @@ export interface MeasureRow {
   description: string;
   formula: CalcExpr;
   where: Filter | null;
+  /** Computed over its whole home table, ignoring the query it is used in: a scalar subquery. */
+  fixed: boolean;
+  /** A date or timestamp column path from its home table, for metric queries; null when it has none. */
+  dateColumn: string | null;
 }
 
 /** A measure the caller may see and use: every column and relation it reads is theirs. */
@@ -89,6 +93,10 @@ export interface VisibleMeasure {
   tableId: string;
   formula: CalcExpr;
   where: Filter | null;
+  /** Computed over its whole home table, ignoring the query it is used in: a scalar subquery. */
+  fixed: boolean;
+  /** A date or timestamp column path from its home table, for metric queries; null when it has none. */
+  dateColumn: string | null;
 }
 
 export const buildVisibleCatalog = (

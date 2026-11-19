@@ -1,6 +1,6 @@
 import type { MeasureRow, VisibleCatalog } from "../grants/visibleCatalog.js";
+import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import { planSql, queryNameOf } from "../adapters/sql/plan.js";
-import type { CalcExpr } from "../adapters/sql/language.js";
 import { MeasureError } from "../adapters/sql/measures.js";
 import { QueryError } from "../engine/errors.js";
 import { prisma } from "../utils/db/prisma.js";
@@ -12,8 +12,11 @@ import { prisma } from "../utils/db/prisma.js";
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
-/** The names of the measures `formula` uses directly. A `case`'s conditions are filters and hold none. */
-export const measuresIn = (formula: CalcExpr): Set<string> => {
+/**
+ * The names of the measures `formula` (or a filter) uses directly: in the
+ * expression, and as fixed measures compared with in a `case`'s conditions.
+ */
+export const measuresIn = (formula: CalcExpr | Filter): Set<string> => {
   const names = new Set<string>();
   const walk = (value: unknown): void => {
     if (Array.isArray(value)) {
@@ -25,9 +28,7 @@ export const measuresIn = (formula: CalcExpr): Set<string> => {
       names.add(value.measure);
       return;
     }
-    for (const [key, inner] of Object.entries(value)) {
-      if (key !== "if") walk(inner);
-    }
+    for (const inner of Object.values(value)) walk(inner);
   };
   walk(formula);
   return names;
@@ -44,7 +45,10 @@ export const dependentsOf = (
     const used = pending.pop()!;
     for (const row of rows) {
       if (row.name === name || found.has(row.name)) continue;
-      if (measuresIn(row.formula).has(used)) {
+      if (
+        measuresIn(row.formula).has(used) ||
+        (row.where !== null && measuresIn(row.where).has(used))
+      ) {
         found.set(row.name, row);
         pending.push(row.name);
       }
@@ -80,6 +84,8 @@ export const checkMeasureSet = (
       tableId: r.tableId,
       formula: r.formula,
       where: r.where,
+      fixed: r.fixed,
+      dateColumn: r.dateColumn,
     })),
   };
   const now = new Date();

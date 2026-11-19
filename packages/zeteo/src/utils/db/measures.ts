@@ -15,6 +15,9 @@ export const toRow = (m: Measure): MeasureRow => ({
   description: m.description,
   formula: m.formula as unknown as CalcExpr,
   where: (m.where ?? null) as unknown as Filter | null,
+  // Read when the columns exist; until then every measure is not fixed and has no date column.
+  fixed: (m as { fixed?: boolean }).fixed ?? false,
+  dateColumn: (m as { dateColumn?: string | null }).dateColumn ?? null,
 });
 
 /** Every measure of a source, by name. */
