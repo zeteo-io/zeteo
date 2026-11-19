@@ -232,6 +232,30 @@ describe("/v1/sources/:sourceId/measures: a date column the caller lacks", () =>
     });
   });
 
+  it("keeps a hidden date column unchecked when a PATCH names the measure's own table", async () => {
+    const made = await createMeasures(app.url, source.id, author.token, [
+      {
+        ...measureBody("same_table_patch", { sum: "total" }),
+        date_column: "created_at",
+      },
+    ]);
+    const res = await api(
+      "PATCH",
+      `/${source.id}/measures/${made.same_table_patch}`,
+      editor.token,
+      { table: "orders", description: "Same table, new words" }
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    // The view's own timestamp key aside, the hidden column is named nowhere.
+    const { created_at: _created, ...view } = res.body;
+    expect(res.body.date_column).toBeNull();
+    expect(JSON.stringify(view)).not.toContain("created_at");
+    const row = await prisma.measure.findUniqueOrThrow({
+      where: { id: made.same_table_patch },
+    });
+    expect(row.dateColumn).toBe("created_at");
+  });
+
   it("clears a date column the editor cannot see when they move the measure, naming nothing", async () => {
     const made = await createMeasures(app.url, source.id, author.token, [
       {

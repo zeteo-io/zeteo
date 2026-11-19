@@ -719,11 +719,12 @@ export const updateMeasure = async (
             : old.dateColumn,
     };
     // A stored date column the editor cannot see stays as it is: checked
-    // only when the change sets it or moves the measure to another table.
+    // only when the change sets it or moves the measure to another table (naming
+    // its current table is no move).
     checkDraft(
       catalogs.mine,
       draft,
-      patch.date_column !== undefined || patch.table !== undefined
+      patch.date_column !== undefined || tableId !== old.tableId
     );
     checkSet(catalogs, draft, old.name);
     const updated = await mapUniqueViolation(
