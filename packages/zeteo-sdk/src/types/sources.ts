@@ -204,6 +204,8 @@ export type TableOrigin =
       url: string;
       /** The tab's `sheetId`. */
       tab_id: number;
+      /** The tab's title; absent on a table made before it was kept. */
+      tab_title?: string;
     }
   | { kind: "merged"; /** The number of member tables. */ members: number };
 
@@ -222,7 +224,7 @@ export interface Table {
    * null for a view or a table the database has no estimate for.
    */
   row_count: number | null;
-  /** An upload or Sheets source's table: when it was last loaded (a Sheets table's last good sync); null for a database source's. */
+  /** An upload source's table: when it was last loaded (a Sheets table's last good sync); null for a database source's. */
   last_loaded_at: string | null;
   /** An upload source's table: where it comes from; null for a database source's. */
   origin: TableOrigin | null;

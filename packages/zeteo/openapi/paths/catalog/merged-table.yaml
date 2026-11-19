@@ -48,11 +48,16 @@
           application/json:
             schema:
               $ref: '../../components/catalog/schemas.yaml#/Table'
-      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '400':
+        description: Bad request - `invalid_request`, with `issues`; a member that is not a table of the source (or is a merged table) is `members.N.table_id`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404':
-        description: Not found - `not_found` (no such source, or merged table in it, or a member that is not a table of the source), or `uploads_not_configured`
+        description: Not found - `not_found` (no such source or merged table), or `uploads_not_configured`
         content:
           application/json:
             schema:

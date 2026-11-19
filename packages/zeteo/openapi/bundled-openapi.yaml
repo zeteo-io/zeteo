@@ -1123,13 +1123,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Table'
         '400':
-          $ref: '#/components/responses/BadRequestResponse'
+          description: Bad request - `invalid_request`, with `issues`; a member that is not a table of the source (or is a merged table) is `members.N.table_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          description: Not found - `not_found` (no such source, or merged table in it, or a member that is not a table of the source), or `uploads_not_configured`
+          description: Not found - `not_found` (no such source), or `uploads_not_configured`
           content:
             application/json:
               schema:
@@ -1266,13 +1270,17 @@ paths:
               schema:
                 $ref: '#/components/schemas/Table'
         '400':
-          $ref: '#/components/responses/BadRequestResponse'
+          description: Bad request - `invalid_request`, with `issues`; a member that is not a table of the source (or is a merged table) is `members.N.table_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          description: Not found - `not_found` (no such source, or merged table in it, or a member that is not a table of the source), or `uploads_not_configured`
+          description: Not found - `not_found` (no such source or merged table), or `uploads_not_configured`
           content:
             application/json:
               schema:
@@ -7170,6 +7178,9 @@ components:
             tab_id:
               type: integer
               description: The tab's `sheetId` in its spreadsheet
+            tab_title:
+              type: string
+              description: The tab's title; absent on a table made before it was kept
         - type: object
           description: A view that stacks two or more of the source's tables; its definition is `TableDetail.merged`
           required:

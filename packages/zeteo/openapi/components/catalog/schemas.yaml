@@ -54,6 +54,7 @@ TableOrigin:
         spreadsheet_title: { type: string }
         url: { type: string, format: uri, description: Opens the tab in Google Sheets }
         tab_id: { type: integer, description: The tab's `sheetId` in its spreadsheet }
+        tab_title: { type: string, description: The tab's title; absent on a table made before it was kept }
     - type: object
       description: A view that stacks two or more of the source's tables; its definition is `TableDetail.merged`
       required: [kind, members]
