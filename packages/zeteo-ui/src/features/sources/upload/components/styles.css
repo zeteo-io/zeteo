@@ -218,13 +218,13 @@
   color: var(--k-danger-color);
 }
 
-.z-fs-sheets {
+.z-fs-origin-tables {
   list-style: none;
-  margin: 0 0 0.75rem;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.125rem;
 }
 
 .z-fs-origin {

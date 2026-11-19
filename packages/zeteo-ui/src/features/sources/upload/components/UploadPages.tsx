@@ -13,7 +13,6 @@ import { LoadFailure } from "./CastFailedNotice";
 import { nameProblem } from "@/utils/queryName";
 import { useNavigate } from "react-router-dom";
 import { MergedDetail } from "./MergedDetail";
-import type { Source } from "../../api/types";
 import { formatBytes } from "./labels";
 import "./styles.css";
 import {
@@ -32,74 +31,6 @@ export const intervalName = (minutes: number): string =>
     : minutes % 60 === 0
       ? `Every ${minutes / 60} hours`
       : `Every ${minutes} minutes`;
-
-/** The spreadsheets a source draws from, with its sync state, as its owner or a sources reader sees them. */
-const SheetsBlock = ({
-  source,
-  tables,
-}: {
-  source: Source;
-  tables: Table[];
-}) => {
-  const { sync } = source;
-  const failingIds = new Set(sync?.failing.map((f) => f.table_id));
-  const sheets = new Map<
-    string,
-    { title: string; url: string; tabs: number; failing: number }
-  >();
-  for (const t of tables) {
-    if (t.origin?.kind !== "google-sheets") continue;
-    const entry = sheets.get(t.origin.spreadsheet_id) ?? {
-      title: t.origin.spreadsheet_title,
-      url: t.origin.url,
-      tabs: 0,
-      failing: 0,
-    };
-    entry.tabs += 1;
-    if (t.sync_error || failingIds.has(t.id)) entry.failing += 1;
-    sheets.set(t.origin.spreadsheet_id, entry);
-  }
-  if (sheets.size === 0) return null;
-  return (
-    <BorderedSection title="Google Sheets" as="h2">
-      <ul className="z-fs-sheets">
-        {[...sheets.entries()].map(([id, s]) => (
-          <li key={id}>
-            <a
-              href={s.url}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`Open ${s.title} in Google Sheets`}
-            >
-              {s.title}
-            </a>{" "}
-            <span className="z-muted">
-              {s.tabs} {s.tabs === 1 ? "tab" : "tabs"}
-            </span>
-            {s.failing > 0 && (
-              <span className="z-fs-sync-error"> · {s.failing} failing</span>
-            )}
-          </li>
-        ))}
-      </ul>
-      <Facts
-        rows={[
-          ...(sync
-            ? [["Sync", intervalName(sync.interval_minutes)] as Row]
-            : []),
-          [
-            "Last synced",
-            source.last_refreshed_at ? (
-              <When iso={source.last_refreshed_at} />
-            ) : (
-              "Not yet"
-            ),
-          ] as Row,
-        ]}
-      />
-    </BorderedSection>
-  );
-};
 
 /**
  * A tab's (or an xlsx sheet's) name on one line, at most 15rem wide: a longer
@@ -185,7 +116,6 @@ export const UploadOverview = () => {
         <LimitSections source={source} />
       </div>
       <div className="z-source-column">
-        <SheetsBlock source={source} tables={tables} />
         <BorderedSection title="Data" as="h2">
           <Facts
             rows={[
@@ -208,6 +138,19 @@ export const UploadOverview = () => {
                   : formatBytes(source.size_bytes),
               ],
               ["Tables", tables.length.toLocaleString()],
+              ...(source.sync
+                ? [
+                    ["Sync", intervalName(source.sync.interval_minutes)] as Row,
+                    [
+                      "Last synced",
+                      source.last_refreshed_at ? (
+                        <When iso={source.last_refreshed_at} />
+                      ) : (
+                        "Not yet"
+                      ),
+                    ] as Row,
+                  ]
+                : []),
               ["Added", <When iso={source.created_at} />],
               ...(source.archived_at
                 ? [["Deleted", <When iso={source.archived_at} />] as Row]

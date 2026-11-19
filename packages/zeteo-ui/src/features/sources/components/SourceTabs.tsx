@@ -1,4 +1,5 @@
 import { TableView, TablesList, useAllTables } from "@/features/tables";
+import { UploadOriginsPage } from "../upload/components/UploadOrigins";
 import { NoAccessSection } from "@/components/NoAccessSection";
 import { isUploadType, sourceHref } from "./sourceLabels";
 import { RelationsList } from "@/features/relations";
@@ -101,4 +102,10 @@ export const SourceSharingPage = () => {
       canRemove={access.canRemoveGrants}
     />
   );
+};
+
+/** Upload Sources: only an upload source has one. */
+export const SourceUploadsPage = () => {
+  const { source } = useSourceContext();
+  return isUploadType(source.type) ? <UploadOriginsPage /> : <NotFound />;
 };

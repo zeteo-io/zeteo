@@ -35,6 +35,11 @@ const RelationsPage = lazy(() =>
     default: m.SourceRelationsPage,
   }))
 );
+const UploadsPage = lazy(() =>
+  import("./components/SourceTabs").then((m) => ({
+    default: m.SourceUploadsPage,
+  }))
+);
 const SharingPage = lazy(() =>
   import("./components/SourceTabs").then((m) => ({
     default: m.SourceSharingPage,
@@ -135,6 +140,7 @@ export const sourceRoutes = [
       { index: true, element: loading(<SourceDetailPage />) },
       { path: "tables", element: loading(<TablesPage />) },
       { path: "tables/:tableId", element: loading(<TablePage />) },
+      { path: "uploads", element: loading(<UploadsPage />) },
       { path: "relations", element: loading(<RelationsPage />) },
       { path: "sharing", element: loading(<SharingPage />) },
     ],

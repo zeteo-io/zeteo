@@ -184,55 +184,66 @@ describe("Add merged table", () => {
   });
 });
 
-describe("a source's overview with Google Sheets", () => {
+describe("a source's Upload Sources and overview", () => {
   beforeEach(() => get.mockReset());
 
-  it("groups the tables by spreadsheet, with the interval and last synced", async () => {
-    serve(
-      makeSheetsSource({
-        sync: {
-          interval_minutes: 60,
-          last_attempt_at: "2026-11-18T09:00:00.000Z",
-          failing: [
-            { table_id: T(2), name: "sheet_2", code: "x", message: "Broke" },
-          ],
-          stale: false,
-        },
+  it("lists each file and spreadsheet on Upload Sources, with its tables", async () => {
+    serve(makeSheetsSource(), [
+      sheet(1, "Budget 2027", "Orders", "S1"),
+      sheet(2, "Budget 2027", "Notes", "S1", {
+        sync_error: { code: "x", message: "Broke" },
       }),
-      [
-        sheet(1, "Budget 2027", "Orders", "S1"),
-        sheet(2, "Budget 2027", "Notes", "S1", {
-          sync_error: { code: "x", message: "Broke" },
-        }),
-        sheet(3, "Forecast", "Q1", "S2"),
-        file(4),
-      ]
-    );
-    renderAt();
-    const block = (
-      await screen.findByRole("heading", { name: "Google Sheets" })
-    ).closest(".k-bordered-section") as HTMLElement;
-    const budget = (await within(block).findByText("Budget 2027")).closest(
-      "li"
-    ) as HTMLElement;
-    expect(within(budget).getByText(/2 tabs/)).toBeInTheDocument();
-    expect(within(budget).getByText(/1 failing/)).toBeInTheDocument();
+      sheet(3, "Forecast", "Q1", "S2"),
+      file(4),
+      file(5, {
+        origin: { kind: "file", filename: "plan.xlsx", tab_title: "Q2" },
+      }),
+      merged(6),
+    ]);
+    renderAt("/uploads");
+    const budget = (
+      await screen.findByRole("link", { name: "Budget 2027" })
+    ).closest("tr") as HTMLElement;
     expect(
-      within(budget).getByRole("link", { name: /Open .* in Google Sheets/ })
+      within(budget).getByRole("link", { name: "Budget 2027" })
     ).toHaveAttribute("href", "https://docs.google.com/spreadsheets/d/S1");
-    const forecast = within(block).getByText("Forecast").closest("li")!;
+    expect(within(budget).getByText("Google Sheet")).toBeInTheDocument();
     expect(
-      within(forecast as HTMLElement).getByText(/1 tab\b/)
+      within(budget).getByRole("link", { name: "sheet_1" })
     ).toBeInTheDocument();
-    expect(within(block).getByText("Every hour")).toBeInTheDocument();
-    expect(within(block).getByText("Last synced")).toBeInTheDocument();
+    expect(
+      within(budget).getByRole("link", { name: "sheet_2" })
+    ).toBeInTheDocument();
+    expect(within(budget).getByText("Sync failing")).toBeInTheDocument();
+    const forecast = screen
+      .getByRole("link", { name: "Forecast" })
+      .closest("tr") as HTMLElement;
+    expect(within(forecast).getByText("Syncing")).toBeInTheDocument();
+    const csv = screen.getByText("data 4.csv").closest("tr") as HTMLElement;
+    expect(within(csv).getByText("CSV")).toBeInTheDocument();
+    const xlsx = screen.getByText("plan.xlsx").closest("tr") as HTMLElement;
+    expect(within(xlsx).getByText("Excel")).toBeInTheDocument();
+    expect(within(xlsx).getByText(/Q2/)).toBeInTheDocument();
+    expect(screen.queryByText("merged_6")).toBeNull();
   });
 
-  it("has no Google Sheets section for a file-only source", async () => {
+  it("shows the interval and last synced on the overview, without a Google Sheets card", async () => {
+    serve(makeSheetsSource(), [sheet(1, "Budget 2027", "Orders", "S1")]);
+    renderAt();
+    await screen.findByRole("heading", { name: "Data" });
+    expect(screen.getByText("Every hour")).toBeInTheDocument();
+    expect(screen.getByText("Last synced")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Google Sheets" })).toBeNull();
+    expect(
+      screen.getByRole("link", { name: "Upload Sources" })
+    ).toBeInTheDocument();
+  });
+
+  it("has no sync facts for a file-only source", async () => {
     serve(makeUploadSource(), [file(1)]);
     renderAt();
     await screen.findByRole("heading", { name: "Data" });
-    expect(screen.queryByRole("heading", { name: "Google Sheets" })).toBeNull();
+    expect(screen.queryByText("Last synced")).toBeNull();
   });
 
   it("shows Sync every in Edit for a source with Sheets tables only", async () => {

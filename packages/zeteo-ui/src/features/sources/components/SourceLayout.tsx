@@ -16,9 +16,10 @@ import "./styles.css";
 
 export { useSourceContext, type SourceContext } from "./context";
 
-const TABS: SourceTab[] = [
+const TABS: (SourceTab & { uploadsOnly?: boolean })[] = [
   { to: "", label: "Overview" },
   { to: "tables", label: "Tables" },
+  { to: "uploads", label: "Upload Sources", uploadsOnly: true },
   { to: "relations", label: "Relations" },
   { to: "sharing", label: "Shared with" },
 ];
@@ -66,7 +67,11 @@ const Shell = ({ source, access, actions, notices }: ShellProps) => (
     status={<SourceStatus source={source} />}
     actions={actions}
     notices={notices}
-    tabs={TABS.filter((t) => t.to !== "sharing" || access.canSeeSharing)}
+    tabs={TABS.filter(
+      (t) =>
+        (t.to !== "sharing" || access.canSeeSharing) &&
+        (!t.uploadsOnly || isUploadType(source.type))
+    )}
   >
     <Outlet context={{ source, access } satisfies SourceContext} />
   </SourceFrame>
