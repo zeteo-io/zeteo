@@ -1,3 +1,4 @@
+import { nameProblem } from "@/utils/queryName";
 import { useMergedColumns, useSaveMergedTable } from "../api/merged";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isUploadType } from "../../components/sourceLabels";
@@ -122,9 +123,10 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
   const labelColumnProblem =
     labelColumn.trim() === ""
       ? "Give the label column a name."
-      : !/^[a-z][a-z0-9_]{0,62}$/.test(labelColumn.trim())
-        ? "Start with a lowercase letter, then lowercase letters, digits or _ (up to 63 characters)."
-        : undefined;
+      : nameProblem(labelColumn.trim());
+  // Shown once something is typed: an empty name only keeps Save disabled.
+  const tableNameProblem =
+    name.trim() === "" ? undefined : nameProblem(name.trim());
 
   const nameProblems = new Map<string, string>();
   const seen = new Set<string>();
@@ -132,6 +134,7 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
     if (!isIncluded(c)) continue;
     const n = nameOf(c).trim();
     if (n === "") nameProblems.set(c.name, "Give the column a name.");
+    else if (nameProblem(n)) nameProblems.set(c.name, nameProblem(n)!);
     else if (seen.has(n) || n === labelColumn.trim())
       nameProblems.set(c.name, "Another column has this name.");
     seen.add(n);
@@ -150,6 +153,7 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
 
   const ready =
     name.trim() !== "" &&
+    !tableNameProblem &&
     !labelColumnProblem &&
     memberIds.length >= 2 &&
     labelProblems.size === 0 &&
@@ -233,6 +237,9 @@ export const MergedTableEditor = ({ source, existing }: EditorProps) => {
             <Input
               label="Name"
               value={name}
+              maxLength={63}
+              error={tableNameProblem}
+              helperText="How queries name the table: a lowercase letter, then lowercase letters, digits or _ (at most 63)."
               onChange={(e) => setName(e.target.value)}
             />
             <Input

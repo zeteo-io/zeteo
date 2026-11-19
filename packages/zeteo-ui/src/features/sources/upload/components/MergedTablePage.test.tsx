@@ -138,6 +138,37 @@ describe("the merged table editor", () => {
     expect(label).toHaveValue("WM");
   });
 
+  it("explains the name rule and checks the name as it is typed", async () => {
+    const user = userEvent.setup();
+    renderNew();
+    await pickMembers(user);
+    await screen.findByText("vivo_sku");
+    expect(
+      screen.getByText(/How queries name the table: a lowercase letter/)
+    ).toBeInTheDocument();
+    await user.type(
+      screen.getByLabelText("Name"),
+      "Master Amazon FBA Inventory"
+    );
+    expect(
+      screen.getByText(
+        "A lowercase letter, then lowercase letters, digits or _ (at most 63)."
+      )
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(
+      screen.getByLabelText("Name"),
+      "master_amazon_fba_inventory"
+    );
+    expect(
+      screen.queryByText(
+        "A lowercase letter, then lowercase letters, digits or _ (at most 63)."
+      )
+    ).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("posts the exact body then goes to the merged table", async () => {
     const user = userEvent.setup();
     renderNew();
@@ -424,11 +455,17 @@ describe("the merged table editor", () => {
     await user.clear(column);
     await user.type(column, "Brand Name");
     expect(
-      screen.getByText(/Start with a lowercase letter/)
+      screen.getByText(
+        "A lowercase letter, then lowercase letters, digits or _ (at most 63)."
+      )
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await user.clear(column);
     await user.type(column, "brand_name");
-    expect(screen.queryByText(/Start with a lowercase letter/)).toBeNull();
+    expect(
+      screen.queryByText(
+        "A lowercase letter, then lowercase letters, digits or _ (at most 63)."
+      )
+    ).toBeNull();
   });
 });
