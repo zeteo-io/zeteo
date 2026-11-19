@@ -172,7 +172,11 @@ export const PreviewEditor = ({
   return (
     <>
       {tables.length > 1 && (
-        <div className="z-source-tabs" role="tablist" aria-label="Tables">
+        <div
+          className="z-source-tabs z-fs-table-tabs"
+          role="tablist"
+          aria-label="Tables"
+        >
           {tables.map((table) => {
             const kept = edits[table.key]?.keep ?? false;
             return (

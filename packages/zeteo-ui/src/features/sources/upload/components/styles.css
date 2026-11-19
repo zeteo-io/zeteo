@@ -21,7 +21,26 @@
 .z-fs-form,
 .z-fs-tables {
   display: grid;
+  /* One column no wider than the page, so a wide child (many tabs, a wide
+     table) scrolls inside itself instead of stretching every section. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 1.25rem;
+}
+
+/* A workbook or spreadsheet with many tabs: the tab row scrolls sideways.
+   The row's rule is drawn as a shadow, so the scroll box doesn't clip the
+   active tab's underline. */
+.z-fs-table-tabs {
+  overflow-x: auto;
+  scrollbar-width: thin;
+  border-bottom: none;
+  box-shadow: inset 0 -1px 0 var(--k-border-color);
+}
+
+.z-fs-table-tabs .z-source-tab {
+  flex-shrink: 0;
+  white-space: nowrap;
+  margin-bottom: 0;
 }
 
 .z-fs-reading {
