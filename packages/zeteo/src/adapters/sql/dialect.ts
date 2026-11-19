@@ -157,6 +157,12 @@ export interface SqlDialect {
     expression: Expression<unknown>,
     fiscalStartMonth: number
   ): Expression<unknown>;
+  /**
+   * A null standing for a number in a union's column: a float when
+   * `approximate`, else an exact decimal (which every integer and decimal
+   * value of the column keeps its digits in).
+   */
+  typedNull(approximate: boolean): Expression<unknown>;
   /** A date bucket as a timestamp at its UTC midnight, beside timestamp buckets. */
   asTimestamp(expression: Expression<unknown>): Expression<unknown>;
   /**

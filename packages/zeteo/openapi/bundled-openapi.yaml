@@ -7515,7 +7515,7 @@ components:
                 - sql
             schema:
               type: object
-              description: The JSON Schema of the query language, which a query's body must satisfy
+              description: 'The JSON Schema of the query language, which a query''s body must satisfy: `anyOf` a table query (`$defs.TableQuery`) or a metric query (`$defs.MetricQuery`, told apart by its `metrics` key)'
               additionalProperties: true
         limits:
           type: object

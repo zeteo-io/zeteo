@@ -455,6 +455,9 @@ export const mssqlDialect: SqlDialect = {
   subqueryInAggregate: false,
   calendarMonths: (months, counts, monthStartOf) =>
     sql`(select c.n from openjson(${param("nvarchar", JSON.stringify(months.map((m, i) => ({ m, n: counts[i] }))))}) with (m date '$.m', n int '$.n') as c where c.m = ${monthStartOf})`,
+  // SQL Server types a union's column over all its branches, and a bare null
+  // (an int) takes the type of the others: no cast, so no decimal is resized.
+  typedNull: () => sql`null`,
   asTimestamp: (expression) => sql`cast(${expression} as datetime2(3))`,
   timestampUtc: (expression, nativeType) =>
     baseType(nativeType) === "datetimeoffset"

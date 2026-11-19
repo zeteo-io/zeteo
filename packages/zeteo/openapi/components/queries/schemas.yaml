@@ -512,7 +512,7 @@ DiscoveredSource:
       required: [id, schema]
       properties:
         id: { type: string, enum: [sql] }
-        schema: { type: object, description: "The JSON Schema of the query language, which a query's body must satisfy", additionalProperties: true }
+        schema: { type: object, description: "The JSON Schema of the query language, which a query's body must satisfy: `anyOf` a table query (`$defs.TableQuery`) or a metric query (`$defs.MetricQuery`, told apart by its `metrics` key)", additionalProperties: true }
     limits:
       type: object
       description: What one query on this source may return and take

@@ -264,6 +264,9 @@ export const postgresDialect: SqlDialect = {
         return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
     }
   },
+  // Unconstrained numeric keeps each value's own scale.
+  typedNull: (approximate) =>
+    approximate ? sql`cast(null as float8)` : sql`cast(null as numeric)`,
   // Midnight, read as UTC beside a timestamptz: the session runs in UTC.
   asTimestamp: (expression) => sql`cast(${expression} as timestamp)`,
   // timestamptz is an instant, and the session runs in UTC.

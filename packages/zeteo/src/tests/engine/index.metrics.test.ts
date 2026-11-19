@@ -88,7 +88,16 @@ describeEachEngine("runQuery: metric queries", (engine) => {
     description: `The ${name}`,
     formula: formula as MetricRow["formula"],
   });
+  const wide = (n: number) =>
+    metric(`wide_${n}`, {
+      add: Array.from({ length: 7 }, (_, i) => ({
+        measure: `wide${n * 7 + i}`,
+      })),
+    });
   const ALL_METRICS = [
+    wide(0),
+    wide(1),
+    wide(2),
     metric("roas", { div: [{ measure: "revenue" }, { measure: "spend" }] }),
     metric("landing", {
       add: [
@@ -175,6 +184,23 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       }
     );
     await addMeasure("undated", "orders", { count: "*" });
+    await addMeasure(
+      "order_count",
+      "orders",
+      { count: "*" },
+      { dateColumn: "created_at" }
+    );
+    // 21 measures for three metrics of seven each: one too many to combine.
+    for (let i = 0; i < 21; i++) {
+      await addMeasure(
+        `wide${i}`,
+        "orders",
+        { sum: "total" },
+        {
+          dateColumn: "created_at",
+        }
+      );
+    }
     await addMeasure(
       "line_count",
       "order_lines",
@@ -266,6 +292,40 @@ describeEachEngine("runQuery: metric queries", (engine) => {
         (Number(rev) + 44).toFixed(2)
       )
     );
+  });
+
+  it("combines three or more measures, each in its own typed column", async () => {
+    const rows = await run({
+      metrics: ["revenue", "spend", "order_count", "roas"],
+      bucket: "month",
+    });
+    const counts = [2, 2, 2, 2, 2, 2, null];
+    expect(rows.map((r) => [iso(r[0]), r[1], r[2], r[3]])).toEqual(
+      MONTHS.map(([p, rev, sp], i) => [
+        p,
+        rev,
+        sp,
+        counts[i] === null ? null : String(counts[i]),
+      ])
+    );
+    expect(rows[0]![4]).toBe("1.736667");
+    expect(await run({ metrics: ["revenue", "spend", "order_count"] })).toEqual(
+      [["3754.56", "555.00", "12"]]
+    );
+  });
+
+  it("refuses a 21st distinct measure as too_complex", async () => {
+    expect(
+      await refusal({ metrics: ["wide_0", "wide_1", "wide_2"] })
+    ).toMatchObject({
+      statusCode: 422,
+      code: "too_complex",
+      details: { path: ["metrics", 2] },
+    });
+    const twenty = await run({ metrics: ["wide_0", "wide_1"] });
+    expect(twenty).toEqual([
+      [(3754.56 * 7).toFixed(2), (3754.56 * 7).toFixed(2)],
+    ]);
   });
 
   it("orders, limits and offsets the result", async () => {

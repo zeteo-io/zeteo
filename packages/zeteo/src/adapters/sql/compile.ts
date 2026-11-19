@@ -314,8 +314,13 @@ export const compileExpr = (
             )
           );
       }
+      break;
     }
   }
+  // A kind the switch does not know would compile to nothing, which binds as null.
+  throw new Error(
+    `cannot compile an expression of kind ${(expr as { kind: unknown }).kind}`
+  );
 };
 
 /** Whether a select item is computed per group rather than per row. */
@@ -366,7 +371,9 @@ const compileFilter = <S>(
 ): Expression<SqlBool> => {
   /** A value bound for the subject, or a fixed measure's value. */
   const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
-    typeof v === "object" ? compileExpr(v, dialect, ctx) : dialect.value(v, s);
+    typeof v === "object" && v !== null && "kind" in v
+      ? compileExpr(v, dialect, ctx)
+      : dialect.value(v, s);
   const go = (f: ResolvedFilter<S>): Expression<SqlBool> => {
     switch (f.kind) {
       case "and":
@@ -478,8 +485,14 @@ const partQuery = (
     named.push({ expression: period, alias: "period" });
   }
   const value = compileExpr(part.expr, dialect, ctx);
-  plan.parts.forEach((_, i) =>
-    named.push({ expression: i === k ? value : sql`null`, alias: `v${i}` })
+  // Each other part's column is a null of that part's type: Postgres types a
+  // union's columns branch by branch, and two bare nulls would make one text.
+  plan.parts.forEach((other, i) =>
+    named.push({
+      expression:
+        i === k ? value : dialect.typedNull(isApproximate(other.expr, dialect)),
+      alias: `v${i}`,
+    })
   );
   for (const { expression, alias } of named) {
     items.push(sql`${expression}`.as(alias));

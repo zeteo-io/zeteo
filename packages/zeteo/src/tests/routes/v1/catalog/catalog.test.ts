@@ -246,12 +246,20 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     ).toBe(true);
   });
 
-  it("describes the language as a JSON Schema that names select", async () => {
+  it("describes the language as a JSON Schema: a table query that names select, or a metric query", async () => {
     const res = await catalog(wide.token, `?source=${source.slug}`);
     const { language } = res.body.sources[0];
     expect(language.id).toBe("sql");
-    expect(language.schema.type).toBe("object");
-    expect(language.schema.properties.select).toBeDefined();
+    expect(language.schema.anyOf).toEqual([
+      { $ref: "#/$defs/TableQuery" },
+      { $ref: "#/$defs/MetricQuery" },
+    ]);
+    const { TableQuery, MetricQuery } = language.schema.$defs;
+    expect(TableQuery.type).toBe("object");
+    expect(TableQuery.properties.select).toBeDefined();
+    expect(MetricQuery.type).toBe("object");
+    expect(MetricQuery.required).toEqual(["source", "metrics"]);
+    expect(MetricQuery.properties.range).toBeDefined();
   });
 
   it("answers a query written only from the response", async () => {

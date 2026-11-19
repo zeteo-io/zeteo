@@ -1,8 +1,8 @@
 // @module-tag unit
 // @module-tag platform
+import { measure, metricsCatalog } from "../../support/pure/metricsCatalog.js";
 import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
-import { metricsCatalog } from "../../support/pure/metricsCatalog.js";
 import type { SqlDialect } from "../../../adapters/sql/dialect.js";
 import { sqlLanguage } from "../../../adapters/sql/language.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
@@ -51,9 +51,9 @@ describe("compileSql: a metric query on Postgres", () => {
         'select "u"."period" as "c0",' +
         ' round(cast(max("u"."v0") as numeric(38, 18)) / nullif(cast(max("u"."v1") as numeric(38, 10)), 0), 6) as "c1",' +
         ' max("u"."v0") as "c2"' +
-        ' from (select date_trunc($1, "t0"."ordered_on")::date as "period", sum("t0"."total") as "v0", null as "v1"' +
+        ' from (select date_trunc($1, "t0"."ordered_on")::date as "period", sum("t0"."total") as "v0", cast(null as numeric) as "v1"' +
         ' from "shop"."orders" as "t0" where ("t0"."ordered_on" >= $2 and "t0"."ordered_on" < $3) group by 1' +
-        ' union all select date_trunc($4, "t0"."launched_on")::date as "period", null as "v0", sum("t0"."cost") as "v1"' +
+        ' union all select date_trunc($4, "t0"."launched_on")::date as "period", cast(null as numeric) as "v0", sum("t0"."cost") as "v1"' +
         ' from "shop"."products" as "t0" where ("t0"."launched_on" >= $5 and "t0"."launched_on" < $6) group by 1) as "u"' +
         ' group by 1 order by "c0" asc nulls last limit $7 offset $8',
       parameters: [
@@ -73,8 +73,8 @@ describe("compileSql: a metric query on Postgres", () => {
     const { sql } = pg({ metrics: ["roas"] });
     expect(sql).toBe(
       'select round(cast(max("u"."v0") as numeric(38, 18)) / nullif(cast(max("u"."v1") as numeric(38, 10)), 0), 6) as "c0"' +
-        ' from (select sum("t0"."total") as "v0", null as "v1" from "shop"."orders" as "t0"' +
-        ' union all select null as "v0", sum("t0"."cost") as "v1" from "shop"."products" as "t0") as "u"' +
+        ' from (select sum("t0"."total") as "v0", cast(null as numeric) as "v1" from "shop"."orders" as "t0"' +
+        ' union all select cast(null as numeric) as "v0", sum("t0"."cost") as "v1" from "shop"."products" as "t0") as "u"' +
         " limit $1 offset $2"
     );
   });
@@ -120,6 +120,61 @@ describe("compileSql: a metric query on Postgres", () => {
     });
     expect(sql).toContain('where "t0"."created_at" >= cast($1 as timestamptz)');
     expect(parameters[0]).toBe("2026-03-01T00:00:00Z");
+  });
+});
+
+describe("compileSql: three or more parts", () => {
+  const THREE = { metrics: ["revenue", "spend", "signups"], bucket: "month" };
+
+  it("types every other part's null on Postgres, so the union's columns never resolve to text", () => {
+    const { sql } = pg(THREE);
+    const branches = sql.slice(sql.indexOf(" from (") + 7).split(" union all ");
+    expect(branches).toHaveLength(3);
+    expect(branches[0]).toContain(
+      'sum("t0"."total") as "v0", cast(null as numeric) as "v1", cast(null as numeric) as "v2"'
+    );
+    expect(branches[1]).toContain(
+      'cast(null as numeric) as "v0", sum("t0"."cost") as "v1", cast(null as numeric) as "v2"'
+    );
+    expect(branches[2]).toContain(
+      'cast(null as numeric) as "v0", cast(null as numeric) as "v1", count(*) as "v2"'
+    );
+    expect(sql).toContain('max("u"."v2") as "c3"');
+  });
+
+  it("types a float part's nulls as float8 on Postgres", () => {
+    const { sql } = compileSql(
+      sqlLanguage.plan(
+        sqlLanguage.schema.parse({
+          source: "shop",
+          metrics: ["revenue", "spend", "avg_order"],
+        }),
+        metricsCatalog(
+          {},
+          {
+            measures: [
+              measure(
+                "avg_order",
+                { avg: "total" },
+                { dateColumn: "ordered_on" }
+              ),
+            ],
+          }
+        ),
+        { now: NOW }
+      ),
+      postgresDialect,
+      { limit: 101, offset: 0 }
+    );
+    expect(sql).toContain(
+      'sum("t0"."total") as "v0", cast(null as numeric) as "v1", cast(null as float8) as "v2"'
+    );
+  });
+
+  it("leaves SQL Server's nulls bare: it types a union's column over all branches", () => {
+    const { sql } = ms(THREE);
+    expect(sql.split(" union all ")).toHaveLength(3);
+    expect(sql).toContain("null as [v0], null as [v1], count_big(*) as [v2]");
   });
 });
 
