@@ -11,6 +11,8 @@ export interface CatalogTable {
   schema_name?: string;
   kind: string;
   description?: string | null;
+  /** Measures usable on this table; absent where the server does not list them. */
+  measures?: { name: string; description: string }[];
 }
 
 export interface CatalogSource {

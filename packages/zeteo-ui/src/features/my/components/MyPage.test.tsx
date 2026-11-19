@@ -61,7 +61,15 @@ const catalog = {
       name: "Sales database",
       type: "postgres",
       tables: [
-        { name: "orders", kind: "table", columns: [], relations: [] },
+        {
+          name: "orders",
+          kind: "table",
+          columns: [],
+          relations: [],
+          measures: [
+            { name: "paid_revenue", description: "Revenue of paid orders" },
+          ],
+        },
         { name: "customers", kind: "table", columns: [], relations: [] },
       ],
     },
@@ -298,6 +306,8 @@ describe("MyPage", () => {
     await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByText("customers")).toBeInTheDocument();
+    expect(screen.getByText("paid_revenue")).toBeInTheDocument();
+    expect(screen.getByText("Revenue of paid orders")).toBeInTheDocument();
   });
 
   it("shows the notice and no source for an inaccessible shared saved query", async () => {

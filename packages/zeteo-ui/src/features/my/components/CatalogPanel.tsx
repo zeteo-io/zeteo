@@ -37,6 +37,19 @@ const SourceRow = ({ source }: { source: CatalogSource }) => {
           {source.tables.map((t) => (
             <li key={`${t.schema_name ?? ""}.${t.name}`}>
               <code>{t.name}</code>
+              {t.measures && t.measures.length > 0 && (
+                <ul
+                  className="z-catalog-measures"
+                  aria-label={`Measures on ${t.name}`}
+                >
+                  {t.measures.map((m) => (
+                    <li key={m.name}>
+                      <code>{m.name}</code>{" "}
+                      <span className="z-muted">{m.description}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </li>
           ))}
         </ul>

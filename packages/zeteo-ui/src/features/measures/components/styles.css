@@ -1,0 +1,70 @@
+.z-measure-form {
+  min-width: min(40rem, 80vw);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-measure-json textarea {
+  font-family: var(--k-font-mono, monospace);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-measure-field-error {
+  color: var(--k-danger-color);
+  font-size: var(--k-text-size-sm);
+  margin: 0.25rem 0 0;
+}
+
+.z-measure-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.z-measure-broken {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-measure-preview {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-measure-preview-value {
+  font-size: var(--k-text-size-xl, 1.5rem);
+}
+
+.z-measure-preview table {
+  border-collapse: collapse;
+}
+
+.z-measure-preview th,
+.z-measure-preview td {
+  text-align: left;
+  padding: 0.25rem 0.75rem 0.25rem 0;
+}
+
+.z-measure-editors {
+  min-width: min(34rem, 80vw);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-measure-editor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-measure-editor-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}

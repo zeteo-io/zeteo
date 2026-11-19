@@ -41,6 +41,13 @@ export const SECTIONS: Section[] = [
     group: "admin",
   },
   {
+    // Read by anyone who can query; changed with `zeteo.calendar.write`.
+    path: "/calendar",
+    label: "Calendar",
+    permission: "zeteo.data.read",
+    group: "admin",
+  },
+  {
     path: "/runs",
     label: "Runs",
     permission: "zeteo.runs.read",

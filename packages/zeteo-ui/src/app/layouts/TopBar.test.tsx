@@ -38,7 +38,7 @@ describe("TopBar", () => {
     ]);
   });
 
-  it("lists the eight admin sections under Admin", async () => {
+  it("lists the nine admin sections under Admin", async () => {
     renderAt("/my");
     const button = adminButton();
     expect(button).toHaveAttribute("aria-haspopup", "menu");
@@ -55,6 +55,7 @@ describe("TopBar", () => {
       "Connections",
       "Grants",
       "Limits",
+      "Calendar",
       "Runs",
       "Saved queries",
       "Dashboards",
@@ -66,6 +67,7 @@ describe("TopBar", () => {
       "/connections",
       "/grants",
       "/limits",
+      "/calendar",
       "/runs",
       "/saved-queries",
       "/admin/dashboards",
@@ -73,17 +75,15 @@ describe("TopBar", () => {
     ]);
   });
 
-  it("shows no Admin item to someone who can only query", () => {
+  it("gives someone who can only query an Admin item with the Calendar alone", async () => {
     held.permissions = ["zeteo.data.read"];
     renderAt("/my");
-    expect(
-      within(nav()).queryByRole("button", { name: /Admin/ })
-    ).not.toBeInTheDocument();
+    await userEvent.click(adminButton());
     expect(
       within(nav())
         .getAllByRole("link")
         .map((l) => l.textContent)
-    ).toEqual(["My Zeteo", "Dashboards"]);
+    ).toEqual(["My Zeteo", "Dashboards", "Calendar"]);
   });
 
   it("lists only the admin sections the person may see", async () => {
