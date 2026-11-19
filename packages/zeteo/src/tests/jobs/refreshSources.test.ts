@@ -117,7 +117,7 @@ describe("refreshStaleSources", () => {
         .lastRefreshedAt
     ).not.toEqual(new Date(NOW.getTime() - 25 * HOUR));
     expect(await prisma.sourceTable.count({ where: { sourceId: stale } })).toBe(
-      12
+      13
     );
   });
 
@@ -204,7 +204,7 @@ describe("refreshStaleSources", () => {
     );
     expect(await redis.get(`zeteo:refresh:${broken}`)).toBeNull();
     expect(await prisma.sourceTable.count({ where: { sourceId: next } })).toBe(
-      12
+      13
     );
   });
 
