@@ -57,6 +57,24 @@ describe("MetricsSection", () => {
     );
   });
 
+  it("shows why a delete is refused, with the dependents", async () => {
+    del.mockReset().mockRejectedValue({
+      status: 409,
+      code: "measure_in_use",
+      message: "Other metrics use this one and would break",
+      dependents: [{ kind: "metric", name: "roas_v2" }],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);
+    const row = (await screen.findByText("margin_pct")).closest("tr")!;
+    await user.click(row.querySelector("button[aria-label='Delete']")!);
+    await user.click(screen.getByRole("button", { name: "Delete metric" }));
+    expect(
+      await screen.findByText("Other metrics use this one and would break")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Used by metrics: roas_v2/)).toBeInTheDocument();
+  });
+
   it("hides the actions from one who is not an editor", async () => {
     respond(false, true);
     renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);

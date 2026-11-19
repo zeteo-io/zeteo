@@ -16,6 +16,7 @@ import {
   loadSourceVisibleCatalog,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
+import { isMetricBody } from "../adapters/sql/language.js";
 import {
   RANGE_TIME_COLUMN,
   withTimeFilter,
@@ -151,12 +152,6 @@ const planColumns = (
   }
 };
 
-const isMetricQuery = (query: unknown): boolean =>
-  typeof query === "object" &&
-  query !== null &&
-  !Array.isArray(query) &&
-  "metrics" in query;
-
 const queryOrder = (query: unknown): { orderBy?: unknown } =>
   typeof query === "object" && query !== null && !Array.isArray(query)
     ? { orderBy: (query as { orderBy?: unknown }).orderBy }
@@ -184,7 +179,7 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
   const wrongForMetrics =
     r.timeColumn !== null &&
     r.timeColumn !== RANGE_TIME_COLUMN &&
-    isMetricQuery(savedQuery.query);
+    isMetricBody(savedQuery.query);
   const columns = wrongForMetrics
     ? null
     : planColumns(ctx.access, savedQuery.sourceId, query, catalog);

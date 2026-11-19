@@ -1010,6 +1010,13 @@ export type SqlLanguageQuery = SqlQuery | MetricQuery;
 export const isMetricQuery = (query: SqlLanguageQuery): query is MetricQuery =>
   "metrics" in query;
 
+/** `isMetricQuery` for a body of unknown shape: false for anything but a plain object. */
+export const isMetricBody = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  !Array.isArray(body) &&
+  "metrics" in body;
+
 /**
  * The language's schema: a metric query when the body has a `metrics` key,
  * else a table query. Dispatched rather than a union, so each issue keeps the

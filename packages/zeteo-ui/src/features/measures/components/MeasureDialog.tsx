@@ -98,7 +98,11 @@ export const MeasureDialog = ({
       set(value);
     };
   const setName = changing(setNameText);
-  const setTable = changing(setTableName);
+  // A date column belongs to its table: choosing another table clears it.
+  const setTable = changing((value: string) => {
+    if (value !== table) setDateColumnPath("");
+    setTableName(value);
+  });
   const setDescription = changing(setDescriptionText);
   const setFormula = changing(setFormulaText);
   const setWhere = changing(setWhereText);

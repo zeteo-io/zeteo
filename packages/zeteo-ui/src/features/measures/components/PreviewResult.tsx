@@ -18,7 +18,7 @@ export const PreviewResult = ({ result }: { result: Result }) => {
       ) : result.rows.length === 0 ? (
         <span className="z-muted">No rows.</span>
       ) : (
-        <table>
+        <table aria-label="Preview result">
           <thead>
             <tr>
               {result.columns.map((c) => (

@@ -242,6 +242,20 @@ describe("MeasureDialog", () => {
       );
     });
 
+    it("clears the date column when the table changes", async () => {
+      post.mockResolvedValue({ data: makeMeasure() });
+      const user = userEvent.setup();
+      renderWithProviders(
+        <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
+      );
+      await fill(user);
+      await pickOption(user, field("Date column \\(optional\\)"), "created_at");
+      await pickOption(user, field("Table"), "customers");
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0]![1]).not.toHaveProperty("date_column");
+    });
+
     it("sends only the changed fixed and date column on an edit", async () => {
       patch.mockResolvedValue({ data: makeMeasure() });
       const user = userEvent.setup();

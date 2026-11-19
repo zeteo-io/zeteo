@@ -85,6 +85,9 @@ describe("MCP preview_panel over a metric query", () => {
       time_column: "created_at",
       time_range: "previous_month",
     });
-    expect(wrong.isError).toBe(true);
+    expect(wrong.isError, wrong.text).toBe(false);
+    expect(wrong.json).toMatchObject({
+      problems: [{ setting: "time_column", problem: "wrong_type" }],
+    });
   });
 });
