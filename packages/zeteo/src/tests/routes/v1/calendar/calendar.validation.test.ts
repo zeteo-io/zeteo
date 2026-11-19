@@ -49,6 +49,8 @@ describe("PUT /v1/calendar validation", () => {
     ["month 0", { fiscal_year_start_month: 0 }],
     ["month 13", { fiscal_year_start_month: 13 }],
     ["an unknown time zone", { time_zone: "Mars/Olympus" }],
+    ["a garbage time zone", { time_zone: "not a zone!" }],
+    ["an offset for a time zone", { time_zone: "+05:00" }],
     ["an unknown field", { extra: true }],
   ])("refuses %s with invalid_request and issues", async (_name, change) => {
     const res = await put(validCalendar(change));
@@ -57,6 +59,15 @@ describe("PUT /v1/calendar validation", () => {
     expect(Array.isArray(res.body.issues)).toBe(true);
     expect(res.body.issues.length).toBeGreaterThan(0);
   });
+
+  it.each(["Asia/Kolkata", "Europe/Kyiv", "Etc/UTC"])(
+    "accepts the current IANA name %s and keeps it as given",
+    async (zone) => {
+      const res = await put(validCalendar({ time_zone: zone }));
+      expect(res.status).toBe(200);
+      expect(res.body.time_zone).toBe(zone);
+    }
+  );
 
   it("accepts UTC and 5,000 holidays", async () => {
     const res = await put(

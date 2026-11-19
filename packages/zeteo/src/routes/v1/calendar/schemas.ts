@@ -12,7 +12,21 @@ const DateSchema = z
     );
   }, "Not a calendar date");
 
-const TIME_ZONES = new Set([...Intl.supportedValuesOf("timeZone"), "UTC"]);
+/**
+ * An IANA time zone name the runtime can format in. `Intl.supportedValuesOf`
+ * lists ICU's canonical names only (`Asia/Calcutta`, not `Asia/Kolkata`), so a
+ * name is checked by formatting with it instead. Offsets (`+05:00`) are not
+ * names and are refused. The name is stored as given.
+ */
+const isTimeZone = (zone: string): boolean => {
+  if (!/^[A-Za-z]/.test(zone)) return false;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 export const MAX_HOLIDAYS = 5000;
 
@@ -38,5 +52,6 @@ export const PutCalendarSchema = z.strictObject({
   fiscal_year_start_month: z.number().int().min(1).max(12),
   time_zone: z
     .string()
-    .refine((zone) => TIME_ZONES.has(zone), "Not a known IANA time zone"),
+    .max(100)
+    .refine(isTimeZone, "Not a known IANA time zone"),
 });

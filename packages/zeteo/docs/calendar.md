@@ -9,7 +9,7 @@ organisation, no external calendar, and a source's own date table is not used as
 | `working_days` | Weekdays as numbers, 1 (Monday) to 7 (Sunday), each once, at least one. Default Monday to Friday (`[1,2,3,4,5]`). |
 | `holidays` | `{ date, name }` entries, `date` as `YYYY-MM-DD`, unique by date, at most 5,000. A holiday on a non-working day has no effect. Default none. |
 | `fiscal_year_start_month` | 1 to 12. Default 1 (January). |
-| `time_zone` | An IANA name. Default `UTC`. |
+| `time_zone` | An IANA name the server can format in, current or legacy (`Asia/Kolkata` and `Asia/Calcutta` both), kept as given; an offset such as `+05:00` is refused. Default `UTC`. |
 
 A **business day** is a working weekday that is not a holiday. With the defaults, everything
 behaves as it did before the calendar existed.

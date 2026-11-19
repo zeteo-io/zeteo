@@ -4,6 +4,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { Calendar, Holiday } from "../api/types";
 import { PageHeader } from "@/components/PageHeader";
+import { timeZoneOptions } from "./timeZones";
 import { useAuth } from "@tereo-io/react";
 import { useState } from "react";
 import "./styles.css";
@@ -49,8 +50,6 @@ const MONTHS = [
   "November",
   "December",
 ];
-
-const TIME_ZONES = ["UTC", ...Intl.supportedValuesOf("timeZone")];
 
 const PasteDialog = ({
   onAdd,
@@ -132,6 +131,7 @@ const CalendarForm = ({
   const [days, setDays] = useState(new Set(calendar.working_days));
   const [month, setMonth] = useState(calendar.fiscal_year_start_month);
   const [zone, setZone] = useState(calendar.time_zone);
+  const [zones] = useState(() => timeZoneOptions(calendar.time_zone));
   const [holidays, setHolidays] = useState(calendar.holidays);
   const [date, setDate] = useState("");
   const [name, setName] = useState("");
@@ -196,7 +196,7 @@ const CalendarForm = ({
           label="Time zone"
           placeholder="Search time zones"
           value={zone}
-          options={TIME_ZONES}
+          options={zones}
           getOptionLabel={(z) => z}
           getOptionKey={(z) => z}
           disabled={!canWrite}
