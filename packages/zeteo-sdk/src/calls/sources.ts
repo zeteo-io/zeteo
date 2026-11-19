@@ -2,7 +2,6 @@ import type { ListOptions, Page } from "../types/common.js";
 import { send, type CallContext } from "../send.js";
 import type {
   AddTablesRequest,
-  CreateSheetsSourceRequest,
   CreateUploadSourceRequest,
   ReuploadTableRequest,
   TransferSourceRequest,
@@ -14,6 +13,8 @@ import type {
   RenameRelationRequest,
   ListSourcesOptions,
   ListTablesOptions,
+  MergedColumnsResponse,
+  MergedTableRequest,
   PatchTableRequest,
   RefreshSummary,
   SyncSummary,
@@ -30,12 +31,9 @@ export const sourcesCalls = (ctx: CallContext) => ({
     send(ctx, { op: "listSources", query: { ...options } }),
   get: (sourceId: string): Promise<Source | null> =>
     send(ctx, { op: "getSource", params: { sourceId }, nullOn404: true }),
-  /** A database, or (`type: "upload"` or `"google-sheets"`) a source from the caller's staging. */
+  /** A database, or (`type: "upload"`) a source from the caller's staging of a file or a spreadsheet. */
   create: (
-    body:
-      | CreateSourceRequest
-      | CreateUploadSourceRequest
-      | CreateSheetsSourceRequest
+    body: CreateSourceRequest | CreateUploadSourceRequest
   ): Promise<Source> => send(ctx, { op: "createSource", body, once: true }),
   update: (sourceId: string, body: UpdateSourceRequest): Promise<Source> =>
     send(ctx, {
@@ -92,6 +90,39 @@ export const sourcesCalls = (ctx: CallContext) => ({
       once: true,
     });
   },
+  /** An upload source only: merges two or more of its tables as one view. */
+  createMergedTable: (
+    sourceId: string,
+    body: MergedTableRequest
+  ): Promise<Table> =>
+    send(ctx, {
+      op: "createMergedTable",
+      params: { sourceId },
+      body,
+      once: true,
+    }),
+  /** A merged table only: replaces its definition. */
+  updateMergedTable: (
+    sourceId: string,
+    tableId: string,
+    body: MergedTableRequest
+  ): Promise<Table> =>
+    send(ctx, {
+      op: "putMergedTable",
+      params: { sourceId, tableId },
+      body,
+      once: true,
+    }),
+  /** An upload source only: the union of the given tables' columns and a suggested label for each, for merging them. */
+  mergedColumns: (
+    sourceId: string,
+    memberTableIds: string[]
+  ): Promise<MergedColumnsResponse> =>
+    send(ctx, {
+      op: "getMergedColumns",
+      params: { sourceId },
+      query: { member: memberTableIds },
+    }),
   /** An upload source only: retypes, renames or describes a column. */
   updateColumn: (
     sourceId: string,
@@ -107,7 +138,7 @@ export const sourcesCalls = (ctx: CallContext) => ({
     }),
   test: (sourceId: string): Promise<TestSourceResponse> =>
     send(ctx, { op: "testSource", params: { sourceId }, once: true }),
-  /** A Google Sheets source is synced instead (Sync now) and answers a `SyncSummary`. */
+  /** An upload source is synced instead (Sync now) and answers a `SyncSummary`; `409 nothing_to_sync` without Google Sheets tables. */
   refresh: (sourceId: string): Promise<RefreshSummary | SyncSummary> =>
     send(ctx, { op: "refreshSource", params: { sourceId }, once: true }),
   tables: {

@@ -4,7 +4,10 @@
     summary: Get a table
     description: |
       A table with its columns (in position order) and the relations that start at it, including
-      declared ones and ones a refresh marked missing.
+      declared ones and ones a refresh marked missing. A merged table of an upload source also
+      carries `merged`: its members, its columns and the columns it does not carry. An upload
+      source's table carries its `origin` and, for its owner and `zeteo.sources.read`, the
+      `sync_error` of a Google Sheets table that failed to sync.
 
       **Upload-source owners:** the owner of an upload source is admitted here for its own tables
       and relations without `zeteo.sources.write`.
@@ -84,8 +87,10 @@
       source is `409 source_archived`; `404 uploads_not_configured` while
       `UPLOADS_READER_URL` is unset.
 
-      **A Google Sheets source's table** is not loaded from a file: `409 not_a_file_upload`; use
-      Sync now (`POST /v1/sources/{sourceId}/refresh`).
+      **Only a file's table** is loaded again this way: a table that syncs from Google Sheets, a
+      merged table, or a file's table given a staging of a spreadsheet is `409 not_a_file_upload`
+      (a Sheets table follows its spreadsheet: use Sync now, `POST /v1/sources/{sourceId}/refresh`).
+      A merged table is redefined with `PUT /v1/sources/{sourceId}/tables/{tableId}/merged`.
     operationId: reuploadTable
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
@@ -113,7 +118,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the source syncs from Google Sheets)
+        description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the table is not a file's, or the staging is a spreadsheet's)
         content:
           application/json:
             schema:
@@ -139,6 +144,13 @@
       Drops the table's data; its catalogue row and its columns stay, marked missing, and grants
       keep their references. A `zeteo.source.table_removed` audit entry is written.
 
+      A Google Sheets table is removed the same way, also when a sync marked it missing (its tab
+      was deleted): it is then marked removed, so a sync never brings it back, its tab can be added
+      again as a new table, and the source's claim on the spreadsheet is released once no table
+      uses it. A merged table is removed too (its view is dropped). A table that a live merged
+      table of the source reads is `409 table_in_merged_table` (`merged_table` names it): edit or
+      remove the merged table first.
+
       **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
       `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
       not, gets the same `403 forbidden`.
@@ -162,7 +174,7 @@
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '409':
-        description: Conflict - `not_an_upload_source`, or `source_archived`
+        description: Conflict - `not_an_upload_source`, `source_archived`, or `table_in_merged_table` (a live merged table reads it; `merged_table` names it)
         content:
           application/json:
             schema:

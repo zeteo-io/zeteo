@@ -36,12 +36,14 @@ info:
     and grants them through these same routes without `zeteo.sources.*`; to anyone else it answers
     as a source they may not see does. See `docs/uploads.md`.
 
-    A Google Sheets source (`type: google-sheets`) is an upload source whose tables are the tabs
-    of a Google spreadsheet, kept current by a sync. Zeteo reads Google as one service account, set
-    with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a Viewer.
-    Its owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a spreadsheet with
-    `POST /v1/uploads/links`, creates the source, adds tabs, changes its sync interval and runs
-    Sync now (`POST /v1/sources/{sourceId}/refresh`) through the same routes as an upload source.
+    An upload source's tables each come from a file, a tab of a Google spreadsheet or a merge
+    (the table's `origin`); one source may hold all three. Zeteo reads Google as one service
+    account, set with `PUT /v1/connections/google`; a spreadsheet is shared with that account as a
+    Viewer. The source's owner (holding `zeteo.uploads.write` and `zeteo.data.read`) stages a
+    spreadsheet with `POST /v1/uploads/links` (naming `source_id` to add its tabs to a source
+    that exists), creates the source or adds tables, changes its sync interval, runs Sync now
+    (`POST /v1/sources/{sourceId}/refresh`) and merges tables
+    (`POST /v1/sources/{sourceId}/merged-tables`) through the same routes as any upload source.
 
     ## Sources
 
@@ -228,7 +230,7 @@ paths:
         - name: owner_id
           in: query
           required: false
-          description: Only the upload and Sheets sources of this owner; `me` for the caller
+          description: Only the upload sources of this owner; `me` for the caller
           schema:
             type: string
             pattern: ^(me|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$
@@ -257,7 +259,7 @@ paths:
     post:
       tags:
         - Sources
-      summary: Register a database or create an upload or Sheets source
+      summary: Register a database or create an upload source
       description: |
         **A database** (`type` `postgres` or `azure-sql`): before anything is stored, Zeteo validates `settings` against the
         type's schema, checks the host against the deploy's network rules, connects with the login
@@ -283,13 +285,13 @@ paths:
         the name gets a suffix instead), `409 quota_exceeded`, `422 cast_failed`, `503
         upload_source_busy`.
 
-        **A Google Sheets source** (`type: google-sheets`): as an upload source, from the caller's
-        staging of a spreadsheet (see `POST /v1/uploads/links`); the tabs are loaded now and again
-        every `sync_interval_minutes` (15 to 1440, default 60). Needs `zeteo.uploads.write` and
-        `zeteo.data.read`. Further errors: `409 sheet_in_use` (an unarchived source already reads the
-        spreadsheet), `422 staging_kind_mismatch` (the staging is a file's, not a spreadsheet's),
-        `404 google_not_configured`, `422 sheet_not_accessible`, `502 google_unavailable`,
-        `502 google_sign_in_failed`. The response carries `sheet` and `sync`.
+        **From a spreadsheet:** the staging may be one of a Google spreadsheet (`POST
+        /v1/uploads/links`); its tabs become tables synced every `sync_interval_minutes` (15 to
+        1440, default 60) and claim the spreadsheet: one an unarchived source already reads is
+        `409 sheet_in_use` (it says nothing of whose). A source may mix tables from files and
+        spreadsheets, so the type is `upload` either way; the response carries `sync` once it has
+        Sheets tables. Further errors: `404 google_not_configured`, `422 sheet_not_accessible`,
+        `502 google_unavailable`, `502 google_sign_in_failed`.
 
         **Required permissions:** `zeteo.sources.write` or `zeteo.uploads.write` to reach the
         route, then as above for the body's `type` (`403 forbidden` without).
@@ -302,7 +304,6 @@ paths:
               oneOf:
                 - $ref: '#/components/schemas/CreateSourceRequest'
                 - $ref: '#/components/schemas/CreateUploadSourceRequest'
-                - $ref: '#/components/schemas/CreateSheetsSourceRequest'
       responses:
         '201':
           description: The source
@@ -317,13 +318,13 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '404':
-          description: Not found - `uploads_not_configured`, `staging_not_found` (an upload source) or `google_not_configured` (a Sheets source)
+          description: Not found - `uploads_not_configured`, `staging_not_found` (an upload source) or `google_not_configured` (a spreadsheet staging)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source), `sheet_in_use` (a Sheets source)
+          description: Conflict - `slug_taken` (a database), `name_taken` or `quota_exceeded` (an upload source), `sheet_in_use` (a spreadsheet staging)
           content:
             application/json:
               schema:
@@ -331,7 +332,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` for an upload source, `staging_kind_mismatch` or `sheet_not_accessible` for a Sheets source
+          description: Refused - `host_not_allowed` or `writable_login` (with `findings`) for a database, `cast_failed` or `sheet_not_accessible` for an upload source
           content:
             application/json:
               schema:
@@ -339,7 +340,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '502':
-          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login; `google_unavailable` or `google_sign_in_failed` for a Sheets source
+          description: Bad gateway - `source_unreachable`, the source could not be reached or refused the login; `google_unavailable` or `google_sign_in_failed` for a spreadsheet staging
           content:
             application/json:
               schema:
@@ -403,11 +404,12 @@ paths:
         which writes `zeteo.source.updated` (as does an admin's change of those alone); its limits
         need `zeteo.sources.write`.
 
-        On a Google Sheets source `sync_interval_minutes` (15 to 1440) sets the minutes between
-        syncs; its owner may send it with `name` and `description`, and an admin also with the
-        limit fields, recorded as one change. On any other source it is `422 not_synced`.
+        On an upload source `sync_interval_minutes` (15 to 1440) sets the minutes between syncs of
+        its Google Sheets tables; its owner may send it with `name` and `description`, and an admin
+        also with the limit fields, recorded as one change. On a database source it is
+        `422 not_synced`.
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload or Sheets source its owner may send `name`, `description` and (Sheets) `sync_interval_minutes` alone; anyone else gets the same 403.
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). On an upload source its owner may send `name`, `description` and `sync_interval_minutes` alone; anyone else gets the same 403.
 
         **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`,
         `422 host_not_allowed`, `422 writable_login`, `422 not_synced`, `502 source_unreachable`.
@@ -678,28 +680,29 @@ paths:
         `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
         See `docs/catalog.md`.
 
-        **A Google Sheets source** is synced instead (Sync now): every tab is read again and its
-        table reloaded, and the answer is a `SyncSummary`. The source's owner may do this, and a
-        second one within a minute is `429 sync_too_soon` (with `Retry-After`). A sync that fails
-        is the error of its cause, and is recorded in the source's `sync.last_error`: besides the Google
-        errors below, `422 cast_failed` (a value no longer casts to its column's type), `422 empty_file`
-        (a tab has no rows), the upload limit errors (`422`) and `409 quota_exceeded`.
+        **An upload source** is synced instead (Sync now): each of its Google Sheets tables that is
+        not removed is read again and reloaded on its own, and the answer is a `SyncSummary`, which
+        carries an `error` for each table that did not sync (the others still did): its `code` is
+        the cause, such as `sheet_not_accessible`, `google_unavailable`, `google_sign_in_failed`,
+        `cast_failed`, `empty_file`, `quota_exceeded` or `sync_failed`. A table's failure is also
+        recorded as its `sync_error`, and the source's `sync.failing` lists it. The request itself
+        fails only when no sync can start: `409 nothing_to_sync` (the source has no Google Sheets
+        table, live or missing), `429 sync_too_soon` (a second Sync now within a minute, with
+        `Retry-After`; `nothing_to_sync` is answered before that window is taken) or
+        `503 upload_source_busy` (the window is freed again).
 
-        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). A Sheets source's
+        **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). An upload source's
         owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
 
-        **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
-        (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
-        `502 source_unreachable`; on a Sheets source also `404 google_not_configured`,
-        `422 sheet_not_accessible`, `429 sync_too_soon`, `502 google_unavailable`,
-        `502 google_sign_in_failed`, `503 upload_source_busy`; and from a sync `422 cast_failed`, `422 empty_file`, the upload limit
-        errors and `409 quota_exceeded`.
+        **Errors:** `404 not_found`, `404 uploads_not_configured` (an upload source), `409 source_archived`,
+        `409 nothing_to_sync`, `429 sync_too_soon`, `503 upload_source_busy`; on a database source
+        `422 host_not_allowed` and `502 source_unreachable`.
       operationId: refreshSource
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
       responses:
         '200':
-          description: What the refresh changed (`RefreshSummary`), or for a Google Sheets source what the sync did (`SyncSummary`)
+          description: What the refresh changed (`RefreshSummary`), or for an upload source what the sync did (`SyncSummary`)
           content:
             application/json:
               schema:
@@ -715,19 +718,19 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`, `not_a_database_source`; or on a Sheets source `quota_exceeded` (the sync would pass the owner's storage quota)
+          description: Conflict - `source_archived`; on an upload source `nothing_to_sync` (no Google Sheets table to sync)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '422':
-          description: The host is not permitted - `host_not_allowed`; or on a Sheets source `sheet_not_accessible`, `cast_failed`, `empty_file` or an upload limit error
+          description: The host is not permitted - `host_not_allowed` (a database source)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
         '429':
-          description: Too many requests - `sync_too_soon` (a Sheets source synced less than a minute ago), with `retry_after` and the `Retry-After` header
+          description: Too many requests - `sync_too_soon` (an upload source synced less than a minute ago), with `retry_after` and the `Retry-After` header
           content:
             application/json:
               schema:
@@ -735,7 +738,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '502':
-          description: Bad gateway - `source_unreachable`; `google_unavailable` or `google_sign_in_failed` (a Sheets source)
+          description: Bad gateway - `source_unreachable` (a database source)
           content:
             application/json:
               schema:
@@ -802,9 +805,11 @@ paths:
         source is `409 source_archived`; `404 uploads_not_configured` while
         `UPLOADS_READER_URL` is unset.
 
-        **A Google Sheets source** takes tabs of its own spreadsheet, staged with `POST
-        /v1/uploads/links` by `source_id`: a staging of a file or of another spreadsheet is `422
-        staging_kind_mismatch`, and a tab the source already has is `409 tab_already_added`.
+        **Files and spreadsheets mix:** the staging may be a file's or a spreadsheet's (`POST
+        /v1/uploads/links` with this `source_id`); a spreadsheet's tabs become Sheets tables that
+        sync with the source. A spreadsheet another unarchived source reads is `409 sheet_in_use`
+        (it says nothing of whose; the source's own claim is fine), and a tab the source already
+        has as a table is `409 tab_already_added`.
       operationId: addTables
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -834,7 +839,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, `quota_exceeded` or `tab_already_added` (a Sheets source)
+          description: Conflict - `not_an_upload_source`, `source_archived`, `name_taken`, `quota_exceeded`, `sheet_in_use` or `tab_already_added` (a spreadsheet staging)
           content:
             application/json:
               schema:
@@ -842,7 +847,7 @@ paths:
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
-          description: Unprocessable - `cast_failed`, or `staging_kind_mismatch` (a Sheets source)
+          description: Unprocessable - `cast_failed`
           content:
             application/json:
               schema:
@@ -862,7 +867,10 @@ paths:
       summary: Get a table
       description: |
         A table with its columns (in position order) and the relations that start at it, including
-        declared ones and ones a refresh marked missing.
+        declared ones and ones a refresh marked missing. A merged table of an upload source also
+        carries `merged`: its members, its columns and the columns it does not carry. An upload
+        source's table carries its `origin` and, for its owner and `zeteo.sources.read`, the
+        `sync_error` of a Google Sheets table that failed to sync.
 
         **Upload-source owners:** the owner of an upload source is admitted here for its own tables
         and relations without `zeteo.sources.write`.
@@ -958,8 +966,10 @@ paths:
         source is `409 source_archived`; `404 uploads_not_configured` while
         `UPLOADS_READER_URL` is unset.
 
-        **A Google Sheets source's table** is not loaded from a file: `409 not_a_file_upload`; use
-        Sync now (`POST /v1/sources/{sourceId}/refresh`).
+        **Only a file's table** is loaded again this way: a table that syncs from Google Sheets, a
+        merged table, or a file's table given a staging of a spreadsheet is `409 not_a_file_upload`
+        (a Sheets table follows its spreadsheet: use Sync now, `POST /v1/sources/{sourceId}/refresh`).
+        A merged table is redefined with `PUT /v1/sources/{sourceId}/tables/{tableId}/merged`.
       operationId: reuploadTable
       parameters:
         - $ref: '#/components/parameters/SourceIdParam'
@@ -990,7 +1000,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the source syncs from Google Sheets)
+          description: Conflict - `not_an_upload_source`, `source_archived`, `quota_exceeded`, or `not_a_file_upload` (the table is not a file's, or the staging is a spreadsheet's)
           content:
             application/json:
               schema:
@@ -1019,6 +1029,13 @@ paths:
         Drops the table's data; its catalogue row and its columns stay, marked missing, and grants
         keep their references. A `zeteo.source.table_removed` audit entry is written.
 
+        A Google Sheets table is removed the same way, also when a sync marked it missing (its tab
+        was deleted): it is then marked removed, so a sync never brings it back, its tab can be added
+        again as a new table, and the source's claim on the spreadsheet is released once no table
+        uses it. A merged table is removed too (its view is dropped). A table that a live merged
+        table of the source reads is `409 table_in_merged_table` (`merged_table` names it): edit or
+        remove the merged table first.
+
         **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
         `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
         not, gets the same `403 forbidden`.
@@ -1046,7 +1063,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, or `source_archived`
+          description: Conflict - `not_an_upload_source`, `source_archived`, or `table_in_merged_table` (a live merged table reads it; `merged_table` names it)
           content:
             application/json:
               schema:
@@ -1055,6 +1072,231 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           description: Service unavailable - `upload_source_busy` (an upload source's load could not finish in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/sources/{sourceId}/merged-tables:
+    post:
+      tags:
+        - Catalogue
+      summary: Create a merged table in an upload source
+      description: |
+        Creates a merged table from tables of the source.
+
+        A merged table is a view of an upload source that stacks two or more of its other tables
+        (its members; tables that are not merged themselves, whether from files or spreadsheets). A
+        row of it is a row of one member, with `label_column` holding that member's `label`; the
+        other columns are the members' columns matched by name (`from_name`), each included one
+        under the name `name` and typed from its members (`text` where they disagree), a member
+        without it giving null. It is a table like any other: it is granted, queried and joined, its
+        `row_count` is the members' rows, and its view is made again whenever a member changes.
+        The owner of the source gets an owner grant on a new one. A `zeteo.source.merged_table_saved`
+        audit entry records the members and the number of columns (never any cell data).
+
+        Checks, each `400 invalid_request` naming its field in `issues`: `name` and `label_column`
+        are lowercase names; at least two members, each once, with a label of 1 to 100 characters
+        different from the others'; every column's `from_name` given once, the included ones with
+        names that differ from each other and from `label_column`, at least one included, and a
+        `from_name` that some member has.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`; a deleted one is
+        `409 source_archived`; `404 uploads_not_configured` while `UPLOADS_READER_URL` is unset.
+      operationId: createMergedTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergedTableRequest'
+      responses:
+        '201':
+          description: The merged table (its `merged` definition is on `GET /v1/sources/{sourceId}/tables/{tableId}`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Table'
+        '400':
+          description: Bad request - `invalid_request`, with `issues`; a member that is not a table of the source (or is a merged table) is `members.N.table_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found` (no such source), or `uploads_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived` or `name_taken` (a table of the source has the name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `upload_source_busy` (the source's load lock could not be taken in time; retry after `Retry-After`), or `service_unavailable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/sources/{sourceId}/merged-tables/columns:
+    get:
+      tags:
+        - Catalogue
+      summary: The columns tables would give a merged table
+      description: |
+        For the merged table editor: the union of the columns of the given tables, matched by name
+        and in order of first appearance, with the types the members give each (`type` is `text`
+        when they disagree), and a suggested label for each member (the part of its spreadsheet's
+        title or file's name the others do not share; the table names when titles repeat). A
+        missing table counts by the columns it last had. Pass each table as `member`, repeated:
+        `?member=<id>&member=<id>`, two to 100 of them, each a table of the source that is not
+        merged (`400 invalid_request` otherwise).
+
+        **Required permissions:** `zeteo.sources.read`, or the source's owner (holding
+        `zeteo.uploads.write` and `zeteo.data.read`); anyone else gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`;
+        `404 uploads_not_configured` while `UPLOADS_READER_URL` is unset.
+      operationId: getMergedColumns
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - name: member
+          in: query
+          required: true
+          description: A table of the source to merge; repeat the parameter for each (2 to 100)
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 2
+            maxItems: 100
+            items:
+              type: string
+              format: uuid
+      responses:
+        '200':
+          description: The union of the members' columns and their suggested labels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MergedColumnsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found`, or `uploads_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/tables/{tableId}/merged:
+    put:
+      tags:
+        - Catalogue
+      summary: Replace a merged table's definition
+      description: |
+        Replaces the members, labels, label column, name and included columns of a merged table.
+        The merged table keeps its id and its grants; a column keeps its id and grants by the member
+        column it reads (`from_name`), and one no longer included is marked missing. A member that
+        is missing may stay a member of it (it contributes no rows); another table must be a live
+        table that is not merged. A table that is not a merged table of the source is `404 not_found`.
+
+        A merged table is a view of an upload source that stacks two or more of its other tables
+        (its members; tables that are not merged themselves, whether from files or spreadsheets). A
+        row of it is a row of one member, with `label_column` holding that member's `label`; the
+        other columns are the members' columns matched by name (`from_name`), each included one
+        under the name `name` and typed from its members (`text` where they disagree), a member
+        without it giving null. It is a table like any other: it is granted, queried and joined, its
+        `row_count` is the members' rows, and its view is made again whenever a member changes.
+        The owner of the source gets an owner grant on a new one. A `zeteo.source.merged_table_saved`
+        audit entry records the members and the number of columns (never any cell data).
+
+        Checks, each `400 invalid_request` naming its field in `issues`: `name` and `label_column`
+        are lowercase names; at least two members, each once, with a label of 1 to 100 characters
+        different from the others'; every column's `from_name` given once, the included ones with
+        names that differ from each other and from `label_column`, at least one included, and a
+        `from_name` that some member has.
+
+        **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
+        `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
+        not, gets the same `403 forbidden`.
+
+        **Upload sources only:** a database source is `409 not_an_upload_source`; a deleted one is
+        `409 source_archived`.
+      operationId: putMergedTable
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/TableIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergedTableRequest'
+      responses:
+        '200':
+          description: The merged table after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Table'
+        '400':
+          description: Bad request - `invalid_request`, with `issues`; a member that is not a table of the source (or is a merged table) is `members.N.table_id`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          description: Not found - `not_found` (no such source or merged table), or `uploads_not_configured`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          description: Conflict - `not_an_upload_source`, `source_archived` or `name_taken` (a table of the source has the name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          description: Service unavailable - `upload_source_busy` (the source's load lock could not be taken in time; retry after `Retry-After`), or `service_unavailable`
           content:
             application/json:
               schema:
@@ -1070,6 +1312,10 @@ paths:
         the table, header not counted, in the order of its last load), its name (`409 name_taken`
         for one the table has), or its description. The column keeps its id and grants. A
         `zeteo.source.updated` audit entry is written.
+
+        A merged table's column takes its type from its members: retyping one is `400
+        invalid_request`; rename or describe it here, and change what it reads with `PUT
+        /v1/sources/{sourceId}/tables/{tableId}/merged`.
 
         **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
         `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
@@ -2635,26 +2881,30 @@ paths:
       description: |
         Reads every tab of a Google spreadsheet into a staging, like `POST /v1/uploads` does a file,
         and returns the same preview plus the spreadsheet's id and title. Name the spreadsheet by
-        `url` (the link from its address bar or Share dialog, or its bare id) or, to add tabs to a
-        Sheets source, by `source_id`. The spreadsheet must be shared with the service account
-        (`GET /v1/connections/google`) as a Viewer. A staging is used by `POST /v1/sources` with
-        `type: google-sheets`, or by `POST /v1/sources/{sourceId}/tables` for a source's new tabs. It
-        expires one hour after creation and counts against `UPLOAD_MAX_STAGINGS` and the caller's
-        upload slots like a file (`429 too_many_stagings`, `too_many_uploads`).
+        `url` (the link from its address bar or Share dialog, or its bare id). The spreadsheet must
+        be shared with the service account (`GET /v1/connections/google`) as a Viewer. A staging is
+        used by `POST /v1/sources` with `type: upload`, or by `POST /v1/sources/{sourceId}/tables`
+        for an upload source's new tabs. It expires one hour after creation and counts against
+        `UPLOAD_MAX_STAGINGS` and the caller's upload slots like a file (`429 too_many_stagings`,
+        `too_many_uploads`).
 
-        With `source_id` the caller must own the source or hold `zeteo.sources.write`; a source that
-        is missing and one that is someone else's both answer `404 not_found`.
+        With `source_id` (and `url`) the staging is for tables to add to that upload source, which
+        may hold files, other spreadsheets and merged tables too: the caller must own the source or
+        hold `zeteo.sources.write`; a source that is missing and one that is someone else's both
+        answer `404 not_found`. The spreadsheet may already be the source's own (its claim is no
+        conflict); one another unarchived source reads is `409 sheet_in_use` with or without
+        `source_id`.
 
         **Required permissions:** `zeteo.uploads.write` and `zeteo.data.read` (`403 forbidden`
         without).
 
         **Errors:** `404 uploads_not_configured` or `google_not_configured`, `404 not_found`,
         `409 sheet_in_use` (an unarchived source already reads this spreadsheet; says nothing of
-        whose), `409 not_a_sheets_source`, `409 source_archived`, `422 invalid_sheet_link`, `422
-        sheet_not_accessible` (not shared with the service account, or it does not exist), `422`
-        codes a file's limits give (`too_many_rows`, `too_many_columns`, `empty_file`),
-        `502 google_unavailable`, `502 google_sign_in_failed` (Google refused the stored key; an
-        admin should check it).
+        whose), `409 not_an_upload_source` (a database source named by `source_id`),
+        `409 source_archived`, `422 invalid_sheet_link`, `422 sheet_not_accessible` (not shared with
+        the service account, or it does not exist), `422` codes a file's limits give
+        (`too_many_rows`, `too_many_columns`, `empty_file`), `502 google_unavailable`,
+        `502 google_sign_in_failed` (Google refused the stored key; an admin should check it).
       operationId: createUploadFromLink
       requestBody:
         required: true
@@ -2682,7 +2932,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `sheet_in_use`, `not_a_sheets_source` or `source_archived`
+          description: Conflict - `sheet_in_use`, `not_an_upload_source` or `source_archived`
           content:
             application/json:
               schema:
@@ -4974,6 +5224,9 @@ components:
                 description: The field, dotted (`settings.port`); empty for the whole value
               message:
                 type: string
+        merged_table:
+          type: string
+          description: On `table_in_merged_table`, the name of the live merged table that reads the table
         findings:
           type: array
           description: On `writable_login`, what the login check found; at most 20
@@ -5043,8 +5296,7 @@ components:
         - postgres
         - azure-sql
         - upload
-        - google-sheets
-      description: The kind of source. `upload` is an upload source, whose data Zeteo stores from uploaded files. `google-sheets` is a Google Sheets source, stored the same way and synced from a spreadsheet on a schedule.
+      description: 'The kind of source. `upload` is an upload source, whose data Zeteo stores: from uploaded files, from tabs of Google spreadsheets kept current by a sync, and merged tables over those.'
     PostgresSettings:
       type: object
       description: |
@@ -5153,7 +5405,7 @@ components:
           type: string
     Source:
       type: object
-      description: A registered database, an upload source or a Google Sheets source. `settings` is the redacted form; it is null for an upload or Sheets source and when the stored settings cannot be decrypted.
+      description: A registered database or an upload source. `settings` is the redacted form; it is null for an upload source and when the stored settings cannot be decrypted.
       required:
         - id
         - slug
@@ -5243,7 +5495,7 @@ components:
             - string
             - 'null'
           format: uuid
-          description: An upload or Sheets source's owner; null for a database source
+          description: An upload source's owner; null for a database source
         status:
           type: string
           enum:
@@ -5254,7 +5506,7 @@ components:
             - string
             - 'null'
           format: date-time
-          description: A database source's last catalogue refresh; an upload or Sheets source's last load of any of its tables (null before one), which for a Sheets source is its last good sync.
+          description: A database source's last catalogue refresh; an upload source's last load of any of its tables (null before one); with live Sheets tables, the oldest good sync among them.
         size_bytes:
           type:
             - integer
@@ -5284,25 +5536,15 @@ components:
             - string
             - 'null'
           format: date-time
-        sheet:
-          type: object
-          description: A Google Sheets source's spreadsheet; absent on any other type
-          required:
-            - spreadsheet_id
-            - url
-          properties:
-            spreadsheet_id:
-              type: string
-            url:
-              type: string
-              format: uri
         sync:
           type: object
-          description: A Google Sheets source's sync state; absent on any other type
+          description: |
+            An upload source with Google Sheets tables (those not removed): their sync state. Only in the
+            view of its owner or of `zeteo.sources.read`; absent otherwise and on any other source.
           required:
             - interval_minutes
             - last_attempt_at
-            - last_error
+            - failing
             - stale
           properties:
             interval_minutes:
@@ -5314,24 +5556,31 @@ components:
                 - string
                 - 'null'
               format: date-time
-              description: The last sync tried, good or not
-            last_error:
-              type:
-                - object
-                - 'null'
-              description: Why the last sync failed; null after a good one
-              required:
-                - code
-                - message
-              properties:
-                code:
-                  type: string
-                  description: An error code such as `sheet_not_accessible`, `google_unavailable` or `sync_failed`
-                message:
-                  type: string
+              description: The last sync tried, good or not; null before one
+            failing:
+              type: array
+              description: The Sheets tables whose last sync failed; empty when every one is good
+              items:
+                type: object
+                required:
+                  - table_id
+                  - name
+                  - code
+                  - message
+                properties:
+                  table_id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  code:
+                    type: string
+                    description: An error code such as `sheet_not_accessible`, `google_unavailable` or `sync_failed`
+                  message:
+                    type: string
             stale:
               type: boolean
-              description: The last sync failed and the last good one (`last_refreshed_at`) is over 24 hours old or never happened
+              description: A Sheets table fails and has had no good sync for over 24 hours
     ListSourcesResponse:
       type: object
       required:
@@ -5467,7 +5716,7 @@ components:
           type: integer
           minimum: 15
           maximum: 1440
-          description: A Google Sheets source only (`422 not_synced` on any other); minutes between syncs
+          description: An upload source only (`422 not_synced` on a database source); minutes between syncs, used for its Google Sheets tables
         timeout_ms:
           type: integer
           minimum: 1000
@@ -5541,6 +5790,8 @@ components:
         - missing_since
         - row_count
         - last_loaded_at
+        - origin
+        - sync_error
       properties:
         id:
           type: string
@@ -5583,7 +5834,17 @@ components:
             - string
             - 'null'
           format: date-time
-          description: An upload or Sheets source's table, when it was last loaded (for a Sheets table, its last good sync); null for a database source's
+          description: An upload source's table, when it was last loaded (for a Sheets table, its last good sync; for a merged table, its last save); null for a database source's
+        origin:
+          oneOf:
+            - $ref: '#/components/schemas/TableOrigin'
+            - type: 'null'
+          description: An upload source's table, where it comes from; null for a database source's
+        sync_error:
+          oneOf:
+            - $ref: '#/components/schemas/TableSyncError'
+            - type: 'null'
+          description: A Google Sheets table's last failed sync; null when its last sync was good or it has none. Seen by the source's owner and by `zeteo.sources.read` only (a grantee's catalogue carries none)
     Column:
       type: object
       required:
@@ -5694,7 +5955,7 @@ components:
           format: date-time
           description: Set when a refresh no longer finds the foreign key; always null for a declared relation
     TableDetail:
-      description: A table with its columns and the relations that start at it
+      description: A table with its columns and the relations that start at it; a merged table also carries `merged`
       allOf:
         - $ref: '#/components/schemas/Table'
         - type: object
@@ -5710,6 +5971,8 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/Relation'
+            merged:
+              $ref: '#/components/schemas/MergedDetail'
     ListTablesResponse:
       type: object
       required:
@@ -6609,7 +6872,7 @@ components:
             - string
             - 'null'
           format: date-time
-          description: 'When an upload or Sheets source''s table was last loaded: its data is as of then. Null for a database table'
+          description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table'
         columns:
           type: array
           description: Only the granted columns, in the table's order
@@ -6828,68 +7091,21 @@ components:
                 title:
                   type: string
     LinkRequest:
-      description: A spreadsheet to stage, named by its link or by an existing Sheets source
-      oneOf:
-        - type: object
-          additionalProperties: false
-          required:
-            - url
-          properties:
-            url:
-              type: string
-              minLength: 1
-              maxLength: 2048
-              description: The link from the sheet's address bar or Share dialog, or the bare spreadsheet id
-        - type: object
-          additionalProperties: false
-          required:
-            - source_id
-          properties:
-            source_id:
-              type: string
-              format: uuid
-              description: 'A Google Sheets source the caller owns (or, with `zeteo.sources.write`, any): stages its spreadsheet again, to add tabs'
-    CreateSheetsSourceRequest:
       type: object
-      description: A Google Sheets source, made from the caller's staging of a spreadsheet (`POST /v1/uploads/links`)
+      description: A spreadsheet to stage, by its link or id; with `source_id`, to add its tabs to an upload source
       additionalProperties: false
       required:
-        - type
-        - staging_id
-        - name
-        - tables
+        - url
       properties:
-        type:
-          type: string
-          const: google-sheets
-        staging_id:
-          type: string
-          format: uuid
-        name:
+        url:
           type: string
           minLength: 1
-          maxLength: 255
-        description:
+          maxLength: 2048
+          description: The link from the sheet's address bar or Share dialog, or the bare spreadsheet id
+        source_id:
           type: string
-          maxLength: 500
-          description: What the source holds, for the people and the AI that query it; trimmed
-        slug:
-          type: string
-          pattern: ^[a-z][a-z0-9-]{1,62}$
-          description: Generated from the name when omitted
-        sync_interval_minutes:
-          type: integer
-          minimum: 15
-          maximum: 1440
-          default: 60
-          description: Minutes between syncs
-        tables:
-          type: array
-          minItems: 1
-          maxItems: 100
-          description: The staged tabs to load, with any corrections
-          items:
-            $ref: '#/components/schemas/TableCorrection'
+          format: uuid
+          description: 'An upload source the caller owns (or, with `zeteo.sources.write`, any): the staging is for new tables of it, and the source''s own claim on the spreadsheet is no conflict'
     GoogleConnection:
       type: object
       description: The Google connection as a caller sees it - who it signs in as, never the key
@@ -6926,9 +7142,267 @@ components:
               writeOnly: true
             - type: string
               writeOnly: true
+    TableOrigin:
+      description: Where an upload source's table comes from
+      oneOf:
+        - type: object
+          required:
+            - kind
+            - filename
+          properties:
+            kind:
+              type: string
+              const: file
+            filename:
+              type: string
+              description: The uploaded file's name
+        - type: object
+          required:
+            - kind
+            - spreadsheet_id
+            - spreadsheet_title
+            - url
+            - tab_id
+          properties:
+            kind:
+              type: string
+              const: google-sheets
+            spreadsheet_id:
+              type: string
+            spreadsheet_title:
+              type: string
+            url:
+              type: string
+              format: uri
+              description: Opens the tab in Google Sheets
+            tab_id:
+              type: integer
+              description: The tab's `sheetId` in its spreadsheet
+            tab_title:
+              type: string
+              description: The tab's title; absent on a table made before it was kept
+        - type: object
+          description: A view that stacks two or more of the source's tables; its definition is `TableDetail.merged`
+          required:
+            - kind
+            - members
+          properties:
+            kind:
+              type: string
+              const: merged
+            members:
+              type: integer
+              minimum: 2
+              description: The number of member tables
+    TableSyncError:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: An error code such as `sheet_not_accessible`, `google_unavailable`, `cast_failed` or `sync_failed`
+        message:
+          type: string
+    MergedTableRequest:
+      type: object
+      description: A merged table's definition, to create one or replace one's
+      additionalProperties: false
+      required:
+        - name
+        - label_column
+        - members
+        - columns
+      properties:
+        name:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+          description: The merged table's name; a table of the source cannot have it already (`409 name_taken`)
+        label_column:
+          type: string
+          pattern: ^[a-z][a-z0-9_]{0,62}$
+          description: The column that names the member each row comes from; it cannot be the name of an included column
+        members:
+          type: array
+          minItems: 2
+          maxItems: 100
+          description: Tables of the source that are not merged tables themselves; on an edit, a member that is missing may stay
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - table_id
+              - label
+            properties:
+              table_id:
+                type: string
+                format: uuid
+              label:
+                type: string
+                maxLength: 1000
+                description: Trimmed, then 1 to 100 characters, and different for each member
+        columns:
+          type: array
+          minItems: 1
+          maxItems: 1600
+          description: Each column the members have, by its name in them (`from_name`), in the merged table's order; at least one included
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+              - from_name
+              - include
+            properties:
+              name:
+                type: string
+                maxLength: 1000
+                description: 'The merged column''s name when included: lowercase letters, digits and `_`, starting with a letter; at most 63 bytes'
+              from_name:
+                type: string
+                minLength: 1
+                maxLength: 1000
+                description: A column's name in the members, each given once
+              include:
+                type: boolean
+    MergedDetail:
+      type: object
+      description: A merged table's definition and state, on `TableDetail.merged`
+      required:
+        - label_column
+        - members
+        - columns
+        - available
+        - warnings
+      properties:
+        label_column:
+          type: string
+        members:
+          type: array
+          items:
+            type: object
+            required:
+              - table_id
+              - name
+              - label
+              - missing
+            properties:
+              table_id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              label:
+                type: string
+              missing:
+                type: boolean
+                description: The member table is missing or removed; it contributes no rows
+        columns:
+          type: array
+          items:
+            type: object
+            required:
+              - id
+              - name
+              - from_name
+              - type
+              - members
+              - missing
+            properties:
+              id:
+                type: string
+                format: uuid
+              name:
+                type: string
+              from_name:
+                type: string
+                description: The members' column name it reads
+              type:
+                $ref: '#/components/schemas/UploadColumnType'
+              members:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                description: The live members that have it, fitting or not
+              missing:
+                type: boolean
+                description: No longer included
+        available:
+          type: array
+          description: The live members' columns that the merged table does not carry
+          items:
+            type: object
+            required:
+              - name
+              - type
+              - members
+            properties:
+              name:
+                type: string
+              type:
+                $ref: '#/components/schemas/UploadColumnType'
+              members:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+        warnings:
+          type: array
+          description: Member columns whose type no longer fits the merged column's; their values read as null
+          items:
+            type: object
+            required:
+              - column_id
+              - table_id
+            properties:
+              column_id:
+                type: string
+                format: uuid
+              table_id:
+                type: string
+                format: uuid
+    MergedColumnsResponse:
+      type: object
+      required:
+        - columns
+        - labels
+      properties:
+        columns:
+          type: array
+          description: The union of the members' columns by name, in order of first appearance
+          items:
+            type: object
+            required:
+              - name
+              - type
+              - types
+              - members
+            properties:
+              name:
+                type: string
+              type:
+                $ref: '#/components/schemas/UploadColumnType'
+              types:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ColumnType'
+                description: The distinct types the members give it, sorted; `type` is `text` when there are several
+              members:
+                type: array
+                items:
+                  type: string
+                  format: uuid
+                description: The members that have it
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+          description: A suggested label for each member, by its table id
     SyncSummary:
       type: object
-      description: What a sync of a Google Sheets source did, answered by `POST /v1/sources/{sourceId}/refresh`
+      description: What a sync of an upload source's Google Sheets tables did, answered by `POST /v1/sources/{sourceId}/refresh`
       required:
         - synced_at
         - tables
@@ -6938,6 +7412,7 @@ components:
           format: date-time
         tables:
           type: array
+          description: Every Sheets table of the source that is not removed, each synced on its own
           items:
             type: object
             required:
@@ -6945,6 +7420,7 @@ components:
               - name
               - row_count
               - missing
+              - error
             properties:
               id:
                 type: string
@@ -6958,6 +7434,11 @@ components:
               missing:
                 type: boolean
                 description: The tab is no longer in the spreadsheet; the table keeps its last data
+              error:
+                oneOf:
+                  - $ref: '#/components/schemas/TableSyncError'
+                  - type: 'null'
+                description: Why this table did not sync (the others still did); null when it did
     ColumnCorrection:
       type: object
       additionalProperties: false
@@ -6999,7 +7480,7 @@ components:
             $ref: '#/components/schemas/ColumnCorrection'
     CreateUploadSourceRequest:
       type: object
-      description: An upload source, made from the caller's staging
+      description: An upload source, made from the caller's staging of a file or of a spreadsheet (`POST /v1/uploads`, `POST /v1/uploads/links`)
       additionalProperties: false
       required:
         - type
@@ -7032,6 +7513,12 @@ components:
           description: The staged tables to load, with any corrections
           items:
             $ref: '#/components/schemas/TableCorrection'
+        sync_interval_minutes:
+          type: integer
+          minimum: 15
+          maximum: 1440
+          default: 60
+          description: Minutes between syncs; used once the source has Google Sheets tables
     AddTablesRequest:
       type: object
       additionalProperties: false

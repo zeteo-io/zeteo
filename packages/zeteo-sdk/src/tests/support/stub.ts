@@ -10,6 +10,8 @@ export type Recorded = {
   method: string;
   path: string;
   query: Record<string, string>;
+  /** The raw query string, repeated keys kept. */
+  search: string;
   headers: Record<string, string>;
   body: unknown;
 };
@@ -120,6 +122,7 @@ export async function startStub(): Promise<Stub> {
         method: req.method ?? "GET",
         path: url.pathname,
         query: Object.fromEntries(url.searchParams),
+        search: url.search,
         headers: Object.fromEntries(
           Object.entries(req.headers).map(([k, v]) => [
             k,

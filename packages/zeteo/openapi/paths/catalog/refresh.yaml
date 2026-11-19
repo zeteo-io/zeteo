@@ -12,28 +12,29 @@
       `502 source_unreachable`. An audit entry `zeteo.source.refreshed` carries the summary.
       See `docs/catalog.md`.
 
-      **A Google Sheets source** is synced instead (Sync now): every tab is read again and its
-      table reloaded, and the answer is a `SyncSummary`. The source's owner may do this, and a
-      second one within a minute is `429 sync_too_soon` (with `Retry-After`). A sync that fails
-      is the error of its cause, and is recorded in the source's `sync.last_error`: besides the Google
-      errors below, `422 cast_failed` (a value no longer casts to its column's type), `422 empty_file`
-      (a tab has no rows), the upload limit errors (`422`) and `409 quota_exceeded`.
+      **An upload source** is synced instead (Sync now): each of its Google Sheets tables that is
+      not removed is read again and reloaded on its own, and the answer is a `SyncSummary`, which
+      carries an `error` for each table that did not sync (the others still did): its `code` is
+      the cause, such as `sheet_not_accessible`, `google_unavailable`, `google_sign_in_failed`,
+      `cast_failed`, `empty_file`, `quota_exceeded` or `sync_failed`. A table's failure is also
+      recorded as its `sync_error`, and the source's `sync.failing` lists it. The request itself
+      fails only when no sync can start: `409 nothing_to_sync` (the source has no Google Sheets
+      table, live or missing), `429 sync_too_soon` (a second Sync now within a minute, with
+      `Retry-After`; `nothing_to_sync` is answered before that window is taken) or
+      `503 upload_source_busy` (the window is freed again).
 
-      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). A Sheets source's
+      **Required permissions:** `zeteo.sources.write` (`403 forbidden` without). An upload source's
       owner (holding `zeteo.uploads.write` and `zeteo.data.read`) may too.
 
-      **Errors:** `404 not_found`, `409 source_archived`, `409 not_a_database_source`
-      (an upload source's catalogue follows its uploads), `422 host_not_allowed`,
-      `502 source_unreachable`; on a Sheets source also `404 google_not_configured`,
-      `422 sheet_not_accessible`, `429 sync_too_soon`, `502 google_unavailable`,
-      `502 google_sign_in_failed`, `503 upload_source_busy`; and from a sync `422 cast_failed`, `422 empty_file`, the upload limit
-      errors and `409 quota_exceeded`.
+      **Errors:** `404 not_found`, `404 uploads_not_configured` (an upload source), `409 source_archived`,
+      `409 nothing_to_sync`, `429 sync_too_soon`, `503 upload_source_busy`; on a database source
+      `422 host_not_allowed` and `502 source_unreachable`.
     operationId: refreshSource
     parameters:
       - $ref: '../../components/parameters.yaml#/SourceIdParam'
     responses:
       '200':
-        description: What the refresh changed (`RefreshSummary`), or for a Google Sheets source what the sync did (`SyncSummary`)
+        description: What the refresh changed (`RefreshSummary`), or for an upload source what the sync did (`SyncSummary`)
         content:
           application/json:
             schema:
@@ -47,25 +48,25 @@
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
       '409':
-        description: Conflict - `source_archived`, `not_a_database_source`; or on a Sheets source `quota_exceeded` (the sync would pass the owner's storage quota)
+        description: Conflict - `source_archived`; on an upload source `nothing_to_sync` (no Google Sheets table to sync)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '429':
-        description: Too many requests - `sync_too_soon` (a Sheets source synced less than a minute ago), with `retry_after` and the `Retry-After` header
+        description: Too many requests - `sync_too_soon` (an upload source synced less than a minute ago), with `retry_after` and the `Retry-After` header
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '422':
-        description: The host is not permitted - `host_not_allowed`; or on a Sheets source `sheet_not_accessible`, `cast_failed`, `empty_file` or an upload limit error
+        description: The host is not permitted - `host_not_allowed` (a database source)
         content:
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
       '502':
-        description: Bad gateway - `source_unreachable`; `google_unavailable` or `google_sign_in_failed` (a Sheets source)
+        description: Bad gateway - `source_unreachable` (a database source)
         content:
           application/json:
             schema:

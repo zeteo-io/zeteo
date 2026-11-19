@@ -6,7 +6,7 @@ ColumnType:
 Table:
   type: object
   description: A table or view of a source
-  required: [id, source_id, schema_name, name, kind, description, last_seen_at, missing_since, row_count, last_loaded_at]
+  required: [id, source_id, schema_name, name, kind, description, last_seen_at, missing_since, row_count, last_loaded_at, origin, sync_error]
   properties:
     id: { type: string, format: uuid, description: 'Stable across refreshes' }
     source_id: { type: string, format: uuid }
@@ -26,7 +26,48 @@ Table:
     last_loaded_at:
       type: [string, 'null']
       format: date-time
-      description: An upload or Sheets source's table, when it was last loaded (for a Sheets table, its last good sync); null for a database source's
+      description: An upload source's table, when it was last loaded (for a Sheets table, its last good sync; for a merged table, its last save); null for a database source's
+    origin:
+      oneOf:
+        - { $ref: '#/TableOrigin' }
+        - { type: 'null' }
+      description: An upload source's table, where it comes from; null for a database source's
+    sync_error:
+      oneOf:
+        - { $ref: '#/TableSyncError' }
+        - { type: 'null' }
+      description: A Google Sheets table's last failed sync; null when its last sync was good or it has none. Seen by the source's owner and by `zeteo.sources.read` only (a grantee's catalogue carries none)
+
+TableOrigin:
+  description: Where an upload source's table comes from
+  oneOf:
+    - type: object
+      required: [kind, filename]
+      properties:
+        kind: { type: string, const: file }
+        filename: { type: string, description: The uploaded file's name }
+    - type: object
+      required: [kind, spreadsheet_id, spreadsheet_title, url, tab_id]
+      properties:
+        kind: { type: string, const: google-sheets }
+        spreadsheet_id: { type: string }
+        spreadsheet_title: { type: string }
+        url: { type: string, format: uri, description: Opens the tab in Google Sheets }
+        tab_id: { type: integer, description: The tab's `sheetId` in its spreadsheet }
+        tab_title: { type: string, description: The tab's title; absent on a table made before it was kept }
+    - type: object
+      description: A view that stacks two or more of the source's tables; its definition is `TableDetail.merged`
+      required: [kind, members]
+      properties:
+        kind: { type: string, const: merged }
+        members: { type: integer, minimum: 2, description: The number of member tables }
+
+TableSyncError:
+  type: object
+  required: [code, message]
+  properties:
+    code: { type: string, description: 'An error code such as `sheet_not_accessible`, `google_unavailable`, `cast_failed` or `sync_failed`' }
+    message: { type: string }
 
 Column:
   type: object
@@ -78,7 +119,7 @@ Relation:
       description: Set when a refresh no longer finds the foreign key; always null for a declared relation
 
 TableDetail:
-  description: A table with its columns and the relations that start at it
+  description: A table with its columns and the relations that start at it; a merged table also carries `merged`
   allOf:
     - $ref: '#/Table'
     - type: object
@@ -90,6 +131,8 @@ TableDetail:
         relations:
           type: array
           items: { $ref: '#/Relation' }
+        merged:
+          $ref: '#/MergedDetail'
 
 ListTablesResponse:
   type: object
@@ -182,17 +225,128 @@ RefreshSummary:
 
 SyncSummary:
   type: object
-  description: What a sync of a Google Sheets source did, answered by `POST /v1/sources/{sourceId}/refresh`
+  description: What a sync of an upload source's Google Sheets tables did, answered by `POST /v1/sources/{sourceId}/refresh`
   required: [synced_at, tables]
   properties:
     synced_at: { type: string, format: date-time }
     tables:
       type: array
+      description: Every Sheets table of the source that is not removed, each synced on its own
       items:
         type: object
-        required: [id, name, row_count, missing]
+        required: [id, name, row_count, missing, error]
         properties:
           id: { type: string, format: uuid }
           name: { type: string }
           row_count: { type: integer, minimum: 0, description: Rows loaded }
           missing: { type: boolean, description: The tab is no longer in the spreadsheet; the table keeps its last data }
+          error:
+            oneOf:
+              - { $ref: '#/TableSyncError' }
+              - { type: 'null' }
+            description: Why this table did not sync (the others still did); null when it did
+
+MergedTableRequest:
+  type: object
+  description: A merged table's definition, to create one or replace one's
+  additionalProperties: false
+  required: [name, label_column, members, columns]
+  properties:
+    name: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}$', description: The merged table's name; a table of the source cannot have it already (`409 name_taken`) }
+    label_column: { type: string, pattern: '^[a-z][a-z0-9_]{0,62}$', description: 'The column that names the member each row comes from; it cannot be the name of an included column' }
+    members:
+      type: array
+      minItems: 2
+      maxItems: 100
+      description: Tables of the source that are not merged tables themselves; on an edit, a member that is missing may stay
+      items:
+        type: object
+        additionalProperties: false
+        required: [table_id, label]
+        properties:
+          table_id: { type: string, format: uuid }
+          label: { type: string, maxLength: 1000, description: 'Trimmed, then 1 to 100 characters, and different for each member' }
+    columns:
+      type: array
+      minItems: 1
+      maxItems: 1600
+      description: Each column the members have, by its name in them (`from_name`), in the merged table's order; at least one included
+      items:
+        type: object
+        additionalProperties: false
+        required: [name, from_name, include]
+        properties:
+          name: { type: string, maxLength: 1000, description: 'The merged column''s name when included: lowercase letters, digits and `_`, starting with a letter; at most 63 bytes' }
+          from_name: { type: string, minLength: 1, maxLength: 1000, description: 'A column''s name in the members, each given once' }
+          include: { type: boolean }
+
+MergedDetail:
+  type: object
+  description: A merged table's definition and state, on `TableDetail.merged`
+  required: [label_column, members, columns, available, warnings]
+  properties:
+    label_column: { type: string }
+    members:
+      type: array
+      items:
+        type: object
+        required: [table_id, name, label, missing]
+        properties:
+          table_id: { type: string, format: uuid }
+          name: { type: string }
+          label: { type: string }
+          missing: { type: boolean, description: The member table is missing or removed; it contributes no rows }
+    columns:
+      type: array
+      items:
+        type: object
+        required: [id, name, from_name, type, members, missing]
+        properties:
+          id: { type: string, format: uuid }
+          name: { type: string }
+          from_name: { type: string, description: The members' column name it reads }
+          type: { $ref: '../uploads/schemas.yaml#/UploadColumnType' }
+          members: { type: array, items: { type: string, format: uuid }, description: 'The live members that have it, fitting or not' }
+          missing: { type: boolean, description: No longer included }
+    available:
+      type: array
+      description: The live members' columns that the merged table does not carry
+      items:
+        type: object
+        required: [name, type, members]
+        properties:
+          name: { type: string }
+          type: { $ref: '../uploads/schemas.yaml#/UploadColumnType' }
+          members: { type: array, items: { type: string, format: uuid } }
+    warnings:
+      type: array
+      description: Member columns whose type no longer fits the merged column's; their values read as null
+      items:
+        type: object
+        required: [column_id, table_id]
+        properties:
+          column_id: { type: string, format: uuid }
+          table_id: { type: string, format: uuid }
+
+MergedColumnsResponse:
+  type: object
+  required: [columns, labels]
+  properties:
+    columns:
+      type: array
+      description: The union of the members' columns by name, in order of first appearance
+      items:
+        type: object
+        required: [name, type, types, members]
+        properties:
+          name: { type: string }
+          type: { $ref: '../uploads/schemas.yaml#/UploadColumnType' }
+          types:
+            type: array
+            items: { $ref: '#/ColumnType' }
+            description: The distinct types the members give it, sorted; `type` is `text` when there are several
+          members: { type: array, items: { type: string, format: uuid }, description: The members that have it }
+    labels:
+      type: object
+      additionalProperties: { type: string }
+      description: A suggested label for each member, by its table id

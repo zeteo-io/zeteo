@@ -366,7 +366,7 @@ DiscoveredTable:
     kind: { type: string, enum: [table, view] }
     description: { type: [string, 'null'] }
     missing: { type: boolean, description: The last refresh did not find the table }
-    last_loaded_at: { type: [string, 'null'], format: date-time, description: 'When an upload or Sheets source''s table was last loaded: its data is as of then. Null for a database table' }
+    last_loaded_at: { type: [string, 'null'], format: date-time, description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table' }
     columns:
       type: array
       description: Only the granted columns, in the table's order
