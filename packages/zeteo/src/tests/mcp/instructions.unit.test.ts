@@ -50,7 +50,9 @@ describe("MCP_INSTRUCTIONS", () => {
     expect(MCP_INSTRUCTIONS).toContain("Prefer a source's measures");
     expect(MCP_INSTRUCTIONS).toContain("`describe_table`");
     expect(MCP_INSTRUCTIONS).toContain("ask which, quoting their descriptions");
-    expect(MCP_INSTRUCTIONS).toContain("measures included");
+    expect(MCP_INSTRUCTIONS).toContain(
+      "names, descriptions and measure formulas tools return"
+    );
   });
 
   it("does not mention export, which MCP does not offer", () => {
