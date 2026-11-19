@@ -29,11 +29,16 @@ Error:
             type: string
     dependents:
       type: array
-      description: On `measure_in_use`, the names of the measures that use the one changed and would break
-      items: { type: string }
+      description: On `measure_in_use`, the measures and metrics that use the one changed and would break
+      items:
+        type: object
+        required: [kind, name]
+        properties:
+          kind: { type: string, enum: [measure, metric] }
+          name: { type: string }
     path:
       type: array
-      description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]` or `["table"]`
+      description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]`, `["table"]` or `["date_column"]` (`["formula"]` for a metric)
       items: { type: string }
     merged_table:
       type: string

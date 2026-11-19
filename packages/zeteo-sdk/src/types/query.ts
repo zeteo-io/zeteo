@@ -114,14 +114,7 @@ export type SelectItem =
        * Truncated in UTC; weeks start on Monday. A fiscal bucket gives the
        * start of the fiscal quarter or year, which follows the calendar.
        */
-      bucket:
-        | "day"
-        | "week"
-        | "month"
-        | "quarter"
-        | "year"
-        | "fiscal_quarter"
-        | "fiscal_year";
+      bucket: BucketUnit;
       column: Path;
       as?: Alias;
     }
@@ -165,8 +158,22 @@ export interface RelativeDate {
   };
 }
 
-/** What a comparison takes: a value, or a moment relative to now. */
-export type ComparedValue = FilterValue | RelativeDate;
+/** A date bucket's unit. */
+export type BucketUnit =
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | "fiscal_quarter"
+  | "fiscal_year";
+
+/**
+ * What a comparison takes: a value, a moment relative to now, or a fixed
+ * measure (`{ measure: name }`, one value of any table; not for `in`,
+ * `notIn` or `between`).
+ */
+export type ComparedValue = FilterValue | RelativeDate | { measure: string };
 
 export interface FilterOperators {
   eq?: ComparedValue;
@@ -176,7 +183,10 @@ export interface FilterOperators {
   lt?: ComparedValue;
   lte?: ComparedValue;
   /** Two values, inclusive. */
-  between?: [ComparedValue, ComparedValue];
+  between?: [
+    Exclude<ComparedValue, { measure: string }>,
+    Exclude<ComparedValue, { measure: string }>,
+  ];
   /** 1 to 1,000 values. */
   in?: FilterValue[];
   notIn?: FilterValue[];
@@ -197,7 +207,7 @@ export type Filter =
   | { not: Filter }
   | { [path: string]: FilterOperators };
 
-export interface Query {
+export interface TableQuery {
   /** The source's slug. */
   source: string;
   /** A table or view: its bare name when unique among the source's schemas, else `schema.table`. */
@@ -218,6 +228,39 @@ export interface Query {
   /** 0 to 1,000,000. */
   offset?: number;
 }
+
+/** A bound of a metric query's `range`. */
+export type RangeBound =
+  { date: string } | { timestamp: string } | RelativeDate;
+
+/** Half-open bounds on each measure's date column: `gte`, `lt` or both. */
+export type MetricRange =
+  { gte: RangeBound; lt?: RangeBound } | { gte?: RangeBound; lt: RangeBound };
+
+/**
+ * Measures and metrics of different tables of one source, combined per
+ * period; told apart from a table query by its `metrics` key. The result is
+ * `period` (when `bucket` is given) then one column per name, in order.
+ * `bucket` and `range` apply to each non-fixed measure's own `date_column`.
+ * There is no `where`, `join`, `groupBy` or `having`.
+ */
+export interface MetricQuery {
+  /** The source's slug. */
+  source: string;
+  /** 1 to 20 names of measures or metrics, each once. */
+  metrics: string[];
+  bucket?: BucketUnit;
+  range?: MetricRange;
+  /** Each entry one `{ "<name>": "asc" | "desc" }`, naming `period` or a requested name. */
+  orderBy?: Record<string, "asc" | "desc">[];
+  /** Default 1,000. */
+  limit?: number;
+  /** 0 to 1,000,000. */
+  offset?: number;
+}
+
+/** A table query or a metric query. */
+export type Query = TableQuery | MetricQuery;
 
 export interface QueryWarning {
   code: "join_multiplies_rows";

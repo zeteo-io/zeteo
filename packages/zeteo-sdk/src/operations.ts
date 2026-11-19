@@ -222,6 +222,24 @@ export const OPERATIONS = {
     method: "DELETE",
     path: "/v1/sources/{sourceId}/measures/{measureId}",
   },
+  listMetrics: { method: "GET", path: "/v1/sources/{sourceId}/metrics" },
+  createMetric: { method: "POST", path: "/v1/sources/{sourceId}/metrics" },
+  previewMetric: {
+    method: "POST",
+    path: "/v1/sources/{sourceId}/metrics/preview",
+  },
+  getMetric: {
+    method: "GET",
+    path: "/v1/sources/{sourceId}/metrics/{metricId}",
+  },
+  updateMetric: {
+    method: "PATCH",
+    path: "/v1/sources/{sourceId}/metrics/{metricId}",
+  },
+  deleteMetric: {
+    method: "DELETE",
+    path: "/v1/sources/{sourceId}/metrics/{metricId}",
+  },
   listMeasureEditors: {
     method: "GET",
     path: "/v1/sources/{sourceId}/measure-editors",

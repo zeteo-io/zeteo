@@ -161,7 +161,10 @@ CalcExpr:
     - type: object
       additionalProperties: false
       required: [measure]
-      description: A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding one is group-level
+      description: |
+        A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding
+        one is group-level. A fixed measure (`fixed: true`, of any table) is one value ignoring the
+        query's filters and grouping, usable anywhere an expression is, inside an aggregate too.
       properties:
         measure: { $ref: '#/Alias' }
     - { $ref: '#/CalcOperation' }
@@ -257,7 +260,7 @@ CalcOperation:
       minItems: 2
       maxItems: 2
       items: { $ref: '#/CalcExpr' }
-    businessDaysInMonth: { $ref: '#/CalcExpr', description: "The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal" }
+    businessDaysInMonth: { $ref: '#/CalcExpr', description: "The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal, or a date or timestamp column or date expression, whose month is looked up in the calendar's counts for 25 years either side of now" }
     businessDaysElapsed: { $ref: '#/CalcExpr', description: "The calendar's business days from the 1st of the date's month through the date, inclusive; the argument is a date, timestamp or relative date literal" }
     businessDaysRemaining: { $ref: '#/CalcExpr', description: "The calendar's business days after the date through the end of its month; the argument is a date, timestamp or relative date literal" }
 
@@ -269,16 +272,83 @@ Filter:
     `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
     takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
     "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
-    `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+    `isNull` (true or false). The comparison operators above (not `in`, `notIn` or `between`) also
+    take `{ "measure": name }`, a fixed measure of any table, as their value (`{ "total": { "gt": {
+    "measure": "avg_order_value" } } }`); a measure that is not fixed is `invalid_operator`. Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
     a column with one of those names cannot be filtered on directly. In `having`, the keys are
     the names of aggregate select items.
   additionalProperties: true
 
 Query:
+  description: A query in the SQL query language, a table query or a metric query, told apart by the `metrics` key of a metric query; see `docs/querying.md` and `docs/measures.md`
+  oneOf:
+    - { $ref: '#/TableQuery' }
+    - { $ref: '#/MetricQuery' }
+
+MetricQuery:
+  type: object
+  additionalProperties: false
+  required: [source, metrics]
+  description: |
+    Combines measures (and metrics) of different tables of one source, per period. The result
+    is `period` (the bucket start, when `bucket` is given) then one column per name, in order;
+    without `bucket` there is one row. `bucket` and `range` apply to each non-fixed measure's own
+    `date_column`; a measure without one, or whose date column the caller cannot read, is
+    `measure_has_no_date` at its name (when `bucket` or `range` is given). A fixed measure reads
+    no periods, so a `bucket` over fixed measures only is `invalid_operator`. At most 20
+    distinct measures in all, a metric counting those of its formula (`too_complex`), and fixed
+    measure subqueries count toward 10 as in a table query. There is no `where`, `join`,
+    `groupBy` or `having`. A name that is neither a visible measure nor a visible metric is
+    `not_found_or_not_accessible`.
+  properties:
+    source: { type: string, minLength: 1, description: The source's slug }
+    metrics:
+      type: array
+      minItems: 1
+      maxItems: 20
+      description: Measure or metric names, each asked for once, naming the output columns
+      items: { $ref: '../measures/schemas.yaml#/MeasureName' }
+    bucket: { type: string, enum: [day, week, month, quarter, year, fiscal_quarter, fiscal_year] }
+    range:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Half-open bounds on each measure's date column, `gte`, `lt` or both; relative dates resolve in the calendar's time zone
+      properties:
+        gte: { $ref: '#/RangeBound' }
+        lt: { $ref: '#/RangeBound' }
+    orderBy:
+      type: array
+      maxItems: 21
+      description: 'Each entry one `{ "<name>": "asc" | "desc" }`, naming `period` or a requested name (`invalid_order` otherwise)'
+      items:
+        type: object
+        minProperties: 1
+        maxProperties: 1
+        additionalProperties: { type: string, enum: [asc, desc] }
+    limit: { type: integer, minimum: 1, description: 'Rows wanted; default 1,000, lowered to the maximum as for a table query' }
+    offset: { type: integer, minimum: 0, maximum: 1000000, default: 0 }
+
+RangeBound:
+  description: A bound of a metric query's `range`
+  oneOf:
+    - type: object
+      additionalProperties: false
+      required: [date]
+      properties:
+        date: { type: string, format: date, description: 'A date literal, `YYYY-MM-DD`' }
+    - type: object
+      additionalProperties: false
+      required: [timestamp]
+      properties:
+        timestamp: { type: string, format: date-time, description: 'A timestamp literal, ISO 8601 with an offset or `Z`' }
+    - { $ref: '#/RelativeDate' }
+
+TableQuery:
   type: object
   additionalProperties: false
   required: [source, from, select]
-  description: A query in the SQL query language; see `docs/querying.md`
+  description: A table query in the SQL query language; see `docs/querying.md`
   properties:
     source: { type: string, minLength: 1, description: The source's slug }
     from:
@@ -376,12 +446,12 @@ QueryResult:
 
 QueryError:
   type: object
-  description: A query that is well formed but cannot be run as written
+  description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name.
   required: [error, error_description, path, suggestions]
   properties:
     error:
       type: string
-      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex]
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex, measure_has_no_date]
     error_description: { type: string }
     path:
       type: array

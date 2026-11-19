@@ -76,6 +76,22 @@ info:
     `409 measure_in_use`. `POST /v1/sources/{sourceId}/measures/preview` runs a draft before it is
     saved.
 
+    A measure may be `fixed`: one value that ignores a query's filters and grouping, usable as a
+    comparison value (`{ "measure": name }`) and anywhere in an expression. A non-fixed measure may
+    name a `date_column` (a date or timestamp column of its home table or reached through to-one
+    relations), which a metric query's `bucket` and `range` apply to.
+
+    ## Metrics
+
+    A metric is a named, described formula over measures of any tables of a source
+    (`{ "div": [{ "measure": "spend" }, { "measure": "revenue" }] }`), asked for by name in a
+    metric query (`{ "source": ..., "metrics": [...], "bucket": "month" }`, see `Query`). It shares
+    the measures' editors, permissions, lock and name space (a name is unique across a source's
+    measures and metrics). A caller sees a metric in full only when every measure it uses is
+    theirs; an editor sees the rest redacted, anyone else not at all, and using one is
+    `not_found_or_not_accessible`. A change or delete of a measure that would break a metric is
+    `409 measure_in_use`. `POST /v1/sources/{sourceId}/metrics/preview` runs a draft.
+
     ## Calendar
 
     `GET /v1/calendar` (`zeteo.data.read`) and `PUT /v1/calendar` (`zeteo.calendar.write`) keep the
@@ -164,6 +180,8 @@ tags:
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Measures
     description: Named, described calculations over a source's table that queries use by name, and the editors who manage them
+  - name: Metrics
+    description: Named, described formulas over a source's measures, combined per period by metric queries
   - name: Calendar
     description: The install's working days, holidays, fiscal year and time zone, which business-day functions, fiscal periods and relative dates follow
   - name: Grants
@@ -178,7 +196,7 @@ tags:
     description: Health and the signed-in caller
 x-tagGroups:
   - name: Sources
-    tags: [Sources, Uploads, Connections, Catalogue, Measures, Calendar]
+    tags: [Sources, Uploads, Connections, Catalogue, Measures, Metrics, Calendar]
   - name: Access
     tags: [Grants]
   - name: Querying
@@ -224,6 +242,12 @@ paths:
     $ref: './paths/sources/measure-preview.yaml#/~1v1~1sources~1{sourceId}~1measures~1preview'
   /v1/sources/{sourceId}/measures/{measureId}:
     $ref: './paths/sources/measure.yaml#/~1v1~1sources~1{sourceId}~1measures~1{measureId}'
+  /v1/sources/{sourceId}/metrics:
+    $ref: './paths/sources/metrics.yaml#/~1v1~1sources~1{sourceId}~1metrics'
+  /v1/sources/{sourceId}/metrics/preview:
+    $ref: './paths/sources/metric-preview.yaml#/~1v1~1sources~1{sourceId}~1metrics~1preview'
+  /v1/sources/{sourceId}/metrics/{metricId}:
+    $ref: './paths/sources/metric.yaml#/~1v1~1sources~1{sourceId}~1metrics~1{metricId}'
   /v1/sources/{sourceId}/measure-editors:
     $ref: './paths/sources/measure-editors.yaml#/~1v1~1sources~1{sourceId}~1measure-editors'
   /v1/calendar:
@@ -437,6 +461,12 @@ components:
       $ref: './components/principals/schemas.yaml#/LookupPrincipalsRequest'
     Query:
       $ref: './components/queries/schemas.yaml#/Query'
+    TableQuery:
+      $ref: './components/queries/schemas.yaml#/TableQuery'
+    MetricQuery:
+      $ref: './components/queries/schemas.yaml#/MetricQuery'
+    RangeBound:
+      $ref: './components/queries/schemas.yaml#/RangeBound'
     QueryResult:
       $ref: './components/queries/schemas.yaml#/QueryResult'
     QueryError:

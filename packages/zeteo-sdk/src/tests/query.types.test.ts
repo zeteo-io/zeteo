@@ -1,6 +1,11 @@
-import type { CalcExpr, Query, SelectItem } from "../types/query.js";
 import type { ChartSettings } from "../types/dashboards.js";
 import { describe, expect, it } from "vitest";
+import type {
+  CalcExpr,
+  MetricQuery,
+  Query,
+  SelectItem,
+} from "../types/query.js";
 
 describe("query types", () => {
   it("accept calculations, nested and in aggregates", () => {
@@ -113,5 +118,39 @@ describe("query types", () => {
     // @ts-expect-error a count over an expression needs a name
     const bad: SelectItem = { count: { add: ["a", "b"] } };
     void bad;
+  });
+});
+
+describe("metric queries", () => {
+  it("are told apart from table queries by their metrics key", () => {
+    const query: Query = {
+      source: "s",
+      metrics: ["revenue", "cost_per_dollar"],
+      bucket: "month",
+      range: {
+        gte: { relative: { unit: "year", offset: 0, startOf: true } },
+        lt: { date: "2027-01-01" },
+      },
+      orderBy: [{ period: "asc" }],
+      limit: 100,
+    };
+    if ("metrics" in query) expect(query.metrics).toHaveLength(2);
+    const bad: MetricQuery = {
+      source: "s",
+      metrics: ["a"],
+      // @ts-expect-error a range has gte, lt or both
+      range: {},
+    };
+    expect(bad).toBeDefined();
+  });
+
+  it("take a fixed measure as a comparison value", () => {
+    const query: Query = {
+      source: "s",
+      from: "orders",
+      select: ["id"],
+      where: { total: { gt: { measure: "avg_order_value" } } },
+    };
+    expect(query).toBeDefined();
   });
 });

@@ -76,6 +76,22 @@ info:
     `409 measure_in_use`. `POST /v1/sources/{sourceId}/measures/preview` runs a draft before it is
     saved.
 
+    A measure may be `fixed`: one value that ignores a query's filters and grouping, usable as a
+    comparison value (`{ "measure": name }`) and anywhere in an expression. A non-fixed measure may
+    name a `date_column` (a date or timestamp column of its home table or reached through to-one
+    relations), which a metric query's `bucket` and `range` apply to.
+
+    ## Metrics
+
+    A metric is a named, described formula over measures of any tables of a source
+    (`{ "div": [{ "measure": "spend" }, { "measure": "revenue" }] }`), asked for by name in a
+    metric query (`{ "source": ..., "metrics": [...], "bucket": "month" }`, see `Query`). It shares
+    the measures' editors, permissions, lock and name space (a name is unique across a source's
+    measures and metrics). A caller sees a metric in full only when every measure it uses is
+    theirs; an editor sees the rest redacted, anyone else not at all, and using one is
+    `not_found_or_not_accessible`. A change or delete of a measure that would break a metric is
+    `409 measure_in_use`. `POST /v1/sources/{sourceId}/metrics/preview` runs a draft.
+
     ## Calendar
 
     `GET /v1/calendar` (`zeteo.data.read`) and `PUT /v1/calendar` (`zeteo.calendar.write`) keep the
@@ -164,6 +180,8 @@ tags:
     description: A source's tables, columns and relations, read from the source by a refresh
   - name: Measures
     description: Named, described calculations over a source's table that queries use by name, and the editors who manage them
+  - name: Metrics
+    description: Named, described formulas over a source's measures, combined per period by metric queries
   - name: Calendar
     description: The install's working days, holidays, fiscal year and time zone, which business-day functions, fiscal periods and relative dates follow
   - name: Grants
@@ -1933,6 +1951,321 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MeasureInUseError'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/metrics:
+    get:
+      tags:
+        - Metrics
+      summary: List a source's metrics
+      description: |
+        The metrics of the source as the caller may see them, in full with whether the caller can use
+        one (`usable`: every measure it uses is theirs). Those who see every metric
+        (`zeteo.sources.read`, or the owner of an upload source) get each in full, with whether it is
+        `broken`. Anyone else gets the ones whose measures are all in their own visible catalogue. A
+        measure editor also sees the others, redacted (name, description and `usable: false`, never
+        the formula). Editors and those who see every metric get `used_by`. `can_edit` and
+        `can_manage_editors` are as for measures.
+
+        A source the caller has nothing of is `404 not_found`.
+
+        **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+      operationId: listMetrics
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMetricsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Metrics
+      summary: Create a metric
+      description: |
+        Saves a metric: a named, described formula over measures of any tables of the source, which a
+        metric query then asks for by name. The draft's formula is checked to hold only numbers,
+        measures and arithmetic (`invalid_operator`) and planned against the editor's own catalogue,
+        so an editor cannot use measures they cannot see. A name is unique across the source's
+        measures and metrics. A `zeteo.metric.created` audit entry is written.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+        **Errors:** `400` with `error` the query error code of the first problem and `path`
+        (`["formula", ...]`); `404 not_found` (source); `409 measure_name_taken`, `409 source_archived`.
+      operationId: createMetric
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMetricRequest'
+            example:
+              name: cost_per_dollar
+              description: Ad spend per dollar of revenue. Lower is better.
+              formula:
+                div:
+                  - measure: spend
+                  - measure: revenue
+      responses:
+        '201':
+          description: The metric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metric'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`; or the formula does not plan, with the
+            query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/metrics/preview:
+    post:
+      tags:
+        - Metrics
+      summary: Preview a draft metric
+      description: |
+        Runs a draft metric, not saved, as a metric query asking for it alone, so an editor can check
+        the number before saving: one row, or, with `bucket`, one per period ordered by `period`,
+        and within `range` when given (each measure's own date column; `measure_has_no_date` for a
+        measure without one). The draft is checked as on create, then runs as a normal query as the
+        caller, with the same limits, the same concurrency leases and a record in the run log with
+        entry point `measure_preview`. A client that disconnects stops its query on the source.
+
+        **Required permissions:** `zeteo.measures.write` and `zeteo.data.read` (`403 forbidden`
+        without), and being an editor of the source.
+
+        **Errors:** `400` as on create; `404 not_found`; `409 source_archived`; the query errors of
+        `POST /v1/query` (`422`, `429`, `502`, `503`).
+      operationId: previewMetric
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewMetricRequest'
+            example:
+              metric:
+                name: cost_per_dollar
+                description: Ad spend per dollar of revenue.
+                formula:
+                  div:
+                    - measure: spend
+                    - measure: revenue
+              bucket: month
+              range:
+                gte:
+                  relative:
+                    unit: year
+                    offset: 0
+                    startOf: true
+      responses:
+        '200':
+          description: The rows, as `POST /v1/query` answers them
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResult'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`; or the formula does not plan, with the
+            query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The query cannot be run as written; the errors of `POST /v1/query`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: Too many queries - `too_many_queries` or `source_busy`; retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `query_failed` or `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/metrics/{metricId}:
+    get:
+      tags:
+        - Metrics
+      summary: Get a metric
+      description: |
+        One metric in full, to a caller who may see it in full: those who see every metric
+        (`zeteo.sources.read`, or the owner of an upload source), and anyone whose catalogue holds
+        every measure it uses. Anyone else gets the `404 not_found` a metric that does not exist gives.
+
+        **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+      operationId: getMetric
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MetricIdParam'
+      responses:
+        '200':
+          description: The metric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metric'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Metrics
+      summary: Change a metric
+      description: |
+        Changes any of the create fields, at least one. An editor may change only a metric they can
+        see in full (else the 404 of a metric that does not exist for them). The changed metric is
+        checked as on create. Saved queries that use it do not block a change; `used_by` says how
+        many there are. A `zeteo.metric.updated` audit entry is written.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+        **Errors:** `400` as on create; `404 not_found`; `409 measure_name_taken`, `409 source_archived`.
+      operationId: updateMetric
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MetricIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMetricRequest'
+      responses:
+        '200':
+          description: The metric
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Metric'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues` (including a body with no field); or the
+            formula does not plan, with the query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Metrics
+      summary: Delete a metric
+      description: |
+        Deletes a metric the caller can see in full. Saved queries that use it do not block a
+        delete. A `zeteo.metric.deleted` audit entry is written.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+        **Errors:** `404 not_found`; `409 source_archived`.
+      operationId: deleteMetric
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MetricIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
@@ -5680,6 +6013,14 @@ components:
       schema:
         type: string
         format: uuid
+    MetricIdParam:
+      name: metricId
+      in: path
+      required: true
+      description: The metric's id, in the source named by the path. A metric of another source, or one the caller may not see in full, is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequestResponse:
       description: Bad request - `invalid_request`, with `issues`
@@ -5795,12 +6136,23 @@ components:
                 type: string
         dependents:
           type: array
-          description: On `measure_in_use`, the names of the measures that use the one changed and would break
+          description: On `measure_in_use`, the measures and metrics that use the one changed and would break
           items:
-            type: string
+            type: object
+            required:
+              - kind
+              - name
+            properties:
+              kind:
+                type: string
+                enum:
+                  - measure
+                  - metric
+              name:
+                type: string
         path:
           type: array
-          description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]` or `["table"]`
+          description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]`, `["table"]` or `["date_column"]` (`["formula"]` for a metric)
           items:
             type: string
         merged_table:
@@ -7085,13 +7437,18 @@ components:
                 type: string
                 format: uuid
     Query:
+      description: A query in the SQL query language, a table query or a metric query, told apart by the `metrics` key of a metric query; see `docs/querying.md` and `docs/measures.md`
+      oneOf:
+        - $ref: '#/components/schemas/TableQuery'
+        - $ref: '#/components/schemas/MetricQuery'
+    TableQuery:
       type: object
       additionalProperties: false
       required:
         - source
         - from
         - select
-      description: A query in the SQL query language; see `docs/querying.md`
+      description: A table query in the SQL query language; see `docs/querying.md`
       properties:
         source:
           type: string
@@ -7163,6 +7520,99 @@ components:
           minimum: 0
           maximum: 1000000
           default: 0
+    MetricQuery:
+      type: object
+      additionalProperties: false
+      required:
+        - source
+        - metrics
+      description: |
+        Combines measures (and metrics) of different tables of one source, per period. The result
+        is `period` (the bucket start, when `bucket` is given) then one column per name, in order;
+        without `bucket` there is one row. `bucket` and `range` apply to each non-fixed measure's own
+        `date_column`; a measure without one, or whose date column the caller cannot read, is
+        `measure_has_no_date` at its name (when `bucket` or `range` is given). A fixed measure reads
+        no periods, so a `bucket` over fixed measures only is `invalid_operator`. At most 20
+        distinct measures in all, a metric counting those of its formula (`too_complex`), and fixed
+        measure subqueries count toward 10 as in a table query. There is no `where`, `join`,
+        `groupBy` or `having`. A name that is neither a visible measure nor a visible metric is
+        `not_found_or_not_accessible`.
+      properties:
+        source:
+          type: string
+          minLength: 1
+          description: The source's slug
+        metrics:
+          type: array
+          minItems: 1
+          maxItems: 20
+          description: Measure or metric names, each asked for once, naming the output columns
+          items:
+            $ref: '#/components/schemas/MeasureName'
+        bucket:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+            - quarter
+            - year
+            - fiscal_quarter
+            - fiscal_year
+        range:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          description: Half-open bounds on each measure's date column, `gte`, `lt` or both; relative dates resolve in the calendar's time zone
+          properties:
+            gte:
+              $ref: '#/components/schemas/RangeBound'
+            lt:
+              $ref: '#/components/schemas/RangeBound'
+        orderBy:
+          type: array
+          maxItems: 21
+          description: 'Each entry one `{ "<name>": "asc" | "desc" }`, naming `period` or a requested name (`invalid_order` otherwise)'
+          items:
+            type: object
+            minProperties: 1
+            maxProperties: 1
+            additionalProperties:
+              type: string
+              enum:
+                - asc
+                - desc
+        limit:
+          type: integer
+          minimum: 1
+          description: Rows wanted; default 1,000, lowered to the maximum as for a table query
+        offset:
+          type: integer
+          minimum: 0
+          maximum: 1000000
+          default: 0
+    RangeBound:
+      description: A bound of a metric query's `range`
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required:
+            - date
+          properties:
+            date:
+              type: string
+              format: date
+              description: A date literal, `YYYY-MM-DD`
+        - type: object
+          additionalProperties: false
+          required:
+            - timestamp
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+              description: A timestamp literal, ISO 8601 with an offset or `Z`
+        - $ref: '#/components/schemas/RelativeDate'
     QueryResult:
       type: object
       required:
@@ -7216,7 +7666,7 @@ components:
           description: The run's id in the run log
     QueryError:
       type: object
-      description: A query that is well formed but cannot be run as written
+      description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name.
       required:
         - error
         - error_description
@@ -7244,6 +7694,7 @@ components:
             - measure_too_deep
             - measure_not_aggregate
             - too_complex
+            - measure_has_no_date
         error_description:
           type: string
         path:
@@ -9629,7 +10080,10 @@ components:
           additionalProperties: false
           required:
             - measure
-          description: A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding one is group-level
+          description: |
+            A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding
+            one is group-level. A fixed measure (`fixed: true`, of any table) is one value ignoring the
+            query's filters and grouping, usable anywhere an expression is, inside an aggregate too.
           properties:
             measure:
               $ref: '#/components/schemas/Alias'
@@ -9642,7 +10096,9 @@ components:
         `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
         takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
         "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
-        `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+        `isNull` (true or false). The comparison operators above (not `in`, `notIn` or `between`) also
+        take `{ "measure": name }`, a fixed measure of any table, as their value (`{ "total": { "gt": {
+        "measure": "avg_order_value" } } }`); a measure that is not fixed is `invalid_operator`. Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
         a column with one of those names cannot be filtered on directly. In `having`, the keys are
         the names of aggregate select items.
       additionalProperties: true
@@ -9811,7 +10267,7 @@ components:
             $ref: '#/components/schemas/CalcExpr'
         businessDaysInMonth:
           $ref: '#/components/schemas/CalcExpr'
-          description: The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal
+          description: The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal, or a date or timestamp column or date expression, whose month is looked up in the calendar's counts for 25 years either side of now
         businessDaysElapsed:
           $ref: '#/components/schemas/CalcExpr'
           description: The calendar's business days from the 1st of the date's month through the date, inclusive; the argument is a date, timestamp or relative date literal
@@ -9834,6 +10290,25 @@ components:
         (`sum(x)` becomes `sum(case when W then x end)`). The relation paths the formula and `where`
         read are the measure's joins; each must be a to-one path (`measure_reads_to_many`).
       $ref: '#/components/schemas/Filter'
+    MeasureFixed:
+      type: boolean
+      default: false
+      description: |
+        A fixed measure is one value that ignores the query's filters and grouping (a target, the
+        business days of the month): it may be a comparison value (`{ "measure": name }`) or appear
+        anywhere in an expression, inside an aggregate too, and in a metric query it reads no periods.
+        At most 10 fixed-measure subqueries to a query.
+    MeasureDateColumn:
+      type:
+        - string
+        - 'null'
+      minLength: 1
+      maxLength: 256
+      description: |
+        The column a metric query's `bucket` and `range` apply to: a path from the home table,
+        through to-one relations, to a date or timestamp column; null for none (the measure then
+        cannot be bucketed or ranged, `measure_has_no_date`). Checked against the editor's catalogue
+        (`invalid_operator` for a column that is not a date, at path `["date_column"]`).
     MeasureUsedBy:
       type: object
       required:
@@ -9871,6 +10346,8 @@ components:
         - table
         - formula
         - where
+        - fixed
+        - date_column
         - created_at
         - updated_at
         - usable
@@ -9891,6 +10368,10 @@ components:
             - $ref: '#/components/schemas/MeasureWhere'
             - type: 'null'
           description: The measure's filter; null when it has none
+        fixed:
+          $ref: '#/components/schemas/MeasureFixed'
+        date_column:
+          $ref: '#/components/schemas/MeasureDateColumn'
         created_at:
           type: string
           format: date-time
@@ -9971,8 +10452,12 @@ components:
           oneOf:
             - $ref: '#/components/schemas/MeasureWhere'
             - type: 'null'
+        fixed:
+          $ref: '#/components/schemas/MeasureFixed'
+        date_column:
+          $ref: '#/components/schemas/MeasureDateColumn'
     InvalidMeasureError:
-      description: The body of a `400`. For a measure that does not plan its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]` or `["table"]`).
+      description: The body of a `400`. For a measure that does not plan its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]`, `["table"]` or `["date_column"]`; `["formula"]` for a metric).
       allOf:
         - $ref: '#/components/schemas/Error'
         - type: object
@@ -10013,21 +10498,32 @@ components:
               minLength: 1
               maxLength: 256
     MeasureInUseError:
-      description: The body of a `409`; `dependents` is present on `measure_in_use` only (`measure_name_taken` and `source_archived` carry none)
+      description: The body of a `409`; `dependents` is present on `measure_in_use` only (`measure_name_taken` and `source_archived` carry none), measures first
       allOf:
         - $ref: '#/components/schemas/Error'
         - type: object
           properties:
             dependents:
               type: array
-              description: The names of the measures that use this one and would break
+              description: The measures and metrics that use this one and would break
               items:
-                type: string
+                type: object
+                required:
+                  - kind
+                  - name
+                properties:
+                  kind:
+                    type: string
+                    enum:
+                      - measure
+                      - metric
+                  name:
+                    type: string
     UpdateMeasureRequest:
       type: object
       additionalProperties: false
       minProperties: 1
-      description: 'Any of a measure''s fields, at least one. `where: null` removes its filter.'
+      description: 'Any of a measure''s fields, at least one. `where: null` removes its filter and `date_column: null` its date column.'
       properties:
         name:
           $ref: '#/components/schemas/MeasureName'
@@ -10041,6 +10537,147 @@ components:
           oneOf:
             - $ref: '#/components/schemas/MeasureWhere'
             - type: 'null'
+        fixed:
+          $ref: '#/components/schemas/MeasureFixed'
+        date_column:
+          $ref: '#/components/schemas/MeasureDateColumn'
+    MetricFormula:
+      description: |
+        An expression whose leaves are numbers and `{ "measure": name }` (a measure of any table of
+        the source, at least one), combined only by `add`, `sub`, `mul`, `div`, `abs` and `round` and
+        the calendar functions over date literals (`businessDaysInMonth` and the like). No columns,
+        `case`, aggregates, text or other metrics. Planned against the editor's own catalogue.
+      $ref: '#/components/schemas/CalcExpr'
+    Metric:
+      type: object
+      description: A metric in full
+      required:
+        - id
+        - name
+        - description
+        - formula
+        - created_at
+        - updated_at
+        - usable
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        formula:
+          $ref: '#/components/schemas/MetricFormula'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        usable:
+          type: boolean
+          description: Whether every measure it uses is in the caller's own visible catalogue, so the caller can ask for it
+        used_by:
+          $ref: '#/components/schemas/MeasureUsedBy'
+          description: Present for measure editors and for those who see every metric
+        broken:
+          oneOf:
+            - $ref: '#/components/schemas/MeasureBroken'
+            - type: 'null'
+          description: Present for those who see every metric (`zeteo.sources.read`, or the upload source's owner); null when the metric plans cleanly
+    RedactedMetric:
+      type: object
+      description: A metric an editor cannot fully see, because a measure it uses is not theirs. Never its formula, which would name measures they cannot see.
+      required:
+        - name
+        - description
+        - usable
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        usable:
+          type: boolean
+          const: false
+    ListMetricsResponse:
+      type: object
+      required:
+        - data
+        - can_edit
+        - can_manage_editors
+      properties:
+        can_edit:
+          type: boolean
+          description: 'Whether the caller may create, change and delete the source''s metrics now: `zeteo.measures.write`, an editor of the source, and the source not archived'
+        can_manage_editors:
+          type: boolean
+          description: Whether the caller may replace the source's editor list now
+        data:
+          type: array
+          description: A `Metric`, or a `RedactedMetric` (told apart by its `id`, which a redacted one lacks)
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/Metric'
+              - $ref: '#/components/schemas/RedactedMetric'
+    CreateMetricRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - formula
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        formula:
+          $ref: '#/components/schemas/MetricFormula'
+    range:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Half-open bounds on each measure's date column, `gte`, `lt` or both; relative dates resolve in the calendar's time zone
+      properties:
+        gte:
+          $ref: '#/components/schemas/RangeBound'
+        lt:
+          $ref: '#/components/schemas/RangeBound'
+    PreviewMetricRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - metric
+      properties:
+        metric:
+          $ref: '#/components/schemas/CreateMetricRequest'
+          description: A draft metric, not saved. A draft of the name of a stored metric stands in its place for the run.
+        bucket:
+          type: string
+          enum:
+            - day
+            - week
+            - month
+            - quarter
+            - year
+            - fiscal_quarter
+            - fiscal_year
+        range:
+          $ref: '#/components/schemas/range'
+    UpdateMetricRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Any of a metric's fields, at least one
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        formula:
+          $ref: '#/components/schemas/MetricFormula'
     MeasureEditor:
       type: object
       description: A user or group that may create, change and delete the source's measures (when it also holds `zeteo.measures.write`). A group has no `email` key.
@@ -10451,6 +11088,7 @@ x-tagGroups:
       - Connections
       - Catalogue
       - Measures
+      - Metrics
       - Calendar
   - name: Access
     tags:
