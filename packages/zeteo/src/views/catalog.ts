@@ -1,3 +1,4 @@
+import { originOf } from "../uploads/origin.js";
 import type {
   Relation,
   SourceColumn,
@@ -22,6 +23,8 @@ export const tableView = (row: SourceTable) => ({
   row_count: row.rowCount === null ? null : Number(row.rowCount),
   /** An upload source's table: when it was last loaded; null for a database source's. */
   last_loaded_at: iso(row.lastSyncedAt),
+  /** An upload source's table: where it comes from (a file, a Sheets tab, a merge); null for a database source's. */
+  origin: originOf(row),
 });
 
 export const columnView = (row: SourceColumn) => ({

@@ -149,8 +149,7 @@ describe("POST /v1/sources (google-sheets)", () => {
     expect(audit.length).toBeGreaterThan(0);
   });
 
-  // C2: the claim in `upload_claims` makes the second create 409 again.
-  it.skip("two creates from two stagings of one spreadsheet: one 201, one 409 sheet_in_use", async () => {
+  it("two creates from two stagings of one spreadsheet: one 201, one 409 sheet_in_use", async () => {
     const sheet = newSheetId();
     const [a, b] = await Promise.all([
       stage(ownerId, sheet),
@@ -172,24 +171,57 @@ describe("POST /v1/sources (google-sheets)", () => {
       },
     });
     expect(claimed).toHaveLength(1);
+    const claims = await prisma.uploadClaim.findMany({
+      where: { fileId: sheet },
+    });
+    expect(claims.map((c) => [c.vendor, c.sourceId])).toEqual([
+      ["google-sheets", claimed[0]!.id],
+    ]);
   });
 
-  // C2: one source type; `staging_kind_mismatch` goes away.
-  it.skip("refuses type upload with a sheets staging and vice versa", async () => {
-    const sheetStaged = await stage(ownerId, newSheetId());
-    const wrong = await call("POST", "", owner, {
-      type: "upload",
-      staging_id: sheetStaged.stagingId,
-      name: "X",
+  it("a Sheets staging creates an upload source with a claim", async () => {
+    const sheet = newSheetId();
+    const res = await createFrom(
+      owner,
+      (await stage(ownerId, sheet)).stagingId,
+      "sheet:11"
+    );
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.type).toBe("upload");
+    expect(
+      await prisma.uploadClaim.findMany({ where: { sourceId: res.body.id } })
+    ).toEqual([expect.objectContaining({ fileId: sheet })]);
+  });
+
+  it("a file staging creates an upload source, keeping sync_interval_minutes for later Sheets tables", async () => {
+    const fileStaged = await stageFile(ownerId, csvOf(["a"], [["1"]]), "a.csv");
+    const res = await createFrom(owner, fileStaged.stagingId, "csv", {
+      sync_interval_minutes: 30,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+    expect(res.body.type).toBe("upload");
+    const row = await prisma.source.findUniqueOrThrow({
+      where: { id: res.body.id },
+    });
+    expect(row.syncIntervalMinutes).toBe(30);
+    const [table] = await prisma.sourceTable.findMany({
+      where: { sourceId: res.body.id },
+    });
+    expect(table!.origin).toEqual({ kind: "file", filename: "a.csv" });
+    expect(
+      await prisma.uploadClaim.count({ where: { sourceId: res.body.id } })
+    ).toBe(0);
+
+    // Its first Sheets tables keep the interval given at create.
+    const added = await call("POST", `/${res.body.id}/tables`, owner, {
+      staging_id: (await stage(ownerId, newSheetId())).stagingId,
       tables: [{ key: "sheet:11" }],
     });
-    expect(wrong.status).toBe(422);
-    expect(wrong.body.error).toBe("staging_kind_mismatch");
-
-    const fileStaged = await stageFile(ownerId, csvOf(["a"], [["1"]]), "a.csv");
-    const wrong2 = await createFrom(owner, fileStaged.stagingId, "csv");
-    expect(wrong2.status).toBe(422);
-    expect(wrong2.body.error).toBe("staging_kind_mismatch");
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    const after = await prisma.source.findUniqueOrThrow({
+      where: { id: res.body.id },
+    });
+    expect(after.syncIntervalMinutes).toBe(30);
   });
 
   it("after delete, the spreadsheet can be claimed again", async () => {
@@ -246,32 +278,68 @@ describe("POST /v1/sources (google-sheets)", () => {
     });
     expect(dup.status).toBe(409);
     expect(dup.body.error).toBe("tab_already_added");
-    // A staging of another spreadsheet is no longer refused (C2 tests it).
   });
 
-  it("re-upload on a Sheets table is 409 not_a_file_upload", async () => {
-    const created = await createFrom(
-      owner,
-      (await stage(ownerId, newSheetId())).stagingId,
-      "sheet:11"
-    );
-    expect(created.status).toBe(201);
-    const [table] = await uploadTablesOf(created.body.id);
+  it("re-upload of a Sheets table is 409 not_a_file_upload; of a file table works", async () => {
     const fileStaged = await stageFile(
       ownerId,
-      csvOf(["Order ID", "Total"], [["9", "9"]]),
+      csvOf(["Order ID", "Total"], [["1", "1"]]),
       "o.csv"
     );
+    const created = await createFrom(owner, fileStaged.stagingId, "csv", {
+      tables: [{ key: "csv", name: "book" }],
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const added = await call("POST", `/${created.body.id}/tables`, owner, {
+      staging_id: (await stage(ownerId, newSheetId())).stagingId,
+      tables: [{ key: "sheet:11", name: "sheet_orders" }],
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    const byName = Object.fromEntries(
+      (await uploadTablesOf(created.body.id)).map((t) => [t.name, t.id])
+    );
+    const reupload = async (tableId: string) =>
+      call("PUT", `/${created.body.id}/tables/${tableId}`, owner, {
+        staging_id: (
+          await stageFile(
+            ownerId,
+            csvOf(["Order ID", "Total"], [["9", "9"]]),
+            "o2.csv"
+          )
+        ).stagingId,
+        key: "csv",
+      });
+
+    const sheets = await reupload(byName.sheet_orders!);
+    expect(sheets.status, JSON.stringify(sheets.body)).toBe(409);
+    expect(sheets.body.error).toBe("not_a_file_upload");
+    expect(sheets.body.error_description).toBe(
+      "This table syncs from Google Sheets; use Sync now."
+    );
+
+    const file = await reupload(byName.book!);
+    expect(file.status, JSON.stringify(file.body)).toBe(200);
+    const table = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: byName.book! },
+    });
+    expect(table.origin).toEqual({ kind: "file", filename: "o2.csv" });
+  });
+
+  it("re-upload of a file table from a Sheets staging is 409 not_a_file_upload", async () => {
+    const fileStaged = await stageFile(ownerId, csvOf(["a"], [["1"]]), "a.csv");
+    const created = await createFrom(owner, fileStaged.stagingId, "csv");
+    expect(created.status).toBe(201);
+    const [table] = await uploadTablesOf(created.body.id);
     const res = await call(
       "PUT",
       `/${created.body.id}/tables/${table!.id}`,
       owner,
-      { staging_id: fileStaged.stagingId, key: "csv" }
+      {
+        staging_id: (await stage(ownerId, newSheetId())).stagingId,
+        key: "sheet:11",
+      }
     );
     expect(res.status, JSON.stringify(res.body)).toBe(409);
     expect(res.body.error).toBe("not_a_file_upload");
-    expect(res.body.error_description).toBe(
-      "This table syncs from Google Sheets; use Sync now."
-    );
   });
 });

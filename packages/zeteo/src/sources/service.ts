@@ -247,10 +247,7 @@ export const updateSource = async (
   ) {
     throw new NotADatabaseSourceError();
   }
-  if (
-    input.sync_interval_minutes !== undefined &&
-    !(isUploadSource(row) && (await db.sources.hasSheetsTables(row.id)))
-  ) {
+  if (input.sync_interval_minutes !== undefined && !isUploadSource(row)) {
     throw new NotSyncedError();
   }
   if (row.archivedAt) throw new SourceArchivedError();

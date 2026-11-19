@@ -77,7 +77,7 @@ const makeSheets = async () => {
 };
 
 describe("PATCH /v1/sources/:id sync_interval_minutes", () => {
-  it("15 ok, 14 and 1441 are 400, on a file upload 422 not_synced", async () => {
+  it("15 ok, 14 and 1441 are 400", async () => {
     const { source } = await makeSheets();
     const ok = await call("PATCH", `/${source.id}`, owner, {
       sync_interval_minutes: 15,
@@ -94,6 +94,9 @@ describe("PATCH /v1/sources/:id sync_interval_minutes", () => {
       });
       expect(res.status).toBe(400);
     }
+  });
+
+  it("PATCH sync_interval_minutes on a file-only upload source is accepted", async () => {
     const file = await createUploadSource(
       app.url,
       owner,
@@ -103,8 +106,17 @@ describe("PATCH /v1/sources/:id sync_interval_minutes", () => {
     const res = await call("PATCH", `/${file.id}`, owner, {
       sync_interval_minutes: 15,
     });
-    expect(res.status).toBe(422);
-    expect(res.body.error).toBe("not_synced");
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).not.toHaveProperty("sync");
+    const adminRes = await call("PATCH", `/${file.id}`, admin, {
+      row_cap: 500,
+      sync_interval_minutes: 45,
+    });
+    expect(adminRes.status, JSON.stringify(adminRes.body)).toBe(200);
+    const row = await prisma.source.findUniqueOrThrow({
+      where: { id: file.id },
+    });
+    expect(row.syncIntervalMinutes).toBe(45);
   });
 });
 
@@ -151,14 +163,20 @@ describe("PATCH /v1/sources/:id by an admin, with limits and sync_interval_minut
   });
 });
 
-describe("sheet and sync in the view", () => {
+describe("sync and origins in the view", () => {
   it("appear for the owner and admins, not in a grantee's catalogue", async () => {
     const { sheet, source } = await makeSheets();
+    expect(source).not.toHaveProperty("sheet");
+    const tables = await call("GET", `/${source.id}/tables`, owner);
+    expect(tables.status, JSON.stringify(tables.body)).toBe(200);
+    expect(tables.body.data[0].origin).toEqual({
+      kind: "google-sheets",
+      spreadsheetId: sheet,
+      spreadsheetTitle: "Book",
+      sheetId: 7,
+      headerRow: 0,
+    });
     const expected = {
-      sheet: {
-        spreadsheet_id: sheet,
-        url: `https://docs.google.com/spreadsheets/d/${sheet}`,
-      },
       sync: {
         interval_minutes: 60,
         last_attempt_at: expect.any(String),

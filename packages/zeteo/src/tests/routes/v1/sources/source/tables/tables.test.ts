@@ -91,6 +91,7 @@ describe("/v1/sources/:sourceId/tables", () => {
         // Never analyzed: the live-row count stands in for an estimate.
         row_count: 2,
         last_loaded_at: null,
+        origin: null,
       });
       expect(
         res.body.data.find((t: { name: string }) => t.name === "paid_orders")

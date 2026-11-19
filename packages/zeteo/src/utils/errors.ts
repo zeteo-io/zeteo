@@ -393,14 +393,6 @@ export class SheetInUseError extends AppError {
   }
 }
 
-/** A staging of the other kind, or of another spreadsheet, than the source it is used for. */
-export class StagingKindMismatchError extends AppError {
-  constructor(message: string) {
-    super(422, "staging_kind_mismatch", message);
-    this.name = "StagingKindMismatchError";
-  }
-}
-
 /** A spreadsheet tab that already backs a table of the source. */
 export class TabAlreadyAddedError extends AppError {
   constructor() {
@@ -413,15 +405,27 @@ export class TabAlreadyAddedError extends AppError {
   }
 }
 
-/** A re-upload of a table that syncs from Google Sheets. */
+/**
+ * A re-upload of a table that is not a file's (it syncs from Google Sheets),
+ * or of a file's table from a Google Sheets staging.
+ */
 export class NotAFileUploadError extends AppError {
-  constructor() {
+  constructor(message = "This table syncs from Google Sheets; use Sync now.") {
+    super(409, "not_a_file_upload", message);
+    this.name = "NotAFileUploadError";
+  }
+}
+
+/** A table a live merged table of its source reads; names the merged table. */
+export class TableInMergedTableError extends AppError {
+  constructor(mergedTable: string) {
     super(
       409,
-      "not_a_file_upload",
-      "This table syncs from Google Sheets; use Sync now."
+      "table_in_merged_table",
+      `The merged table ${mergedTable} uses this table; edit the merged table first.`,
+      { details: { merged_table: mergedTable } }
     );
-    this.name = "NotAFileUploadError";
+    this.name = "TableInMergedTableError";
   }
 }
 
@@ -440,7 +444,7 @@ export class NotASheetsSourceError extends AppError {
 /** A sync setting on a source that does not sync. */
 export class NotSyncedError extends AppError {
   constructor() {
-    super(422, "not_synced", "Only a Google Sheets source syncs.");
+    super(422, "not_synced", "Only an upload source has a sync interval.");
     this.name = "NotSyncedError";
   }
 }

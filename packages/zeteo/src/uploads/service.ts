@@ -1,10 +1,10 @@
-import { assertSheetUnclaimed, discardStaging, getStaging } from "./staging.js";
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
 import { isFileTable, originOf, type TableOrigin } from "./origin.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { isUploadSource, typeOf } from "../sources/types.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
+import { discardStaging, getStaging } from "./staging.js";
 import { presentSourceById } from "../sources/present.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
@@ -13,7 +13,6 @@ import type { Caller } from "../middleware/auth.js";
 import type { UploadColumnType } from "./types.js";
 import { normalizeName } from "./parse/names.js";
 import { logger } from "../utils/logger.js";
-import { db } from "../utils/db/index.js";
 import { lacking } from "./ownership.js";
 import { randomUUID } from "crypto";
 import env from "../env.js";
@@ -34,9 +33,9 @@ import {
   NotAFileUploadError,
   NotAnUploadSourceError,
   NotFoundError,
-  NotSyncedError,
   SourceArchivedError,
   TabAlreadyAddedError,
+  TableInMergedTableError,
 } from "../utils/errors.js";
 import {
   checkQuota,
@@ -59,6 +58,12 @@ import {
   stageStoredTable,
   swapIn,
 } from "./storage.js";
+import {
+  assertSheetUnclaimed,
+  claimSpreadsheet,
+  releaseAllClaims,
+  releaseUnusedClaims,
+} from "./claims.js";
 
 export { LOAD_LOCKING } from "./loading.js";
 
@@ -302,7 +307,10 @@ export interface CreateUploadSourceInput {
   description?: string;
   slug?: string;
   tables: TableCorrection[];
-  /** Minutes between syncs of its Sheets tables; 60 when not given. */
+  /**
+   * Minutes between syncs of its Sheets tables, kept from a file's staging too
+   * (used once it has Sheets tables); 60 for a Sheets staging when not given.
+   */
   sync_interval_minutes?: number;
 }
 
@@ -311,7 +319,8 @@ export interface CreateUploadSourceInput {
  * then the source, its tables, columns and the caller's owner grants are
  * created with the loads swapped in, in one transaction that also checks the
  * caller's quota. On any failure nothing is left: no source row, no schema.
- * The staging is discarded once the source exists.
+ * A Sheets staging's spreadsheet is claimed in that transaction. The staging
+ * is discarded once the source exists.
  */
 export const createUploadSource = async (
   caller: Caller,
@@ -363,16 +372,21 @@ export const createUploadSource = async (
                 sealedSettings: {},
                 schemas: [schemaFor(id)],
                 createdBy: caller.userId,
-                ...(sheets && {
-                  syncIntervalMinutes: input.sync_interval_minutes ?? 60,
-                  lastRefreshedAt: now,
-                  lastSyncAttemptAt: now,
-                }),
+                ...(sheets
+                  ? {
+                      syncIntervalMinutes: input.sync_interval_minutes ?? 60,
+                      lastRefreshedAt: now,
+                      lastSyncAttemptAt: now,
+                    }
+                  : input.sync_interval_minutes !== undefined && {
+                      syncIntervalMinutes: input.sync_interval_minutes,
+                    }),
               },
             }),
           slugTaken().message,
           "name_taken"
         );
+        if (vendorFileId) await claimSpreadsheet(tx, id, vendorFileId);
         const tables = [];
         for (const [i, t] of planned.entries()) {
           await swapIn(tx, id, t.name, loaded[i]!.physicalName);
@@ -437,7 +451,7 @@ const discardQuietly = async (stagingId: string) => {
 export interface UploadSourceDetails {
   name?: string;
   description?: string;
-  /** Minutes between syncs; a Google Sheets source only. */
+  /** Minutes between syncs, used while it has Google Sheets tables. */
   sync_interval_minutes?: number;
 }
 
@@ -447,13 +461,7 @@ export const changeUploadSource = async (
   id: string,
   change: UploadSourceDetails
 ): Promise<SourceView> => {
-  const found = await findChangeable(caller, id);
-  if (
-    change.sync_interval_minutes !== undefined &&
-    !(await db.sources.hasSheetsTables(found.id))
-  ) {
-    throw new NotSyncedError();
-  }
+  await findChangeable(caller, id);
   await withAudit(async (tx, audit) => {
     const row = await lockChangeable(tx, caller, id);
     await tx.source.update({
@@ -497,7 +505,8 @@ const inDrop = <T>(
  * Deletes an upload source: archives it, drops its schema (waiting for queries
  * reading it, up to the swap's lock timeout) and marks its tables and columns
  * missing. Grants and saved queries keep their references; the owner grants
- * lose their `owner_grant` flag, so an admin may remove them.
+ * lose their `owner_grant` flag, so an admin may remove them. Its claims are
+ * released (archiving never fires their foreign key's cascade).
  */
 export const deleteUploadSource = async (
   caller: Caller,
@@ -523,6 +532,7 @@ export const deleteUploadSource = async (
         where: { table: { sourceId: id }, ownerGrant: true },
         data: { ownerGrant: false },
       });
+      await releaseAllClaims(tx, id);
       await dropSourceSchema(id, tx);
       audit({
         action: AUDIT_EVENTS.sourceDeleted,
@@ -563,7 +573,11 @@ const assertTabsFree = async (
   if (wanted.some((k) => taken.has(k))) throw new TabAlreadyAddedError();
 };
 
-/** Adds the staging's tables to the source, each with an owner grant to the source's owner. */
+/**
+ * Adds the staging's tables (a file's or a spreadsheet's) to the source, each
+ * with an owner grant to the source's owner. A spreadsheet is claimed for the
+ * source in the same transaction: one another source claims is `sheet_in_use`.
+ */
 export const addTables = async (
   caller: Caller,
   id: string,
@@ -572,8 +586,7 @@ export const addTables = async (
   await findChangeable(caller, id);
   const staging = await getStaging(input.staging_id, caller.userId);
   const vendorFileId = spreadsheetOf(staging);
-  // TODO(C2): claims in `upload_claims`; until then a pre-check only.
-  if (vendorFileId) await assertSheetUnclaimed(vendorFileId, prisma, id);
+  if (vendorFileId) await assertSheetUnclaimed(vendorFileId, id);
   const planned: PlannedTable[] = [];
   for (const [i, t] of input.tables.entries()) {
     planned.push(await planTable(staging, t, `tables.${i}`));
@@ -594,6 +607,7 @@ export const addTables = async (
     const loaded = await loadTables(id, planned);
     await inSwap(id, loaded, async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
+      if (vendorFileId) await claimSpreadsheet(tx, id, vendorFileId);
       await assertTabsFree(tx, id, origins);
       const now = new Date();
       const tables = [];
@@ -794,6 +808,11 @@ export const reuploadTable = async (
   // Only a file's table is re-uploaded; a Sheets table follows its tab.
   if (!isFileTable(table)) throw new NotAFileUploadError();
   const staging = await getStaging(input.staging_id, caller.userId);
+  if (staging.kind === "google-sheets") {
+    throw new NotAFileUploadError(
+      "A file's table is re-uploaded from a file, not a Google Sheet."
+    );
+  }
   const filename = staging.tables.find((t) => t.key === input.key)?.filename;
   const planned = await planTable(
     staging,
@@ -867,7 +886,9 @@ export const reuploadTable = async (
 /**
  * Drops a table and marks it and its columns missing; grants keep their
  * references. A Sheets table's origin is marked `removed`, so a sync leaves
- * it missing (its tab can be added again as a new table).
+ * it missing (its tab can be added again as a new table), and the source's
+ * claim of its spreadsheet is released when no other table uses it. A table
+ * a live merged table reads is 409 `table_in_merged_table`.
  */
 export const removeTable = async (
   caller: Caller,
@@ -876,6 +897,7 @@ export const removeTable = async (
 ): Promise<void> => {
   await findChangeable(caller, id);
   await findTable(id, tableId);
+  await assertNotMerged(prisma, id, tableId);
   await withLoadLock(id, () =>
     inDrop(id, async (tx, audit) => {
       const row = await lockChangeable(tx, caller, id);
@@ -883,6 +905,7 @@ export const removeTable = async (
         where: { id: tableId, sourceId: id, missingSince: null },
       });
       if (!table) throw new NotFoundError("Table not found");
+      await assertNotMerged(tx, id, tableId);
       const now = new Date();
       await dropStoredTable(tx, id, table.name);
       // A Sheets table's origin is marked removed so a sync never brings
@@ -901,6 +924,9 @@ export const removeTable = async (
         where: { tableId, missingSince: null },
         data: { missingSince: now },
       });
+      if (origin?.kind === "google-sheets") {
+        await releaseUnusedClaims(tx, id);
+      }
       audit({
         action: AUDIT_EVENTS.sourceTableRemoved,
         resourceType: "source",
@@ -915,6 +941,32 @@ export const removeTable = async (
       });
     })
   );
+};
+
+/** 409 `table_in_merged_table` when a live merged table of the source lists the table as a member. */
+const assertNotMerged = async (
+  client: Prisma.TransactionClient,
+  sourceId: string,
+  tableId: string
+) => {
+  const tables = await client.sourceTable.findMany({
+    where: {
+      sourceId,
+      missingSince: null,
+      origin: { path: ["kind"], equals: "merged" },
+    },
+    select: { name: true, origin: true },
+    orderBy: { name: "asc" },
+  });
+  for (const t of tables) {
+    const origin = originOf(t);
+    if (
+      origin?.kind === "merged" &&
+      origin.definition.members.some((m) => m.tableId === tableId)
+    ) {
+      throw new TableInMergedTableError(t.name);
+    }
+  }
 };
 
 export interface ColumnChange {

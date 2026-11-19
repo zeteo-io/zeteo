@@ -2,8 +2,13 @@ import { IdSchema } from "../../../../utils/idSchema.js";
 import { noNul } from "../../../../utils/text.js";
 import { z } from "zod";
 
-/** A spreadsheet's link or id, or an existing Sheets source whose spreadsheet to read again. */
+const UrlSchema = noNul(z.string().min(1).max(2048));
+
+/**
+ * A spreadsheet's link or id; with `source_id`, the upload source its tabs
+ * are to be added to.
+ */
 export const PostLinkBodySchema = z.union([
-  z.object({ url: noNul(z.string().min(1).max(2048)) }).strict(),
-  z.object({ source_id: IdSchema }).strict(),
+  z.object({ url: UrlSchema }).strict(),
+  z.object({ source_id: IdSchema, url: UrlSchema }).strict(),
 ]);

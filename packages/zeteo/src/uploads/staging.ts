@@ -14,7 +14,6 @@ import {
   EmptyFileError,
   FileTooLargeError,
   FileUnreadableError,
-  SheetInUseError,
   StagingNotFoundError,
   TooManyRequestsError,
   UnsupportedFileTypeError,
@@ -598,29 +597,6 @@ export const stageSheets = async ({
     await dropStagingTables(created);
     throw err;
   }
-};
-
-/**
- * Throws `SheetInUseError` when an unarchived source other than `exceptSourceId`
- * has a table from this spreadsheet; never says whose it is.
- * TODO(C2): a pre-check only; `upload_claims` becomes the guard.
- */
-export const assertSheetUnclaimed = async (
-  spreadsheetId: string,
-  db: Prisma.TransactionClient = prisma,
-  exceptSourceId?: string
-): Promise<void> => {
-  const claimed = await db.sourceTable.findFirst({
-    where: {
-      origin: { path: ["spreadsheetId"], equals: spreadsheetId },
-      source: {
-        archivedAt: null,
-        ...(exceptSourceId && { id: { not: exceptSourceId } }),
-      },
-    },
-    select: { id: true },
-  });
-  if (claimed) throw new SheetInUseError();
 };
 
 /**

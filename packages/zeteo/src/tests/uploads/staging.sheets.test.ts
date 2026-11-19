@@ -1,12 +1,10 @@
 // @module-tag int
 // @module-tag platform
-import { assertSheetUnclaimed, stageSheets } from "../../uploads/staging.js";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { removeUploadSourcesOf } from "../support/uploads.js";
 import { listStagingTables } from "../../uploads/storage.js";
 import type { Row } from "../../uploads/parse/types.js";
-import { SheetInUseError } from "../../utils/errors.js";
-import { uniqueSlug } from "../support/sources.js";
+import { stageSheets } from "../../uploads/staging.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { randomUUID } from "crypto";
 import env from "../../env.js";
@@ -210,52 +208,5 @@ describe("stageSheets", () => {
         spreadsheet: { id: "x", title: "T", tabs: [tab(1, "Empty", [])] },
       })
     ).rejects.toMatchObject({ code: "empty_file" });
-  });
-});
-
-describe("assertSheetUnclaimed", () => {
-  it("throws sheet_in_use for an unarchived source with a table from the spreadsheet and not for an archived one", async () => {
-    const spreadsheetId = `sheet-${randomUUID()}`;
-    const source = await prisma.source.create({
-      data: {
-        slug: uniqueSlug("sheet"),
-        name: "Sheet source",
-        type: "upload",
-        ownerId: owner,
-        sealedSettings: {},
-        schemas: [],
-        createdBy: owner,
-        tables: {
-          create: {
-            schemaName: "zu_test",
-            name: "tab",
-            kind: "table",
-            origin: {
-              kind: "google-sheets",
-              spreadsheetId,
-              spreadsheetTitle: "Sheet",
-              sheetId: 0,
-              headerRow: 0,
-            },
-          },
-        },
-      },
-    });
-    const err = await assertSheetUnclaimed(spreadsheetId).catch(
-      (e: unknown) => e
-    );
-    expect(err).toBeInstanceOf(SheetInUseError);
-    expect(err).toMatchObject({
-      statusCode: 409,
-      code: "sheet_in_use",
-      message:
-        "This spreadsheet is already a Zeteo source. Ask an admin if it should be yours.",
-    });
-    await assertSheetUnclaimed(`other-${randomUUID()}`);
-    await prisma.source.update({
-      where: { id: source.id },
-      data: { archivedAt: new Date() },
-    });
-    await assertSheetUnclaimed(spreadsheetId);
   });
 });

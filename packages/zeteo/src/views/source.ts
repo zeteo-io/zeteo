@@ -50,18 +50,13 @@ const syncError = (
 };
 
 /**
- * An upload source's spreadsheet and sync state, when it has Google Sheets
- * tables. Only the source's own view (its owner, or `zeteo.sources.read`)
- * carries it; no catalogue does.
- * TODO(C2/C3): the spreadsheet goes per table; this shows the first.
+ * An upload source's sync state, when it has Google Sheets tables (each
+ * table's spreadsheet is in its `origin`). Only the source's own view (its
+ * owner, or `zeteo.sources.read`) carries it; no catalogue does.
  */
-const sheetsBlocks = (row: Source, spreadsheetId: string, now: Date) => {
+const syncBlock = (row: Source, now: Date) => {
   const lastError = syncError(row.lastSyncError);
   return {
-    sheet: {
-      spreadsheet_id: spreadsheetId,
-      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
-    },
     sync: {
       interval_minutes: row.syncIntervalMinutes,
       last_attempt_at: row.lastSyncAttemptAt?.toISOString() ?? null,
@@ -122,8 +117,9 @@ export const sourceView = (
   share_count: extras.shareCount,
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
-  ...(extras.spreadsheetIds?.[0] !== undefined &&
-    sheetsBlocks(row, extras.spreadsheetIds[0], now)),
+  ...(extras.spreadsheetIds !== undefined &&
+    extras.spreadsheetIds.length > 0 &&
+    syncBlock(row, now)),
 });
 
 export type SourceView = ReturnType<typeof sourceView>;

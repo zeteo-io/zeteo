@@ -37,3 +37,10 @@ CREATE INDEX "upload_claims_source_id_idx" ON "zeteo"."upload_claims"("source_id
 -- AddForeignKey
 ALTER TABLE "zeteo"."upload_claims" ADD CONSTRAINT "upload_claims_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "zeteo"."sources"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+
+-- Backfill: every table of an upload source loaded before origins came from a file. Its file's
+-- name was not kept, so the table's name stands in for it.
+UPDATE "zeteo"."source_tables" t
+SET "origin" = jsonb_build_object('kind', 'file', 'filename', t."name")
+FROM "zeteo"."sources" s
+WHERE s."id" = t."source_id" AND s."type" = 'upload' AND t."origin" IS NULL;

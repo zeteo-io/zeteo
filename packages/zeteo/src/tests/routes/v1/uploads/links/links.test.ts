@@ -159,6 +159,15 @@ const makeSource = async (
         },
       },
     });
+    if (!fields.archivedAt) {
+      await prisma.uploadClaim.create({
+        data: {
+          vendor: "google-sheets",
+          fileId: vendorFileId,
+          sourceId: source.id,
+        },
+      });
+    }
   }
   return { ...source, vendorFileId };
 };
@@ -253,55 +262,99 @@ describe("POST /v1/uploads/links", () => {
     expect(getSpreadsheet).not.toHaveBeenCalled();
   });
 
-  it("with source_id stages the source's own spreadsheet for its owner", async () => {
-    const source = await makeSource(owner);
-    const res = await post(ownerToken, { source_id: source.id });
+  it("with source_id and a url the source already uses stages it for its owner", async () => {
+    const source = await makeSource(owner, { vendorFileId: SHEET_ID });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
-    expect(res.body.spreadsheet.id).toBe(source.vendorFileId);
+    expect(res.body.spreadsheet.id).toBe(SHEET_ID);
     const row = await prisma.uploadStaging.findUniqueOrThrow({
       where: { id: res.body.staging_id },
     });
-    expect(row.vendorFileId).toBe(source.vendorFileId);
+    expect(row.vendorFileId).toBe(SHEET_ID);
   });
 
-  it("with source_id lets a holder of zeteo.sources.write stage another person's source", async () => {
-    const source = await makeSource(owner);
+  it("with the source_id of a file-only source stages any free spreadsheet", async () => {
+    const source = await makeSource(owner, { vendorFileId: null });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(201);
+  });
+
+  it("with source_id and a url another source claims is 409 sheet_in_use", async () => {
+    await makeSource(stranger, { vendorFileId: SHEET_ID });
+    const source = await makeSource(owner, { vendorFileId: null });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("sheet_in_use");
+    expect(JSON.stringify(res.body)).not.toContain(stranger);
+    expect(getSpreadsheet).not.toHaveBeenCalled();
+  });
+
+  it("with source_id lets a holder of zeteo.sources.write stage for another person's source", async () => {
+    const source = await makeSource(owner, { vendorFileId: SHEET_ID });
     const res = await post(tokenOf(admin, [SOURCES_WRITE]), {
       source_id: source.id,
+      url: SHEET_ID,
     });
     expect(res.status, JSON.stringify(res.body)).toBe(201);
   });
 
   it("with another person's source_id is 404", async () => {
     const source = await makeSource(owner);
-    const res = await post(tokenOf(stranger), { source_id: source.id });
+    const res = await post(tokenOf(stranger), {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
     expect(res.status).toBe(404);
     expect(getSpreadsheet).not.toHaveBeenCalled();
-    expect((await post(ownerToken, { source_id: randomUUID() })).status).toBe(
-      404
-    );
+    expect(
+      (await post(ownerToken, { source_id: randomUUID(), url: SHEET_ID }))
+        .status
+    ).toBe(404);
   });
 
-  it("with the source_id of a source that is not a Sheets source is 409", async () => {
-    const source = await makeSource(owner, { vendorFileId: null });
-    const res = await post(ownerToken, { source_id: source.id });
+  it("with the source_id of a database source is 409 not_an_upload_source", async () => {
+    const source = await prisma.source.create({
+      data: {
+        slug: uniqueSlug("links"),
+        name: "Database",
+        type: "postgres",
+        sealedSettings: {},
+        schemas: ["public"],
+        createdBy: owner,
+      },
+    });
+    const res = await post(tokenOf(admin, [SOURCES_WRITE]), {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe("not_a_sheets_source");
+    expect(res.body.error).toBe("not_an_upload_source");
   });
 
   it("with the source_id of an archived source is 409", async () => {
     const source = await makeSource(owner, { archivedAt: new Date() });
-    const res = await post(ownerToken, { source_id: source.id });
+    const res = await post(ownerToken, {
+      source_id: source.id,
+      url: SHEET_ID,
+    });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("source_archived");
   });
 
-  it("refuses a body naming neither or both", async () => {
+  it("refuses a body without a url", async () => {
     expect((await post(ownerToken, {})).status).toBe(400);
-    expect(
-      (await post(ownerToken, { url: SHEET_ID, source_id: randomUUID() }))
-        .status
-    ).toBe(400);
+    expect((await post(ownerToken, { source_id: randomUUID() })).status).toBe(
+      400
+    );
   });
 
   it("404 google_not_configured when no connection", async () => {

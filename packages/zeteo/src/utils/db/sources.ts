@@ -1,4 +1,4 @@
-import type { Prisma, Source } from "../../../prisma/generated/client/index.js";
+import type { Source } from "../../../prisma/generated/client/index.js";
 import { prisma } from "./prisma.js";
 import env from "../../env.js";
 
@@ -33,11 +33,6 @@ export const listPage = async (options: {
     take: limit + 1,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
-};
-
-/** A Prisma filter for a table whose origin is a Google Sheets tab. */
-export const SHEETS_TABLE: Prisma.SourceTableWhereInput = {
-  origin: { path: ["kind"], equals: "google-sheets" },
 };
 
 /**
