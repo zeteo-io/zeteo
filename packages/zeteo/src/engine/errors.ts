@@ -63,6 +63,7 @@ const KIND_LABEL = {
   table: "Table",
   relation: "Relation",
   column: "Column",
+  measure: "Measure",
 } as const;
 
 export const notFoundMessage = (

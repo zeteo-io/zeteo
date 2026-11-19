@@ -1,4 +1,6 @@
+import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
+import { visibleMeasures } from "../measures/visible.js";
 import type { Calendar } from "../calendar/calendar.js";
 import { loadCalendar } from "../calendar/service.js";
 import { typeOf } from "../sources/types.js";
@@ -63,17 +65,29 @@ export interface VisibleCatalog {
   tables: VisibleTable[];
   relations: VisibleRelation[];
   calendar: Calendar;
+  /** The measures whose expansion plans cleanly against this catalogue; see `visibleMeasures`. */
+  measures: VisibleMeasure[];
 }
 
-/** A stored measure (Task 8 narrows `formula` and `where`). */
+/** A stored measure: a named group-level expression on one home table. */
 export interface MeasureRow {
   id: string;
   sourceId: string;
   tableId: string;
   name: string;
   description: string;
-  formula: unknown;
-  where: unknown | null;
+  formula: CalcExpr;
+  where: Filter | null;
+}
+
+/** A measure the caller may see and use: every column and relation it reads is theirs. */
+export interface VisibleMeasure {
+  id: string;
+  name: string;
+  description: string;
+  tableId: string;
+  formula: CalcExpr;
+  where: Filter | null;
 }
 
 export const buildVisibleCatalog = (
@@ -82,7 +96,6 @@ export const buildVisibleCatalog = (
   columns: SourceColumn[],
   relations: Relation[],
   access: Access,
-  // `measures` is consumed once measures reach the planner.
   extras: { calendar: Calendar; measures: MeasureRow[] }
 ): VisibleCatalog => {
   const columnsByTable = new Map<string, SourceColumn[]>();
@@ -152,7 +165,7 @@ export const buildVisibleCatalog = (
       missing: r.missingSince !== null,
     }));
 
-  return {
+  const catalog: Omit<VisibleCatalog, "measures"> = {
     source: {
       id: source.id,
       slug: source.slug,
@@ -171,6 +184,7 @@ export const buildVisibleCatalog = (
     relations: visibleRelations,
     calendar: extras.calendar,
   };
+  return { ...catalog, measures: visibleMeasures(catalog, extras.measures) };
 };
 
 /** What a catalogue carries besides the source's own rows: the stored calendar, and measures once there are any. */
@@ -226,5 +240,7 @@ export const loadSourceVisibleCatalog = async (
     await loadExtras()
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
-  return visible ? catalog : { ...catalog, tables: [], relations: [] };
+  return visible
+    ? catalog
+    : { ...catalog, tables: [], relations: [], measures: [] };
 };

@@ -646,10 +646,14 @@ describe("sqlLanguage.describe, calculations", () => {
       "max",
       "bucket",
       "calc",
+      "measure",
     ]);
     const calc = items.find((i) => i.properties?.calc)!;
     expect(calc.required).toEqual(["calc", "as"]);
     expect(calc.properties.calc.$ref).toBe("#/$defs/CalcExpr");
+    expect(items.find((i) => i.properties?.measure)!.required).toEqual([
+      "measure",
+    ]);
   });
 
   it("shows paths, numbers and text literals as expressions", () => {

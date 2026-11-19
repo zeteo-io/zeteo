@@ -57,6 +57,7 @@ const catalog = (over: Partial<VisibleCatalog> = {}): VisibleCatalog => ({
     relation("r4", "ghost", "unknown"),
   ],
   calendar: DEFAULT_CALENDAR,
+  measures: [],
   ...over,
 });
 

@@ -263,7 +263,8 @@ export type CalcExpr =
   | { max: CalcExpr }
   | { count: CalcExpr }
   | { countDistinct: CalcExpr }
-  | { case: { when: { if: Filter; then: CalcExpr }[]; else?: CalcExpr } };
+  | { case: { when: { if: Filter; then: CalcExpr }[]; else?: CalcExpr } }
+  | { measure: string };
 
 const AGGREGATE_KEYS = ["sum", "avg", "min", "max", "count", "countDistinct"];
 
@@ -285,7 +286,7 @@ const timestampLiteralSchema = z.strictObject({
 
 /** The keys of the literal objects, which are expressions with no operation in them. */
 const LITERAL_KEYS = ["value", "date", "timestamp", "relative"] as const;
-const isLiteralObject = (v: unknown): boolean =>
+export const isLiteralObject = (v: unknown): boolean =>
   isPlainObject(v) && LITERAL_KEYS.some((k) => k in v);
 
 const notStar = (v: unknown) => v !== "*";
@@ -296,6 +297,13 @@ const tooDeepCalc = z.never({
 const nestedAggregate = z.never({
   error: "An aggregate does not contain another aggregate",
 });
+
+/** A measure's name: the form of an `as` alias. */
+const measureNameSchema = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/, {
+  error:
+    "A measure's name is a lowercase letter then up to 62 of a-z, 0-9 and _",
+});
+const measureRefSchema = z.strictObject({ measure: measureNameSchema });
 
 /**
  * An expression and a nested schema's issues, forwarded with their paths: a
@@ -430,9 +438,19 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
       if (isPlainObject(value) && "relative" in value) {
         return relativeDateSchema.safeParse(value);
       }
+      // A measure is group-level: one operation, never inside an aggregate.
+      if (isPlainObject(value) && "measure" in value) {
+        return (
+          !deeper
+            ? tooDeepCalc
+            : aggregates
+              ? measureRefSchema
+              : nestedAggregate
+        ).safeParse(value);
+      }
       return node.safeParse(value);
     },
-    `A column path, a number, { value: "text" }, { date }, { timestamp }, { relative }, or an object with exactly one of ${[...CALC_OPS, ...DATE_OPS, ...AGGREGATE_KEYS].join(", ")}`,
+    `A column path, a number, { value: "text" }, { date }, { timestamp }, { relative }, { measure: name }, or an object with exactly one of ${[...CALC_OPS, ...DATE_OPS, ...AGGREGATE_KEYS].join(", ")}`,
     { $ref: "#/$defs/CalcExpr" }
   );
 };
@@ -463,7 +481,8 @@ export type SelectItem =
   | { min: CalcExpr; as?: string }
   | { max: CalcExpr; as?: string }
   | { bucket: (typeof BUCKET_UNITS)[number]; column: string; as?: string }
-  | { calc: CalcExpr; as: string };
+  | { calc: CalcExpr; as: string }
+  | { measure: string; as?: string };
 
 const expressionAggregate = (
   key: "sum" | "avg" | "min" | "max" | "count" | "countDistinct"
@@ -494,10 +513,14 @@ const selectForms: Record<string, z.ZodType> = {
     as: aliasSchema.optional(),
   }),
   calc: z.strictObject({ calc: calcSchema, as: aliasSchema }),
+  measure: z.strictObject({
+    measure: measureNameSchema,
+    as: aliasSchema.optional(),
+  }),
 };
 
 const SELECT_ITEM_ERROR =
-  'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column } or { calc: expression, as }; "as" is optional except on calc';
+  'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column }, { calc: expression, as } or { measure: name }; "as" is optional except on calc';
 
 /** Dispatched by key rather than a union, so an issue keeps its exact path. */
 const selectItemSchema = dispatching<SelectItem>(
@@ -728,6 +751,11 @@ const CALC_JSON_SCHEMA_DEFS = {
         },
         "The then of the first when whose if holds, else the else (null without one); every then and the else are of one type"
       ),
+      operation(
+        "measure",
+        asJson,
+        "A measure of the from table, by name: group-level, so not inside an aggregate"
+      ),
     ],
   },
   SelectItem: {
@@ -761,12 +789,20 @@ const CALC_JSON_SCHEMA_DEFS = {
         description:
           "A calculation: row-level (no aggregate) or group-level (every column inside an aggregate), not mixed",
       },
+      {
+        type: "object",
+        properties: { measure: asJson, as: asJson },
+        required: ["measure"],
+        additionalProperties: false,
+        description:
+          "A measure of the from table; named by its own name unless as is given",
+      },
     ],
   },
 };
 
-/** Operation and aggregate objects in one expression. */
-const countNodes = (expr: unknown): number => {
+/** Operation and aggregate objects in one expression; a measure is one. */
+export const countNodes = (expr: unknown): number => {
   if (!isPlainObject(expr) || isLiteralObject(expr)) return 0;
   const [key, operand] = Object.entries(expr)[0] ?? [];
   if (key === undefined) return 0;
@@ -793,6 +829,7 @@ const countNodes = (expr: unknown): number => {
 const nodesInSelectItem = (item: unknown): number => {
   if (!isPlainObject(item)) return 0;
   if ("calc" in item) return countNodes(item.calc);
+  if ("measure" in item) return 1;
   for (const key of ["sum", "avg", "min", "max", "count", "countDistinct"]) {
     if (key in item && typeof item[key] !== "string") {
       return 1 + countNodes(item[key]);

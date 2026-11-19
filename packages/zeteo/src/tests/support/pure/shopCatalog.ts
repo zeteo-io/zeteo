@@ -9,6 +9,7 @@ import type {
 } from "../../../../prisma/generated/client/index.js";
 import {
   buildVisibleCatalog,
+  type MeasureRow,
   type VisibleCatalog,
 } from "../../../grants/visibleCatalog.js";
 
@@ -149,6 +150,8 @@ export interface ShopOptions {
   engine?: "postgres" | "mssql";
   /** The source's join limit; 4 unless given. */
   maxJoins?: number;
+  /** The source's stored measures; the catalogue holds those the caller may use. */
+  measures?: MeasureRow[];
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -256,6 +259,6 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
     columns,
     relations,
     access,
-    { calendar: DEFAULT_CALENDAR, measures: [] }
+    { calendar: DEFAULT_CALENDAR, measures: options.measures ?? [] }
   );
 };
