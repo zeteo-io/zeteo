@@ -6,12 +6,28 @@ import type {
   SourceTable,
 } from "../../prisma/generated/client/index.js";
 
-/** A table's origin as views give it: a merged table's as its member count. */
-const originView = (row: SourceTable) => {
+/**
+ * A table's origin as views give it, in the API's snake_case: a Sheets table's
+ * as its spreadsheet and tab, a merged table's as its member count.
+ */
+export const originView = (row: { origin: unknown }) => {
   const origin = originOf(row);
-  return origin?.kind === "merged"
-    ? { kind: "merged" as const, members: origin.definition.members.length }
-    : origin;
+  if (origin?.kind === "merged") {
+    return {
+      kind: "merged" as const,
+      members: origin.definition.members.length,
+    };
+  }
+  if (origin?.kind === "google-sheets") {
+    return {
+      kind: "google-sheets" as const,
+      spreadsheet_id: origin.spreadsheetId,
+      spreadsheet_title: origin.spreadsheetTitle,
+      url: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(origin.spreadsheetId)}/edit#gid=${origin.sheetId}`,
+      tab_id: origin.sheetId,
+    };
+  }
+  return origin;
 };
 
 const iso = (date: Date | null) => date?.toISOString() ?? null;

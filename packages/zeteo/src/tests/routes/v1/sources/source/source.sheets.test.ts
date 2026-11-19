@@ -171,10 +171,10 @@ describe("sync and origins in the view", () => {
     expect(tables.status, JSON.stringify(tables.body)).toBe(200);
     expect(tables.body.data[0].origin).toEqual({
       kind: "google-sheets",
-      spreadsheetId: sheet,
-      spreadsheetTitle: "Book",
-      sheetId: 7,
-      headerRow: 0,
+      spreadsheet_id: sheet,
+      spreadsheet_title: "Book",
+      url: `https://docs.google.com/spreadsheets/d/${sheet}/edit#gid=7`,
+      tab_id: 7,
     });
     const expected = {
       sync: {
