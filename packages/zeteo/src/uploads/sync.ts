@@ -201,6 +201,7 @@ const syncTable = async (
   table: CatalogTable,
   tab: SpreadsheetTab,
   revived: boolean,
+  spreadsheetTitle: string,
   now: Date
 ): Promise<number | null> => {
   const locator = locatorOf(table);
@@ -253,6 +254,12 @@ const syncTable = async (
     const rowCount = loaded[0]!.rowCount;
     await inSwap(sourceId, loaded, [table.id], async (tx) => {
       const row = await lockSyncedSource(tx, sourceId);
+      // The tab's and spreadsheet's current names, from the read.
+      const current = await tx.sourceTable.findUniqueOrThrow({
+        where: { id: table.id },
+        select: { origin: true },
+      });
+      const origin = sheetsOriginOf(current);
       await swapIn(tx, sourceId, planned.name, loaded[0]!.physicalName);
       await writeColumns(tx, table.id, planned.columns, columns, now);
       await tx.sourceTable.update({
@@ -263,6 +270,9 @@ const syncTable = async (
           lastSeenAt: now,
           lastSyncAttemptAt: now,
           lastSyncError: PrismaRuntime.DbNull,
+          ...(origin && {
+            origin: { ...origin, tabTitle: tab.name, spreadsheetTitle },
+          }),
           ...(revived && { missingSince: null }),
         },
       });
@@ -329,6 +339,7 @@ const syncSpreadsheet = async (
     return { table, kind: "failed", err, error };
   };
   let tabs: Map<number, SpreadsheetTab>;
+  let spreadsheetTitle: string;
   try {
     const read = await readSpreadsheet(
       spreadsheetId,
@@ -336,6 +347,7 @@ const syncSpreadsheet = async (
       located.map((l) => locatorOf(l.table).sheetId)
     );
     tabs = new Map(read.tabs.map((t) => [t.sheetId, t]));
+    spreadsheetTitle = read.title;
   } catch (err) {
     const unreadable = toUnreadable(err);
     const outcomes: Outcome[] = [];
@@ -352,7 +364,14 @@ const syncSpreadsheet = async (
         outcomes.push({ table, kind: "missing" });
         continue;
       }
-      const rowCount = await syncTable(sourceId, table, tab, revived, now);
+      const rowCount = await syncTable(
+        sourceId,
+        table,
+        tab,
+        revived,
+        spreadsheetTitle,
+        now
+      );
       if (rowCount !== null) outcomes.push({ table, kind: "synced", rowCount });
     } catch (err) {
       if (stopsTheSync(err)) throw err;

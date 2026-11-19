@@ -234,6 +234,7 @@ const originsOf = (
           kind: "google-sheets",
           spreadsheetId: staging.vendorFileId!,
           spreadsheetTitle: staged.spreadsheetTitle ?? "",
+          tabTitle: staged.tabTitle ?? "",
           sheetId: staged.locator!.sheetId,
           headerRow: t.headerRow,
         }

@@ -193,6 +193,49 @@ describe("syncSource", () => {
     ]);
   });
 
+  it("a Sheets table's origin records its tab title", async () => {
+    const { sheet, id } = await makeSource();
+    const stock = new FakeSpreadsheet(`sheet-${randomUUID()}`, [
+      { sheetId: 4, title: "Stock", rows: [["sku"], ["a1"]] },
+    ]);
+    sheets.set(stock.id, stock);
+    const staged = await stageFakeSheet(ownerId, stock);
+    await addTables(owner, id, {
+      staging_id: staged.stagingId,
+      tables: [{ key: "sheet:4", name: "stock" }],
+    });
+
+    const origins = async () =>
+      Object.fromEntries(
+        (await prisma.sourceTable.findMany({ where: { sourceId: id } })).map(
+          (t) => [t.name, t.origin]
+        )
+      );
+    expect(await origins()).toMatchObject({
+      costs: { spreadsheetId: sheet.id, tabTitle: "Costs" },
+      stock: { spreadsheetId: stock.id, tabTitle: "Stock" },
+    });
+  });
+
+  it("a renamed tab updates the origin's tabTitle on sync", async () => {
+    const { sheet, id } = await makeSource();
+    const before = await tableNamed(id, "costs");
+    sheet.tab(1).title = "Spend 2026";
+
+    await syncSource(id, ownerId);
+
+    const row = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: before.id },
+    });
+    expect(row.origin).toMatchObject({
+      kind: "google-sheets",
+      spreadsheetId: sheet.id,
+      spreadsheetTitle: "Book",
+      sheetId: 1,
+      tabTitle: "Spend 2026",
+    });
+  });
+
   it("a deleted tab marks its table missing", async () => {
     const { sheet, id } = await makeSource([
       costs(),

@@ -27,6 +27,8 @@ export type TableOrigin =
       kind: "google-sheets";
       spreadsheetId: string;
       spreadsheetTitle: string;
+      /** The tab's title; absent only in rows written before it was kept. */
+      tabTitle?: string;
       sheetId: number;
       headerRow: number | null;
       removed?: boolean;
@@ -67,6 +69,7 @@ const originSchema = z.discriminatedUnion("kind", [
     kind: z.literal("google-sheets"),
     spreadsheetId: z.string(),
     spreadsheetTitle: z.string(),
+    tabTitle: z.string().optional(),
     sheetId: z.number().int(),
     headerRow: z.number().int().nullable(),
     removed: z.boolean().optional(),

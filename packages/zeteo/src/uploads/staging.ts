@@ -101,6 +101,8 @@ export interface StagedTable {
   locator?: { sheetId: number };
   /** A Google Sheets tab: its spreadsheet's title, for the table's origin. */
   spreadsheetTitle?: string;
+  /** A Google Sheets tab: its title, for the table's origin. */
+  tabTitle?: string;
   /** A file's table: the uploaded file's name, for the table's origin. */
   filename?: string;
 }
@@ -582,6 +584,7 @@ export const stageSheets = async ({
       if (result) {
         result.staged.locator = { sheetId: tab.sheetId };
         result.staged.spreadsheetTitle = spreadsheet.title;
+        result.staged.tabTitle = tab.name;
         tables.push(result);
       }
     }
