@@ -152,6 +152,29 @@ PieChart:
     decimals: { $ref: '#/ChartDecimals' }
     legend: { $ref: '#/ChartLegend' }
 
+GaugeChart:
+  type: object
+  additionalProperties: false
+  required: [type, version, value, max]
+  description: |
+    A progress gauge read from the first row of the result: `value` is the progress, `max` the end
+    of the scale and `target` a marker on it (a budget pacing gauge: `value` the spend to date,
+    `target` the budget pace, `max` the monthly budget). Typically fed by measures.
+  properties:
+    type: { type: string, const: gauge }
+    version: { type: integer, const: 1 }
+    value: { $ref: '#/ChartColumn', description: A number column }
+    max: { $ref: '#/ChartColumn', description: A number column, the end of the scale }
+    target: { $ref: '#/ChartColumn', description: A number column, drawn as a marker }
+    min:
+      description: The start of the scale, a number column or a number; 0 when left out
+      oneOf:
+        - { $ref: '#/ChartColumn' }
+        - { type: number }
+    unit: { type: string, maxLength: 20 }
+    decimals: { $ref: '#/ChartDecimals' }
+    legend: { $ref: '#/ChartLegend' }
+
 TableChart:
   type: object
   additionalProperties: false
@@ -180,6 +203,7 @@ ChartSettings:
     - { $ref: '#/AreaChart' }
     - { $ref: '#/BarChart' }
     - { $ref: '#/PieChart' }
+    - { $ref: '#/GaugeChart' }
     - { $ref: '#/TableChart' }
   discriminator:
     propertyName: type
@@ -189,6 +213,7 @@ ChartSettings:
       area: '#/AreaChart'
       bar: '#/BarChart'
       pie: '#/PieChart'
+      gauge: '#/GaugeChart'
       table: '#/TableChart'
 
 PanelTitle:

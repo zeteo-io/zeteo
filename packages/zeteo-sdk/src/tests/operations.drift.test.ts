@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 87 operations as the description", () => {
+  it("lists the same 97 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(87);
-    expect(Object.keys(found)).toHaveLength(87);
+    expect(blocks).toBe(97);
+    expect(Object.keys(found)).toHaveLength(97);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -116,6 +116,48 @@ describe("operations against the API description", () => {
         (c) => c.savedQueries.transfer(ID, { user_id: ID2 }),
       ],
       ["savedQueries.dashboards", (c) => c.savedQueries.dashboards(ID)],
+      ["measures.list", (c) => c.measures.list(ID)],
+      [
+        "measures.create",
+        (c) =>
+          c.measures.create(ID, {
+            name: "m",
+            description: "d",
+            table: "orders",
+            formula: { sum: "total" },
+          }),
+      ],
+      ["measures.get", (c) => c.measures.get(ID, ID2)],
+      ["measures.update", (c) => c.measures.update(ID, ID2, { name: "n" })],
+      ["measures.delete", (c) => c.measures.delete(ID, ID2)],
+      [
+        "measures.preview",
+        (c) =>
+          c.measures.preview(ID, {
+            measure: {
+              name: "m",
+              description: "d",
+              table: "orders",
+              formula: { sum: "total" },
+            },
+          }),
+      ],
+      ["measures.editors", (c) => c.measures.editors(ID)],
+      [
+        "measures.replaceEditors",
+        (c) => c.measures.replaceEditors(ID, [{ type: "user", id: ID2 }]),
+      ],
+      ["calendar.get", (c) => c.calendar.get()],
+      [
+        "calendar.replace",
+        (c) =>
+          c.calendar.replace({
+            working_days: [1, 2, 3, 4, 5],
+            holidays: [],
+            fiscal_year_start_month: 1,
+            time_zone: "UTC",
+          }),
+      ],
       ["savedPanels.list", (c) => c.savedPanels.list()],
       [
         "savedPanels.create",

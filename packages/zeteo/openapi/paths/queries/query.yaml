@@ -78,7 +78,10 @@
           `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
           `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's
           `max_joins`); `too_many_parameters` (at path `[]`: the
-          compiled query binds more values than the source's engine takes). A plan
+          compiled query binds more values than the source's engine takes). The measure codes, at the
+          measure's path: `measure_needs_single_rows` (a query that joins a to-many relation uses a
+          measure), `measure_reads_to_many`, `measure_cycle`, `measure_too_deep`,
+          `measure_not_aggregate` and `too_complex` (the expansion holds more than 500 operations). A plan
           that references a column outside the grants (a planner fault, logged) is
           `not_found_or_not_accessible` with a fixed message and path `[]`.
         content:

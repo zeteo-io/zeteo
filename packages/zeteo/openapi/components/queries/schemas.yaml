@@ -27,8 +27,11 @@ RelativeDate:
     A moment relative to now, as a comparison value of a date or timestamp column:
     `{ "relative": { "unit": "day", "offset": -30 } }` is 30 days before now, and with `startOf`
     `{ "relative": { "unit": "month", "offset": 0, "startOf": true } }` is the start of this month.
-    Resolved in UTC against the minute the run starts, as the same moment for the whole run (a
-    dashboard's panels share one). A week starts on Monday. Never stored as a date: a saved query
+    Resolved against the minute the run starts, as the same moment for the whole run (a
+    dashboard's panels share one), in the calendar's time zone (`GET /v1/calendar`; `UTC` by
+    default): `startOf` cuts to the start of the unit there, converted to a UTC instant for a
+    timestamp column and to a calendar date for a date column. A week starts on Monday; the fiscal
+    units follow the calendar's `fiscal_year_start_month`. Never stored as a date: a saved query
     keeps it relative.
   properties:
     relative:
@@ -36,27 +39,32 @@ RelativeDate:
       additionalProperties: false
       required: [unit, offset]
       properties:
-        unit: { type: string, enum: [minute, hour, day, week, month, quarter, year] }
+        unit: { type: string, enum: [minute, hour, day, week, month, quarter, year, fiscal_quarter, fiscal_year] }
         offset: { type: integer, minimum: -1000, maximum: 1000, description: Whole units from now; negative is the past }
         startOf: { type: boolean, description: Cut back to the start of the unit after the offset is applied }
 
 SelectItem:
   description: |
-    A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
-    `sum`, `avg`, `min` and `max` over an expression, and `calc`, need `as`.
+    A column path, an aggregate or date bucket with an optional `as`, a calculation `{ calc, as }`
+    or a measure `{ measure, as? }`. `count`, `countDistinct`, `sum`, `avg`, `min` and `max` over
+    an expression, and `calc`, need `as`. A measure's output name is its `as`, else its name.
   oneOf:
     - { $ref: '#/Path' }
     - type: object
       additionalProperties: false
       required: [count]
       properties:
-        count: { type: string, description: 'A path, or `"*"` to count rows' }
+        count:
+          description: 'A path, `"*"` to count rows, or an expression (then `as` is required)'
+          oneOf:
+            - { type: string }
+            - { $ref: '#/CalcExpr' }
         as: { $ref: '#/Alias' }
     - type: object
       additionalProperties: false
       required: [countDistinct]
       properties:
-        countDistinct: { $ref: '#/Path' }
+        countDistinct: { $ref: '#/CalcExpr', description: 'A path, or an expression (then `as` is required); never `"*"`' }
         as: { $ref: '#/Alias' }
     - type: object
       additionalProperties: false
@@ -90,8 +98,28 @@ SelectItem:
       additionalProperties: false
       required: [bucket, column]
       properties:
-        bucket: { type: string, enum: [day, week, month, quarter, year], description: Truncated in UTC; weeks start on Monday }
+        bucket:
+          type: string
+          enum: [day, week, month, quarter, year, fiscal_quarter, fiscal_year]
+          description: |
+            Truncated in UTC (buckets on timestamp columns do not follow the calendar's time zone);
+            weeks start on Monday. A fiscal bucket gives the start date of the fiscal quarter or
+            year, which begins in the calendar's `fiscal_year_start_month`.
         column: { $ref: '#/Path' }
+        as: { $ref: '#/Alias' }
+    - type: object
+      additionalProperties: false
+      required: [measure]
+      description: |
+        A measure of the source, saved with `POST /v1/sources/{sourceId}/measures`, computed over
+        the query's `from` table, which must be the measure's home table. It is group-level, like
+        an aggregate. A measure the caller cannot use, or one of another table, is refused as one
+        that does not exist (`not_found_or_not_accessible`, with the usable measures as
+        `suggestions`). Joins the measure needs that the query lacks are added as left joins and
+        count toward `max_joins`. A query that joins a to-many relation cannot use a measure
+        (`measure_needs_single_rows`).
+      properties:
+        measure: { $ref: '#/Alias' }
         as: { $ref: '#/Alias' }
     - type: object
       additionalProperties: false
@@ -106,12 +134,15 @@ SelectItem:
 
 CalcExpr:
   description: |
-    An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
-    with exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a
-    query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
+    An expression: a column path, a number, a text literal `{ value }`, a date literal `{ date }`
+    or `{ timestamp }`, a `RelativeDate`, a measure `{ measure }`, an aggregate, or an object with
+    exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a query
+    holds at most 100 operations and aggregates (a measure's expansion is counted apart, at most
+    500 in all, and measures nest at most 8 levels). Operands are numbers for `add`, `sub`,
     `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
-    one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;
-    `round` gives exactly the places asked, half away from zero. Aggregates do not nest.
+    one shared type for `coalesce`; dates or timestamps for `dateAdd`, `dateDiff` and `datePart`.
+    `div` by zero gives null and keeps at least 6 decimal places; `round` gives exactly the places
+    asked, half away from zero. Aggregates do not nest. A measure inside an aggregate is refused.
   oneOf:
     - { $ref: '#/Path' }
     - { type: number }
@@ -120,6 +151,23 @@ CalcExpr:
       required: [value]
       properties:
         value: { type: string, maxLength: 1000, description: A text literal; a bare string is a path }
+    - type: object
+      additionalProperties: false
+      required: [date]
+      properties:
+        date: { type: string, format: date, description: 'A date literal, `YYYY-MM-DD`' }
+    - type: object
+      additionalProperties: false
+      required: [timestamp]
+      properties:
+        timestamp: { type: string, format: date-time, description: 'A timestamp literal, ISO 8601 with an offset or `Z`' }
+    - { $ref: '#/RelativeDate' }
+    - type: object
+      additionalProperties: false
+      required: [measure]
+      description: A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding one is group-level
+      properties:
+        measure: { $ref: '#/Alias' }
     - { $ref: '#/CalcOperation' }
 
 CalcOperation:
@@ -152,8 +200,74 @@ CalcOperation:
     avg: { $ref: '#/CalcExpr' }
     min: { $ref: '#/CalcExpr' }
     max: { $ref: '#/CalcExpr' }
-    count: { type: string, description: 'A path, or `"*"`' }
-    countDistinct: { $ref: '#/Path' }
+    count:
+      description: 'A path, `"*"`, or an expression'
+      oneOf:
+        - { type: string }
+        - { $ref: '#/CalcExpr' }
+    countDistinct: { $ref: '#/CalcExpr' }
+    case:
+      type: object
+      additionalProperties: false
+      required: [when]
+      description: |
+        The `then` of the first `when` whose `if` holds, else the `else` (null without one). Every
+        `then` and the `else` share one type (number, text, date or timestamp; a number literal
+        fits any number). Booleans are not values: conditions live only in `if`.
+      properties:
+        when:
+          type: array
+          minItems: 1
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [if, then]
+            properties:
+              if: { $ref: '#/Filter', description: 'A filter over column paths, as in `where`' }
+              then: { $ref: '#/CalcExpr' }
+        else: { $ref: '#/CalcExpr' }
+    dateAdd:
+      description: '`[date or timestamp, amount, unit]`: the moment shifted; a month, quarter or year step clamps to the last day of the month'
+      type: array
+      minItems: 3
+      maxItems: 3
+      prefixItems:
+        - { $ref: '#/CalcExpr' }
+        - { type: integer, minimum: -10000, maximum: 10000 }
+        - { type: string, enum: [day, week, month, quarter, year] }
+    dateDiff:
+      description: '`[unit, start, end]`: whole units completed from start to end, negative when end is before start'
+      type: array
+      minItems: 3
+      maxItems: 3
+      prefixItems:
+        - { type: string, enum: [day, week, month, quarter, year] }
+        - { $ref: '#/CalcExpr' }
+        - { $ref: '#/CalcExpr' }
+    datePart:
+      description: |
+        `[part, date or timestamp]`: a number. `weekday` is 1 for Monday to 7 for Sunday. The
+        fiscal parts follow the calendar's `fiscal_year_start_month`, a fiscal year named by the
+        calendar year in which it ends.
+      type: array
+      minItems: 2
+      maxItems: 2
+      prefixItems:
+        - { type: string, enum: [year, quarter, month, day, weekday, fiscal_year, fiscal_quarter] }
+        - { $ref: '#/CalcExpr' }
+    businessDays:
+      description: |
+        `[start, end]`: the calendar's business days from start to end, both inclusive. A business
+        day is a working weekday that is not a holiday. Each argument is a date, timestamp or
+        relative date literal, not a column (`invalid_operator`).
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { $ref: '#/CalcExpr' }
+    businessDaysInMonth: { $ref: '#/CalcExpr', description: "The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal" }
+    businessDaysElapsed: { $ref: '#/CalcExpr', description: "The calendar's business days from the 1st of the date's month through the date, inclusive; the argument is a date, timestamp or relative date literal" }
+    businessDaysRemaining: { $ref: '#/CalcExpr', description: "The calendar's business days after the date through the end of its month; the argument is a date, timestamp or relative date literal" }
 
 Filter:
   type: object
@@ -275,7 +389,7 @@ QueryError:
   properties:
     error:
       type: string
-      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters]
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex]
     error_description: { type: string }
     path:
       type: array

@@ -1,4 +1,5 @@
 import type { CalcExpr, Query, SelectItem } from "../types/query.js";
+import type { ChartSettings } from "../types/dashboards.js";
 import { describe, expect, it } from "vitest";
 
 describe("query types", () => {
@@ -65,5 +66,52 @@ describe("query types", () => {
       where: { at: { lt: { relative: { unit: "fortnight", offset: 1 } } } },
     };
     expect(bad).toBeDefined();
+  });
+
+  it("accept measures, case, dates and the calendar functions", () => {
+    const items: SelectItem[] = [
+      { measure: "total_revenue" },
+      { measure: "orders", as: "n" },
+      { bucket: "fiscal_quarter", column: "created_at", as: "q" },
+      {
+        count: {
+          case: {
+            when: [{ if: { status: { eq: "open" } }, then: 1 }],
+            else: 0,
+          },
+        },
+        as: "open_orders",
+      },
+      {
+        calc: {
+          div: [
+            { measure: "spend_mtd" },
+            { businessDaysElapsed: { relative: { unit: "day", offset: 0 } } },
+          ],
+        },
+        as: "daily_pace",
+      },
+      {
+        calc: {
+          datePart: [
+            "fiscal_year",
+            { dateAdd: [{ date: "2026-01-31" }, 1, "month"] },
+          ],
+        },
+        as: "fy",
+      },
+    ];
+    const gauge: ChartSettings = {
+      type: "gauge",
+      version: 1,
+      value: "a",
+      max: "b",
+      min: 0,
+    };
+    expect(items).toHaveLength(6);
+    expect(gauge.type).toBe("gauge");
+    // @ts-expect-error a count over an expression needs a name
+    const bad: SelectItem = { count: { add: ["a", "b"] } };
+    void bad;
   });
 });

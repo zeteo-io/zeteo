@@ -1,0 +1,84 @@
+/v1/sources/{sourceId}/measures/preview:
+  post:
+    tags: [Measures]
+    summary: Preview a draft measure
+    description: |
+      Runs a draft measure, not saved, over its home table, so an editor can check the number
+      before saving: its value alone as one row, or, with `bucket`, grouped by a date bucket of a
+      column of the home table and ordered by period (the period column is `period`, or
+      `period_start` for a measure named `period`). The draft is checked as on create, and then
+      runs as a normal query as the caller, with the same limits, the same concurrency leases and
+      a record in the run log with entry point `measure_preview`. A client that disconnects stops
+      its query on the source.
+
+      **Required permissions:** `zeteo.measures.write` and `zeteo.data.read` (`403 forbidden`
+      without), and being an editor of the source.
+
+      **Errors:** `400` as on create; `404 not_found`; `409 source_archived`; the query errors of
+      `POST /v1/query` (`422`, `429`, `502`, `503`).
+    operationId: previewMeasure
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/PreviewMeasureRequest'
+          example:
+            measure:
+              name: total_revenue
+              description: Gross revenue of paid orders.
+              table: orders
+              formula: { sum: total }
+              where: { status: { eq: paid } }
+            bucket: { unit: month, column: created_at }
+    responses:
+      '200':
+        description: The rows, as `POST /v1/query` answers them
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryResult'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`; or the measure does not plan, with the
+          query error code of the problem and the `path` at fault
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/InvalidMeasureError'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409':
+        description: Conflict - `source_archived`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: The query cannot be run as written; the errors of `POST /v1/query`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/queries/schemas.yaml#/QueryError'
+      '429':
+        description: Too many queries - `too_many_queries` or `source_busy`; retry after `Retry-After`
+        headers:
+          Retry-After:
+            description: Seconds to wait before retrying
+            schema: { type: integer }
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `query_failed` or `source_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

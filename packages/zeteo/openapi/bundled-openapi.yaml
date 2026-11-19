@@ -59,6 +59,30 @@ info:
     description or touch a declared relation: what disappears from the source is marked with
     `missing_since`. See `docs/catalog.md`.
 
+    ## Measures
+
+    A measure is a named, described calculation over one table of a source (`total_revenue`, an
+    average order value), kept by the source's measure editors and used by name in any query
+    (`{ "measure": "total_revenue" }`). Its formula is group-level, may use `case`, date arithmetic,
+    the calendar functions and other measures of the same table, and may carry a filter that applies
+    to every aggregate in it. A caller sees and can use a measure only if its table, every column it
+    reads and every relation it joins are in their own visible catalogue; otherwise it is absent,
+    and using it is `not_found_or_not_accessible`. Reading measures needs `zeteo.data.read`;
+    `zeteo.sources.read` (and an upload source's owner) sees every measure of a source, with whether
+    each is broken. Creating, changing and deleting them needs `zeteo.measures.write` and being an
+    editor of the source: listed, as a user or through a group, by `PUT
+    /v1/sources/{sourceId}/measure-editors` (`zeteo.sources.write`, or an upload source's owner), or
+    the owner of the upload source. A change or delete that would break another measure is
+    `409 measure_in_use`. `POST /v1/sources/{sourceId}/measures/preview` runs a draft before it is
+    saved.
+
+    ## Calendar
+
+    `GET /v1/calendar` (`zeteo.data.read`) and `PUT /v1/calendar` (`zeteo.calendar.write`) keep the
+    one calendar of the install: working days, holidays, the month a fiscal year starts in and a
+    time zone. It defines business days, fiscal buckets and parts, and the time zone "now" is
+    evaluated in for every relative date.
+
     ## Grants
 
     A grant gives one user or group the right to query one table: every column (including ones
@@ -138,6 +162,10 @@ tags:
     description: The connection to Google that Google Sheets sources read through
   - name: Catalogue
     description: A source's tables, columns and relations, read from the source by a refresh
+  - name: Measures
+    description: Named, described calculations over a source's table that queries use by name, and the editors who manage them
+  - name: Calendar
+    description: The install's working days, holidays, fiscal year and time zone, which business-day functions, fiscal periods and relative dates follow
   - name: Grants
     description: Which users and groups may query which tables and columns, and how much at once
   - name: Queries
@@ -1564,6 +1592,528 @@ paths:
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
           $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/measures:
+    get:
+      tags:
+        - Measures
+      summary: List a source's measures
+      description: |
+        The measures of the source as the caller may see them. Those who see every measure
+        (`zeteo.sources.read`, or the owner of an upload source) get each in full, with whether the
+        caller can use it (`usable`) and whether it is `broken`. Anyone else gets the ones that plan
+        against their own visible catalogue, in full: a measure whose home table, columns or relations
+        they are not granted is absent. A measure editor also sees the ones they cannot use, redacted
+        (name, description, home table and `usable: false`, never the formula or filter). Editors and
+        those who see every measure get `used_by`.
+
+        A source the caller has nothing of is `404 not_found`.
+
+        **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+      operationId: listMeasures
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The measures
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMeasuresResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    post:
+      tags:
+        - Measures
+      summary: Create a measure
+      description: |
+        Saves a measure: a named, described calculation over a home table, such as total revenue or
+        average order value, which a query then asks for by name (`{ "measure": "total_revenue" }`).
+        The draft is checked twice. It is planned alone from its home table against the editor's own
+        catalogue (so an editor cannot define a measure over columns they are not granted), first its
+        formula, then with its `where`; and, with every measure that uses it, against the source's whole
+        catalogue. A `zeteo.measure.created` audit entry is written.
+
+        Everything is checked inside one transaction that holds a lock on the source's measures, so
+        concurrent saves cannot form a loop.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (listed
+        as a user or through a group, or the owner of the upload source); `403 forbidden` otherwise,
+        also for a source that does not exist when the caller cannot read sources.
+
+        **Errors:** `400` with `error` the query error code of the first problem and `path`
+        (`not_found_or_not_accessible` for a table or column the editor cannot see,
+        `measure_not_aggregate` for a formula with a column outside an aggregate, `measure_cycle`,
+        `measure_too_deep`, `too_complex`, `invalid_operator`, ...); `404 not_found` (source);
+        `409 measure_name_taken`, `409 source_archived`.
+      operationId: createMeasure
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMeasureRequest'
+            example:
+              name: net_revenue
+              description: Revenue of paid orders after discounts, before tax. Use for the money the business keeps; use total_revenue for the gross figure.
+              table: orders
+              formula:
+                sum:
+                  sub:
+                    - total
+                    - discount
+              where:
+                status:
+                  eq: paid
+      responses:
+        '201':
+          description: The measure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Measure'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`; or the measure does not plan, with the
+            query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/measures/preview:
+    post:
+      tags:
+        - Measures
+      summary: Preview a draft measure
+      description: |
+        Runs a draft measure, not saved, over its home table, so an editor can check the number
+        before saving: its value alone as one row, or, with `bucket`, grouped by a date bucket of a
+        column of the home table and ordered by period (the period column is `period`, or
+        `period_start` for a measure named `period`). The draft is checked as on create, and then
+        runs as a normal query as the caller, with the same limits, the same concurrency leases and
+        a record in the run log with entry point `measure_preview`. A client that disconnects stops
+        its query on the source.
+
+        **Required permissions:** `zeteo.measures.write` and `zeteo.data.read` (`403 forbidden`
+        without), and being an editor of the source.
+
+        **Errors:** `400` as on create; `404 not_found`; `409 source_archived`; the query errors of
+        `POST /v1/query` (`422`, `429`, `502`, `503`).
+      operationId: previewMeasure
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PreviewMeasureRequest'
+            example:
+              measure:
+                name: total_revenue
+                description: Gross revenue of paid orders.
+                table: orders
+                formula:
+                  sum: total
+                where:
+                  status:
+                    eq: paid
+              bucket:
+                unit: month
+                column: created_at
+      responses:
+        '200':
+          description: The rows, as `POST /v1/query` answers them
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResult'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues`; or the measure does not plan, with the
+            query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: The query cannot be run as written; the errors of `POST /v1/query`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryError'
+        '429':
+          description: Too many queries - `too_many_queries` or `source_busy`; retry after `Retry-After`
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `query_failed` or `source_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/measures/{measureId}:
+    get:
+      tags:
+        - Measures
+      summary: Get a measure
+      description: |
+        One measure in full, to a caller who may see it in full: those who see every measure
+        (`zeteo.sources.read`, or the owner of an upload source), and anyone it plans against the
+        catalogue of. Anyone else gets the `404 not_found` a measure that does not exist gives.
+
+        **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+      operationId: getMeasure
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MeasureIdParam'
+      responses:
+        '200':
+          description: The measure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Measure'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    patch:
+      tags:
+        - Measures
+      summary: Change a measure
+      description: |
+        Changes any of the create fields, at least one; `where: null` removes the filter. An editor
+        may change only a measure they can see in full (else the 404 of a measure that does not exist
+        for them). The changed measure is checked as on create, and so is every measure that uses it,
+        directly or not, against the source's whole catalogue: if one that planned before would break,
+        the change is refused with `409 measure_in_use`, naming them in `dependents`; a dependent
+        already broken does not refuse it. A rename is refused the same way while other measures use
+        the measure. Saved queries that use it do not block a change; `used_by` says how many there
+        are, and they fail with `not_found_or_not_accessible` until fixed. A change that makes a
+        dependent read a column some callers lack is allowed: those callers stop seeing the dependent.
+        A `zeteo.measure.updated` audit entry is written.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+        **Errors:** `400` as on create; `404 not_found`; `409 measure_in_use`,
+        `409 measure_name_taken`, `409 source_archived`.
+      operationId: updateMeasure
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MeasureIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMeasureRequest'
+      responses:
+        '200':
+          description: The measure
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Measure'
+        '400':
+          description: |
+            Bad request - `invalid_request`, with `issues` (including a body with no field); or the
+            measure does not plan, with the query error code of the problem and the `path` at fault
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InvalidMeasureError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `measure_in_use` (with `dependents`), `measure_name_taken` or `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasureInUseError'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    delete:
+      tags:
+        - Measures
+      summary: Delete a measure
+      description: |
+        Deletes a measure the caller can see in full, refused with `409 measure_in_use` (naming the
+        measures in `dependents`) while other measures use it. Saved queries that use it do not block
+        a delete. A `zeteo.measure.deleted` audit entry is written.
+
+        **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+        **Errors:** `404 not_found`; `409 measure_in_use`, `409 source_archived`.
+      operationId: deleteMeasure
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+        - $ref: '#/components/parameters/MeasureIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          description: Conflict - `measure_in_use` (with `dependents`) or `source_archived`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeasureInUseError'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/sources/{sourceId}/measure-editors:
+    get:
+      tags:
+        - Measures
+      summary: List a source's measure editors
+      description: |
+        The users and groups that may create, change and delete the source's measures, with names
+        from tereo's directory. Read by those who manage the list and by the editors on it.
+
+        **Required permissions:** `zeteo.sources.write`, `zeteo.measures.write` or `zeteo.uploads.write`
+        (`403 forbidden` without), and being someone who manages the list or an editor of the source
+        (`403 forbidden` otherwise). `404 not_found` for a source that does not exist to a caller who may read sources.
+      operationId: listMeasureEditors
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      responses:
+        '200':
+          description: The editors
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMeasureEditorsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Measures
+      summary: Replace a source's measure editors
+      description: |
+        Makes the editors exactly `principals` (users and groups, each once). Being listed does
+        nothing for a user who lacks `zeteo.measures.write`. The owner of an upload source is always
+        an editor while they hold that permission, listed or not; a transfer keeps the list. For a
+        database source the list is managed by `zeteo.sources.write` holders; for an upload source
+        also by its owner, who may name only groups that are global or of their signed-in
+        organization (`422 group_not_allowed`; a group already listed stays). A
+        `zeteo.measure_editors.updated` audit entry is written when anything changed.
+
+        **Required permissions:** `zeteo.sources.write`, or being the owner of the upload source
+        (holding `zeteo.uploads.write` and `zeteo.data.read`); `403 forbidden` otherwise.
+
+        **Errors:** `404 not_found`; `409 source_archived`; `422 group_not_allowed`; `502 tereo_unreachable`.
+      operationId: replaceMeasureEditors
+      parameters:
+        - $ref: '#/components/parameters/SourceIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReplaceMeasureEditorsRequest'
+      responses:
+        '200':
+          description: The editors as they now stand
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMeasureEditorsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ConflictResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '422':
+          description: Unprocessable - `group_not_allowed`, a group of another organization named by an upload source's owner
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '502':
+          description: Bad gateway - `tereo_unreachable`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+  /v1/calendar:
+    get:
+      tags:
+        - Calendar
+      summary: Get the calendar
+      description: |
+        The one calendar of the install: working days, holidays, the month a fiscal year starts in
+        and the time zone. Until an admin saves one, the defaults are Monday to Friday, no holidays,
+        January and `UTC`, and `updated_at` is null.
+
+        The calendar shapes queries: a business day is a working weekday that is not a holiday (the
+        `businessDays*` operations); the fiscal buckets, relative units and `datePart` parts follow
+        the fiscal year; and "now" for every relative date (in `where`, a measure's filter, the
+        calendar functions and a dashboard's time range) is evaluated in the time zone, so
+        `{ "unit": "day", "offset": -1, "startOf": true }` is the start of yesterday there. Buckets
+        on timestamp columns stay in UTC. The calendar's values are folded into each plan as bound
+        literals, so a change reaches dashboard results without any invalidation.
+
+        **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
+      operationId: getCalendar
+      responses:
+        '200':
+          description: The calendar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calendar'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
+    put:
+      tags:
+        - Calendar
+      summary: Replace the calendar
+      description: |
+        Replaces the whole calendar (working days, holidays, fiscal year start month and time zone)
+        and answers the calendar as it now stands. At most 5,000 holidays, each date once; the body
+        may be up to 512 KB. A `zeteo.calendar.updated` audit entry is written.
+
+        **Required permissions:** `zeteo.calendar.write` (`403 forbidden` without).
+      operationId: replaceCalendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CalendarInput'
+            example:
+              working_days:
+                - 1
+                - 2
+                - 3
+                - 4
+                - 5
+              holidays:
+                - date: '2026-12-25'
+                  name: Christmas Day
+              fiscal_year_start_month: 7
+              time_zone: America/Chicago
+      responses:
+        '200':
+          description: The calendar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Calendar'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '413':
+          $ref: '#/components/responses/PayloadTooLargeResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailableResponse'
   /v1/grants:
     get:
       tags:
@@ -2301,7 +2851,10 @@ paths:
             `invalid_value`, `invalid_grouping`, `invalid_order`, `invalid_having`,
             `duplicate_output_name`, `join_parent_missing`, `too_many_joins` (at path `["join"]`: more joins than the source's
             `max_joins`); `too_many_parameters` (at path `[]`: the
-            compiled query binds more values than the source's engine takes). A plan
+            compiled query binds more values than the source's engine takes). The measure codes, at the
+            measure's path: `measure_needs_single_rows` (a query that joins a to-many relation uses a
+            measure), `measure_reads_to_many`, `measure_cycle`, `measure_too_deep`,
+            `measure_not_aggregate` and `too_complex` (the expansion holds more than 500 operations). A plan
             that references a column outside the grants (a planner fault, logged) is
             `not_found_or_not_accessible` with a fixed message and path `[]`.
           content:
@@ -5118,6 +5671,14 @@ components:
       schema:
         type: string
         format: uuid
+    MeasureIdParam:
+      name: measureId
+      in: path
+      required: true
+      description: The measure's id, in the source named by the path. A measure of another source, or one the caller may not see in full, is `404 not_found`; a value that is not a UUID is `400 invalid_request`.
+      schema:
+        type: string
+        format: uuid
   responses:
     BadRequestResponse:
       description: Bad request - `invalid_request`, with `issues`
@@ -5231,6 +5792,16 @@ components:
                 description: The field, dotted (`settings.port`); empty for the whole value
               message:
                 type: string
+        dependents:
+          type: array
+          description: On `measure_in_use`, the names of the measures that use the one changed and would break
+          items:
+            type: string
+        path:
+          type: array
+          description: On a measure that does not plan (`400`), the part at fault, as `["formula"]`, `["where"]` or `["table"]`
+          items:
+            type: string
         merged_table:
           type: string
           description: On `table_in_merged_table`, the name of the live merged table that reads the table
@@ -6666,6 +7237,12 @@ components:
             - join_parent_missing
             - too_many_joins
             - too_many_parameters
+            - measure_needs_single_rows
+            - measure_reads_to_many
+            - measure_cycle
+            - measure_too_deep
+            - measure_not_aggregate
+            - too_complex
         error_description:
           type: string
         path:
@@ -8200,6 +8777,7 @@ components:
         - $ref: '#/components/schemas/AreaChart'
         - $ref: '#/components/schemas/BarChart'
         - $ref: '#/components/schemas/PieChart'
+        - $ref: '#/components/schemas/GaugeChart'
         - $ref: '#/components/schemas/TableChart'
       discriminator:
         propertyName: type
@@ -8209,6 +8787,7 @@ components:
           area: '#/components/schemas/AreaChart'
           bar: '#/components/schemas/BarChart'
           pie: '#/components/schemas/PieChart'
+          gauge: '#/components/schemas/GaugeChart'
           table: '#/components/schemas/TableChart'
     Panel:
       type: object
@@ -8925,8 +9504,11 @@ components:
         A moment relative to now, as a comparison value of a date or timestamp column:
         `{ "relative": { "unit": "day", "offset": -30 } }` is 30 days before now, and with `startOf`
         `{ "relative": { "unit": "month", "offset": 0, "startOf": true } }` is the start of this month.
-        Resolved in UTC against the minute the run starts, as the same moment for the whole run (a
-        dashboard's panels share one). A week starts on Monday. Never stored as a date: a saved query
+        Resolved against the minute the run starts, as the same moment for the whole run (a
+        dashboard's panels share one), in the calendar's time zone (`GET /v1/calendar`; `UTC` by
+        default): `startOf` cuts to the start of the unit there, converted to a UTC instant for a
+        timestamp column and to a calendar date for a date column. A week starts on Monday; the fiscal
+        units follow the calendar's `fiscal_year_start_month`. Never stored as a date: a saved query
         keeps it relative.
       properties:
         relative:
@@ -8946,6 +9528,8 @@ components:
                 - month
                 - quarter
                 - year
+                - fiscal_quarter
+                - fiscal_year
             offset:
               type: integer
               minimum: -1000
@@ -8963,15 +9547,20 @@ components:
         name:
           type: string
           pattern: ^[a-z][a-z0-9_]{0,62}$
-    GrantColumnIds:
-      type: array
-      minItems: 1
-      maxItems: 500
-      uniqueItems: true
-      items:
-        type: string
-        format: uuid
-      description: Columns of the grant's table
+    MeasureName:
+      type: string
+      pattern: ^[a-z][a-z0-9_]{0,62}$
+      description: Lowercase letter then up to 62 of `a-z`, `0-9` and `_`; unique per source across all its tables. The default output name when the measure is selected.
+    MeasureDescription:
+      type: string
+      minLength: 1
+      maxLength: 2000
+      description: Trimmed. Written for people and for Claude, which reads it to choose between measures; data, never instructions.
+    MeasureTable:
+      type: string
+      minLength: 1
+      maxLength: 256
+      description: The measure's home table, by its query name in the editor's catalogue (the bare name when unique among the source's schemas, else `schema.table`)
     Path:
       type: string
       description: |
@@ -8983,12 +9572,15 @@ components:
       description: An output name for a select item
     CalcExpr:
       description: |
-        An expression: a column path, a number, a text literal `{ value }`, an aggregate, or an object
-        with exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a
-        query holds at most 100 operations and aggregates. Operands are numbers for `add`, `sub`,
+        An expression: a column path, a number, a text literal `{ value }`, a date literal `{ date }`
+        or `{ timestamp }`, a `RelativeDate`, a measure `{ measure }`, an aggregate, or an object with
+        exactly one operation key. It nests at most 8 levels (an aggregate counts as one) and a query
+        holds at most 100 operations and aggregates (a measure's expansion is counted apart, at most
+        500 in all, and measures nest at most 8 levels). Operands are numbers for `add`, `sub`,
         `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
-        one shared type for `coalesce`. `div` by zero gives null and keeps at least 6 decimal places;
-        `round` gives exactly the places asked, half away from zero. Aggregates do not nest.
+        one shared type for `coalesce`; dates or timestamps for `dateAdd`, `dateDiff` and `datePart`.
+        `div` by zero gives null and keeps at least 6 decimal places; `round` gives exactly the places
+        asked, half away from zero. Aggregates do not nest. A measure inside an aggregate is refused.
       oneOf:
         - $ref: '#/components/schemas/Path'
         - type: number
@@ -9001,7 +9593,46 @@ components:
               type: string
               maxLength: 1000
               description: A text literal; a bare string is a path
+        - type: object
+          additionalProperties: false
+          required:
+            - date
+          properties:
+            date:
+              type: string
+              format: date
+              description: A date literal, `YYYY-MM-DD`
+        - type: object
+          additionalProperties: false
+          required:
+            - timestamp
+          properties:
+            timestamp:
+              type: string
+              format: date-time
+              description: A timestamp literal, ISO 8601 with an offset or `Z`
+        - $ref: '#/components/schemas/RelativeDate'
+        - type: object
+          additionalProperties: false
+          required:
+            - measure
+          description: A measure of the query's `from` table, as in a select item; group-level, so a `calc` holding one is group-level
+          properties:
+            measure:
+              $ref: '#/components/schemas/Alias'
         - $ref: '#/components/schemas/CalcOperation'
+    Filter:
+      type: object
+      description: |
+        One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
+        `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
+        `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
+        takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
+        "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
+        `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
+        a column with one of those names cannot be filtered on directly. In `having`, the keys are
+        the names of aggregate select items.
+      additionalProperties: true
     CalcOperation:
       type: object
       minProperties: 1
@@ -9072,14 +9703,473 @@ components:
         max:
           $ref: '#/components/schemas/CalcExpr'
         count:
-          type: string
-          description: A path, or `"*"`
+          description: A path, `"*"`, or an expression
+          oneOf:
+            - type: string
+            - $ref: '#/components/schemas/CalcExpr'
         countDistinct:
-          $ref: '#/components/schemas/Path'
+          $ref: '#/components/schemas/CalcExpr'
+        case:
+          type: object
+          additionalProperties: false
+          required:
+            - when
+          description: |
+            The `then` of the first `when` whose `if` holds, else the `else` (null without one). Every
+            `then` and the `else` share one type (number, text, date or timestamp; a number literal
+            fits any number). Booleans are not values: conditions live only in `if`.
+          properties:
+            when:
+              type: array
+              minItems: 1
+              maxItems: 10
+              items:
+                type: object
+                additionalProperties: false
+                required:
+                  - if
+                  - then
+                properties:
+                  if:
+                    $ref: '#/components/schemas/Filter'
+                    description: A filter over column paths, as in `where`
+                  then:
+                    $ref: '#/components/schemas/CalcExpr'
+            else:
+              $ref: '#/components/schemas/CalcExpr'
+        dateAdd:
+          description: '`[date or timestamp, amount, unit]`: the moment shifted; a month, quarter or year step clamps to the last day of the month'
+          type: array
+          minItems: 3
+          maxItems: 3
+          prefixItems:
+            - $ref: '#/components/schemas/CalcExpr'
+            - type: integer
+              minimum: -10000
+              maximum: 10000
+            - type: string
+              enum:
+                - day
+                - week
+                - month
+                - quarter
+                - year
+        dateDiff:
+          description: '`[unit, start, end]`: whole units completed from start to end, negative when end is before start'
+          type: array
+          minItems: 3
+          maxItems: 3
+          prefixItems:
+            - type: string
+              enum:
+                - day
+                - week
+                - month
+                - quarter
+                - year
+            - $ref: '#/components/schemas/CalcExpr'
+            - $ref: '#/components/schemas/CalcExpr'
+        datePart:
+          description: |
+            `[part, date or timestamp]`: a number. `weekday` is 1 for Monday to 7 for Sunday. The
+            fiscal parts follow the calendar's `fiscal_year_start_month`, a fiscal year named by the
+            calendar year in which it ends.
+          type: array
+          minItems: 2
+          maxItems: 2
+          prefixItems:
+            - type: string
+              enum:
+                - year
+                - quarter
+                - month
+                - day
+                - weekday
+                - fiscal_year
+                - fiscal_quarter
+            - $ref: '#/components/schemas/CalcExpr'
+        businessDays:
+          description: |
+            `[start, end]`: the calendar's business days from start to end, both inclusive. A business
+            day is a working weekday that is not a holiday. Each argument is a date, timestamp or
+            relative date literal, not a column (`invalid_operator`).
+          type: array
+          minItems: 2
+          maxItems: 2
+          items:
+            $ref: '#/components/schemas/CalcExpr'
+        businessDaysInMonth:
+          $ref: '#/components/schemas/CalcExpr'
+          description: The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal
+        businessDaysElapsed:
+          $ref: '#/components/schemas/CalcExpr'
+          description: The calendar's business days from the 1st of the date's month through the date, inclusive; the argument is a date, timestamp or relative date literal
+        businessDaysRemaining:
+          $ref: '#/components/schemas/CalcExpr'
+          description: The calendar's business days after the date through the end of its month; the argument is a date, timestamp or relative date literal
+    MeasureFormula:
+      description: |
+        An expression that is group-level: every column it reads sits inside an aggregate, or comes
+        from other measures (`{ "measure": name }`) of the same home table. It may use `case`, date
+        arithmetic and the calendar functions, and nests at most 8 levels; the expansion, with the
+        measures it uses, holds at most 500 operations and aggregates, and measures nest at most 8
+        levels. Planned against the editor's own catalogue, so an editor cannot define a measure over
+        columns they are not granted.
+      $ref: '#/components/schemas/CalcExpr'
+    MeasureWhere:
+      description: |
+        A filter over the home table's columns and its to-one relation paths, with literal or relative
+        values. It applies to every aggregate in the formula, including those of the measures it uses
+        (`sum(x)` becomes `sum(case when W then x end)`). The relation paths the formula and `where`
+        read are the measure's joins; each must be a to-one path (`measure_reads_to_many`).
+      $ref: '#/components/schemas/Filter'
+    MeasureUsedBy:
+      type: object
+      required:
+        - saved_queries
+        - panels
+      description: What is built on the measure, counted by searching saved queries of the source for its name
+      properties:
+        saved_queries:
+          type: integer
+          minimum: 0
+          description: Saved queries that use it; they do not block a change, and fail with `not_found_or_not_accessible` once it no longer fits
+        panels:
+          type: integer
+          minimum: 0
+          description: Dashboard panels that show one of those saved queries
+    MeasureBroken:
+      type: object
+      required:
+        - code
+        - message
+      description: Why a measure does not plan against its source's whole catalogue
+      properties:
+        code:
+          type: string
+          description: 'A query error code: `missing_in_source` for a column a refresh marked missing, `too_many_joins`, `measure_cycle`, ...'
+        message:
+          type: string
+    Measure:
+      type: object
+      description: A measure in full
+      required:
+        - id
+        - name
+        - description
+        - table
+        - formula
+        - where
+        - created_at
+        - updated_at
+        - usable
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        table:
+          $ref: '#/components/schemas/MeasureTable'
+        formula:
+          $ref: '#/components/schemas/MeasureFormula'
+        where:
+          oneOf:
+            - $ref: '#/components/schemas/MeasureWhere'
+            - type: 'null'
+          description: The measure's filter; null when it has none
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        usable:
+          type: boolean
+          description: Whether it plans against the caller's own visible catalogue, so the caller can use it in a query
+        used_by:
+          $ref: '#/components/schemas/MeasureUsedBy'
+          description: Present for measure editors and for those who see every measure
+        broken:
+          oneOf:
+            - $ref: '#/components/schemas/MeasureBroken'
+            - type: 'null'
+          description: Present for those who see every measure (`zeteo.sources.read`, or the upload source's owner); null when the measure plans cleanly
+    RedactedMeasure:
+      type: object
+      description: A measure an editor cannot fully see, because it reads columns they are not granted. Never its formula or filter, which would name ungranted columns and filter values.
+      required:
+        - name
+        - description
+        - table
+        - usable
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        table:
+          $ref: '#/components/schemas/MeasureTable'
+        usable:
+          type: boolean
+          const: false
+    ListMeasuresResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          description: A `Measure`, or a `RedactedMeasure` (told apart by its `id`, which a redacted one lacks)
+          items:
+            anyOf:
+              - $ref: '#/components/schemas/Measure'
+              - $ref: '#/components/schemas/RedactedMeasure'
+    CreateMeasureRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - description
+        - table
+        - formula
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        table:
+          $ref: '#/components/schemas/MeasureTable'
+        formula:
+          $ref: '#/components/schemas/MeasureFormula'
+        where:
+          oneOf:
+            - $ref: '#/components/schemas/MeasureWhere'
+            - type: 'null'
+    InvalidMeasureError:
+      description: The body of a `400` for a measure that does not plan. Its `error` is the query error code of the first problem found, and `path` names the part at fault (`["formula"]`, `["where"]` or `["table"]`).
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required:
+            - path
+          properties:
+            path:
+              type: array
+              items:
+                type: string
+    PreviewMeasureRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - measure
+      properties:
+        measure:
+          $ref: '#/components/schemas/CreateMeasureRequest'
+          description: A draft measure, not saved. A draft of the name of a stored measure stands in its place for the run.
+        bucket:
+          type: object
+          additionalProperties: false
+          required:
+            - unit
+            - column
+          description: Groups the value by a date bucket of a column of the home table, ordered by period; the measure's value alone, as one row, without it
+          properties:
+            unit:
+              type: string
+              enum:
+                - day
+                - week
+                - month
+                - quarter
+                - year
+                - fiscal_quarter
+                - fiscal_year
+            column:
+              type: string
+              minLength: 1
+              maxLength: 256
+    MeasureInUseError:
+      description: The body of `409 measure_in_use`
+      allOf:
+        - $ref: '#/components/schemas/Error'
+        - type: object
+          required:
+            - dependents
+          properties:
+            dependents:
+              type: array
+              description: The names of the measures that use this one and would break
+              items:
+                type: string
+    UpdateMeasureRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: 'Any of a measure''s fields, at least one. `where: null` removes its filter.'
+      properties:
+        name:
+          $ref: '#/components/schemas/MeasureName'
+        description:
+          $ref: '#/components/schemas/MeasureDescription'
+        table:
+          $ref: '#/components/schemas/MeasureTable'
+        formula:
+          $ref: '#/components/schemas/MeasureFormula'
+        where:
+          oneOf:
+            - $ref: '#/components/schemas/MeasureWhere'
+            - type: 'null'
+    MeasureEditor:
+      type: object
+      description: A user or group that may create, change and delete the source's measures (when it also holds `zeteo.measures.write`). A group has no `email` key.
+      required:
+        - type
+        - id
+        - name
+        - added_at
+      properties:
+        type:
+          $ref: '#/components/schemas/PrincipalType'
+        id:
+          type: string
+          format: uuid
+        name:
+          type:
+            - string
+            - 'null'
+          description: From tereo's directory; null when it could not be looked up
+        email:
+          type:
+            - string
+            - 'null'
+          description: Users only
+        added_at:
+          type: string
+          format: date-time
+    ListMeasureEditorsResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeasureEditor'
+    ReplaceMeasureEditorsRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - principals
+      properties:
+        principals:
+          type: array
+          maxItems: 100
+          description: The whole editor list; each principal once
+          items:
+            $ref: '#/components/schemas/SharePrincipal'
+    CalendarDate:
+      type: string
+      pattern: ^\d{4}-\d{2}-\d{2}$
+      description: A calendar day, `YYYY-MM-DD`, that exists
+    Holiday:
+      type: object
+      additionalProperties: false
+      required:
+        - date
+        - name
+      properties:
+        date:
+          $ref: '#/components/schemas/CalendarDate'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+    Calendar:
+      type: object
+      description: |
+        The one calendar of the install. Its defaults, until an admin saves one, are Monday to Friday,
+        no holidays, a fiscal year starting in January and `UTC`, which behave as before the calendar
+        existed.
+      required:
+        - working_days
+        - holidays
+        - fiscal_year_start_month
+        - time_zone
+        - updated_at
+      properties:
+        working_days:
+          type: array
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        holidays:
+          type: array
+          description: Sorted by date
+          items:
+            $ref: '#/components/schemas/Holiday'
+        fiscal_year_start_month:
+          type: integer
+          minimum: 1
+          maximum: 12
+        time_zone:
+          type: string
+        updated_at:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Null until a calendar has been saved
+    CalendarInput:
+      type: object
+      additionalProperties: false
+      required:
+        - working_days
+        - holidays
+        - fiscal_year_start_month
+        - time_zone
+      properties:
+        working_days:
+          type: array
+          minItems: 1
+          maxItems: 7
+          uniqueItems: true
+          description: Weekdays that work, 1 (Monday) to 7 (Sunday); at least one
+          items:
+            type: integer
+            minimum: 1
+            maximum: 7
+        holidays:
+          type: array
+          maxItems: 5000
+          description: Unique by date. A holiday on a non-working day has no effect.
+          items:
+            $ref: '#/components/schemas/Holiday'
+        fiscal_year_start_month:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: The month a fiscal year starts in; 1 is January
+        time_zone:
+          type: string
+          description: An IANA time zone name, or `UTC`
+    GrantColumnIds:
+      type: array
+      minItems: 1
+      maxItems: 500
+      uniqueItems: true
+      items:
+        type: string
+        format: uuid
+      description: Columns of the grant's table
     SelectItem:
       description: |
-        A column path, an aggregate or date bucket with an optional `as`, or a calculation `{ calc, as }`.
-        `sum`, `avg`, `min` and `max` over an expression, and `calc`, need `as`.
+        A column path, an aggregate or date bucket with an optional `as`, a calculation `{ calc, as }`
+        or a measure `{ measure, as? }`. `count`, `countDistinct`, `sum`, `avg`, `min` and `max` over
+        an expression, and `calc`, need `as`. A measure's output name is its `as`, else its name.
       oneOf:
         - $ref: '#/components/schemas/Path'
         - type: object
@@ -9088,8 +10178,10 @@ components:
             - count
           properties:
             count:
-              type: string
-              description: A path, or `"*"` to count rows
+              description: A path, `"*"` to count rows, or an expression (then `as` is required)
+              oneOf:
+                - type: string
+                - $ref: '#/components/schemas/CalcExpr'
             as:
               $ref: '#/components/schemas/Alias'
         - type: object
@@ -9098,7 +10190,8 @@ components:
             - countDistinct
           properties:
             countDistinct:
-              $ref: '#/components/schemas/Path'
+              $ref: '#/components/schemas/CalcExpr'
+              description: A path, or an expression (then `as` is required); never `"*"`
             as:
               $ref: '#/components/schemas/Alias'
         - type: object
@@ -9155,9 +10248,31 @@ components:
                 - month
                 - quarter
                 - year
-              description: Truncated in UTC; weeks start on Monday
+                - fiscal_quarter
+                - fiscal_year
+              description: |
+                Truncated in UTC (buckets on timestamp columns do not follow the calendar's time zone);
+                weeks start on Monday. A fiscal bucket gives the start date of the fiscal quarter or
+                year, which begins in the calendar's `fiscal_year_start_month`.
             column:
               $ref: '#/components/schemas/Path'
+            as:
+              $ref: '#/components/schemas/Alias'
+        - type: object
+          additionalProperties: false
+          required:
+            - measure
+          description: |
+            A measure of the source, saved with `POST /v1/sources/{sourceId}/measures`, computed over
+            the query's `from` table, which must be the measure's home table. It is group-level, like
+            an aggregate. A measure the caller cannot use, or one of another table, is refused as one
+            that does not exist (`not_found_or_not_accessible`, with the usable measures as
+            `suggestions`). Joins the measure needs that the query lacks are added as left joins and
+            count toward `max_joins`. A query that joins a to-many relation cannot use a measure
+            (`measure_needs_single_rows`).
+          properties:
+            measure:
+              $ref: '#/components/schemas/Alias'
             as:
               $ref: '#/components/schemas/Alias'
         - type: object
@@ -9174,18 +10289,6 @@ components:
             A calculation. Row-level when it holds no aggregate (computed per row, nameable in `where`
             and `groupBy`); group-level when every column sits inside an aggregate (nameable in `having`
             and `orderBy`). A mix of the two is refused (`invalid_grouping`).
-    Filter:
-      type: object
-      description: |
-        One of `{ "and": [filter, ...] }`, `{ "or": [filter, ...] }`, `{ "not": filter }`, or
-        `{ "<path>": { "<operator>": value }, ... }`, where several paths must all hold. Operators:
-        `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
-        takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
-        "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
-        `isNull` (true or false). Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
-        a column with one of those names cannot be filtered on directly. In `having`, the keys are
-        the names of aggregate select items.
-      additionalProperties: true
     ChartColumn:
       type: string
       minLength: 1
@@ -9201,6 +10304,48 @@ components:
       enum:
         - auto
         - none
+    GaugeChart:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - version
+        - value
+        - max
+      description: |
+        A progress gauge read from the first row of the result: `value` is the progress, `max` the end
+        of the scale and `target` a marker on it (a budget pacing gauge: `value` the spend to date,
+        `target` the budget pace, `max` the monthly budget). Typically fed by measures.
+      properties:
+        type:
+          type: string
+          const: gauge
+        version:
+          type: integer
+          const: 1
+        value:
+          $ref: '#/components/schemas/ChartColumn'
+          description: A number column
+        max:
+          $ref: '#/components/schemas/ChartColumn'
+          description: A number column
+          the end of the scale: null
+        target:
+          $ref: '#/components/schemas/ChartColumn'
+          description: A number column
+          drawn as a marker: null
+        min:
+          description: The start of the scale, a number column or a number; 0 when left out
+          oneOf:
+            - $ref: '#/components/schemas/ChartColumn'
+            - type: number
+        unit:
+          type: string
+          maxLength: 20
+        decimals:
+          $ref: '#/components/schemas/ChartDecimals'
+        legend:
+          $ref: '#/components/schemas/ChartLegend'
     PanelTimeColumn:
       type: string
       minLength: 1
@@ -9238,6 +10383,8 @@ x-tagGroups:
       - Uploads
       - Connections
       - Catalogue
+      - Measures
+      - Calendar
   - name: Access
     tags:
       - Grants

@@ -96,6 +96,25 @@ export interface PieChart extends ChartCommon {
   donut?: boolean;
 }
 
+/**
+ * A progress gauge read from the first row of the result, typically fed by
+ * measures: `value` is the progress, `max` the end of the scale and `target`
+ * a marker on it.
+ */
+export interface GaugeChart extends ChartCommon {
+  type: "gauge";
+  /** A number column. */
+  value: string;
+  /** A number column: the end of the scale. */
+  max: string;
+  /** A number column, drawn as a marker. */
+  target?: string;
+  /** The start of the scale: a number column or a number; 0 when left out. */
+  min?: string | number;
+  /** At most 20 characters. */
+  unit?: string;
+}
+
 export interface TableChart extends ChartCommon {
   type: "table";
   /** 1 to 50 columns, in order; all of them when left out. */
@@ -104,7 +123,13 @@ export interface TableChart extends ChartCommon {
 
 /** A panel's chart; narrow on `type`. */
 export type ChartSettings =
-  StatChart | LineChart | AreaChart | BarChart | PieChart | TableChart;
+  | StatChart
+  | LineChart
+  | AreaChart
+  | BarChart
+  | PieChart
+  | GaugeChart
+  | TableChart;
 
 /**
  * What the viewer can do with a panel. `ok`: it can run. `not_accessible`:

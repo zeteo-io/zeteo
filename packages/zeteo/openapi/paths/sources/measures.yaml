@@ -1,0 +1,92 @@
+/v1/sources/{sourceId}/measures:
+  get:
+    tags: [Measures]
+    summary: List a source's measures
+    description: |
+      The measures of the source as the caller may see them. Those who see every measure
+      (`zeteo.sources.read`, or the owner of an upload source) get each in full, with whether the
+      caller can use it (`usable`) and whether it is `broken`. Anyone else gets the ones that plan
+      against their own visible catalogue, in full: a measure whose home table, columns or relations
+      they are not granted is absent. A measure editor also sees the ones they cannot use, redacted
+      (name, description, home table and `usable: false`, never the formula or filter). Editors and
+      those who see every measure get `used_by`.
+
+      A source the caller has nothing of is `404 not_found`.
+
+      **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+    operationId: listMeasures
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '200':
+        description: The measures
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/ListMeasuresResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Measures]
+    summary: Create a measure
+    description: |
+      Saves a measure: a named, described calculation over a home table, such as total revenue or
+      average order value, which a query then asks for by name (`{ "measure": "total_revenue" }`).
+      The draft is checked twice. It is planned alone from its home table against the editor's own
+      catalogue (so an editor cannot define a measure over columns they are not granted), first its
+      formula, then with its `where`; and, with every measure that uses it, against the source's whole
+      catalogue. A `zeteo.measure.created` audit entry is written.
+
+      Everything is checked inside one transaction that holds a lock on the source's measures, so
+      concurrent saves cannot form a loop.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (listed
+      as a user or through a group, or the owner of the upload source); `403 forbidden` otherwise,
+      also for a source that does not exist when the caller cannot read sources.
+
+      **Errors:** `400` with `error` the query error code of the first problem and `path`
+      (`not_found_or_not_accessible` for a table or column the editor cannot see,
+      `measure_not_aggregate` for a formula with a column outside an aggregate, `measure_cycle`,
+      `measure_too_deep`, `too_complex`, `invalid_operator`, ...); `404 not_found` (source);
+      `409 measure_name_taken`, `409 source_archived`.
+    operationId: createMeasure
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/CreateMeasureRequest'
+          example:
+            name: net_revenue
+            description: Revenue of paid orders after discounts, before tax. Use for the money the business keeps; use total_revenue for the gross figure.
+            table: orders
+            formula: { sum: { sub: [total, discount] } }
+            where: { status: { eq: paid } }
+    responses:
+      '201':
+        description: The measure
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Measure'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`; or the measure does not plan, with the
+          query error code of the problem and the `path` at fault
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/InvalidMeasureError'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

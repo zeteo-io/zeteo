@@ -1,0 +1,79 @@
+/v1/sources/{sourceId}/measure-editors:
+  get:
+    tags: [Measures]
+    summary: List a source's measure editors
+    description: |
+      The users and groups that may create, change and delete the source's measures, with names
+      from tereo's directory. Read by those who manage the list and by the editors on it.
+
+      **Required permissions:** `zeteo.sources.write`, `zeteo.measures.write` or `zeteo.uploads.write`
+      (`403 forbidden` without), and being someone who manages the list or an editor of the source
+      (`403 forbidden` otherwise). `404 not_found` for a source that does not exist to a caller who may read sources.
+    operationId: listMeasureEditors
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '200':
+        description: The editors
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/ListMeasureEditorsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  put:
+    tags: [Measures]
+    summary: Replace a source's measure editors
+    description: |
+      Makes the editors exactly `principals` (users and groups, each once). Being listed does
+      nothing for a user who lacks `zeteo.measures.write`. The owner of an upload source is always
+      an editor while they hold that permission, listed or not; a transfer keeps the list. For a
+      database source the list is managed by `zeteo.sources.write` holders; for an upload source
+      also by its owner, who may name only groups that are global or of their signed-in
+      organization (`422 group_not_allowed`; a group already listed stays). A
+      `zeteo.measure_editors.updated` audit entry is written when anything changed.
+
+      **Required permissions:** `zeteo.sources.write`, or being the owner of the upload source
+      (holding `zeteo.uploads.write` and `zeteo.data.read`); `403 forbidden` otherwise.
+
+      **Errors:** `404 not_found`; `409 source_archived`; `422 group_not_allowed`; `502 tereo_unreachable`.
+    operationId: replaceMeasureEditors
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/ReplaceMeasureEditorsRequest'
+    responses:
+      '200':
+        description: The editors as they now stand
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/ListMeasureEditorsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '422':
+        description: Unprocessable - `group_not_allowed`, a group of another organization named by an upload source's owner
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
