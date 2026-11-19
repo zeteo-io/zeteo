@@ -73,6 +73,7 @@ item's `as`, else its path). `decimals` (0 to 6) and `legend` (`auto`, `none`) a
 | `area` | as `line`, and `stacked` | as `line` |
 | `bar` | `x`, `y`, `series`, `stacked`, `horizontal` | `y` number; `series` text |
 | `pie` | `label`, `value`, `donut` | `label` text; `value` number |
+| `gauge` | `value`, `max`, `target`, `min` (a column or a number, default 0), `unit` | `value`, `max`, `target` number; read from the first row; the value is the bar, the target a marker, `max` the end of the scale |
 | `table` | `columns` (all when absent) | any |
 
 A chart is checked against the columns of the plan, so nothing runs to check it. The problems

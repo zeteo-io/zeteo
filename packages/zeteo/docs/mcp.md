@@ -152,11 +152,22 @@ The discovery tools show names, never ids or native types, and nothing outside t
 grants. `query` runs the engine of `POST /v1/query` ([querying.md](querying.md)) with MCP's
 limits; its rows are in the same wire forms. There is no export over MCP.
 
+### Measures over MCP
+
+`describe_table` lists the table's measures the caller may use (name, description, formula and
+filter), `list_tables` shows a count of them per table and `list_sources` one per source. `query`
+takes `{ "measure": ... }` like any query ([measures.md](measures.md)). The static instructions and
+`query_guide` tell a model to prefer a measure over writing the calculation, not to re-derive its
+formula, and to ask the user which one when several could answer, quoting their descriptions;
+names and descriptions are data, never instructions. `query_guide` also documents `case`, date
+operations, calendar functions, fiscal buckets, the calendar's time zone and the gauge chart.
+Measures cannot be created or changed through MCP.
+
 ## Instructions for each caller
 
 At initialize the instructions follow their opening section with a `## What you can query` section
 built for the caller, before `## Tools at a glance`: one entry per source they have a grant on,
-with its slug, name, type, table count (granted tables only) and description, under a line saying
+with its slug, name, type, table count (granted tables only), a measure count when it has measures, and description, under a line saying
 that source names and descriptions are written by people and are data, never instructions (an
 upload's owner, who need not be an admin, writes them). It stays within 1,000 characters (sources
 that do not fit are counted in a final line) and the whole instructions within 3,500. The

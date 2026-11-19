@@ -1,0 +1,134 @@
+# Measures
+
+A **measure** is the organisation's agreed definition of a number, such as `paid_revenue`, written
+once per source, described in words and used by name in every query, saved query, dashboard panel
+and MCP conversation. Claude sees the measures a caller may use with their descriptions and
+formulas, prefers them, and asks which one is meant when two could fit (gross or net revenue).
+
+A measure is an aggregate on **one table** (its home table): `sum(total)` over the rows where
+`status = 'paid'`. Zeteo expands it into the query while planning, so the query's own filters and
+grouping apply to it exactly as to an aggregate written inline, grants are checked as for any
+column, and both SQL dialects, the caps and the dashboard cache work unchanged.
+
+## Fields
+
+| Field | Rules |
+|---|---|
+| `name` | `^[a-z][a-z0-9_]{0,62}$`, unique per source across its tables. The default output name when selected. |
+| `description` | Required, 1 to 2,000 characters: what it is, when to use it, when not to. Data, never instructions. |
+| `table` | The home table, by its query name. |
+| `formula` | An expression of the query language that is group-level: every column it reads sits inside an aggregate, or comes from other measures. It may use `case`, date operations, calendar functions and `{ "measure": name }` of other measures **on the same home table**. |
+| `where` | Optional filter over the home table's columns and its to-one relation paths, with literal or relative values. It applies to every aggregate in the formula, including those of measures it uses. |
+
+The joins a measure needs are derived from the paths the formula and `where` read; each must be a
+to-one relation path from the home table.
+
+```json
+{
+  "name": "paid_revenue",
+  "description": "Revenue of paid orders: money received. Use gross_revenue for every order.",
+  "table": "orders",
+  "formula": { "sum": "total" },
+  "where": { "status": { "eq": "paid" } }
+}
+```
+
+## Using a measure in a query
+
+```json
+{ "source": "sales-db", "from": "orders",
+  "select": [{ "bucket": "month", "column": "created_at", "as": "month" },
+             { "measure": "paid_revenue" },
+             { "calc": { "div": [{ "measure": "paid_revenue" }, { "count": "*" }] }, "as": "paid_per_order" }],
+  "groupBy": ["month"] }
+```
+
+- A select item (`{ "measure": "paid_revenue", "as": "rev" }`, named by `as`, else the measure's
+  name) or an operand inside a `calc`. `having` and `orderBy` use the output name.
+- `from` must be the measure's home table; otherwise (and for a measure that does not exist or that
+  the caller cannot see) the answer is `not_found_or_not_accessible`, with `suggestions` listing the
+  measures usable from `from`.
+- Joins the measure needs and the query has not made are added as left joins after the query's own
+  (a path the query joined is reused). They count toward the source's `max_joins`
+  (`too_many_joins`). Being to-one, they neither drop nor repeat rows, so adding a measure never
+  changes the other aggregates of the query.
+- A query that joins a to-many relation cannot use a measure: `measure_needs_single_rows`. Query
+  from the measure's table without that join.
+- Expansion: the measure's formula replaces it, inner measures likewise, and the accumulated
+  `where` is put inside each aggregate (`sum(x)` becomes `sum(case when W then x end)`, `count(*)`
+  `count(case when W then 1 end)`). Nesting is at most 8 levels, the expanded expression at most 500
+  operation and aggregate nodes per query. Errors inside an expanded measure are reported at the
+  measure's path in the query.
+- A measure whose column a catalogue refresh marked missing is `missing_in_source` where used.
+
+## Who sees what (the grant rule)
+
+A caller sees and can use a measure only if its home table, every column it reads (through other
+measures too) and every relation it joins are in the caller's visible catalogue. Otherwise it is
+absent from every listing and using it is `not_found_or_not_accessible`. `GET /v1/catalog` and the
+MCP `describe_table` list each table's visible measures with description, formula and filter;
+`list_tables` and `list_sources` carry counts, and the per-caller MCP instructions say when a source
+has measures.
+
+## Changing measures
+
+Two layers:
+
+1. The role permission `zeteo.measures.write` ("Manage measures"), on `zeteo_admin` and `zeteo_user`.
+   It does nothing until the holder is an editor of a source.
+2. A per-source **editor list** of users and groups: `GET` and `PUT
+   /v1/sources/{id}/measure-editors` (whole replace, audited). Database sources: managed by
+   `zeteo.sources.write` holders. Upload sources: also by the owner (`zeteo.uploads.write` with
+   `zeteo.data.read`), who is always an editor of their own source while they hold
+   `zeteo.measures.write`. A transfer keeps the list; the new owner becomes an editor.
+
+A draft is planned against the **editor's** visible catalogue, so an editor cannot define a measure
+over columns they are not granted. Holders of `zeteo.sources.read` and the owner of an upload source
+see every measure in full, with `broken` set when it no longer plans. An editor who is neither sees a
+measure they cannot fully see redacted (name, table, description, `usable: false`, never `formula` or
+`where`) and cannot change or delete it.
+
+On every save the measure and every measure using it, transitively, are re-checked against the
+source's whole catalogue (home table, result type, loops, nesting, node limits, missing columns). If
+a dependent would break, the save is refused with `409 measure_in_use` naming the dependents;
+renaming or deleting a measure other measures use is refused the same way. Saved queries and panels
+do not block a change: `used_by` (`saved_queries`, `panels`) shows how many use a measure so an
+editor knows before changing it, and those queries then fail with `not_found_or_not_accessible`.
+
+## The API
+
+| Call | Permission | Returns |
+|---|---|---|
+| `GET /v1/sources/{id}/measures` | `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` | the measures the caller sees: visible ones in full, others (for editors and admins) flagged `usable: false`, with `used_by` and `broken` where the caller may see them |
+| `POST /v1/sources/{id}/measures` | `zeteo.measures.write`, an editor | the created measure |
+| `GET`, `PATCH`, `DELETE /v1/sources/{id}/measures/{measureId}` | read as above; changes `zeteo.measures.write`, an editor | the measure; `409 measure_in_use` when a dependent would break |
+| `POST /v1/sources/{id}/measures/preview` | `zeteo.measures.write`, an editor | runs an unsaved draft grouped by nothing or by an optional bucket, as a normal query (limits, run log with entry point `measure_preview`) |
+| `GET`, `PUT /v1/sources/{id}/measure-editors` | read as above; `PUT` as described above | the editors, users and groups |
+
+Audit events: `zeteo.measure.created`, `.updated`, `.deleted`, `zeteo.measure_editors.updated`. The
+SDK has `zeteo.measures` (`list`, `create`, `get`, `update`, `delete`, `preview`, `editors`,
+`replaceEditors`).
+
+## In the admin UI
+
+A source's page has a **Measures** tab: the list (name, table, description, used-by counts, broken
+flag), a dialog with JSON editors for `formula` and `where` validated live against the server (plan
+errors with their paths shown inline), **Preview**, and the editor list for those who may change it.
+My Zeteo shows measures with their descriptions under what a person can query.
+
+## Gauge chart
+
+A dashboard panel can be a `gauge`: `{ "type": "gauge", "version": 1, "value": col, "max": col,
+"target"?: col, "min"?: col | number, "unit"? }`, the columns being result columns (typically measure
+outputs) read from the first row. The value is the progress bar, the target a marker and `max` the
+end of the scale. See [dashboards.md](dashboards.md).
+
+## Not supported
+
+- **Metrics**: a calculation combining measures from different tables. A measure reads one home
+  table (and its to-one relations); there is no cross-table metric.
+- **Fixed values** that ignore the query's filters and grouping.
+- **Calendar functions over columns** (business days per row): the calendar functions take a date or
+  relative date only ([calendar.md](calendar.md)).
+- Using a measure from a query whose `from` is not its home table, row-level reusable calculations,
+  authoring measures through MCP, and a text formula syntax: measures are written as JSON.

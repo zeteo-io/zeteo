@@ -92,6 +92,16 @@ page and no sections.
   connection; for an upload source its owner, size, tables and when it was added. With
   `zeteo.sources.write`, the Querying and Exports sections each have an **Edit** that opens the
   limits dialog (time limit, row cap, concurrency, exports), for both kinds of source.
+- **Measures**, a source's tab (`/sources/<id>/measures`; read by anyone who may see measures,
+  changed with `zeteo.measures.write` as an editor of the source): the list with description,
+  used-by counts and a broken flag; a dialog to create or edit with JSON editors for the formula and
+  filter, validated live against the server with plan errors shown at their paths, and **Preview**
+  of the draft; who may edit measures (users and groups, changed with `zeteo.sources.write` or by an
+  upload source's owner). Details: [measures.md](measures.md).
+- **Calendar** (`/calendar`, in the Admin menu for anyone with `zeteo.data.read`, changed with
+  `zeteo.calendar.write`): working days, fiscal year start month, time zone, and holidays by year
+  with add, remove and CSV paste, showing which years have holidays entered. Details:
+  [calendar.md](calendar.md).
 - **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
   columns and relations and edits the table's and columns' descriptions; Relations lists the
   relations read from the database and declares, renames or removes the ones it lacks.

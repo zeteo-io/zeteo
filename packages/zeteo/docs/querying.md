@@ -58,7 +58,7 @@ results for the same data:
   column on both sides is granted.
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
-  `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year",
+  `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year" | "fiscal_quarter" | "fiscal_year",
   "column": path }`, truncated in UTC, weeks starting on Monday. Each takes an optional `"as"`
   (a lowercase letter, then up to 62 of `a-z`, `0-9`, `_`). Without one an item is named by its
   path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on. A calculation
@@ -338,6 +338,42 @@ Full name (row-level); a null last name counts as empty text:
 }
 ```
 
+### Case, dates and the calendar
+
+`case` (`{ "case": { "when": [{ "if": <filter>, "then": <expression> }], "else": <expression> } }`):
+1 to 10 branches; `if` is a filter in the `where` syntax over column paths (never select names);
+every `then` and `else` has one type (number, text, date or timestamp; a number literal fits any
+number); `else` is optional (null). It is row-level unless a branch holds an aggregate, and the
+rule against mixing bare columns with aggregates applies. Booleans stay refused as values.
+
+Dates and timestamps are allowed in expressions:
+
+| Operation | Operands | Result |
+|---|---|---|
+| `{ "date": "2026-01-01" }`, `{ "timestamp": "...Z" }` | a literal | date, timestamp |
+| `{ "relative": {...} }` | the relative date shape, also with units `fiscal_quarter` and `fiscal_year` | date |
+| `dateAdd` | `[expression, amount, unit]`, `amount` an integer from -10,000 to 10,000, unit `day` to `year` | the operand's type |
+| `dateDiff` | `[unit, start, end]`, unit `day`, `week`, `month`, `quarter` or `year` | number: whole units completed from start to end, the same on both engines |
+| `datePart` | `[part, expression]`, part `year`, `quarter`, `month`, `day`, `weekday` (1 = Monday), `fiscal_year` or `fiscal_quarter` | number |
+
+`min`, `max`, `case` and `coalesce` also take dates. **Calendar functions** count with the admin's
+[calendar](calendar.md): `{ "businessDays": [start, end] }` (both inclusive), `{ "businessDaysInMonth":
+date }`, `{ "businessDaysElapsed": date }` (the month's first day to `date`, inclusive) and `{
+"businessDaysRemaining": date }` (after `date` to month end). Their arguments are constant, a date
+or relative literal; a column is refused with `invalid_operator`. They are not supported over
+columns. `bucket` also takes `fiscal_quarter` and `fiscal_year` (the period's start date), and
+relative dates follow the calendar's time zone (UTC by default); buckets on timestamp columns stay
+in UTC.
+
+### Measures
+
+`{ "measure": "paid_revenue" }` is a select item or an operand of a `calc`: a named, described
+aggregate on one table that an editor defined, expanded by the planner so grants, filters and
+grouping apply as to an inline aggregate. `from` must be its home table; a query that joins a
+to-many relation cannot use one (`measure_needs_single_rows`). A caller who lacks any column a
+measure reads does not see it (`not_found_or_not_accessible`). Cross-table metrics and fixed values
+(measures that ignore the query's filters) do not exist. Details: [measures.md](measures.md).
+
 ## Discovering what you can query
 
 `GET /v1/catalog` (`zeteo.data.read`) answers what the caller may query, so a person or an AI
@@ -568,7 +604,7 @@ recorded, refused and failed ones included, in one transaction that writes a `qu
 recorded in the same table, with their own audit entries ([export.md](export.md#what-is-recorded)).
 
 - The row holds the query as sent, who ran it, the source (null when the caller could not see the
-  one named), the entry point (`api`, `mcp`, `export`, `dashboard`), the duration, the rows returned, the
+  one named), the entry point (`api`, `mcp`, `export`, `dashboard`, `measure_preview`), the duration, the rows returned, the
   outcome, the error code and whether rows were left out. It never holds result data.
 - The audit entry's metadata is `{ source_id, entry_point, outcome, error_code, row_count,
   duration_ms }`; the query itself is only in the row.

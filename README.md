@@ -15,7 +15,8 @@ querying: the catalogue of what a caller may query, the query language, `POST /v
 run log ([docs/querying.md](packages/zeteo/docs/querying.md)), the streaming export
 ([docs/export.md](packages/zeteo/docs/export.md)), saved queries
 ([docs/saved-queries.md](packages/zeteo/docs/saved-queries.md)), dashboards
-([docs/dashboards.md](packages/zeteo/docs/dashboards.md)), Uploads: uploaded CSV and Excel files
+([docs/dashboards.md](packages/zeteo/docs/dashboards.md)), measures and the calendar
+([docs/measures.md](packages/zeteo/docs/measures.md), [docs/calendar.md](packages/zeteo/docs/calendar.md)), Uploads: uploaded CSV and Excel files
 that their owner queries and grants like a database, managed through the same `/v1/sources` API,
 staged with `/v1/uploads`, Google Sheets: tabs of spreadsheets shared with Zeteo's Google service account become tables
 that sync on the source's interval or on Sync now, beside file tables in the same source, and
@@ -106,6 +107,17 @@ and changes write audit entries to tereo's outbox.
   (`DASHBOARD_CACHE_TTL_SECONDS`) and a dashboard's runs are recorded once per viewer per query
   per `DASHBOARD_RECORD_WINDOW_MINUTES`. The UI has Dashboards, a display mode for wall screens
   and admin pages. ([docs/dashboards.md](packages/zeteo/docs/dashboards.md))
+- **Measures and the calendar.** A measure is a named, described aggregate on one table, such as
+  `paid_revenue`, defined once per source by an editor (`zeteo.measures.write` and the source's
+  editor list) and used by name in any query (`{ "measure": "paid_revenue" }`), saved query,
+  dashboard panel or MCP conversation; it shows only to callers granted everything it reads. The
+  query language gains `case`, date arithmetic (`dateAdd`, `dateDiff`, `datePart`), business-day
+  functions over dates and relative dates, and fiscal buckets and relative units. One calendar for
+  the install (`/v1/calendar`, `zeteo.calendar.write`) keeps working days, holidays, the fiscal
+  year start and the time zone that relative dates follow. Dashboards gain a gauge chart. Not
+  there: metrics that combine measures from different tables, fixed values that ignore a query's
+  filters, and calendar functions over columns.
+  ([docs/measures.md](packages/zeteo/docs/measures.md), [docs/calendar.md](packages/zeteo/docs/calendar.md))
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).
 - **MCP.** With `MCP_ALLOWED_CLIENTS` set, `/mcp` serves these tools to an AI signed in through
