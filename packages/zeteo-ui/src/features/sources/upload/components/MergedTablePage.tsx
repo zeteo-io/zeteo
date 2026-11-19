@@ -1,4 +1,3 @@
-import { nameProblem } from "@/utils/queryName";
 import { useMergedColumns, useSaveMergedTable } from "../api/merged";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isUploadType } from "../../components/sourceLabels";
@@ -11,6 +10,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { useUuidParam } from "@/lib/useUuidParam";
 import type { UnionColumn } from "../api/merged";
 import { NotFound } from "@/components/NotFound";
+import { nameProblem } from "@/utils/queryName";
 import { useSource } from "../../api/useSource";
 import { useNavigate } from "react-router-dom";
 import type { Source } from "../../api/types";
