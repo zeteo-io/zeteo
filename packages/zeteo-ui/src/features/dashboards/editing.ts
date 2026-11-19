@@ -86,12 +86,19 @@ const joinPaths = (query: Record<string, unknown>): string[] =>
 /**
  * The date and timestamp column paths a saved query can filter on: those of
  * its `from` table, then of each relation it joins (`orders.created_at`), as
- * the query language names them.
+ * the query language names them; for a metric query, its `range`.
  */
 export const timeColumnOptions = (
   query: unknown,
   catalog: CatalogSourceColumns | undefined
 ): string[] => {
+  // A metric query has one time column of its own: the range its measures are dated by.
+  if (
+    isRecord(query) &&
+    Array.isArray(query.metrics) &&
+    query.from === undefined
+  )
+    return ["range"];
   if (!isRecord(query) || typeof query.from !== "string" || !catalog) return [];
   const table = (name: string) => catalog.tables.find((t) => t.name === name);
   const timeColumns = (name: string, prefix: string) =>

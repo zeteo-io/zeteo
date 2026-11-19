@@ -20,6 +20,8 @@ export interface CatalogSource {
   name: string;
   type: SourceType;
   tables: CatalogTable[];
+  /** Metrics usable in this source; absent where the server does not list them. */
+  metrics?: { name: string; description: string }[];
 }
 
 /** True for the placeholder of a run whose query could not be recorded. */

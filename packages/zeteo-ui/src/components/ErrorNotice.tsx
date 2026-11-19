@@ -7,6 +7,19 @@ interface ErrorNoticeProps {
   fieldPaths?: string[];
 }
 
+const usedByText = (dependents: NonNullable<ApiError["dependents"]>) => {
+  const names = (kind: string) =>
+    dependents
+      .filter((d) => d.kind === kind)
+      .map((d) => d.name)
+      .join(", ");
+  const parts = [
+    ["measures", names("measure")],
+    ["metrics", names("metric")],
+  ].filter(([, list]) => list);
+  return `Used by ${parts.map(([kind, list]) => `${kind}: ${list}`).join("; ")}`;
+};
+
 /** An API failure: its message, its issues not shown beside a field, and its findings. */
 export const ErrorNotice = ({ error, fieldPaths }: ErrorNoticeProps) => {
   if (!error) return null;
@@ -23,6 +36,9 @@ export const ErrorNotice = ({ error, fieldPaths }: ErrorNoticeProps) => {
         error.retryAfter !== undefined && (
           <p>Try again in {error.retryAfter} seconds.</p>
         )}
+      {error.dependents && error.dependents.length > 0 && (
+        <p>{usedByText(error.dependents)}</p>
+      )}
       {general.length > 0 && (
         <ul>
           {general.map((issue, i) => (

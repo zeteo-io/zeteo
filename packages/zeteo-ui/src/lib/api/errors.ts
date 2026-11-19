@@ -11,8 +11,8 @@ export interface ApiError {
   problems?: { setting: string; problem: string }[];
   /** A plan or measure error: where in the request it is, keys and array indexes from the root. */
   path?: (string | number)[];
-  /** `measure_in_use`: the measures that use this one. */
-  dependents?: string[];
+  /** `measure_in_use`: the measures and metrics that use this one. */
+  dependents?: { kind: "measure" | "metric"; name: string }[];
   /** Seconds, from `Retry-After`. */
   retryAfter?: number;
   /** `cast_failed`: the column (and table) whose values do not fit its type, and the first 1-based rows at fault. */
@@ -132,8 +132,12 @@ export const toApiError = (err: unknown): ApiError => {
     out.path = body.path as (string | number)[];
   }
   if (Array.isArray(body.dependents)) {
-    out.dependents = body.dependents.filter(
-      (d): d is string => typeof d === "string"
+    out.dependents = body.dependents.flatMap((d) =>
+      isRecord(d) &&
+      (d.kind === "measure" || d.kind === "metric") &&
+      typeof d.name === "string"
+        ? [{ kind: d.kind, name: d.name }]
+        : []
     );
   }
   const retry = retryAfterSeconds(res.headers?.["retry-after"]);

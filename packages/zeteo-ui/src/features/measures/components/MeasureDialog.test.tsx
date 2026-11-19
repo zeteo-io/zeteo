@@ -1,17 +1,25 @@
+import { makeRelation } from "@/features/relations/testFixtures";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { optionTexts, pickOption } from "@/test/searchSelect";
 import { SOURCE_ID } from "@/features/sources/testFixtures";
-import { makeTable } from "@/features/tables/testFixtures";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { pickOption } from "@/test/searchSelect";
 import { MeasureDialog } from "./MeasureDialog";
 import { makeMeasure } from "../testFixtures";
+import {
+  CUSTOMERS_ID,
+  ORDERS_ID,
+  makeColumn,
+  makeTable,
+  makeTableDetail,
+} from "@/features/tables/testFixtures";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
+const patch = vi.hoisted(() => vi.fn());
 vi.mock("@tereo-io/react", async () =>
-  (await import("@/test/authMock")).mockTereo({ api: { get, post } })
+  (await import("@/test/authMock")).mockTereo({ api: { get, post, patch } })
 );
 
 const label = (text: string) => new RegExp(`^${text}( \\*)?$`);
@@ -174,5 +182,84 @@ describe("MeasureDialog", () => {
         /used by 2 saved queries and 1 panel; they will stop working/
       )
     ).toBeInTheDocument();
+  });
+
+  describe("fixed and date column", () => {
+    const customers = makeTable({ id: CUSTOMERS_ID, name: "customers" });
+    beforeEach(() => {
+      get.mockReset().mockImplementation(async (url: string) => {
+        if (url.endsWith(`/tables/${ORDERS_ID}`))
+          return {
+            data: makeTableDetail({
+              columns: [
+                makeColumn({ name: "created_at", type: "timestamp" }),
+                makeColumn({ name: "note", type: "text" }),
+              ],
+            }),
+          };
+        if (url.endsWith(`/tables/${CUSTOMERS_ID}`))
+          return {
+            data: makeTableDetail({
+              ...customers,
+              columns: [makeColumn({ name: "signup_date", type: "date" })],
+            }),
+          };
+        if (url.endsWith("/relations"))
+          return { data: { data: [makeRelation()], next_cursor: null } };
+        return { data: { data: [makeTable(), customers], next_cursor: null } };
+      });
+    });
+
+    it("offers date columns of the table and its to-one relations", async () => {
+      post.mockResolvedValue({ data: makeMeasure() });
+      const user = userEvent.setup();
+      renderWithProviders(
+        <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
+      );
+      await fill(user);
+      await user.click(field("Date column \\(optional\\)"));
+      await waitFor(() =>
+        expect(optionTexts()).toEqual(["created_at", "customer.signup_date"])
+      );
+      await pickOption(
+        user,
+        field("Date column \\(optional\\)"),
+        "customer.signup_date"
+      );
+      await user.click(screen.getByLabelText(/Fixed/));
+      expect(
+        screen.getByText(/Ignores the query's filters/)
+      ).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(post).toHaveBeenCalledWith(
+          `/v1/sources/${SOURCE_ID}/measures`,
+          expect.objectContaining({
+            fixed: true,
+            date_column: "customer.signup_date",
+          })
+        )
+      );
+    });
+
+    it("sends only the changed fixed and date column on an edit", async () => {
+      patch.mockResolvedValue({ data: makeMeasure() });
+      const user = userEvent.setup();
+      renderWithProviders(
+        <MeasureDialog
+          sourceId={SOURCE_ID}
+          measure={makeMeasure({ fixed: false, date_column: "created_at" })}
+          onClose={vi.fn()}
+        />
+      );
+      await user.click(screen.getByLabelText(/Fixed/));
+      await user.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() =>
+        expect(patch).toHaveBeenCalledWith(
+          `/v1/sources/${SOURCE_ID}/measures/${makeMeasure().id}`,
+          { fixed: true }
+        )
+      );
+    });
   });
 });
