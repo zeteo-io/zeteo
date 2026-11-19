@@ -6,6 +6,7 @@ import { hasPermission } from "../../../../utils/permissions.js";
 import { validateBody } from "../../../../utils/validateReq.js";
 import { readSpreadsheet } from "../../../../google/sheets.js";
 import { parseSheetLink } from "../../../../google/links.js";
+import { originOf } from "../../../../uploads/origin.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { PostLinkBodySchema } from "./schemas.js";
 import type { Request, Response } from "express";
@@ -33,18 +34,29 @@ const spreadsheetOfSource = async (
 ): Promise<string> => {
   const row = await prisma.source.findUnique({
     where: { id },
-    select: { type: true, ownerId: true, archivedAt: true, vendorFileId: true },
+    select: { type: true, ownerId: true, archivedAt: true },
   });
   const may =
     row !== null &&
     (row.ownerId === caller.userId ||
       hasPermission(caller.permissions, SOURCES_WRITE));
   if (!row || !may) throw new NotFoundError("Source not found");
-  if (row.type !== "google_sheets" || !row.vendorFileId) {
+  // TODO(C2): this form goes; until then, the source's one spreadsheet.
+  const tables = await prisma.sourceTable.findMany({
+    where: { sourceId: id },
+    select: { origin: true },
+  });
+  const spreadsheets = new Set(
+    tables.flatMap((t) => {
+      const origin = originOf(t);
+      return origin?.kind === "google-sheets" ? [origin.spreadsheetId] : [];
+    })
+  );
+  if (row.type !== "upload" || spreadsheets.size !== 1) {
     throw new NotASheetsSourceError();
   }
   if (row.archivedAt) throw new SourceArchivedError();
-  return row.vendorFileId;
+  return [...spreadsheets][0]!;
 };
 
 /**

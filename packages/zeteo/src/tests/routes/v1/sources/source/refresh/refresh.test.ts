@@ -181,7 +181,7 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     sheets.set(sheet.id, sheet);
     const staged = await stageFakeSheet(ownerId, sheet);
     const res = await fetchJson("POST", `${app.url}/v1/sources`, owner, {
-      type: "google-sheets",
+      type: "upload",
       staging_id: staged.stagingId,
       name: "Book",
       tables: [{ key: "sheet:1" }],

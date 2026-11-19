@@ -1,7 +1,7 @@
-import { isSheetsSource, isUploadSource, typeOf } from "../sources/types.js";
 import { syncSheetsSource, type SyncSummary } from "../uploads/sync.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { isUploadSource, typeOf } from "../sources/types.js";
 import { withSourceConnection } from "../sources/pools.js";
 import type { Prisma } from "../utils/db/prisma.js";
 import { withAudit } from "../utils/transaction.js";
@@ -648,16 +648,22 @@ const applySnapshot = async (
 
 /**
  * Refreshes a source: a database source's catalogue is read again
- * (`refreshDatabaseSource`); a Google Sheets source is synced
- * (`syncSheetsSource`). A file upload source has nothing to read
- * (`not_a_database_source`).
+ * (`refreshDatabaseSource`); an upload source's Google Sheets tables are
+ * synced (`syncSheetsSource`). An upload source with none has nothing to
+ * read (`not_a_database_source`).
  */
 export const refreshSource = async (
   sourceId: string,
   actorId: string
 ): Promise<RefreshSummary | SyncSummary> => {
   const row = await db.sources.findById(sourceId);
-  if (row && isSheetsSource(row)) return syncSheetsSource(sourceId, actorId);
+  if (
+    row &&
+    isUploadSource(row) &&
+    (await db.sources.hasSheetsTables(sourceId))
+  ) {
+    return syncSheetsSource(sourceId, actorId);
+  }
   return refreshDatabaseSource(sourceId, actorId);
 };
 

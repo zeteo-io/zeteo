@@ -1,7 +1,7 @@
-import { isSheetsSource, isUploadSource, storedType, typeOf } from "./types.js";
 import type { LoginFinding, SourceAdapter } from "../adapters/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
+import { isUploadSource, storedType, typeOf } from "./types.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { sealSettings } from "../utils/crypto/envelope.js";
 import { withAudit } from "../utils/transaction.js";
@@ -247,7 +247,10 @@ export const updateSource = async (
   ) {
     throw new NotADatabaseSourceError();
   }
-  if (input.sync_interval_minutes !== undefined && !isSheetsSource(row)) {
+  if (
+    input.sync_interval_minutes !== undefined &&
+    !(isUploadSource(row) && (await db.sources.hasSheetsTables(row.id)))
+  ) {
     throw new NotSyncedError();
   }
   if (row.archivedAt) throw new SourceArchivedError();

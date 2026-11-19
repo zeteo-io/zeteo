@@ -16,7 +16,6 @@ export const adapterFor = (type: SourceType): SourceAdapter => {
     // An upload source's data is in Zeteo's own Postgres, read by the reader role.
     case "postgres":
     case "upload":
-    case "google-sheets":
       return postgresAdapter as SourceAdapter;
     case "azure-sql":
       return azureSqlAdapter as SourceAdapter;

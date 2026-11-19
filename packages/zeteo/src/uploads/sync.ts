@@ -2,10 +2,12 @@ import { Prisma as PrismaRuntime } from "../../prisma/generated/client/index.js"
 import { dropStagingTables, stageTable, toUnreadable } from "./staging.js";
 import { dropStoredTable, CastFailedError, swapIn } from "./storage.js";
 import { withinRedisTimeout } from "../utils/redisTimeout.js";
+import { originOf, type SheetsOrigin } from "./origin.js";
 import { readSpreadsheet } from "../google/sheets.js";
-import { isSheetsSource } from "../sources/types.js";
+import { isUploadSource } from "../sources/types.js";
 import { prisma } from "../utils/db/prisma.js";
 import { logger } from "../utils/logger.js";
+import { db } from "../utils/db/index.js";
 import { redis } from "../utils/redis.js";
 import env from "../env.js";
 import type {
@@ -38,7 +40,7 @@ import {
 } from "./loading.js";
 
 /**
- * Syncing a Google Sheets source: every table read again from its tab, each
+ * Syncing an upload source's Google Sheets tables: each read again from its tab, each
  * loaded as a re-upload would be (columns matched to the sheet's headers),
  * and all swapped in at once. A sync that fails changes no table; its error
  * is kept on the source for its owner to see. Syncs are logged, not audited.
@@ -54,32 +56,19 @@ export const SYNC_NOW_SECONDS = 60;
 
 const syncNowKey = (sourceId: string) => `zeteo:sync-now:${sourceId}`;
 
+/** A Sheets table's origin: where its data is in its spreadsheet, or null for another table. */
+const sheetsOriginOf = (table: SourceTable): SheetsOrigin | null => {
+  const origin = originOf(table);
+  return origin?.kind === "google-sheets" ? origin : null;
+};
+
 /**
- * Where a table's data is in its spreadsheet, as `vendor_locator` keeps it.
- * Create and add-tables always set it; one without a header row is read with
- * row 0 as its header, and one naming no tab fails the sync rather than
- * losing the table.
+ * Where a Sheets table's data is in its spreadsheet, as its origin keeps it.
+ * Only called for a table whose origin is a Sheets tab.
  */
 const locatorOf = (table: SourceTable) => {
-  const locator = table.vendorLocator as {
-    sheetId?: unknown;
-    headerRow?: unknown;
-  } | null;
-  if (typeof locator?.sheetId !== "number") {
-    logger.error(
-      { source_id: table.sourceId, table_id: table.id },
-      "a Sheets table has no tab in its locator"
-    );
-    throw new Error("A Sheets table has no tab in its locator");
-  }
-  if (typeof locator.headerRow !== "number" && locator.headerRow !== null) {
-    logger.warn(
-      { source_id: table.sourceId, table_id: table.id },
-      "a Sheets table has no header row in its locator; reading row 0 as its header"
-    );
-    return { sheetId: locator.sheetId, headerRow: 0 };
-  }
-  return { sheetId: locator.sheetId, headerRow: locator.headerRow };
+  const origin = sheetsOriginOf(table)!;
+  return { sheetId: origin.sheetId, headerRow: origin.headerRow };
 };
 
 /** What a failed sync keeps on the source: the error's code, and a message for the owner. */
@@ -115,12 +104,18 @@ const recordFailure = async (sourceId: string, err: unknown) => {
     });
 };
 
-/** The source row a sync starts from: 404 for none, 409 for another type or an archived one. */
+/**
+ * The source row a sync starts from: 404 for none, 409 for a database source,
+ * an upload source with no Google Sheets tables, or an archived one.
+ */
 const sheetsSource = async (sourceId: string) => {
   const row = await prisma.source.findUnique({ where: { id: sourceId } });
   if (!row) throw new NotFoundError("Source not found");
-  if (!isSheetsSource(row)) throw new NotASheetsSourceError();
+  if (!isUploadSource(row)) throw new NotASheetsSourceError();
   if (row.archivedAt) throw new SourceArchivedError();
+  if (!(await db.sources.hasSheetsTables(sourceId))) {
+    throw new NotASheetsSourceError();
+  }
   return row;
 };
 
@@ -139,12 +134,9 @@ type CatalogTable = SourceTable & { columns: SourceColumn[] };
  * thrown) and for a table its owner removed, which a sync never brings back.
  */
 const missingSheetId = (table: SourceTable): number | null => {
-  const locator = table.vendorLocator as {
-    sheetId?: unknown;
-    removed?: unknown;
-  } | null;
-  if (locator?.removed === true) return null;
-  return typeof locator?.sheetId === "number" ? locator.sheetId : null;
+  const origin = sheetsOriginOf(table);
+  if (!origin || origin.removed === true) return null;
+  return origin.sheetId;
 };
 
 /**
@@ -248,9 +240,21 @@ const readTables = async (
   return { syncs, gone };
 };
 
+/** The source's Sheets tables (not those their owner removed), by the spreadsheet they come from. */
+const bySpreadsheet = (tables: CatalogTable[]) => {
+  const groups = new Map<string, CatalogTable[]>();
+  for (const table of tables) {
+    const origin = sheetsOriginOf(table);
+    if (!origin || origin.removed === true) continue;
+    const group = groups.get(origin.spreadsheetId) ?? [];
+    group.push(table);
+    groups.set(origin.spreadsheetId, group);
+  }
+  return groups;
+};
+
 const sync = async (
   sourceId: string,
-  spreadsheetId: string,
   actorId: string
 ): Promise<SyncSummary> => {
   // Under the load lock nothing else changes the tables' data or columns.
@@ -261,18 +265,23 @@ const sync = async (
   });
   const created: string[] = [];
   try {
-    let read: Awaited<ReturnType<typeof readTables>>;
+    // TODO(C3): each table in its own transaction, errors per table.
+    const syncs: TableSync[] = [];
+    const gone: SourceTable[] = [];
     try {
-      read = await readTables(
-        spreadsheetId,
-        tables.filter((t) => t.missingSince === null),
-        tables.filter((t) => t.missingSince !== null),
-        created
-      );
+      for (const [spreadsheetId, group] of bySpreadsheet(tables)) {
+        const read = await readTables(
+          spreadsheetId,
+          group.filter((t) => t.missingSince === null),
+          group.filter((t) => t.missingSince !== null),
+          created
+        );
+        syncs.push(...read.syncs);
+        gone.push(...read.gone);
+      }
     } catch (err) {
       throw toUnreadable(err);
     }
-    const { syncs, gone } = read;
     const loaded = await loadTables(
       sourceId,
       syncs.map((s) => s.planned)
@@ -352,7 +361,8 @@ const sync = async (
 };
 
 /**
- * Syncs a Google Sheets source under its load lock: reads every tab backing a
+ * Syncs an upload source's Google Sheets tables under its load lock (its file
+ * tables are left as they are): reads every tab backing a
  * table that is not missing (and brings back a missing table whose tab has
  * returned, keeping its id and grants), loads each table again (columns matched to the
  * sheet's headers by `original_name`, keeping their ids, grants and types;
@@ -369,9 +379,9 @@ export const syncSheetsSource = async (
   assertUploadsOn();
   return withLoadLock(sourceId, async () => {
     // Read again under the lock: a delete may have landed while it waited.
-    const row = await sheetsSource(sourceId);
+    await sheetsSource(sourceId);
     try {
-      return await sync(sourceId, row.vendorFileId!, actorId);
+      return await sync(sourceId, actorId);
     } catch (err) {
       // Busy (a swap kept waiting) is not a failure of the sync: nothing was
       // read wrong, and the next sync will do.

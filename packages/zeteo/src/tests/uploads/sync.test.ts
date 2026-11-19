@@ -95,7 +95,7 @@ const makeSource = async (tabs = [costs()]) => {
   sheets.set(sheet.id, sheet);
   const staged = await stageFakeSheet(ownerId, sheet);
   const view = await createUploadSource(owner, {
-    type: "google-sheets",
+    type: "upload",
     staging_id: staged.stagingId,
     name: "Book",
     tables: tabs.map((t) => ({ key: `sheet:${t.sheetId}` })),

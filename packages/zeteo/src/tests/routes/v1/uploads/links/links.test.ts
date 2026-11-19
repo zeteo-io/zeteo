@@ -122,20 +122,46 @@ const post = async (token: string, body: unknown) => {
   return { status: res.status, body: (text ? JSON.parse(text) : null) as any };
 };
 
-const makeSource = (ownerId: string, fields: object = {}) =>
-  prisma.source.create({
+/** An upload source with one table from a spreadsheet (none when `vendorFileId` is null). */
+const makeSource = async (
+  ownerId: string,
+  fields: { vendorFileId?: string | null; archivedAt?: Date } = {}
+) => {
+  const vendorFileId =
+    fields.vendorFileId === undefined
+      ? `${SHEET_ID}-${randomUUID().slice(0, 8)}`
+      : fields.vendorFileId;
+  const source = await prisma.source.create({
     data: {
       slug: uniqueSlug("links"),
       name: "Sheet source",
-      type: "google_sheets",
+      type: "upload",
       ownerId,
       sealedSettings: {},
       schemas: [],
       createdBy: owner,
-      vendorFileId: `${SHEET_ID}-${randomUUID().slice(0, 8)}`,
-      ...fields,
+      ...(fields.archivedAt && { archivedAt: fields.archivedAt }),
     },
   });
+  if (vendorFileId !== null) {
+    await prisma.sourceTable.create({
+      data: {
+        sourceId: source.id,
+        schemaName: `zu_${source.id.replaceAll("-", "")}`,
+        name: "tab",
+        kind: "table",
+        origin: {
+          kind: "google-sheets",
+          spreadsheetId: vendorFileId,
+          spreadsheetTitle: "Sheet",
+          sheetId: 0,
+          headerRow: 0,
+        },
+      },
+    });
+  }
+  return { ...source, vendorFileId };
+};
 
 let app: Awaited<ReturnType<typeof startV1Routes>>;
 
@@ -257,10 +283,7 @@ describe("POST /v1/uploads/links", () => {
   });
 
   it("with the source_id of a source that is not a Sheets source is 409", async () => {
-    const source = await makeSource(owner, {
-      type: "upload",
-      vendorFileId: null,
-    });
+    const source = await makeSource(owner, { vendorFileId: null });
     const res = await post(ownerToken, { source_id: source.id });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe("not_a_sheets_source");

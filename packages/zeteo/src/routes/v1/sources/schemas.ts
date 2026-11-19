@@ -119,7 +119,10 @@ export const TablesSchema = z.array(TableCorrectionSchema).min(1).max(100);
 /** Minutes between a Sheets source's syncs. */
 export const SyncIntervalSchema = z.number().int().min(15).max(1440);
 
-/** An upload source, made from the caller's staging. */
+/**
+ * An upload source, made from the caller's staging (of a file or a
+ * spreadsheet); `sync_interval_minutes` is used once it has Sheets tables.
+ */
 export const CreateUploadSourceSchema = z.strictObject({
   type: z.literal("upload"),
   staging_id: IdSchema,
@@ -127,15 +130,10 @@ export const CreateUploadSourceSchema = z.strictObject({
   description: SourceFieldsShape.description.optional(),
   slug: SlugSchema.optional(),
   tables: TablesSchema,
-});
-
-/** A Google Sheets source, made from the caller's staging of a spreadsheet. */
-export const CreateSheetsSourceSchema = CreateUploadSourceSchema.extend({
-  type: z.literal("google-sheets"),
   sync_interval_minutes: SyncIntervalSchema.optional(),
 });
 
-const TYPES = ["postgres", "azure-sql", "upload", "google-sheets"] as const;
+const TYPES = ["postgres", "azure-sql", "upload"] as const;
 
 export const ListSourcesQuerySchema = z.strictObject({
   include_archived: z

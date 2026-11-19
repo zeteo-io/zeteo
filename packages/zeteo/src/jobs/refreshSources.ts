@@ -1,6 +1,6 @@
-import { isSheetsSource, isUploadSource } from "../sources/types.js";
 import { SYSTEM_USER_ID } from "../definitions/systemUser.js";
 import { refreshSource } from "../catalog/refresh.js";
+import { isUploadSource } from "../sources/types.js";
 import { AppError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { redis } from "../utils/redis.js";
@@ -23,8 +23,9 @@ const RELEASE = `if redis.call("get", KEYS[1]) == ARGV[1] then return redis.call
 
 /**
  * Refreshes each unarchived database source not refreshed in the last 24
- * hours, and syncs each Google Sheets source whose sync interval has passed
- * (while uploads are on), one at a time; a file upload source never. A source
+ * hours, and syncs each upload source with Google Sheets tables whose sync
+ * interval has passed (while uploads are on), one at a time; an upload source
+ * without Sheets tables never. A source
  * another replica holds the lock for is skipped, and so is one that, read
  * again under the lock, is no longer due or has been archived since the list
  * was read. A failing one is logged (a failed sync is also recorded on the
@@ -53,12 +54,12 @@ export const refreshStaleSources = async (
         const stillDue =
           current !== null &&
           current.archivedAt === null &&
-          (isSheetsSource(current)
+          (isUploadSource(current)
             ? Boolean(env.UPLOADS_READER_URL) &&
-              db.sources.syncIsDue(current, now)
-            : !isUploadSource(current) &&
-              (current.lastRefreshedAt === null ||
-                current.lastRefreshedAt < cutoff));
+              db.sources.syncIsDue(current, now) &&
+              (await db.sources.hasSheetsTables(current.id))
+            : current.lastRefreshedAt === null ||
+              current.lastRefreshedAt < cutoff);
         if (stillDue) await refreshSource(source.id, SYSTEM_USER_ID);
       } finally {
         await redis.eval(RELEASE, 1, lockKey(source.id), token);
@@ -66,7 +67,7 @@ export const refreshStaleSources = async (
     } catch (err) {
       // A sync's own failures (a sheet no longer shared...) are expected and
       // already logged and recorded on the source.
-      if (isSheetsSource(source) && err instanceof AppError) continue;
+      if (isUploadSource(source) && err instanceof AppError) continue;
       logger.error({ err, source_id: source.id }, "scheduled refresh failed");
     }
   }

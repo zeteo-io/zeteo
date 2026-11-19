@@ -1,17 +1,25 @@
--- AlterEnum
-ALTER TYPE "zeteo"."source_type" ADD VALUE 'google-sheets';
-
 -- AlterTable
 ALTER TABLE "zeteo"."sources" ADD COLUMN     "last_sync_attempt_at" TIMESTAMP(3),
 ADD COLUMN     "last_sync_error" JSONB,
-ADD COLUMN     "sync_interval_minutes" INTEGER,
-ADD COLUMN     "vendor_file_id" TEXT;
+ADD COLUMN     "sync_interval_minutes" INTEGER;
 
 -- AlterTable
-ALTER TABLE "zeteo"."source_tables" ADD COLUMN     "vendor_locator" JSONB;
+ALTER TABLE "zeteo"."source_tables" ADD COLUMN     "last_sync_attempt_at" TIMESTAMP(3),
+ADD COLUMN     "last_sync_error" JSONB,
+ADD COLUMN     "origin" JSONB;
 
 -- AlterTable
 ALTER TABLE "zeteo"."upload_stagings" ADD COLUMN     "vendor_file_id" TEXT;
+
+-- CreateTable
+CREATE TABLE "zeteo"."upload_claims" (
+    "vendor" TEXT NOT NULL,
+    "file_id" TEXT NOT NULL,
+    "source_id" UUID NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "upload_claims_pkey" PRIMARY KEY ("vendor","file_id")
+);
 
 -- CreateTable
 CREATE TABLE "zeteo"."connections" (
@@ -23,12 +31,9 @@ CREATE TABLE "zeteo"."connections" (
     CONSTRAINT "connections_pkey" PRIMARY KEY ("provider")
 );
 
--- A spreadsheet is one live source at a time.
-CREATE UNIQUE INDEX "sources_vendor_file_key" ON "zeteo"."sources" ("type", "vendor_file_id") WHERE "archived_at" IS NULL AND "vendor_file_id" IS NOT NULL;
+-- CreateIndex
+CREATE INDEX "upload_claims_source_id_idx" ON "zeteo"."upload_claims"("source_id");
 
--- A source has an owner exactly when it is an upload source, a Sheets one
--- included. Compared as text: the enum value added above cannot be used in the
--- transaction that adds it.
-ALTER TABLE "zeteo"."sources" DROP CONSTRAINT "sources_owner_id_upload_check";
-ALTER TABLE "zeteo"."sources" ADD CONSTRAINT "sources_owner_id_upload_check"
-  CHECK (("owner_id" IS NOT NULL) = ("type"::text IN ('upload', 'google-sheets')));
+-- AddForeignKey
+ALTER TABLE "zeteo"."upload_claims" ADD CONSTRAINT "upload_claims_source_id_fkey" FOREIGN KEY ("source_id") REFERENCES "zeteo"."sources"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+

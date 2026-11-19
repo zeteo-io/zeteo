@@ -1,5 +1,5 @@
-import { isSheetsSource, isUploadSource, typeOf } from "../sources/types.js";
 import type { Source } from "../../prisma/generated/client/index.js";
+import { isUploadSource, typeOf } from "../sources/types.js";
 import { readSettings } from "../sources/connect.js";
 import { adapterFor } from "../adapters/index.js";
 import { logger } from "../utils/logger.js";
@@ -28,6 +28,8 @@ export interface SourceViewExtras {
   storedBytes: number;
   /** An upload source: its latest load, which it reports as its last refresh. */
   lastLoadedAt?: Date | null;
+  /** An upload source: the spreadsheets its Google Sheets tables come from, sorted. */
+  spreadsheetIds?: string[];
 }
 
 /** How long after its last good sync a failing Google Sheets source is called stale. */
@@ -48,15 +50,17 @@ const syncError = (
 };
 
 /**
- * A Google Sheets source's spreadsheet and sync state. Only the source's own
- * view (its owner, or `zeteo.sources.read`) carries it; no catalogue does.
+ * An upload source's spreadsheet and sync state, when it has Google Sheets
+ * tables. Only the source's own view (its owner, or `zeteo.sources.read`)
+ * carries it; no catalogue does.
+ * TODO(C2/C3): the spreadsheet goes per table; this shows the first.
  */
-const sheetsBlocks = (row: Source, now: Date) => {
+const sheetsBlocks = (row: Source, spreadsheetId: string, now: Date) => {
   const lastError = syncError(row.lastSyncError);
   return {
     sheet: {
-      spreadsheet_id: row.vendorFileId,
-      url: `https://docs.google.com/spreadsheets/d/${row.vendorFileId}`,
+      spreadsheet_id: spreadsheetId,
+      url: `https://docs.google.com/spreadsheets/d/${spreadsheetId}`,
     },
     sync: {
       interval_minutes: row.syncIntervalMinutes,
@@ -118,7 +122,8 @@ export const sourceView = (
   share_count: extras.shareCount,
   created_at: row.createdAt.toISOString(),
   archived_at: row.archivedAt?.toISOString() ?? null,
-  ...(isSheetsSource(row) && sheetsBlocks(row, now)),
+  ...(extras.spreadsheetIds?.[0] !== undefined &&
+    sheetsBlocks(row, extras.spreadsheetIds[0], now)),
 });
 
 export type SourceView = ReturnType<typeof sourceView>;

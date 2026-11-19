@@ -259,7 +259,7 @@ describe("refreshStaleSources of Google Sheets sources", () => {
     sheets.set(sheet.id, sheet);
     const staged = await stageFakeSheet(ownerId, sheet);
     const view = await createUploadSource(owner, {
-      type: "google-sheets",
+      type: "upload",
       staging_id: staged.stagingId,
       name: "Book",
       tables: [{ key: "sheet:1" }],

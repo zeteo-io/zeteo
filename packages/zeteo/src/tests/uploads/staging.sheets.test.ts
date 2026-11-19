@@ -214,18 +214,31 @@ describe("stageSheets", () => {
 });
 
 describe("assertSheetUnclaimed", () => {
-  it("throws sheet_in_use for an unarchived google_sheets source and not for an archived one", async () => {
+  it("throws sheet_in_use for an unarchived source with a table from the spreadsheet and not for an archived one", async () => {
     const spreadsheetId = `sheet-${randomUUID()}`;
     const source = await prisma.source.create({
       data: {
         slug: uniqueSlug("sheet"),
         name: "Sheet source",
-        type: "google_sheets",
+        type: "upload",
         ownerId: owner,
         sealedSettings: {},
         schemas: [],
         createdBy: owner,
-        vendorFileId: spreadsheetId,
+        tables: {
+          create: {
+            schemaName: "zu_test",
+            name: "tab",
+            kind: "table",
+            origin: {
+              kind: "google-sheets",
+              spreadsheetId,
+              spreadsheetTitle: "Sheet",
+              sheetId: 0,
+              headerRow: 0,
+            },
+          },
+        },
       },
     });
     const err = await assertSheetUnclaimed(spreadsheetId).catch(

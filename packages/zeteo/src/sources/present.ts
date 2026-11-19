@@ -1,9 +1,9 @@
 import type { Source } from "../../prisma/generated/client/index.js";
 import { sourceView, type SourceView } from "../views/source.js";
 import { sourceStoredBytes } from "../uploads/storage.js";
-import { isFileUpload, isUploadSource } from "./types.js";
 import { NotFoundError } from "../utils/errors.js";
 import { prisma } from "../utils/db/prisma.js";
+import { isUploadSource } from "./types.js";
 
 /**
  * Per source, how many people and groups its tables are shared with: the
@@ -48,6 +48,34 @@ const lastLoads = async (ids: string[]): Promise<Map<string, Date>> => {
 };
 
 /**
+ * Per upload source, the spreadsheets its Google Sheets tables come from
+ * (those their owner removed left out), sorted.
+ */
+const spreadsheetsOf = async (
+  ids: string[]
+): Promise<Map<string, string[]>> => {
+  if (ids.length === 0) return new Map();
+  const rows = await prisma.$queryRaw<
+    { source_id: string; spreadsheet_id: string }[]
+  >`
+    SELECT DISTINCT "source_id"::text AS "source_id",
+      "origin"->>'spreadsheetId' AS "spreadsheet_id"
+    FROM "zeteo"."source_tables"
+    WHERE "source_id" = ANY(${ids}::uuid[])
+      AND "origin"->>'kind' = 'google-sheets'
+      AND ("origin"->>'removed') IS DISTINCT FROM 'true'
+    ORDER BY 2`;
+  const found = new Map<string, string[]>();
+  for (const r of rows) {
+    found.set(r.source_id, [
+      ...(found.get(r.source_id) ?? []),
+      r.spreadsheet_id,
+    ]);
+  }
+  return found;
+};
+
+/**
  * The views of `rows`, with what a view needs besides the row: each one's
  * share count and, for a live upload source, the bytes it stores now and its
  * last load (shown as its last refresh).
@@ -57,17 +85,21 @@ export const presentSources = async (rows: Source[]): Promise<SourceView[]> => {
   const stored = rows
     .filter((r) => isUploadSource(r) && !r.archivedAt)
     .map((r) => r.id);
-  const uploads = rows.filter(isFileUpload).map((r) => r.id);
-  const [shares, bytes, loads] = await Promise.all([
+  const uploads = rows.filter(isUploadSource).map((r) => r.id);
+  const [shares, bytes, loads, sheets] = await Promise.all([
     shareCounts(ids),
     sourceStoredBytes(stored),
     lastLoads(uploads),
+    spreadsheetsOf(uploads),
   ]);
   return rows.map((r) =>
     sourceView(r, {
       shareCount: shares.get(r.id) ?? 0,
       storedBytes: bytes.get(r.id) ?? 0,
-      ...(isFileUpload(r) && { lastLoadedAt: loads.get(r.id) ?? null }),
+      ...(isUploadSource(r) && {
+        lastLoadedAt: loads.get(r.id) ?? null,
+        spreadsheetIds: sheets.get(r.id) ?? [],
+      }),
     })
   );
 };

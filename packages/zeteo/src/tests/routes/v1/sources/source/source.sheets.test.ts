@@ -67,7 +67,7 @@ const makeSheets = async () => {
     },
   });
   const res = await call("POST", "", owner, {
-    type: "google-sheets",
+    type: "upload",
     staging_id: staged.stagingId,
     name: "Book",
     tables: [{ key: "sheet:7" }],

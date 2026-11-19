@@ -21,7 +21,6 @@ import {
 } from "../../../uploads/service.js";
 import {
   CreateSourceSchema,
-  CreateSheetsSourceSchema,
   CreateUploadSourceSchema,
   ListSourcesQuerySchema,
   SourceCursorSchema,
@@ -63,14 +62,11 @@ export const listSources = async (req: Request, res: Response) => {
   });
 };
 
-/** The upload type a create body names, or null for a database source. */
-const uploadTypeOf = (body: unknown): "upload" | "google-sheets" | null => {
-  const type =
-    typeof body === "object" && body !== null
-      ? (body as { type?: unknown }).type
-      : undefined;
-  return type === "upload" || type === "google-sheets" ? type : null;
-};
+/** Whether a create body names an upload source rather than a database source. */
+const isUploadBody = (body: unknown): boolean =>
+  typeof body === "object" &&
+  body !== null &&
+  (body as { type?: unknown }).type === "upload";
 
 /**
  * A database source for `zeteo.sources.write`; an upload source (`type:
@@ -79,18 +75,14 @@ const uploadTypeOf = (body: unknown): "upload" | "google-sheets" | null => {
  */
 export const createSource = async (req: Request, res: Response) => {
   const caller = callerOf(req);
-  const uploadType = uploadTypeOf(req.body);
-  if (uploadType) {
+  if (isUploadBody(req.body)) {
     assertUploadsOn();
     for (const permission of [DATA_READ, UPLOADS_WRITE]) {
       if (!hasPermission(caller.permissions, permission)) {
         throw lacking(permission);
       }
     }
-    const input =
-      uploadType === "google-sheets"
-        ? validateBody(CreateSheetsSourceSchema, req)
-        : validateBody(CreateUploadSourceSchema, req);
+    const input = validateBody(CreateUploadSourceSchema, req);
     res.status(201).json(await createUploadSource(caller, input));
     return;
   }

@@ -2,7 +2,7 @@ import type { VisibleCatalog, VisibleTable } from "../grants/visibleCatalog.js";
 import type { ResolvedTarget } from "../sources/network.js";
 import type { z } from "zod";
 
-export type SourceType = "postgres" | "azure-sql" | "upload" | "google-sheets";
+export type SourceType = "postgres" | "azure-sql" | "upload";
 export type ColumnType =
   "text" | "number" | "boolean" | "date" | "timestamp" | "json" | "other";
 

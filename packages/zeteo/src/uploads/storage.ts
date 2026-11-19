@@ -479,7 +479,7 @@ export const storedBytes = async (
     JOIN pg_namespace n ON n.nspname = 'zu_' || replace(s.id::text, '-', '')
     JOIN pg_class c ON c.relnamespace = n.oid AND c.relkind = 'r'
     WHERE s.owner_id = ${ownerId}::uuid
-      AND s.type IN ('upload', 'google-sheets')
+      AND s.type = 'upload'
       AND s.archived_at IS NULL`;
   return Number(bytes);
 };

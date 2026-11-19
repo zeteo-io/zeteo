@@ -47,9 +47,8 @@ model CoreOutbox {
 
 enum SourceType {
   postgres
-  azure_sql     @map("azure-sql")
+  azure_sql @map("azure-sql")
   upload
-  google_sheets @map("google-sheets")
 
   @@map("source_type")
   @@schema("zeteo")
@@ -124,10 +123,9 @@ model Source {
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamp(3)
   updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamp(3)
   archivedAt           DateTime?    @map("archived_at") @db.Timestamp(3)
-  // A Google Sheets source: the spreadsheet's id, how often it is synced (15 to
-  // 1440 minutes; null for every other type), and the last sync attempt and
-  // its error, if it failed.
-  vendorFileId         String?      @map("vendor_file_id")
+  // An upload source with Google Sheets tables: how often they are synced (15
+  // to 1440 minutes; null for a database source), and the source's last sync
+  // attempt and its error summary, if it failed.
   syncIntervalMinutes  Int?         @map("sync_interval_minutes")
   lastSyncAttemptAt    DateTime?    @map("last_sync_attempt_at") @db.Timestamp(3)
   lastSyncError        Json?        @map("last_sync_error")
@@ -136,6 +134,7 @@ model Source {
   relations    Relation[]
   runs         QueryRun[]
   savedQueries SavedQuery[]
+  uploadClaims UploadClaim[]
 
   @@index([ownerId])
   @@map("sources")
@@ -143,20 +142,24 @@ model Source {
 }
 
 model SourceTable {
-  id            String    @id @default(uuid(7)) @db.Uuid
-  sourceId      String    @map("source_id") @db.Uuid
-  schemaName    String    @map("schema_name")
-  name          String
-  kind          TableKind
-  description   String?
-  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
-  missingSince  DateTime? @map("missing_since") @db.Timestamp(3)
-  lastSyncedAt  DateTime? @map("last_synced_at") @db.Timestamp(3)
+  id                String    @id @default(uuid(7)) @db.Uuid
+  sourceId          String    @map("source_id") @db.Uuid
+  schemaName        String    @map("schema_name")
+  name              String
+  kind              TableKind
+  description       String?
+  lastSeenAt        DateTime  @default(now()) @map("last_seen_at") @db.Timestamp(3)
+  missingSince      DateTime? @map("missing_since") @db.Timestamp(3)
+  lastSyncedAt      DateTime? @map("last_synced_at") @db.Timestamp(3)
   // An upload source's table: its rows at its last load. A database source's:
   // the database's estimate at the last refresh, null when it gave none.
-  rowCount      BigInt?   @map("row_count")
-  // A Google Sheets table: `{ sheetId: number, headerRow: number | null }`.
-  vendorLocator Json?     @map("vendor_locator")
+  rowCount          BigInt?   @map("row_count")
+  // An upload source's table: where it comes from (`TableOrigin` in
+  // src/uploads/origin.ts: a file, a Google Sheets tab or a merged table).
+  origin            Json?     @map("origin")
+  // A Google Sheets table: its last sync attempt and its error, if it failed.
+  lastSyncAttemptAt DateTime? @map("last_sync_attempt_at") @db.Timestamp(3)
+  lastSyncError     Json?     @map("last_sync_error")
 
   source        Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   columns       SourceColumn[]
@@ -294,6 +297,22 @@ model UploadStaging {
   @@index([expiresAt])
   @@index([ownerId])
   @@map("upload_stagings")
+  @@schema("zeteo")
+}
+
+// A spreadsheet (or another vendor's file) backing tables of an upload source:
+// one unarchived source at a time, the first to claim it.
+model UploadClaim {
+  vendor    String
+  fileId    String   @map("file_id")
+  sourceId  String   @map("source_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([vendor, fileId])
+  @@index([sourceId])
+  @@map("upload_claims")
   @@schema("zeteo")
 }
 

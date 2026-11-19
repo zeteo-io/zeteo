@@ -100,6 +100,10 @@ export interface StagedTable {
   columnCount: number;
   /** Where a Google Sheets tab lives in its spreadsheet; absent for a file's tables. */
   locator?: { sheetId: number };
+  /** A Google Sheets tab: its spreadsheet's title, for the table's origin. */
+  spreadsheetTitle?: string;
+  /** A file's table: the uploaded file's name, for the table's origin. */
+  filename?: string;
 }
 
 export interface StagingResult {
@@ -449,7 +453,8 @@ export const stageUpload = async ({
           taken,
           created
         );
-        if (result) tables.push(result);
+        if (result)
+          tables.push({ ...result, staged: { ...result.staged, filename } });
       } else {
         const parts: Buffer[] = [];
         for await (const chunk of bytes) parts.push(chunk as Buffer);
@@ -469,7 +474,12 @@ export const stageUpload = async ({
               taken,
               created
             );
-            if (result) tables.push(result);
+            if (result) {
+              tables.push({
+                ...result,
+                staged: { ...result.staged, filename },
+              });
+            }
           }
         });
       }
@@ -572,6 +582,7 @@ export const stageSheets = async ({
       );
       if (result) {
         result.staged.locator = { sheetId: tab.sheetId };
+        result.staged.spreadsheetTitle = spreadsheet.title;
         tables.push(result);
       }
     }
@@ -590,20 +601,22 @@ export const stageSheets = async ({
 };
 
 /**
- * Throws `SheetInUseError` when an unarchived source already reads this
- * spreadsheet; never says whose it is. A friendly pre-check, not a guard: two
- * callers can both pass it, and the partial unique index `sources_vendor_file_key`
- * is what stops the second source at create time.
+ * Throws `SheetInUseError` when an unarchived source other than `exceptSourceId`
+ * has a table from this spreadsheet; never says whose it is.
+ * TODO(C2): a pre-check only; `upload_claims` becomes the guard.
  */
 export const assertSheetUnclaimed = async (
   spreadsheetId: string,
-  db: Prisma.TransactionClient = prisma
+  db: Prisma.TransactionClient = prisma,
+  exceptSourceId?: string
 ): Promise<void> => {
-  const claimed = await db.source.findFirst({
+  const claimed = await db.sourceTable.findFirst({
     where: {
-      type: "google_sheets",
-      vendorFileId: spreadsheetId,
-      archivedAt: null,
+      origin: { path: ["spreadsheetId"], equals: spreadsheetId },
+      source: {
+        archivedAt: null,
+        ...(exceptSourceId && { id: { not: exceptSourceId } }),
+      },
     },
     select: { id: true },
   });

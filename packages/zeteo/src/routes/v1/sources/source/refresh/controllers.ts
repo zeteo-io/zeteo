@@ -1,6 +1,6 @@
 import { refreshSource as refresh } from "../../../../../catalog/refresh.js";
 import { validateParams } from "../../../../../utils/validateReq.js";
-import { isSheetsSource } from "../../../../../sources/types.js";
+import { isUploadSource } from "../../../../../sources/types.js";
 import { callerOf } from "../../../../../middleware/auth.js";
 import { syncNow } from "../../../../../uploads/sync.js";
 import { db } from "../../../../../utils/db/index.js";
@@ -14,7 +14,7 @@ export const refreshSource = async (req: Request, res: Response) => {
   res
     .status(200)
     .json(
-      row && isSheetsSource(row)
+      row && isUploadSource(row) && (await db.sources.hasSheetsTables(row.id))
         ? await syncNow(sourceId, userId)
         : await refresh(sourceId, userId)
     );
