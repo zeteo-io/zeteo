@@ -226,7 +226,11 @@ PanelTimeColumn:
   type: string
   minLength: 1
   maxLength: 200
-  description: A date or timestamp column of the saved query that the dashboard's time range filters
+  description: |
+    A date or timestamp column of the saved query that the dashboard's time range filters; or
+    `range`, for a saved query that is a metric query (it has `metrics`): the dashboard's range then
+    replaces the query's own `range`. A metric query takes no other time column, and a table query
+    never takes `range`.
 
 Panel:
   type: object

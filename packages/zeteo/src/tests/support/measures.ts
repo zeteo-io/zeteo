@@ -162,7 +162,9 @@ export const withoutRequestId = (res: JsonResponse) => {
 export const seedMeasures = async (
   baseUrl: string,
   source: SeededSource,
-  bodies: unknown[]
+  bodies: unknown[],
+  /** Metrics created after the measures, by the same editor. */
+  metrics: unknown[] = []
 ): Promise<Record<string, string>> => {
   const editor = measureUser();
   for (const table of Object.values(source.tables)) {
@@ -170,7 +172,14 @@ export const seedMeasures = async (
   }
   await setEditors(baseUrl, source.id, [editor.principal]);
   try {
-    return await createMeasures(baseUrl, source.id, editor.token, bodies);
+    const ids = await createMeasures(baseUrl, source.id, editor.token, bodies);
+    if (metrics.length > 0) {
+      Object.assign(
+        ids,
+        await createMetrics(baseUrl, source.id, editor.token, metrics)
+      );
+    }
+    return ids;
   } finally {
     await removeRunsOf([editor.id]);
   }

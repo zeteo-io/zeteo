@@ -34,6 +34,7 @@ export type {
   DiscoveredColumn,
   DiscoveredRelation,
   DiscoveredMeasure,
+  DiscoveredMetric,
   DiscoveredTable,
   DiscoveredSource,
   Catalog,

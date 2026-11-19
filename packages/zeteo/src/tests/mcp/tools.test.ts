@@ -1,8 +1,8 @@
 // @module-tag int
 // @module-tag platform
+import { measureBody, metricBody, seedMeasures } from "../support/measures.js";
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedMeasures, measureBody } from "../support/measures.js";
 import { removeSources } from "../support/sources.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { ENGINES } from "../support/engines.js";
@@ -40,18 +40,46 @@ describe("MCP discovery tools", () => {
       "status",
     ]);
     await grantTo(principal, source.tables.customers!, ["id", "region"]);
-    // One measure over granted columns (visible), one over `total` (never).
-    await seedMeasures(BASE_URL, source, [
-      {
-        ...measureBody(
-          "paid_orders",
-          { count: "*" },
-          { status: { eq: "paid" } }
-        ),
-        description: "Orders that are paid",
-      },
-      measureBody("total_revenue", { sum: "total" }),
-    ]);
+    // Measures over granted columns (visible), one over `total` (never);
+    // dated_orders is dated by `created_at`, which is not granted.
+    await seedMeasures(
+      BASE_URL,
+      source,
+      [
+        {
+          ...measureBody(
+            "paid_orders",
+            { count: "*" },
+            { status: { eq: "paid" } }
+          ),
+          description: "Orders that are paid",
+        },
+        {
+          ...measureBody("dated_orders", { count: "*" }),
+          description: "Orders by creation",
+          date_column: "created_at",
+        },
+        {
+          ...measureBody("customer_total", { count: "*" }),
+          table: "customers",
+          description: "All customers",
+          fixed: true,
+        },
+        measureBody("total_revenue", { sum: "total" }),
+      ],
+      [
+        {
+          ...metricBody("paid_per_customer", {
+            div: [{ measure: "paid_orders" }, { measure: "customer_total" }],
+          }),
+          description: "Paid orders per customer",
+        },
+        // Over total_revenue, which the caller cannot see: never listed.
+        metricBody("revenue_share", {
+          div: [{ measure: "total_revenue" }, { measure: "paid_orders" }],
+        }),
+      ]
+    );
     session = await connectMcp(mcpToken([MCP_USE, DATA_READ], userId));
   });
   afterAll(async () => {
@@ -72,7 +100,8 @@ describe("MCP discovery tools", () => {
       kind: "database",
       language: expect.any(String),
       tables: 2,
-      measures: 1,
+      measures: 3,
+      metrics: 1,
       limits: {
         default_rows: 100,
         // The profile's 5,000, under the source's own cap.
@@ -146,7 +175,7 @@ describe("MCP discovery tools", () => {
           missing: false,
           last_loaded_at: null,
           columns: 2,
-          measures: 0,
+          measures: 1,
         },
         {
           name: "orders",
@@ -156,10 +185,20 @@ describe("MCP discovery tools", () => {
           missing: false,
           last_loaded_at: null,
           columns: 3,
-          measures: 1,
+          measures: 2,
+        },
+      ],
+      metrics: [
+        {
+          name: "paid_per_customer",
+          description: "Paid orders per customer",
+          formula: {
+            div: [{ measure: "paid_orders" }, { measure: "customer_total" }],
+          },
         },
       ],
     });
+    expect(call.text).not.toContain("revenue_share");
   });
 
   it("describe_table shows exactly the granted columns and the relations whose keys are granted", async () => {
@@ -210,10 +249,21 @@ describe("MCP discovery tools", () => {
         ],
         measures: [
           {
+            // Stored with date_column created_at, which the caller lacks.
+            name: "dated_orders",
+            description: "Orders by creation",
+            formula: { count: "*" },
+            where: null,
+            fixed: false,
+            date_column: null,
+          },
+          {
             name: "paid_orders",
             description: "Orders that are paid",
             formula: { count: "*" },
             where: { status: { eq: "paid" } },
+            fixed: false,
+            date_column: null,
           },
         ],
       },
@@ -221,6 +271,24 @@ describe("MCP discovery tools", () => {
     // Never an id, and nothing of the measure over the ungranted `total`.
     expect(call.text).not.toContain("total_revenue");
     expect(call.text).not.toContain('"total"');
+    expect(call.text).not.toContain("created_at");
+  });
+
+  it("describe_table shows a fixed measure on its home table", async () => {
+    const call = await callTool(session.client, "describe_table", {
+      source: source.slug,
+      table: "customers",
+    });
+    expect(call.json.table.measures).toEqual([
+      {
+        name: "customer_total",
+        description: "All customers",
+        formula: { count: "*" },
+        where: null,
+        fixed: true,
+        date_column: null,
+      },
+    ]);
   });
 
   it("answers an unknown table with not_found_or_not_accessible, suggesting only visible names", async () => {

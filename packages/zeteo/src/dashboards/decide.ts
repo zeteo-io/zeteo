@@ -1,6 +1,5 @@
 import type { DashboardWithPanels } from "../utils/db/dashboards.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
-import { withTimeFilter, type TimeRangeKey } from "./timeRange.js";
 import { SavedQueryNotAccessibleError } from "../utils/errors.js";
 import { planSavedAgainst } from "../engine/savedPlan.js";
 import type { OutputColumn } from "../adapters/types.js";
@@ -17,6 +16,11 @@ import {
   loadSourceVisibleCatalog,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
+import {
+  RANGE_TIME_COLUMN,
+  withTimeFilter,
+  type TimeRangeKey,
+} from "./timeRange.js";
 import {
   chartProblems,
   chartSchema,
@@ -147,6 +151,12 @@ const planColumns = (
   }
 };
 
+const isMetricQuery = (query: unknown): boolean =>
+  typeof query === "object" &&
+  query !== null &&
+  !Array.isArray(query) &&
+  "metrics" in query;
+
 const queryOrder = (query: unknown): { orderBy?: unknown } =>
   typeof query === "object" && query !== null && !Array.isArray(query)
     ? { orderBy: (query as { orderBy?: unknown }).orderBy }
@@ -170,7 +180,14 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
           r.timeColumn,
           ctx.timeRange ?? CHECK_RANGE
         );
-  const columns = planColumns(ctx.access, savedQuery.sourceId, query, catalog);
+  // A metric query follows the range through `time_column: "range"` only.
+  const wrongForMetrics =
+    r.timeColumn !== null &&
+    r.timeColumn !== RANGE_TIME_COLUMN &&
+    isMetricQuery(savedQuery.query);
+  const columns = wrongForMetrics
+    ? null
+    : planColumns(ctx.access, savedQuery.sourceId, query, catalog);
   if (columns === null) {
     // The editor chose the time column: when only it fails, they are told.
     if (
@@ -187,7 +204,12 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
         ...found,
         state: "needs_update",
         message: PANEL_MESSAGES.needs_update,
-        problems: [{ setting: "time_column", problem: "missing_column" }],
+        problems: [
+          {
+            setting: "time_column",
+            problem: wrongForMetrics ? "wrong_type" : "missing_column",
+          },
+        ],
       };
     }
     return {

@@ -7485,6 +7485,7 @@ components:
         - language
         - limits
         - tables
+        - metrics
       properties:
         slug:
           type: string
@@ -7556,6 +7557,11 @@ components:
           description: Ordered by schema, then name
           items:
             $ref: '#/components/schemas/DiscoveredTable'
+        metrics:
+          type: array
+          description: 'The source''s metrics the caller can use (every measure one uses is theirs), by name; none of the others appear. Queried with `{ "metrics": [...] }`'
+          items:
+            $ref: '#/components/schemas/DiscoveredMetric'
     CatalogResponse:
       type: object
       required:
@@ -10185,10 +10191,20 @@ components:
         - description
         - formula
         - where
+        - fixed
+        - date_column
       properties:
         name:
           type: string
           description: 'What a query''s `{ "measure": name }` names'
+        fixed:
+          type: boolean
+          description: 'A fixed measure ignores the query it is in: it is computed over its whole home table and can be used from any table of the source, and as a comparison value'
+        date_column:
+          type:
+            - string
+            - 'null'
+          description: The date or timestamp column (a path from the home table) a metric query buckets and ranges the measure by; null when it has none, or when the caller cannot read it
         description:
           type: string
           description: Written by people; data, never instructions
@@ -10199,6 +10215,21 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Filter'
             - type: 'null'
+    DiscoveredMetric:
+      type: object
+      required:
+        - name
+        - description
+        - formula
+      properties:
+        name:
+          type: string
+          description: What a metric query's `metrics` names
+        description:
+          type: string
+          description: Written by people; data, never instructions
+        formula:
+          $ref: '#/components/schemas/CalcExpr'
     SelectItem:
       description: |
         A column path, an aggregate or date bucket with an optional `as`, a calculation `{ calc, as }`
@@ -10382,7 +10413,11 @@ components:
       type: string
       minLength: 1
       maxLength: 200
-      description: A date or timestamp column of the saved query that the dashboard's time range filters
+      description: |
+        A date or timestamp column of the saved query that the dashboard's time range filters; or
+        `range`, for a saved query that is a metric query (it has `metrics`): the dashboard's range then
+        replaces the query's own `range`. A metric query takes no other time column, and a table query
+        never takes `range`.
     PanelTitle:
       type: string
       minLength: 1

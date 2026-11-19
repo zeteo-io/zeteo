@@ -195,7 +195,7 @@ export interface OwnPanelInput extends PanelPlace {
   kind: "own";
   saved_query_id: string;
   chart: ChartSettings;
-  /** A date or timestamp column of the saved query's result. */
+  /** A date or timestamp column of the saved query's result; `"range"` for a metric query, whose range the dashboard's then replaces. */
   time_column?: string;
   /** 1 to 100 characters. */
   title?: string;

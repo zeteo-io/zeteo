@@ -1,9 +1,9 @@
 // @module-tag int
 // @module-tag platform
+import { measureBody, metricBody, seedMeasures } from "../support/measures.js";
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { createTestClient, startStubCore } from "@tereo-io/mcp/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { seedMeasures, measureBody } from "../support/measures.js";
 import { grantTo, seedQuerySource } from "../support/queries.js";
 import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { connectMcp, mcpToken } from "../support/mcp.js";
@@ -45,14 +45,23 @@ describe("per-caller MCP instructions", () => {
     );
     sourceIds.push(granted.id, later.id);
     await grantTo({ type: "user", id: userId }, granted.tables.orders!, "all");
-    await seedMeasures(BASE_URL, granted, [
-      measureBody("total_revenue", { sum: "total" }),
-      measureBody(
-        "paid_revenue",
-        { measure: "total_revenue" },
-        { status: { eq: "paid" } }
-      ),
-    ]);
+    await seedMeasures(
+      BASE_URL,
+      granted,
+      [
+        measureBody("total_revenue", { sum: "total" }),
+        measureBody(
+          "paid_revenue",
+          { measure: "total_revenue" },
+          { status: { eq: "paid" } }
+        ),
+      ],
+      [
+        metricBody("paid_share", {
+          div: [{ measure: "paid_revenue" }, { measure: "total_revenue" }],
+        }),
+      ]
+    );
   });
   afterAll(async () => {
     await redis.del(cacheKey);
@@ -76,7 +85,8 @@ describe("per-caller MCP instructions", () => {
     const line = text
       .split("\n")
       .find((l) => l.includes(`\`${granted.slug}\``))!;
-    expect(line).toContain(", 2 measures)");
+    expect(line).toContain(", 2 measures, 1 metric)");
+    expect(text).not.toContain("paid_share");
     expect(text).not.toContain("paid_revenue");
     expect(text).not.toContain("total_revenue");
   });

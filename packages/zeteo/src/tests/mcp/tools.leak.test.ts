@@ -1,9 +1,9 @@
 // @module-tag int
 // @module-tag platform
 // @module-tag security
+import { measureBody, metricBody, seedMeasures } from "../support/measures.js";
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { seedMeasures, measureBody } from "../support/measures.js";
 import { removeSources } from "../support/sources.js";
 import { prisma } from "../../utils/db/prisma.js";
 import { ENGINES } from "../support/engines.js";
@@ -60,10 +60,24 @@ describe("MCP discovery tools: what the caller may not see", () => {
       "id",
       "status",
     ]);
-    await seedMeasures(BASE_URL, visible, [
-      measureBody("hidden_revenue", { sum: "total" }),
-      measureBody("hidden_chain", { measure: "hidden_revenue" }),
-    ]);
+    await seedMeasures(
+      BASE_URL,
+      visible,
+      [
+        measureBody("hidden_revenue", { sum: "total" }),
+        measureBody("hidden_chain", { measure: "hidden_revenue" }),
+        {
+          ...measureBody("hidden_dated", { count: "*" }),
+          date_column: "created_at",
+        },
+      ],
+      [
+        metricBody("hidden_metric", {
+          div: [{ measure: "hidden_revenue" }, { measure: "hidden_dated" }],
+        }),
+        metricBody("hidden_trivial", { measure: "hidden_chain" }),
+      ]
+    );
     session = await connectMcp(mcpToken([MCP_USE, DATA_READ], userId));
   });
   afterAll(async () => {
@@ -111,20 +125,42 @@ describe("MCP discovery tools: what the caller may not see", () => {
 
   it("shows no measure over an ungranted column anywhere: counts, listings, descriptions", async () => {
     const sources = await callTool(session.client, "list_sources");
-    expect(sources.json.sources[0].measures).toBe(0);
+    // hidden_dated reads no ungranted column, but is dated by `created_at`.
+    expect(sources.json.sources[0].measures).toBe(1);
+    expect(sources.json.sources[0].metrics).toBe(0);
     const tables = await callTool(session.client, "list_tables", {
       source: visible.slug,
     });
-    expect(tables.json.tables[0].measures).toBe(0);
+    expect(tables.json.tables[0].measures).toBe(1);
+    expect(tables.json.metrics).toEqual([]);
     const described = await callTool(session.client, "describe_table", {
       source: visible.slug,
       table: "orders",
     });
-    expect(described.json.table.measures).toEqual([]);
+    // The measure is shown, its undreadable date column is not.
+    expect(described.json.table.measures).toMatchObject([
+      { name: "hidden_dated", fixed: false, date_column: null },
+    ]);
     for (const text of [sources.text, tables.text, described.text]) {
       expect(text).not.toContain("hidden_revenue");
       expect(text).not.toContain("hidden_chain");
+      expect(text).not.toContain("hidden_metric");
+      expect(text).not.toContain("hidden_trivial");
+      expect(text).not.toContain("created_at");
     }
+    const metric = await callTool(session.client, "query", {
+      source: visible.slug,
+      metrics: ["hidden_metric"],
+    });
+    const absent = await callTool(session.client, "query", {
+      source: visible.slug,
+      metrics: ["hidden_metrik"],
+    });
+    expect(metric.isError).toBe(true);
+    expect(metric.json.error).toBe("not_found_or_not_accessible");
+    expect(normalised(metric.text, "hidden_metric")).toBe(
+      normalised(absent.text, "hidden_metrik")
+    );
     const used = await callTool(session.client, "query", {
       source: visible.slug,
       from: "orders",

@@ -1,11 +1,10 @@
 // @module-tag unit
 // @module-tag platform
-import { sqlQuerySchema } from "../../adapters/sql/language.js";
+import { sqlLanguage, sqlQuerySchema } from "../../adapters/sql/language.js";
 import { salesCatalog } from "../support/pure/salesCatalog.js";
 import { jsonBlocks } from "../support/pure/jsonBlocks.js";
 import { chartSchema } from "../../dashboards/chart.js";
 import { LIMIT_PROFILES } from "../../engine/limits.js";
-import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "fs";
 import {
@@ -71,11 +70,11 @@ describe("the MCP reference", () => {
     expect(QUERYING_REFERENCE).toContain('{"mul":[100,{"div"');
   });
 
-  it("holds eleven worked queries, each one the SQL language accepts, and an add_panel example", () => {
+  it("holds fifteen worked queries, each one the SQL language accepts, and an add_panel example", () => {
     const blocks = jsonBlocks(QUERY_GUIDE);
-    expect(blocks).toHaveLength(12);
+    expect(blocks).toHaveLength(16);
     const examples = blocks.slice(0, 6);
-    const addPanel = blocks[11] as Record<string, unknown>;
+    const addPanel = blocks[15] as Record<string, unknown>;
     expect(chartSchema.safeParse(addPanel.chart).success).toBe(true);
     for (const example of examples) {
       const parsed = sqlQuerySchema.safeParse(example);
@@ -136,6 +135,34 @@ describe("the MCP reference", () => {
     );
   });
 
+  it("teaches fixed measures, date columns, metrics and metric queries, and panels over them", () => {
+    const text = QUERYING_REFERENCE;
+    for (const phrase of [
+      "Fixed measures",
+      "from any table",
+      "comparison in",
+      "Date columns",
+      "measure_has_no_date",
+      "## Metrics",
+      '"metrics": [names]',
+      "`period`",
+      "null for the other",
+      "calendar's time zone; buckets stay in UTC",
+      "`businessDaysInMonth`, which also takes a date or timestamp column",
+    ]) {
+      expect(text).toContain(phrase);
+    }
+    expect(DASHBOARDS_REFERENCE).toContain('`time_column: "range"`');
+    const json = JSON.stringify(jsonBlocks(QUERY_GUIDE));
+    for (const word of [
+      '"metrics":["roas","revenue","spend"]',
+      '{"measure":"avg_order_total"}',
+      '"businessDaysInMonth":"created_at"',
+    ]) {
+      expect(json).toContain(word);
+    }
+  });
+
   it("describes the gauge chart and its summary, in prose", () => {
     expect(DASHBOARDS_REFERENCE).toContain("`gauge`: `value`");
     expect(DASHBOARDS_REFERENCE).toContain("`target`");
@@ -152,19 +179,21 @@ describe("the MCP reference", () => {
   const planned = (blocks: unknown[]) => {
     const queries = blocks.filter(
       (b): b is Record<string, unknown> =>
-        typeof b === "object" && b !== null && "from" in b && "select" in b
+        typeof b === "object" &&
+        b !== null &&
+        (("from" in b && "select" in b) || "metrics" in b)
     );
     expect(queries.length).toBeGreaterThan(0);
     for (const query of queries) {
       expect(
-        () => planSql(sqlQuerySchema.parse(query), salesCatalog()),
+        () => sqlLanguage.plan(sqlLanguage.schema.parse(query), salesCatalog()),
         JSON.stringify(query)
       ).not.toThrow();
     }
   };
 
   it("plans every worked example against the example schema", () => {
-    planned(jsonBlocks(QUERY_GUIDE).slice(0, 11));
+    planned(jsonBlocks(QUERY_GUIDE).slice(0, 15));
   });
 
   it("plans every query in docs/querying.md against the example schema", () => {
