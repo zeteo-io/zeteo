@@ -36,13 +36,16 @@ export const listPage = async (options: {
 };
 
 /**
- * Whether an upload source has Google Sheets tables (not ones their owner
- * removed): only such a source syncs.
+ * Whether an upload source has a live Google Sheets table (not missing, not
+ * removed by its owner): only such a source has anything to sync.
  */
-export const hasSheetsTables = async (sourceId: string): Promise<boolean> => {
+export const hasLiveSheetsTables = async (
+  sourceId: string
+): Promise<boolean> => {
   const found = await prisma.$queryRaw<unknown[]>`
     SELECT 1 FROM "zeteo"."source_tables"
     WHERE "source_id" = ${sourceId}::uuid
+      AND "missing_since" IS NULL
       AND "origin"->>'kind' = 'google-sheets'
       AND ("origin"->>'removed') IS DISTINCT FROM 'true'
     LIMIT 1`;
@@ -67,8 +70,9 @@ export const syncIsDue = (
  * The unarchived sources due for the scheduled check, the longest-waiting
  * first: database sources never refreshed or last refreshed before
  * `olderThan`, then upload sources with Google Sheets tables whose sync interval has passed at
- * `now` (`syncIsDue`), while uploads are on (`UPLOADS_READER_URL`). File
- * upload sources never are: their uploads keep them.
+ * `now` (`syncIsDue`) and that have a live Sheets table (`hasLiveSheetsTables`),
+ * while uploads are on (`UPLOADS_READER_URL`). A source of files only never
+ * is: its uploads keep it.
  */
 export const listDue = async (
   olderThan: Date,
@@ -94,7 +98,8 @@ export const listDue = async (
     WHERE "type" = 'upload' AND "archived_at" IS NULL
       AND "sync_interval_minutes" IS NOT NULL
       AND EXISTS (SELECT 1 FROM "zeteo"."source_tables" t
-        WHERE t."source_id" = s."id" AND t."origin"->>'kind' = 'google-sheets'
+        WHERE t."source_id" = s."id" AND t."missing_since" IS NULL
+          AND t."origin"->>'kind' = 'google-sheets'
           AND (t."origin"->>'removed') IS DISTINCT FROM 'true')
       AND ("last_sync_attempt_at" IS NULL
         OR "last_sync_attempt_at" < (${now.toISOString()}::timestamptz AT TIME ZONE 'UTC') - make_interval(mins => "sync_interval_minutes"))`;

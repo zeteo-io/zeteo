@@ -111,12 +111,13 @@ describe("POST /v1/sources/:sourceId/refresh", () => {
     expect(res.body.error).toBe("source_archived");
   });
 
-  it("answers 409 not_a_database_source for an upload source, and changes nothing", async () => {
+  it("answers 409 nothing_to_sync for an upload source without Sheets tables, and changes nothing", async () => {
     const file = await seedUploadSource({ ownerId: randomUUID(), tables: [] });
     try {
       const res = await call("POST", `/${file.id}/refresh`);
       expect(res.status).toBe(409);
-      expect(res.body.error).toBe("not_a_database_source");
+      expect(res.body.error).toBe("nothing_to_sync");
+      expect(await redis.get(`zeteo:sync-now:${file.id}`)).toBeNull();
       const row = await prisma.source.findUniqueOrThrow({
         where: { id: file.id },
       });
@@ -163,8 +164,8 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
   const sheets = new Map<string, FakeSpreadsheet>();
   const made: string[] = [];
 
-  const call = (method: string, path: string, token: string) =>
-    fetchJson(method, `${app.url}/v1/sources${path}`, token);
+  const call = (method: string, path: string, token: string, body?: unknown) =>
+    fetchJson(method, `${app.url}/v1/sources${path}`, token, body);
 
   /** A Sheets source of the owner with one tab, `costs`, made through `POST /v1/sources`. */
   const makeSheets = async () => {
@@ -206,7 +207,7 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     await app.close();
   });
 
-  it("the owner can sync their Sheets source; a non-owner without sources.write gets 403; a file upload still gets 409 not_a_database_source", async () => {
+  it("the owner can sync their Sheets source; a non-owner without sources.write gets 403; a file-only source gets 409 nothing_to_sync", async () => {
     const { sheet, id } = await makeSheets();
     expect((await call("POST", `/${id}/refresh`, other)).status).toBe(403);
     sheet.tab(1).rows.push(["food", "300"]);
@@ -215,7 +216,13 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     expect(res.body).toEqual({
       synced_at: expect.any(String),
       tables: [
-        { id: expect.any(String), name: "costs", row_count: 2, missing: false },
+        {
+          id: expect.any(String),
+          name: "costs",
+          row_count: 2,
+          missing: false,
+          error: null,
+        },
       ],
     });
 
@@ -227,7 +234,8 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     );
     const refused = await call("POST", `/${file.id}/refresh`, owner);
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toBe("not_a_database_source");
+    expect(refused.body.error).toBe("nothing_to_sync");
+    expect(await redis.get(`zeteo:sync-now:${file.id}`)).toBeNull();
   });
 
   it("Sync now twice within 60 s: second is 429 sync_too_soon with Retry-After", async () => {
@@ -268,7 +276,7 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     expect((await call("POST", `/${id}/refresh`, owner)).status).toBe(200);
   });
 
-  it("unshared sheet: 422 sheet_not_accessible from Sync now; data unchanged; owner's source view shows the error; a grantee's catalogue has last_loaded_at and no sync", async () => {
+  it("per-table errors appear on the source's sync.failing, not in a grantee's catalogue", async () => {
     const { sheet, id } = await makeSheets();
     const table = await prisma.sourceTable.findFirstOrThrow({
       where: { sourceId: id },
@@ -284,19 +292,36 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     });
     sheet.failWith = "GGL_0009";
 
+    // Its only table failed: Sync now answers that table's error.
     const res = await call("POST", `/${id}/refresh`, owner);
     expect(res.status).toBe(422);
     expect(res.body.error).toBe("sheet_not_accessible");
 
-    expect(
-      await prisma.sourceTable.findUniqueOrThrow({ where: { id: table.id } })
-    ).toEqual(table);
+    const after = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: table.id },
+    });
+    expect({
+      ...after,
+      lastSyncError: null,
+      lastSyncAttemptAt: null,
+    }).toEqual(table);
+    const error = {
+      code: "sheet_not_accessible",
+      message: expect.any(String),
+    };
     const view = await call("GET", `/${id}`, owner);
-    expect(view.body.sync).toMatchObject({
+    expect(view.body.sync).toEqual({
+      interval_minutes: 60,
       last_attempt_at: expect.any(String),
-      last_error: { code: "sheet_not_accessible", message: expect.any(String) },
+      failing: [{ table_id: table.id, name: "costs", ...error }],
       stale: false,
     });
+    const tables = await call("GET", `/${id}/tables`, owner);
+    expect(tables.body.data).toEqual([
+      expect.objectContaining({ id: table.id, sync_error: error }),
+    ]);
+    const detail = await call("GET", `/${id}/tables/${table.id}`, owner);
+    expect(detail.body.sync_error).toEqual(error);
 
     const catalog = await fetchJson("GET", `${app.url}/v1/catalog`, grantee);
     expect(catalog.status).toBe(200);
@@ -310,6 +335,49 @@ describe("POST /v1/sources/:sourceId/refresh of a Google Sheets source (Sync now
     expect(source.tables[0]).not.toHaveProperty("last_synced_at");
     const text = JSON.stringify(catalog.body);
     expect(text).not.toContain('"sync"');
+    expect(text).not.toContain("sync_error");
     expect(text).not.toContain("sheet_not_accessible");
+  });
+
+  it("partial success answers 200 with per-table errors", async () => {
+    const { sheet, id } = await makeSheets();
+    const other = new FakeSpreadsheet(`sheet-${randomUUID()}`, [
+      { sheetId: 1, title: "Stock", rows: [["sku"], ["a1"]] },
+    ]);
+    sheets.set(other.id, other);
+    const staged = await stageFakeSheet(ownerId, other);
+    const added = await call("POST", `/${id}/tables`, owner, {
+      staging_id: staged.stagingId,
+      tables: [{ key: "sheet:1", name: "stock" }],
+    });
+    expect(added.status, JSON.stringify(added.body)).toBe(201);
+    sheet.failWith = "GGL_0009";
+    other.tab(1).rows.push(["b2"]);
+
+    const res = await call("POST", `/${id}/refresh`, owner);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(res.body).toEqual({
+      synced_at: expect.any(String),
+      tables: [
+        {
+          id: expect.any(String),
+          name: "costs",
+          row_count: 1,
+          missing: false,
+          error: { code: "sheet_not_accessible", message: expect.any(String) },
+        },
+        {
+          id: expect.any(String),
+          name: "stock",
+          row_count: 2,
+          missing: false,
+          error: null,
+        },
+      ],
+    });
+    const view = await call("GET", `/${id}`, owner);
+    expect(view.body.sync.failing).toEqual([
+      expect.objectContaining({ name: "costs", code: "sheet_not_accessible" }),
+    ]);
   });
 });

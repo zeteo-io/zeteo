@@ -441,6 +441,18 @@ export class NotASheetsSourceError extends AppError {
   }
 }
 
+/** A sync of an upload source that has no live Google Sheets table. */
+export class NothingToSyncError extends AppError {
+  constructor() {
+    super(
+      409,
+      "nothing_to_sync",
+      "This source has no Google Sheets tables to sync."
+    );
+    this.name = "NothingToSyncError";
+  }
+}
+
 /** A sync setting on a source that does not sync. */
 export class NotSyncedError extends AppError {
   constructor() {

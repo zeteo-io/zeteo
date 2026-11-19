@@ -1,4 +1,5 @@
 import { originOf } from "../uploads/origin.js";
+import { tableSyncError } from "./source.js";
 import type {
   Relation,
   SourceColumn,
@@ -25,6 +26,11 @@ export const tableView = (row: SourceTable) => ({
   last_loaded_at: iso(row.lastSyncedAt),
   /** An upload source's table: where it comes from (a file, a Sheets tab, a merge); null for a database source's. */
   origin: originOf(row),
+  /**
+   * A Google Sheets table's last failed sync; null when its last sync was good
+   * or it has none. These views are its owner's and `zeteo.sources.read`'s only.
+   */
+  sync_error: tableSyncError(row.lastSyncError),
 });
 
 export const columnView = (row: SourceColumn) => ({

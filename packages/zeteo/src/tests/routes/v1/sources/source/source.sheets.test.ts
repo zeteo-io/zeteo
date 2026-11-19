@@ -180,7 +180,7 @@ describe("sync and origins in the view", () => {
       sync: {
         interval_minutes: 60,
         last_attempt_at: expect.any(String),
-        last_error: null,
+        failing: [],
         stale: false,
       },
     };
@@ -188,24 +188,31 @@ describe("sync and origins in the view", () => {
     const asAdmin = await call("GET", `/${source.id}`, admin);
     expect(asAdmin.body).toMatchObject(expected);
 
-    // A failed sync more than a day after the last good one is stale.
-    await prisma.source.update({
-      where: { id: source.id },
+    // A table failing to sync more than a day after its last good sync is stale.
+    const table = await prisma.sourceTable.findFirstOrThrow({
+      where: { sourceId: source.id },
+    });
+    await prisma.sourceTable.update({
+      where: { id: table.id },
       data: {
         lastSyncError: { code: "sheet_unreachable", message: "Gone" },
-        lastRefreshedAt: new Date(Date.now() - 25 * 3600_000),
+        lastSyncedAt: new Date(Date.now() - 25 * 3600_000),
       },
     });
     const stale = await call("GET", `/${source.id}`, owner);
     expect(stale.body.sync).toMatchObject({
-      last_error: { code: "sheet_unreachable", message: "Gone" },
+      failing: [
+        {
+          table_id: table.id,
+          name: table.name,
+          code: "sheet_unreachable",
+          message: "Gone",
+        },
+      ],
       stale: true,
     });
     expect(stale.body.last_refreshed_at).toBeTruthy();
 
-    const table = await prisma.sourceTable.findFirstOrThrow({
-      where: { sourceId: source.id },
-    });
     await prisma.grant.create({
       data: {
         principalType: "user",
