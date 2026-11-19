@@ -50,6 +50,10 @@ export const defaultChart = (
     }
     case "pie":
       return { type, version: 1, label: first(isText), value: first(isNumber) };
+    case "gauge": {
+      const [value = "", max = ""] = numbers();
+      return { type, version: 1, value, max };
+    }
     case "table":
       return { type, version: 1 };
   }

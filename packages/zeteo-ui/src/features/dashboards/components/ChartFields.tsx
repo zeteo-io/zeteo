@@ -9,6 +9,7 @@ export const CHART_TYPES: { value: ChartType; label: string }[] = [
   { value: "area", label: "Area" },
   { value: "bar", label: "Bar" },
   { value: "pie", label: "Pie" },
+  { value: "gauge", label: "Gauge" },
   { value: "table", label: "Table" },
 ];
 
@@ -284,6 +285,59 @@ export const ChartFields = ({
             />
           )}
           {legend}
+        </div>
+      );
+    case "gauge":
+      return (
+        <div className="z-pe-settings">
+          {at(
+            "value",
+            <ColumnSelect
+              label="Value"
+              value={chart.value}
+              columns={numbers}
+              onChange={(value) => set({ value: value ?? "" })}
+            />
+          )}
+          {at(
+            "max",
+            <ColumnSelect
+              label="Maximum"
+              value={chart.max}
+              columns={numbers}
+              onChange={(max) => set({ max: max ?? "" })}
+            />
+          )}
+          {at(
+            "target",
+            <ColumnSelect
+              label="Target"
+              value={chart.target}
+              columns={numbers}
+              optional
+              onChange={(target) => set({ target })}
+            />
+          )}
+          {at(
+            "min",
+            <ColumnSelect
+              label="Minimum"
+              value={typeof chart.min === "string" ? chart.min : undefined}
+              columns={numbers}
+              optional
+              onChange={(min) => set({ min })}
+            />
+          )}
+          {at(
+            "unit",
+            <Input
+              label="Unit"
+              value={chart.unit ?? ""}
+              max={20}
+              onChange={(e) => set({ unit: e.target.value || undefined })}
+            />
+          )}
+          {decimals}
         </div>
       );
     case "table":

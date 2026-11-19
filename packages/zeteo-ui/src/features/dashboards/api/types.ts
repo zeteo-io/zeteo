@@ -44,6 +44,15 @@ export interface PieSettings extends ChartBase {
   value: string;
   donut?: boolean;
 }
+export interface GaugeSettings extends ChartBase {
+  type: "gauge";
+  value: string;
+  max: string;
+  target?: string;
+  /** A number column's name, or a fixed number; 0 when left out. */
+  min?: string | number;
+  unit?: string;
+}
 export interface TableSettings extends ChartBase {
   type: "table";
   columns?: string[];
@@ -56,6 +65,7 @@ export type ChartSettings =
   | AreaSettings
   | BarSettings
   | PieSettings
+  | GaugeSettings
   | TableSettings;
 
 export type ChartType = ChartSettings["type"];

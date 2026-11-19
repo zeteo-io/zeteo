@@ -245,6 +245,48 @@ describe("chartProblems", () => {
   });
 });
 
+describe("gauge", () => {
+  const gauge = { type: "gauge", version: 1, value: "revenue", max: "orders" };
+
+  it("accepts value and max, with target, min and unit", () => {
+    expect(chartSchema.safeParse(gauge).success).toBe(true);
+    expect(
+      chartSchema.safeParse({
+        ...gauge,
+        target: "orders",
+        min: 5,
+        unit: "USD",
+      }).success
+    ).toBe(true);
+    expect(chartSchema.safeParse({ ...gauge, min: "orders" }).success).toBe(
+      true
+    );
+  });
+
+  it("rejects a missing max", () => {
+    expect(
+      chartSchema.safeParse({ type: "gauge", version: 1, value: "revenue" })
+        .success
+    ).toBe(false);
+  });
+
+  it("flags a text target, a missing max, a text min", () => {
+    const c = { ...gauge, target: "region" } as ChartSettings;
+    expect(chartProblems(c, columns, {})).toEqual([
+      { setting: "target", problem: "wrong_type" },
+    ]);
+    expect(
+      chartProblems({ ...gauge, max: "gone" } as ChartSettings, columns, {})
+    ).toEqual([{ setting: "max", problem: "missing_column" }]);
+    expect(
+      chartProblems({ ...gauge, min: "region" } as ChartSettings, columns, {})
+    ).toEqual([{ setting: "min", problem: "wrong_type" }]);
+    expect(
+      chartProblems({ ...gauge, min: 3 } as ChartSettings, columns, {})
+    ).toEqual([]);
+  });
+});
+
 describe("DEFAULT_SIZES", () => {
   it("has a size for every type", () => {
     expect(DEFAULT_SIZES).toEqual({
@@ -254,6 +296,7 @@ describe("DEFAULT_SIZES", () => {
       area: { w: 6, h: 4 },
       bar: { w: 6, h: 4 },
       pie: { w: 6, h: 4 },
+      gauge: { w: 3, h: 3 },
     });
   });
 });
