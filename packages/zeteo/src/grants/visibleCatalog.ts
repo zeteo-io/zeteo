@@ -1,5 +1,6 @@
-import { DEFAULT_CALENDAR, type Calendar } from "../calendar/calendar.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
+import type { Calendar } from "../calendar/calendar.js";
+import { loadCalendar } from "../calendar/service.js";
 import { typeOf } from "../sources/types.js";
 import { db } from "../utils/db/index.js";
 import type { Access } from "./access.js";
@@ -172,7 +173,11 @@ export const buildVisibleCatalog = (
   };
 };
 
-const defaultExtras = { calendar: DEFAULT_CALENDAR, measures: [] };
+/** What a catalogue carries besides the source's own rows: the stored calendar, and measures once there are any. */
+const loadExtras = async (): Promise<{
+  calendar: Calendar;
+  measures: MeasureRow[];
+}> => ({ calendar: await loadCalendar(), measures: [] });
 
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
 export const loadVisibleCatalog = async (
@@ -192,7 +197,7 @@ export const loadVisibleCatalog = async (
     columns,
     relations,
     access,
-    defaultExtras
+    await loadExtras()
   );
 };
 
@@ -218,7 +223,7 @@ export const loadSourceVisibleCatalog = async (
     columns,
     relations,
     access,
-    defaultExtras
+    await loadExtras()
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
   return visible ? catalog : { ...catalog, tables: [], relations: [] };

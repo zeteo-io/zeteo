@@ -63,6 +63,7 @@ const VERB: Record<AuditEvent, AuditLogWritableAction> = {
   [AUDIT_EVENTS.savedPanelShared]: "UPDATE",
   [AUDIT_EVENTS.savedPanelTransferred]: "UPDATE",
   [AUDIT_EVENTS.savedPanelCopied]: "CREATE",
+  [AUDIT_EVENTS.calendarUpdated]: "UPDATE",
   [AUDIT_EVENTS.queryRun]: "CREATE",
   [AUDIT_EVENTS.exportStarted]: "CREATE",
   // Ends the run its start created; an export refused before it started

@@ -96,4 +96,55 @@ describe("calendar", () => {
       "2026-03-08T05:00:00.000Z"
     );
   });
+
+  it("counts a multi-century range arithmetically", () => {
+    expect(businessDays(DEFAULT_CALENDAR, "2000-01-01", "2099-12-31")).toBe(
+      26089
+    );
+    expect(businessDays(DEFAULT_CALENDAR, "0001-01-01", "9999-12-31")).toBe(
+      2_608_615
+    );
+  });
+
+  it("counts holidays on working days only, inside the range only", () => {
+    const cal = {
+      ...DEFAULT_CALENDAR,
+      holidays: new Map([
+        ["2026-11-18", "Wednesday"],
+        ["2026-11-21", "Saturday"],
+        ["2026-12-25", "outside"],
+      ]),
+    };
+    expect(businessDays(cal, "2026-11-16", "2026-11-22")).toBe(4);
+  });
+
+  it("is 0 when the end is before the start", () => {
+    expect(businessDays(DEFAULT_CALENDAR, "2026-11-19", "2026-11-18")).toBe(0);
+  });
+
+  it("matches a day-by-day count on odd ranges and calendars", () => {
+    const cal = {
+      workingDays: [2, 4, 6, 7] as (1 | 2 | 3 | 4 | 5 | 6 | 7)[],
+      holidays: new Map([
+        ["2026-03-03", "x"],
+        ["2026-03-07", "y"],
+        ["2026-03-08", "z"],
+        ["2026-03-09", "not a working day"],
+      ]),
+      fiscalYearStartMonth: 1,
+      timeZone: "UTC",
+    };
+    for (const [a, b] of [
+      ["2026-03-01", "2026-03-31"],
+      ["2026-03-03", "2026-03-03"],
+      ["2026-02-27", "2026-03-10"],
+    ] as const) {
+      let n = 0;
+      for (let ms = Date.parse(a); ms <= Date.parse(b); ms += 86_400_000) {
+        const d = new Date(ms).toISOString().slice(0, 10);
+        if (isBusinessDay(cal, d)) n += 1;
+      }
+      expect(businessDays(cal, a, b)).toBe(n);
+    }
+  });
 });

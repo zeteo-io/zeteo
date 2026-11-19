@@ -565,3 +565,26 @@ model Connection {
   @@map("connections")
   @@schema("zeteo")
 }
+
+// The one calendar of the deployment (a single row, id = 1; no row means the
+// defaults). CHECK constraints in the migration: id = 1,
+// fiscal_year_start_month 1..12.
+model Calendar {
+  id                   Int      @id
+  workingDays          Int[]    @map("working_days")
+  fiscalYearStartMonth Int      @map("fiscal_year_start_month")
+  timeZone             String   @map("time_zone")
+  updatedBy            String?  @map("updated_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @map("updated_at") @db.Timestamp(3)
+
+  @@map("calendar")
+  @@schema("zeteo")
+}
+
+model CalendarHoliday {
+  date DateTime @id @db.Date
+  name String
+
+  @@map("calendar_holidays")
+  @@schema("zeteo")
+}

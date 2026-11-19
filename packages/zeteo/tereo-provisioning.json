@@ -89,6 +89,12 @@
         "displayName": "Manage upload sources",
         "description": "Create upload sources from uploaded files, and manage and grant the ones the holder owns",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.calendar.write",
+        "displayName": "Manage the calendar",
+        "description": "Change the working days, holidays, fiscal year start and time zone that dates and business-day functions use",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
@@ -109,7 +115,8 @@
           "zeteo.saved_queries.write",
           "zeteo.dashboards.read",
           "zeteo.dashboards.write",
-          "zeteo.uploads.write"
+          "zeteo.uploads.write",
+          "zeteo.calendar.write"
         ]
       },
       {
@@ -320,6 +327,11 @@
         "eventType": "zeteo.saved_panel.copied",
         "description": "A saved panel was copied",
         "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.calendar.updated",
+        "description": "The calendar's working days, holidays, fiscal year or time zone were changed",
+        "readPermission": "zeteo.sources.read"
       },
       {
         "eventType": "zeteo.query.run",

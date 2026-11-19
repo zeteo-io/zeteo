@@ -55,6 +55,9 @@ export const DASHBOARDS_WRITE = "zeteo.dashboards.write";
  */
 export const UPLOADS_WRITE = "zeteo.uploads.write";
 
+/** Changes the calendar: working days, holidays, fiscal year start and time zone. */
+export const CALENDAR_WRITE = "zeteo.calendar.write";
+
 /** The audit trail's event names, one per recorded change. */
 export const AUDIT_EVENTS = {
   sourceCreated: "zeteo.source.created",
@@ -95,6 +98,7 @@ export const AUDIT_EVENTS = {
   savedPanelShared: "zeteo.saved_panel.shared",
   savedPanelTransferred: "zeteo.saved_panel.transferred",
   savedPanelCopied: "zeteo.saved_panel.copied",
+  calendarUpdated: "zeteo.calendar.updated",
   queryRun: "zeteo.query.run",
   exportStarted: "zeteo.export.started",
   exportRun: "zeteo.export.run",
@@ -156,6 +160,8 @@ const EVENT_DESCRIPTIONS: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedPanelTransferred]:
     "A saved panel was transferred to another owner",
   [AUDIT_EVENTS.savedPanelCopied]: "A saved panel was copied",
+  [AUDIT_EVENTS.calendarUpdated]:
+    "The calendar's working days, holidays, fiscal year or time zone were changed",
   [AUDIT_EVENTS.queryRun]: "A query was run, refused or failed",
   [AUDIT_EVENTS.exportStarted]: "An export started sending rows",
   [AUDIT_EVENTS.exportRun]: "An export ended, was refused or failed",
@@ -200,6 +206,7 @@ const EVENT_READ_PERMISSION: Record<AuditEvent, string> = {
   [AUDIT_EVENTS.savedPanelShared]: DASHBOARDS_READ,
   [AUDIT_EVENTS.savedPanelTransferred]: DASHBOARDS_READ,
   [AUDIT_EVENTS.savedPanelCopied]: DASHBOARDS_READ,
+  [AUDIT_EVENTS.calendarUpdated]: SOURCES_READ,
   [AUDIT_EVENTS.queryRun]: RUNS_READ,
   [AUDIT_EVENTS.exportStarted]: RUNS_READ,
   [AUDIT_EVENTS.exportRun]: RUNS_READ,
@@ -311,6 +318,13 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           "Create upload sources from uploaded files, and manage and grant the ones the holder owns",
         orgAssignable: false,
       },
+      {
+        name: CALENDAR_WRITE,
+        displayName: "Manage the calendar",
+        description:
+          "Change the working days, holidays, fiscal year start and time zone that dates and business-day functions use",
+        orgAssignable: false,
+      },
     ],
     systemRoles: [
       {
@@ -333,6 +347,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
           DASHBOARDS_READ,
           DASHBOARDS_WRITE,
           UPLOADS_WRITE,
+          CALENDAR_WRITE,
         ],
       },
       {

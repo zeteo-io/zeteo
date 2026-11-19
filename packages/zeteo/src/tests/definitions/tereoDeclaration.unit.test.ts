@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
 import {
   AUDIT_EVENTS,
+  CALENDAR_WRITE,
   DATA_EXPORT,
   DATA_READ,
   GRANTS_READ,
@@ -45,7 +46,7 @@ describe("buildTereoDocument", () => {
     ]);
   });
 
-  it("declares exactly the thirteen zeteo permissions", () => {
+  it("declares exactly the fourteen zeteo permissions", () => {
     expect(SOURCES_READ).toBe("zeteo.sources.read");
     expect(SOURCES_WRITE).toBe("zeteo.sources.write");
     expect(GRANTS_READ).toBe("zeteo.grants.read");
@@ -69,6 +70,7 @@ describe("buildTereoDocument", () => {
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
         UPLOADS_WRITE,
+        CALENDAR_WRITE,
       ].sort()
     );
   });
@@ -94,7 +96,7 @@ describe("buildTereoDocument", () => {
     });
   });
 
-  it("declares zeteo_admin with all thirteen permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
+  it("declares zeteo_admin with all fourteen permissions, zeteo_user with data read only, and zeteo_mcp_user with data read and MCP use", () => {
     const roles = Object.fromEntries(
       service.systemRoles!.map((r) => [r.name, [...r.permissions!].sort()])
     );
@@ -118,6 +120,7 @@ describe("buildTereoDocument", () => {
         DASHBOARDS_READ,
         DASHBOARDS_WRITE,
         UPLOADS_WRITE,
+        CALENDAR_WRITE,
       ].sort()
     );
     expect(roles.zeteo_user).toEqual([DATA_READ]);
@@ -239,6 +242,7 @@ describe("buildTereoDocument", () => {
 
   it("declares every audit event as an event type", () => {
     expect(Object.values(AUDIT_EVENTS).sort()).toEqual([
+      "zeteo.calendar.updated",
       "zeteo.connection.updated",
       "zeteo.dashboard.copied",
       "zeteo.dashboard.created",
@@ -333,5 +337,34 @@ describe("upload sources declaration", () => {
     expect(
       service.eventTypes!.some((e) => e.eventType.startsWith("zeteo.file_"))
     ).toBe(false);
+  });
+});
+
+describe("the calendar", () => {
+  it("declares zeteo.calendar.write for zeteo_admin only, not assignable in an organization", () => {
+    expect(CALENDAR_WRITE).toBe("zeteo.calendar.write");
+    const permission = service.permissions!.find(
+      (p) => p.name === CALENDAR_WRITE
+    );
+    expect(permission).toMatchObject({
+      displayName: "Manage the calendar",
+      orgAssignable: false,
+    });
+    const holders = service
+      .systemRoles!.filter((r) => r.permissions!.includes(CALENDAR_WRITE))
+      .map((r) => r.name);
+    expect(holders).toEqual(["zeteo_admin"]);
+  });
+
+  it("declares zeteo.calendar.updated, readable with zeteo.sources.read", () => {
+    expect(AUDIT_EVENTS.calendarUpdated).toBe("zeteo.calendar.updated");
+    const event = service.eventTypes!.find(
+      (e) => e.eventType === AUDIT_EVENTS.calendarUpdated
+    );
+    expect(event).toMatchObject({
+      description:
+        "The calendar's working days, holidays, fiscal year or time zone were changed",
+      readPermission: SOURCES_READ,
+    });
   });
 });

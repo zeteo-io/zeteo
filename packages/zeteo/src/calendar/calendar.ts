@@ -25,9 +25,23 @@ const parse = (date: string): { y: number; m: number; d: number } => {
   return { y, m, d };
 };
 
+/** `Date.UTC`, except that years 0–99 are those years, not 1900–1999. */
+const utcMs = (
+  y: number,
+  month: number,
+  d: number,
+  h = 0,
+  mi = 0,
+  s = 0
+): number => {
+  const date = new Date(Date.UTC(2000, month, d, h, mi, s));
+  date.setUTCFullYear(y, month, d);
+  return date.getTime();
+};
+
 const toMs = (date: string): number => {
   const { y, m, d } = parse(date);
-  return Date.UTC(y, m - 1, d);
+  return utcMs(y, m - 1, d);
 };
 
 const fromMs = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
@@ -42,16 +56,31 @@ const weekdayOf = (date: string): Weekday => {
 export const isBusinessDay = (cal: Calendar, date: string): boolean =>
   cal.workingDays.includes(weekdayOf(date)) && !cal.holidays.has(date);
 
-/** Business days from `start` to `end`, both inclusive; 0 when `end < start`. */
+/**
+ * Business days from `start` to `end`, both inclusive; 0 when `end < start`.
+ * Counted by arithmetic, so a range of centuries costs no more than a week:
+ * whole weeks times the working days in one, the leftover days one by one, and
+ * the holidays that fall on working days inside the range taken off.
+ */
 export const businessDays = (
   cal: Calendar,
   start: string,
   end: string
 ): number => {
+  const first = toMs(start);
   const last = toMs(end);
-  let count = 0;
-  for (let ms = toMs(start); ms <= last; ms += DAY_MS) {
-    if (isBusinessDay(cal, fromMs(ms))) count += 1;
+  if (last < first) return 0;
+  const days = (last - first) / DAY_MS + 1;
+  const working = new Set(cal.workingDays);
+  const weeks = Math.floor(days / 7);
+  let count = weeks * working.size;
+  const firstWeekday = weekdayOf(start);
+  for (let i = 0; i < days - weeks * 7; i += 1) {
+    if (working.has((((firstWeekday - 1 + i) % 7) + 1) as Weekday)) count += 1;
+  }
+  for (const date of cal.holidays.keys()) {
+    const ms = toMs(date);
+    if (ms >= first && ms <= last && working.has(weekdayOf(date))) count -= 1;
   }
   return count;
 };
@@ -60,7 +89,7 @@ const monthStart = (date: string): string => `${date.slice(0, 7)}-01`;
 
 const monthEnd = (date: string): string => {
   const { y, m } = parse(date);
-  return fromMs(Date.UTC(y, m, 0));
+  return fromMs(utcMs(y, m, 0));
 };
 
 export const businessDaysInMonth = (cal: Calendar, date: string): number =>
