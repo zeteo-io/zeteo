@@ -1,8 +1,8 @@
 import { makeTable, makeTableDetail } from "@/features/tables/testFixtures";
 import { MergedTableEditPage, MergedTableNewPage } from "./MergedTablePage";
+import { FS_ID, makeUploadSource, sheetOrigin } from "../testFixtures";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { FS_ID, makeUploadSource } from "../testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
@@ -21,7 +21,7 @@ const A = "a1000000-1c7a-4a53-9d0e-6a3b1f2c4d01";
 const B = "a2000000-1c7a-4a53-9d0e-6a3b1f2c4d02";
 const C = "a3000000-1c7a-4a53-9d0e-6a3b1f2c4d03";
 const M = "a4000000-1c7a-4a53-9d0e-6a3b1f2c4d04";
-const SHEET = { kind: "google-sheets" as const };
+const SHEET = sheetOrigin();
 
 const tables = [
   makeTable({ id: A, name: "watermelon", origin: SHEET }),
@@ -32,7 +32,11 @@ const tables = [
     origin: SHEET,
     missing_since: "2026-11-01",
   }),
-  makeTable({ id: M, name: "all_brands", origin: { kind: "merged" } }),
+  makeTable({
+    id: M,
+    name: "all_brands",
+    origin: { kind: "merged", members: 2 },
+  }),
 ];
 
 const union = {

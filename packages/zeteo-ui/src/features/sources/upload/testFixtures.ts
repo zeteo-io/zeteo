@@ -1,4 +1,5 @@
 import type { PreviewTable, Staging } from "./api/types";
+import type { TableOrigin } from "@/features/tables";
 import { makeSource } from "../testFixtures";
 import type { Source } from "../api/types";
 import { TEST_ME } from "@/test/authMock";
@@ -44,6 +45,8 @@ export interface UploadTable {
   row_count: number;
   last_loaded_at: string | null;
   missing?: boolean;
+  origin?: TableOrigin;
+  sync_error?: { code: string; message: string } | null;
   columns: UploadColumn[];
 }
 
@@ -144,6 +147,8 @@ export const catalogueOf = (
     missing_since: t.missing ? "2026-11-15T09:30:00.000Z" : null,
     row_count: t.row_count,
     last_loaded_at: t.last_loaded_at,
+    ...(t.origin && { origin: t.origin }),
+    ...(t.sync_error !== undefined && { sync_error: t.sync_error }),
   });
   if (url === `/v1/sources/${source.id}`) return { data: source };
   if (url === base) {
@@ -193,25 +198,41 @@ export const uploadGet =
 export const SHEET_ID = "1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789";
 export const ROBOT_EMAIL = "zeteo@proj.iam.gserviceaccount.com";
 
-/** A Google Sheets source as `GET /v1/sources/:id` gives its owner. */
+/** An upload source that has Google Sheets tables, as `GET /v1/sources/:id` gives its owner. */
 export const makeSheetsSource = (over: Partial<Source> = {}): Source =>
   makeUploadSource({
-    type: "google-sheets",
     name: "Budget sheet",
     slug: "budget-sheet",
     last_refreshed_at: "2026-11-18T08:00:00.000Z",
-    sheet: {
-      spreadsheet_id: SHEET_ID,
-      url: `https://docs.google.com/spreadsheets/d/${SHEET_ID}`,
-    },
     sync: {
       interval_minutes: 60,
       last_attempt_at: "2026-11-18T08:00:00.000Z",
-      last_error: null,
+      failing: [],
       stale: false,
     },
     ...over,
   });
+
+/** The origin of a table read from one tab of a spreadsheet. */
+export const sheetOrigin = (
+  spreadsheet_id = SHEET_ID,
+  spreadsheet_title = "Budget 2027",
+  tab_title = "Orders"
+): TableOrigin => ({
+  kind: "google-sheets",
+  spreadsheet_id,
+  spreadsheet_title,
+  url: `https://docs.google.com/spreadsheets/d/${spreadsheet_id}`,
+  tab_id: 0,
+  tab_title,
+});
+
+/** The orders table, read from a Google Sheet. */
+export const sheetsOrders = (over: Partial<UploadTable> = {}): UploadTable => ({
+  ...ordersTable(),
+  origin: sheetOrigin(),
+  ...over,
+});
 
 /** What `POST /v1/uploads/links` answers. */
 export const makeSheetStaging = (tables?: PreviewTable[]) => ({

@@ -7,6 +7,8 @@ import {
   FS_ID,
   makeSheetsSource,
   makeUploadSource,
+  ordersTable,
+  sheetsOrders,
   uploadGet,
 } from "../testFixtures";
 
@@ -26,7 +28,9 @@ vi.mock("@tereo-io/react", async () =>
 const SYNCED = {
   data: {
     synced_at: "2026-11-18T10:00:00.000Z",
-    tables: [{ id: "t1", name: "orders", row_count: 12, missing: false }],
+    tables: [
+      { id: "t1", name: "orders", row_count: 12, missing: false, error: null },
+    ],
   },
 };
 
@@ -36,7 +40,12 @@ const renderAt = () =>
 describe("Sync now", () => {
   beforeEach(() => {
     held.permissions = ["zeteo.data.read", "zeteo.uploads.write"];
-    get.mockReset().mockImplementation(uploadGet(() => makeSheetsSource()));
+    get.mockReset().mockImplementation(
+      uploadGet(
+        () => makeSheetsSource(),
+        () => [sheetsOrders()]
+      )
+    );
     post
       .mockReset()
       .mockImplementation(async (url: string) =>
@@ -54,7 +63,10 @@ describe("Sync now", () => {
   it("is shown to a sources admin who is not the owner", async () => {
     held.permissions = ["zeteo.data.read", "zeteo.sources.write"];
     get.mockImplementation(
-      uploadGet(() => makeSheetsSource({ owner_id: "someone-else" }), undefined)
+      uploadGet(
+        () => makeSheetsSource({ owner_id: "someone-else" }),
+        () => [sheetsOrders()]
+      )
     );
     renderAt();
     expect(
@@ -69,10 +81,34 @@ describe("Sync now", () => {
     expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
   });
 
+  it("is shown by the tables' origin, not the source's type: not for file tables, even with a sync block", async () => {
+    get.mockImplementation(uploadGet(() => makeSheetsSource()));
+    renderAt();
+    await screen.findByRole("button", { name: "Add tables" });
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
+  });
+
+  it("is shown for a source mixing files and a Sheets table", async () => {
+    get.mockImplementation(
+      uploadGet(
+        () => makeUploadSource(),
+        () => [
+          { ...ordersTable(), origin: { kind: "file", filename: "a.csv" } },
+          sheetsOrders({ id: "t2", name: "budget" }),
+        ]
+      )
+    );
+    renderAt();
+    expect(
+      await screen.findByRole("button", { name: "Sync now" })
+    ).toBeInTheDocument();
+  });
+
   it("is not shown on an archived source", async () => {
     get.mockImplementation(
-      uploadGet(() =>
-        makeSheetsSource({ archived_at: "2026-11-17T00:00:00.000Z" })
+      uploadGet(
+        () => makeSheetsSource({ archived_at: "2026-11-17T00:00:00.000Z" }),
+        () => [sheetsOrders()]
       )
     );
     renderAt();
@@ -88,6 +124,45 @@ describe("Sync now", () => {
       expect(post).toHaveBeenCalledWith(`/v1/sources/${FS_ID}/refresh`)
     );
     expect(await screen.findByText(/Synced 1 table/)).toBeInTheDocument();
+  });
+
+  it("says how many tables synced and how many failed when a 200 carries errors", async () => {
+    const user = userEvent.setup();
+    post.mockResolvedValue({
+      data: {
+        synced_at: "2026-11-18T10:00:00.000Z",
+        tables: [
+          { id: "t1", name: "a", row_count: 1, missing: false, error: null },
+          {
+            id: "t2",
+            name: "b",
+            row_count: 0,
+            missing: false,
+            error: { code: "sheet_not_accessible", message: "No access" },
+          },
+          { id: "t3", name: "c", row_count: 3, missing: false, error: null },
+        ],
+      },
+    });
+    renderAt();
+    await user.click(await screen.findByRole("button", { name: "Sync now" }));
+    expect(
+      await screen.findByText("Synced 3 tables; 1 failing")
+    ).toBeInTheDocument();
+  });
+
+  it("says there is nothing to sync on nothing_to_sync", async () => {
+    const user = userEvent.setup();
+    post.mockRejectedValue({
+      status: 409,
+      code: "nothing_to_sync",
+      message: "x",
+    });
+    renderAt();
+    await user.click(await screen.findByRole("button", { name: "Sync now" }));
+    expect(
+      await screen.findByText("This source has no Google Sheets to sync")
+    ).toBeInTheDocument();
   });
 
   it("says so on sync_too_soon", async () => {

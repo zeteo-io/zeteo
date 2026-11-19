@@ -218,8 +218,8 @@ export const SourceForm = ({
   const [exportEnabled, setExportEnabled] = useState(
     source?.export_enabled ?? false
   );
-  // Only a Google Sheets source syncs.
-  const syncs = source?.type === "google-sheets";
+  // Only a source with Google Sheets tables syncs (the server sends `sync` then).
+  const syncs = !!source?.sync;
   const [syncEvery, setSyncEvery] = useState(
     String(source?.sync?.interval_minutes ?? 60)
   );

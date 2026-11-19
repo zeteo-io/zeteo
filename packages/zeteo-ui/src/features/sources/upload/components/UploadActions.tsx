@@ -8,18 +8,22 @@ import { useDeleteUploadSource } from "../api/uploads";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { TransferDialog } from "./TransferDialog";
 import { Alert, Button } from "@kosmeo-ui/react";
+import { useAllTables } from "@/features/tables";
 import { useNavigate } from "react-router-dom";
 import type { ApiError } from "@/lib/api";
 import { MY_DATA_HREF } from "./labels";
 import { useState } from "react";
 
 const tablesSynced = (summary: SyncSummary) => {
-  const n = summary.tables.filter((t) => !t.missing).length;
-  return `Synced ${n} ${n === 1 ? "table" : "tables"}`;
+  const live = summary.tables.filter((t) => !t.missing);
+  const failing = live.filter((t) => t.error).length;
+  const n = live.length;
+  const synced = `Synced ${n} ${n === 1 ? "table" : "tables"}`;
+  return failing > 0 ? `${synced}; ${failing} failing` : synced;
 };
 
 /**
- * An upload's header actions (Sync now for a Google Sheet, Add tables, Transfer, Edit, Delete) and the
+ * An upload's header actions (Sync now for a source with Google Sheets tables, Add tables, Add merged table, Transfer, Edit, Delete) and the
  * dialogs they open: for its owner or a sources admin, until it is deleted.
  */
 export const useUploadActions = (source: Source, access: SourceAccess) => {
@@ -28,6 +32,11 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
   const [dialog, setDialog] = useState<"edit" | "transfer" | null>(null);
   const close = () => setDialog(null);
   const refresh = useRefreshSource(source.id);
+  const { tables } = useAllTables(source.id, { includeMissing: false });
+  const hasSheets = tables.some((t) => t.origin?.kind === "google-sheets");
+  const canMerge =
+    !source.archived_at &&
+    tables.filter((t) => t.origin?.kind !== "merged").length >= 2;
   const [synced, setSynced] = useState<SyncSummary | null>(null);
   const [syncError, setSyncError] = useState<ApiError | null>(null);
 
@@ -36,7 +45,7 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
     setSynced(null);
     setSyncError(null);
     refresh.mutate(undefined, {
-      // For a Sheets source the server answers with what it synced.
+      // For a source with Sheets tables the server answers with what it synced.
       onSuccess: (result) => "synced_at" in result && setSynced(result),
       onError: setSyncError,
     });
@@ -44,7 +53,7 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
 
   const actions = access.canManage && (
     <div className="z-source-actions">
-      {source.type === "google-sheets" && (
+      {hasSheets && (
         <Button
           size="sm"
           variant="secondary"
@@ -64,6 +73,16 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
       >
         Add tables
       </Button>
+      {canMerge && (
+        <Button
+          size="sm"
+          variant="secondary"
+          fullWidth={false}
+          onClick={() => navigate(`${sourceHref(source.id)}/merged/new`)}
+        >
+          Add merged table
+        </Button>
+      )}
       <Button
         size="sm"
         variant="secondary"
@@ -97,12 +116,22 @@ export const useUploadActions = (source: Source, access: SourceAccess) => {
         <div className="z-source-result">
           <Alert variant="warning">Synced less than a minute ago</Alert>
         </div>
+      ) : syncError?.code === "nothing_to_sync" ? (
+        <div className="z-source-result">
+          <Alert variant="warning">
+            This source has no Google Sheets to sync
+          </Alert>
+        </div>
       ) : (
         <ErrorNotice error={syncError} />
       )}
       {synced && (
         <div className="z-source-result">
-          <Alert variant="success">{tablesSynced(synced)}</Alert>
+          <Alert
+            variant={synced.tables.some((t) => t.error) ? "warning" : "success"}
+          >
+            {tablesSynced(synced)}
+          </Alert>
         </div>
       )}
       {dialog === "edit" && (

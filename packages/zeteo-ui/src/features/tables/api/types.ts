@@ -2,6 +2,18 @@
 // `PatchTableRequest` schemas.
 import type { Relation } from "@/features/relations/api/types";
 
+export type TableOrigin =
+  | { kind: "file"; filename: string }
+  | {
+      kind: "google-sheets";
+      spreadsheet_id: string;
+      spreadsheet_title: string;
+      url: string;
+      tab_id: number | string;
+      tab_title: string;
+    }
+  | { kind: "merged"; members: number };
+
 export interface Table {
   id: string;
   source_id: string;
@@ -16,7 +28,9 @@ export interface Table {
   /** When an upload's table was last loaded; null for a database source. */
   last_loaded_at: string | null;
   /** Where an upload's table came from; a merged table says how many members. */
-  origin?: { kind: "file" | "google-sheets" | "merged" } | null;
+  origin?: TableOrigin | null;
+  /** A Google Sheets table's last failed sync; only its owner and `zeteo.sources.read` see it. */
+  sync_error?: { code: string; message: string } | null;
 }
 
 export interface Column {

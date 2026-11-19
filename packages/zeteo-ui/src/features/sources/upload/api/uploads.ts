@@ -3,7 +3,6 @@ import { toApiError, useZeteoApi, type ApiError } from "@/lib/api";
 import type { Source } from "../../api/types";
 import { useCallback } from "react";
 import type {
-  CreateSheetsSource,
   CreateUploadSource,
   SheetStaging,
   Staging,
@@ -73,13 +72,13 @@ export const useUploadFile = () => {
   });
 };
 
-/** Stages a Google Sheet from its link, or an existing Sheets source's own spreadsheet: the answer is its preview. */
+/** Stages any Google Sheet from its link (for an existing source too, with its `source_id`): the answer is its preview. */
 export const useStageSheet = () => {
   const api = useZeteoApi();
   return useMutation<
     SheetStaging,
     ApiError,
-    { url: string } | { source_id: string }
+    { url: string; source_id?: string }
   >({
     mutationFn: (body) =>
       call(() => api.post<SheetStaging>("/v1/uploads/links", body)),
@@ -129,11 +128,6 @@ const useSourceChange = <V>(
 export const useCreateUploadSource = () =>
   useSourceChange<Omit<CreateUploadSource, "type">>((api, body) =>
     api.post("/v1/sources", { type: "upload", ...body })
-  );
-
-export const useCreateSheetsSource = () =>
-  useSourceChange<Omit<CreateSheetsSource, "type">>((api, body) =>
-    api.post("/v1/sources", { type: "google-sheets", ...body })
   );
 
 export const useAddTables = (id: string) =>

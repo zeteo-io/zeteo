@@ -587,7 +587,7 @@ describe("AddDataPage: Google Sheet", () => {
       expect(post).toHaveBeenCalledWith(
         "/v1/sources",
         expect.objectContaining({
-          type: "google-sheets",
+          type: "upload",
           staging_id: STAGING_ID,
           name: "Budget 2027",
           sync_interval_minutes: 30,
@@ -617,19 +617,28 @@ describe("AddDataPage: Google Sheet", () => {
     ).toBeInTheDocument();
   });
 
-  it("stages Add tables from the source itself, with no link field", async () => {
+  it("offers Add tables a file or a Google Sheet, and posts the source with any link", async () => {
+    const user = userEvent.setup();
     renderAt(`/sources/${FS_ID}/add`);
     expect(
       await screen.findByRole("heading", { name: "Add tables to Budget sheet" })
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Upload a file/ })
+    ).toBeInTheDocument();
+    // Nothing is staged on its own.
+    expect(post).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: /Google Sheet/ }));
+    await user.type(screen.getByLabelText(/Link to the Google Sheet/), LINK);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/v1/uploads/links", {
         source_id: FS_ID,
+        url: LINK,
       })
     );
     expect(
       await screen.findByRole("heading", { name: "orders" })
     ).toBeInTheDocument();
-    expect(screen.queryByLabelText(/Link to the Google Sheet/)).toBeNull();
   });
 });
