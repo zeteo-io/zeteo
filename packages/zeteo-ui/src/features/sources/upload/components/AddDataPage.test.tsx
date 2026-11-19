@@ -31,6 +31,15 @@ vi.mock("@tereo-io/react", async () =>
   })
 );
 
+// A new discard function on every render, as when the API client is rebuilt
+// after a token refresh: the page must still discard only when it is left.
+vi.mock("../api/uploads", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/uploads")>()),
+  useDiscardStaging: () => (stagingId: string) => {
+    void del(`/v1/uploads/${stagingId}`);
+  },
+}));
+
 const renderAt = (route: string) =>
   renderWithProviders(
     <Routes>
@@ -124,6 +133,47 @@ describe("AddDataPage", () => {
     await user.click(screen.getByRole("button", { name: "Create source" }));
     expect(await screen.findByText("Source page")).toBeInTheDocument();
     await new Promise((r) => setTimeout(r, 20));
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("keeps the staging while the person edits the preview, whatever re-renders", async () => {
+    const user = userEvent.setup();
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.type(screen.getAllByLabelText(/^Name/)[0]!, " edited");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("says a preview that is gone has expired, above the form, and starts again", async () => {
+    const user = userEvent.setup();
+    post.mockImplementation(async (url: string) => {
+      if (url === "/v1/uploads") return { data: makeStaging() };
+      throw {
+        status: 404,
+        code: "staging_not_found",
+        message: "Upload not found or expired",
+      };
+    });
+    renderAt("/my/data/new");
+    await upload(user);
+    await screen.findByRole("heading", { name: "orders" });
+    await user.click(screen.getByRole("button", { name: "Create source" }));
+
+    const notice = await screen.findByText(/no longer available/);
+    const about = screen.getByRole("heading", { name: "About" });
+    expect(
+      notice.compareDocumentPosition(about) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(screen.queryByText("Upload not found or expired")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Start again" }));
+    // Back to the file picker, the preview gone.
+    await waitFor(() =>
+      expect(document.querySelector('input[type="file"]')).not.toBeNull()
+    );
+    expect(screen.queryByRole("heading", { name: "orders" })).toBeNull();
     expect(del).not.toHaveBeenCalled();
   });
 

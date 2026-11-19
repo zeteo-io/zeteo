@@ -20,6 +20,7 @@ import {
   DescriptionField,
 } from "../../components/DescriptionField";
 import {
+  Alert,
   BorderedSection,
   Button,
   FileDropZone,
@@ -170,14 +171,39 @@ const AddData = ({ mode }: { mode: Mode }) => {
 
   // A staging the person leaves without using (Cancel, or navigating away)
   // is discarded, so it stops counting against their space.
+  // Only leaving the page discards it: the cleanup runs on unmount alone, with
+  // the latest discard function, so a re-render (a new API client after a
+  // token refresh, say) never throws away the preview the person is editing.
   const discard = useDiscardStaging();
+  const discardRef = useRef(discard);
+  useEffect(() => {
+    discardRef.current = discard;
+  }, [discard]);
   const unused = useRef<string | null>(null);
   useEffect(
     () => () => {
-      if (unused.current) discard(unused.current);
+      if (unused.current) discardRef.current(unused.current);
     },
-    [discard]
+    []
   );
+
+  // A failed create, add or re-upload is shown above the form and brought
+  // into view, wherever the person was in a long preview.
+  const failureRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (mutation.error) {
+      failureRef.current?.scrollIntoView?.({
+        block: "start",
+        behavior: "smooth",
+      });
+    }
+  }, [mutation.error]);
+  const startAgain = () => {
+    unused.current = null;
+    mutation.reset();
+    setStaging(null);
+    setEdits({});
+  };
 
   const onStaged = (s: Staging, defaultName: string) => {
     setStaging(s);
@@ -330,6 +356,29 @@ const AddData = ({ mode }: { mode: Mode }) => {
             submit();
           }}
         >
+          {mutation.error && (
+            <div ref={failureRef}>
+              {mutation.error.code === "staging_not_found" ? (
+                <Alert variant="danger">
+                  <p>
+                    This preview is no longer available: a preview is kept for
+                    an hour. Read the {origin === "sheet" ? "sheet" : "file"}{" "}
+                    again to carry on.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    fullWidth={false}
+                    onClick={startAgain}
+                  >
+                    Start again
+                  </Button>
+                </Alert>
+              ) : (
+                <LoadFailure error={mutation.error} />
+              )}
+            </div>
+          )}
           {mode.kind === "create" && (
             <BorderedSection title="About" as="h2">
               <FormGrid columns={2}>
@@ -379,7 +428,6 @@ const AddData = ({ mode }: { mode: Mode }) => {
             mode={mode.kind === "reupload" ? "one" : "many"}
             origin={origin ?? undefined}
           />
-          <LoadFailure error={mutation.error} />
         </form>
       )}
     </div>
