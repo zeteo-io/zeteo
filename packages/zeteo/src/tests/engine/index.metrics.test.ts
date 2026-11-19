@@ -207,6 +207,27 @@ describeEachEngine("runQuery: metric queries", (engine) => {
         fixed: true,
       }
     );
+    // Part measures with the awkward shapes: a calendar function over a
+    // column, a fixed measure inside an aggregate, a date column reached
+    // through a to-one relation.
+    await addMeasure(
+      "bd_days",
+      "orders",
+      { max: { businessDaysInMonth: "created_at" } },
+      { dateColumn: "created_at" }
+    );
+    await addMeasure(
+      "revenue_plus_lines",
+      "orders",
+      { sum: { add: ["total", { measure: "line_count" }] } },
+      { dateColumn: "created_at" }
+    );
+    await addMeasure(
+      "lines_by_order_date",
+      "order_lines",
+      { count: "*" },
+      { dateColumn: "orders.created_at" }
+    );
     await addMeasure(
       "secret_spend",
       "ad_spend",
@@ -479,5 +500,26 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       await resetCalendar();
       await clearDashboardKeys();
     }
+  });
+
+  it("buckets part measures with a calendar function over a column, a fixed measure inside an aggregate and a date column through a relation", async () => {
+    const rows = await run({
+      metrics: ["bd_days", "revenue_plus_lines", "lines_by_order_date"],
+      bucket: "month",
+    });
+    // Business days of each month of 2026 (Monday to Friday, no holidays);
+    // revenue plus the fixed line_count (2) for each of the month's two
+    // orders; the two lines of order 2, dated by that order's January.
+    // July has no orders, so no row.
+    expect(
+      rows.map((r) => [iso(r[0]), Number(r[1]), r[2], r[3] && Number(r[3])])
+    ).toEqual([
+      ["2026-01-01T00:00:00.000Z", 22, "264.50", 2],
+      ["2026-02-01T00:00:00.000Z", 20, "1303.99", null],
+      ["2026-03-01T00:00:00.000Z", 22, "84.25", null],
+      ["2026-04-01T00:00:00.000Z", 22, "662.50", null],
+      ["2026-05-01T00:00:00.000Z", 21, "447.33", null],
+      ["2026-06-01T00:00:00.000Z", 22, "1015.99", null],
+    ]);
   });
 });
