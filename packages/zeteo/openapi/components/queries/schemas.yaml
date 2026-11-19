@@ -446,12 +446,12 @@ QueryResult:
 
 QueryError:
   type: object
-  description: A query that is well formed but cannot be run as written
+  description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name.
   required: [error, error_description, path, suggestions]
   properties:
     error:
       type: string
-      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex]
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex, measure_has_no_date]
     error_description: { type: string }
     path:
       type: array

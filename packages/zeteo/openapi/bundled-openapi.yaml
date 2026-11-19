@@ -7666,7 +7666,7 @@ components:
           description: The run's id in the run log
     QueryError:
       type: object
-      description: A query that is well formed but cannot be run as written
+      description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name.
       required:
         - error
         - error_description
@@ -7694,6 +7694,7 @@ components:
             - measure_too_deep
             - measure_not_aggregate
             - too_complex
+            - measure_has_no_date
         error_description:
           type: string
         path:
