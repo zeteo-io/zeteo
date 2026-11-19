@@ -6,6 +6,7 @@ import { useSourceContext } from "../../components/context";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { sourceHref } from "../../components/sourceLabels";
 import { ConfirmButton } from "@/components/ConfirmButton";
+import { useLayoutEffect, useRef, useState } from "react";
 import { columnTypeName, RETYPE_WARNING } from "./labels";
 import { PrincipalLabel } from "@/features/principals";
 import { LoadFailure } from "./CastFailedNotice";
@@ -100,6 +101,29 @@ const SheetsBlock = ({
   );
 };
 
+/**
+ * A tab's (or an xlsx sheet's) name on one line, at most 15rem wide: a longer
+ * one ends in "…" and shows in full in a tooltip; one that fits has none.
+ */
+const OriginTab = ({ name }: { name: string }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [cut, setCut] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setCut(el.scrollWidth > el.clientWidth);
+  }, [name]);
+  return (
+    <Tooltip
+      disabled={!cut}
+      content={<span className="z-wide-tip">{name}</span>}
+    >
+      <span ref={ref} className="z-fs-origin-tab">
+        {name}
+      </span>
+    </Tooltip>
+  );
+};
+
 /** Where a table came from: its file, its spreadsheet tab, or its members; and a failing sync. */
 const OriginCell = ({ table }: { table: Table }) => {
   const { origin } = table;
@@ -112,9 +136,7 @@ const OriginCell = ({ table }: { table: Table }) => {
           >
             <span>File Upload</span>
           </Tooltip>
-          {origin.tab_title && (
-            <span className="z-fs-origin-tab">{origin.tab_title}</span>
-          )}
+          {origin.tab_title && <OriginTab name={origin.tab_title} />}
         </span>
       ) : origin?.kind === "google-sheets" ? (
         <span className="z-fs-origin-name">
@@ -127,9 +149,7 @@ const OriginCell = ({ table }: { table: Table }) => {
               Google Sheet
             </a>
           </Tooltip>
-          {origin.tab_title && (
-            <span className="z-fs-origin-tab">{origin.tab_title}</span>
-          )}
+          {origin.tab_title && <OriginTab name={origin.tab_title} />}
         </span>
       ) : origin?.kind === "merged" ? (
         `Merged · ${origin.members} ${origin.members === 1 ? "table" : "tables"}`
