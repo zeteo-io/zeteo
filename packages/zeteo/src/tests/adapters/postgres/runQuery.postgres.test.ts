@@ -8,6 +8,7 @@ import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
 import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
@@ -89,11 +90,18 @@ beforeAll(async () => {
   const source = (await db.sources.findById(sourceId))!;
   const { tables, columns, relations } =
     await db.catalog.loadSourceCatalog(sourceId);
-  catalog = buildVisibleCatalog(source, tables, columns, relations, {
-    sourceIds: new Set([sourceId]),
-    allows: () => true,
-    tableAccess: () => "all",
-  });
+  catalog = buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    {
+      sourceIds: new Set([sourceId]),
+      allows: () => true,
+      tableAccess: () => "all",
+    },
+    { calendar: DEFAULT_CALENDAR, measures: [] }
+  );
   connection = await postgresAdapter.connect(
     fixtureSettings("ro"),
     await fixtureTarget(),

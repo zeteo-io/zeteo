@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import type { Access } from "../../../grants/access.js";
 import type {
   Relation,
@@ -124,5 +125,8 @@ export const hostileCatalog = (
     allows: () => true,
     tableAccess: () => "all",
   };
-  return buildVisibleCatalog(SOURCE, tables, columns, relations, access);
+  return buildVisibleCatalog(SOURCE, tables, columns, relations, access, {
+    calendar: DEFAULT_CALENDAR,
+    measures: [],
+  });
 };

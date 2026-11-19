@@ -48,13 +48,15 @@ A test that exercises one route belongs to that route even if it sets up state t
   | `postgres`    | behaviour specific to the Postgres dialect                            |
   | `mssql`       | behaviour specific to the SQL Server dialect                          |
   | `calc`        | calculations: expression operations, their types and levels           |
-  | `relative`    | relative dates: a moment as an offset from now, in a filter           |
+  | `relative`    | relative dates, in a filter and in a calculation; date operations     |
   | `available`   | saved queries available for dashboards                                |
   | `files`       | upload sources: the same behaviour over an uploaded source              |
   | `size`        | a source's size, measured by a catalogue refresh                      |
   | `rows`        | a table's estimated rows, measured by a catalogue refresh             |
   | `plugin`      | the Claude Code plugin's files generated from a module                |
   | `sheets`      | Google Sheets sources: the same behaviour over a synced spreadsheet     |
+  | `calendar`    | the business calendar: working days, holidays, fiscal periods, zones    |
+  | `measures`    | measures: expansion in the planner, their joins, limits and errors    |
 
 - `<method>`: `get`, `post`, `put`, `patch` or `delete`; only as the last-resort split below.
 - A file without an aspect holds the main behaviour. Add aspect files only when the main file would

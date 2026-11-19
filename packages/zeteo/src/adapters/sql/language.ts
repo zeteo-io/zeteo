@@ -19,6 +19,9 @@ const MAX_KEYS = MAX_SELECT_ITEMS;
 
 const noNul = (s: string) => !s.includes("\u0000");
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
 /** `(<relation>.)*<column>`: segments of 1–128 characters, any but `.` and NUL. */
 const pathSchema = z
   .string()
@@ -52,395 +55,6 @@ const scalarSchema = z.union([
 
 /** A value a comparison takes: a literal, or a moment relative to now. */
 const comparedSchema = z.union([scalarSchema, relativeDateSchema]);
-
-export const BUCKET_UNITS = [
-  "day",
-  "week",
-  "month",
-  "quarter",
-  "year",
-] as const;
-
-export const CALC_OPS = [
-  "add",
-  "sub",
-  "mul",
-  "div",
-  "abs",
-  "round",
-  "concat",
-  "lower",
-  "upper",
-  "coalesce",
-] as const;
-export type CalcOp = (typeof CALC_OPS)[number];
-
-/** Operation and aggregate objects nested in one expression; paths and literals add none. */
-export const MAX_CALC_DEPTH = 8;
-/** Operation and aggregate objects across all select items of one query. */
-export const MAX_CALC_NODES = 100;
-export const MAX_CALC_OPERANDS = 10;
-export const MAX_ROUND_PLACES = 10;
-const MAX_TEXT_LITERAL_CHARS = 1000;
-
-export type CalcExpr =
-  | string
-  | number
-  | { value: string }
-  | { add: CalcExpr[] }
-  | { sub: [CalcExpr, CalcExpr] }
-  | { mul: CalcExpr[] }
-  | { div: [CalcExpr, CalcExpr] }
-  | { abs: CalcExpr }
-  | { round: CalcExpr | [CalcExpr, number] }
-  | { concat: CalcExpr[] }
-  | { lower: CalcExpr }
-  | { upper: CalcExpr }
-  | { coalesce: CalcExpr[] }
-  | { sum: CalcExpr }
-  | { avg: CalcExpr }
-  | { min: CalcExpr }
-  | { max: CalcExpr }
-  | { count: string }
-  | { countDistinct: string };
-
-const AGGREGATE_KEYS = ["sum", "avg", "min", "max", "count", "countDistinct"];
-
-const textLiteralSchema = z.strictObject({
-  value: z
-    .string()
-    .max(MAX_TEXT_LITERAL_CHARS)
-    .refine(noNul, { error: "A text literal has no NUL" }),
-});
-
-const tooDeepCalc = z.never({
-  error: `Calculations nest at most ${MAX_CALC_DEPTH} levels deep`,
-});
-const nestedAggregate = z.never({
-  error: "An aggregate does not contain another aggregate",
-});
-
-/**
- * An expression and a nested schema's issues, forwarded with their paths: a
- * union here would bury the exact path of a bad operand under invalid_union.
- */
-const dispatching = <T>(
-  check: (value: unknown) => z.ZodSafeParseResult<unknown> | undefined,
-  description: string,
-  jsonSchema: Record<string, unknown> = {}
-): z.ZodType<T> =>
-  z
-    .unknown()
-    .superRefine((value, ctx) => {
-      const result = check(value);
-      if (result && !result.success) {
-        for (const issue of result.error.issues) {
-          ctx.addIssue({
-            code: "custom",
-            message: issue.message,
-            path: issue.path,
-          });
-        }
-      }
-    })
-    .meta({ ...jsonSchema, description }) as unknown as z.ZodType<T>;
-
-const isPlainObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
-
-/**
- * An expression whose operation or aggregate object, if it is one, is at
- * `depth` (the outermost is 1); an object past the limit is refused at each key. Built out level by level like `filterAt`, so
- * parsing stops at the limit. Inside an aggregate (`aggregates` false) a
- * further aggregate is refused at its own key.
- */
-const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
-  const deeper = depth <= MAX_CALC_DEPTH;
-  const inner = deeper ? calcAt(depth + 1, aggregates) : tooDeepCalc;
-  const insideAggregate = deeper ? calcAt(depth + 1, false) : tooDeepCalc;
-  const many = deeper
-    ? z.array(inner).min(2).max(MAX_CALC_OPERANDS).optional()
-    : tooDeepCalc.optional();
-  const two = deeper
-    ? z.tuple([inner, inner]).optional()
-    : tooDeepCalc.optional();
-  const aggregate = (schema: z.ZodType) =>
-    aggregates ? schema.optional() : nestedAggregate.optional();
-  const round = deeper
-    ? dispatching<unknown>(
-        (v) =>
-          Array.isArray(v)
-            ? z
-                .tuple([inner, z.int().min(0).max(MAX_ROUND_PLACES)])
-                .safeParse(v)
-            : inner.safeParse(v),
-        "An expression, or [expression, places] with places an integer 0–10"
-      ).optional()
-    : tooDeepCalc.optional();
-
-  const node = z
-    .strictObject({
-      add: many,
-      sub: two,
-      mul: many,
-      div: two,
-      abs: (deeper ? inner : tooDeepCalc).optional(),
-      round,
-      concat: many,
-      lower: (deeper ? inner : tooDeepCalc).optional(),
-      upper: (deeper ? inner : tooDeepCalc).optional(),
-      coalesce: many,
-      sum: aggregate(insideAggregate),
-      avg: aggregate(insideAggregate),
-      min: aggregate(insideAggregate),
-      max: aggregate(insideAggregate),
-      count: aggregate(pathSchema),
-      countDistinct: aggregate(
-        pathSchema.refine((p) => p !== "*", {
-          error: 'countDistinct takes a column path, not "*"',
-        })
-      ),
-    })
-    .superRefine((operation, ctx) => {
-      if (Object.keys(operation).length !== 1) {
-        ctx.addIssue({
-          code: "custom",
-          message: "An operation object has exactly one key",
-        });
-      }
-    });
-
-  return dispatching<CalcExpr>(
-    (value) => {
-      if (typeof value === "string") return pathSchema.safeParse(value);
-      if (typeof value === "number") return z.number().safeParse(value);
-      if (isPlainObject(value) && "value" in value) {
-        return textLiteralSchema.safeParse(value);
-      }
-      return node.safeParse(value);
-    },
-    `A column path, a number, { value: "text" }, or an object with exactly one of ${[...CALC_OPS, ...AGGREGATE_KEYS].join(", ")}`,
-    { $ref: "#/$defs/CalcExpr" }
-  );
-};
-
-/** A calculation, at the top of a select item or as an aggregate's argument. */
-const calcSchema = calcAt(1, true);
-/** The argument of a select-level aggregate: the aggregate itself is level 1. */
-const aggregateArgSchema = calcAt(2, false);
-
-/** sum, avg, min and max over an expression need a name; over a plain path they do not. */
-const needsAs = (key: string) => (item: object, ctx: z.RefinementCtx) => {
-  const { as, [key]: arg } = item as Record<string, unknown>;
-  if (typeof arg !== "string" && as === undefined) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["as"],
-      message: `A ${key} over an expression needs an "as" name`,
-    });
-  }
-};
-
-export type SelectItem =
-  | string
-  | { count: string; as?: string }
-  | { countDistinct: string; as?: string }
-  | { sum: CalcExpr; as?: string }
-  | { avg: CalcExpr; as?: string }
-  | { min: CalcExpr; as?: string }
-  | { max: CalcExpr; as?: string }
-  | { bucket: (typeof BUCKET_UNITS)[number]; column: string; as?: string }
-  | { calc: CalcExpr; as: string };
-
-const expressionAggregate = (key: "sum" | "avg" | "min" | "max") =>
-  z
-    .strictObject({ [key]: aggregateArgSchema, as: aliasSchema.optional() })
-    .superRefine(needsAs(key));
-
-/** The form a select item's object is checked as, by the key that names it. */
-const selectForms: Record<string, z.ZodType> = {
-  count: z.strictObject({ count: pathSchema, as: aliasSchema.optional() }),
-  countDistinct: z.strictObject({
-    countDistinct: pathSchema,
-    as: aliasSchema.optional(),
-  }),
-  sum: expressionAggregate("sum"),
-  avg: expressionAggregate("avg"),
-  min: expressionAggregate("min"),
-  max: expressionAggregate("max"),
-  bucket: z.strictObject({
-    bucket: z.enum(BUCKET_UNITS),
-    column: pathSchema,
-    as: aliasSchema.optional(),
-  }),
-  calc: z.strictObject({ calc: calcSchema, as: aliasSchema }),
-};
-
-const SELECT_ITEM_ERROR =
-  'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column } or { calc: expression, as }; "as" is optional except on calc';
-
-/** Dispatched by key rather than a union, so an issue keeps its exact path. */
-const selectItemSchema = dispatching<SelectItem>(
-  (value) => {
-    if (typeof value === "string") return pathSchema.safeParse(value);
-    const form = isPlainObject(value)
-      ? Object.keys(value).find((k) => k in selectForms)
-      : undefined;
-    return form
-      ? selectForms[form]!.safeParse(value)
-      : z.never({ error: SELECT_ITEM_ERROR }).safeParse(value);
-  },
-  SELECT_ITEM_ERROR,
-  { $ref: "#/$defs/SelectItem" }
-);
-
-const operands = (min: number, max: number) => ({
-  type: "array",
-  items: { $ref: "#/$defs/CalcExpr" },
-  minItems: min,
-  maxItems: max,
-});
-const operation = (key: string, operand: object, description?: string) => ({
-  type: "object",
-  properties: { [key]: operand },
-  required: [key],
-  additionalProperties: false,
-  ...(description ? { description } : {}),
-});
-const calcRef = { $ref: "#/$defs/CalcExpr" };
-const pathJson = { type: "string", minLength: 1 };
-const asJson = { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" };
-
-/**
- * The structured shape of expressions and select items, which the Zod
- * schemas cannot show (they dispatch by key to keep exact error paths).
- * Published by `describe()` beside the query schema; validation never reads it.
- */
-const CALC_JSON_SCHEMA_DEFS = {
-  CalcExpr: {
-    description: `An expression nests at most ${MAX_CALC_DEPTH} levels (an aggregate counts as one); a query holds at most ${MAX_CALC_NODES} operations and aggregates`,
-    anyOf: [
-      { ...pathJson, description: "A column path" },
-      { type: "number", description: "A number literal" },
-      {
-        type: "object",
-        properties: {
-          value: { type: "string", maxLength: MAX_TEXT_LITERAL_CHARS },
-        },
-        required: ["value"],
-        additionalProperties: false,
-        description: "A text literal; a bare string is a column path",
-      },
-      operation("add", operands(2, MAX_CALC_OPERANDS), "Sum of numbers"),
-      operation("sub", operands(2, 2), "First minus second"),
-      operation("mul", operands(2, MAX_CALC_OPERANDS), "Product of numbers"),
-      operation(
-        "div",
-        operands(2, 2),
-        "First over second; division by zero gives null; keeps at least 6 decimal places"
-      ),
-      operation("abs", calcRef),
-      operation(
-        "round",
-        {
-          anyOf: [
-            calcRef,
-            {
-              type: "array",
-              prefixItems: [
-                calcRef,
-                { type: "integer", minimum: 0, maximum: MAX_ROUND_PLACES },
-              ],
-              minItems: 2,
-              maxItems: 2,
-            },
-          ],
-        },
-        "An expression (0 places) or [expression, places], places an integer 0 to 10; half away from zero"
-      ),
-      operation(
-        "concat",
-        operands(2, MAX_CALC_OPERANDS),
-        "Text or number operands joined; null counts as empty text"
-      ),
-      operation("lower", calcRef),
-      operation("upper", calcRef),
-      operation(
-        "coalesce",
-        operands(2, MAX_CALC_OPERANDS),
-        "The first non-null of operands of one type"
-      ),
-      ...(["sum", "avg", "min", "max"] as const).map((key) =>
-        operation(
-          key,
-          calcRef,
-          "Aggregate over an expression; not nested in another aggregate"
-        )
-      ),
-      operation("count", { ...pathJson, description: 'A path or "*"' }),
-      operation("countDistinct", pathJson),
-    ],
-  },
-  SelectItem: {
-    description: SELECT_ITEM_ERROR,
-    anyOf: [
-      { ...pathJson, description: "A column path" },
-      ...(["count", "countDistinct"] as const).map((key) => ({
-        type: "object",
-        properties: { [key]: pathJson, as: asJson },
-        required: [key],
-        additionalProperties: false,
-      })),
-      ...(["sum", "avg", "min", "max"] as const).map((key) => ({
-        type: "object",
-        properties: { [key]: calcRef, as: asJson },
-        required: [key],
-        additionalProperties: false,
-        description: `A path, or an expression, in which case "as" is required`,
-      })),
-      {
-        type: "object",
-        properties: {
-          bucket: { enum: [...BUCKET_UNITS] },
-          column: pathJson,
-          as: asJson,
-        },
-        required: ["bucket", "column"],
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        properties: { calc: calcRef, as: asJson },
-        required: ["calc", "as"],
-        additionalProperties: false,
-        description:
-          "A calculation: row-level (no aggregate) or group-level (every column inside an aggregate), not mixed",
-      },
-    ],
-  },
-};
-
-/** Operation and aggregate objects in one expression. */
-const countNodes = (expr: unknown): number => {
-  if (!isPlainObject(expr) || "value" in expr) return 0;
-  const [key, operand] = Object.entries(expr)[0] ?? [];
-  if (key === undefined) return 0;
-  if (Array.isArray(operand)) {
-    return 1 + operand.reduce<number>((n, e) => n + countNodes(e), 0);
-  }
-  return 1 + countNodes(operand);
-};
-
-const nodesInSelectItem = (item: unknown): number => {
-  if (!isPlainObject(item)) return 0;
-  if ("calc" in item) return countNodes(item.calc);
-  for (const key of ["sum", "avg", "min", "max"]) {
-    if (key in item && typeof item[key] !== "string") {
-      return 1 + countNodes(item[key]);
-    }
-  }
-  return 0;
-};
 
 export const OPERATORS = [
   "eq",
@@ -556,6 +170,680 @@ const filterAt = (depth: number): z.ZodType<Filter> => {
 };
 
 const filterSchema = filterAt(1);
+
+export const BUCKET_UNITS = [
+  "day",
+  "week",
+  "month",
+  "quarter",
+  "year",
+  "fiscal_quarter",
+  "fiscal_year",
+] as const;
+
+export const CALC_OPS = [
+  "add",
+  "sub",
+  "mul",
+  "div",
+  "abs",
+  "round",
+  "concat",
+  "lower",
+  "upper",
+  "coalesce",
+] as const;
+export type CalcOp = (typeof CALC_OPS)[number];
+
+/** Operation and aggregate objects nested in one expression; paths and literals add none. */
+export const MAX_CALC_DEPTH = 8;
+/** Operation and aggregate objects across all select items of one query. */
+export const MAX_CALC_NODES = 100;
+export const MAX_CALC_OPERANDS = 10;
+export const MAX_ROUND_PLACES = 10;
+export const MAX_CASE_BRANCHES = 10;
+export const MAX_DATE_ADD_AMOUNT = 10_000;
+export const DATE_ADD_UNITS = [
+  "day",
+  "week",
+  "month",
+  "quarter",
+  "year",
+] as const;
+export type DateAddUnit = (typeof DATE_ADD_UNITS)[number];
+export const DATE_PARTS = [
+  "year",
+  "quarter",
+  "month",
+  "day",
+  "weekday",
+  "fiscal_year",
+  "fiscal_quarter",
+] as const;
+export type DatePart = (typeof DATE_PARTS)[number];
+/** The date operations, besides the operations of `CALC_OPS`. */
+export const DATE_OPS = [
+  "dateAdd",
+  "dateDiff",
+  "datePart",
+  "businessDays",
+  "businessDaysInMonth",
+  "businessDaysElapsed",
+  "businessDaysRemaining",
+] as const;
+const MAX_TEXT_LITERAL_CHARS = 1000;
+
+export type CalcExpr =
+  | string
+  | number
+  | { value: string }
+  | { date: string }
+  | { timestamp: string }
+  | RelativeDate
+  | { dateAdd: [CalcExpr, number, DateAddUnit] }
+  | { dateDiff: [DateAddUnit, CalcExpr, CalcExpr] }
+  | { datePart: [DatePart, CalcExpr] }
+  | { businessDays: [CalcExpr, CalcExpr] }
+  | { businessDaysInMonth: CalcExpr }
+  | { businessDaysElapsed: CalcExpr }
+  | { businessDaysRemaining: CalcExpr }
+  | { add: CalcExpr[] }
+  | { sub: [CalcExpr, CalcExpr] }
+  | { mul: CalcExpr[] }
+  | { div: [CalcExpr, CalcExpr] }
+  | { abs: CalcExpr }
+  | { round: CalcExpr | [CalcExpr, number] }
+  | { concat: CalcExpr[] }
+  | { lower: CalcExpr }
+  | { upper: CalcExpr }
+  | { coalesce: CalcExpr[] }
+  | { sum: CalcExpr }
+  | { avg: CalcExpr }
+  | { min: CalcExpr }
+  | { max: CalcExpr }
+  | { count: CalcExpr }
+  | { countDistinct: CalcExpr }
+  | { case: { when: { if: Filter; then: CalcExpr }[]; else?: CalcExpr } }
+  | { measure: string };
+
+const AGGREGATE_KEYS = ["sum", "avg", "min", "max", "count", "countDistinct"];
+
+const textLiteralSchema = z.strictObject({
+  value: z
+    .string()
+    .max(MAX_TEXT_LITERAL_CHARS)
+    .refine(noNul, { error: "A text literal has no NUL" }),
+});
+
+const dateLiteralSchema = z.strictObject({
+  date: z.string().refine(noNul, { error: "A date literal has no NUL" }),
+});
+const timestampLiteralSchema = z.strictObject({
+  timestamp: z
+    .string()
+    .refine(noNul, { error: "A timestamp literal has no NUL" }),
+});
+
+/** The keys of the literal objects, which are expressions with no operation in them. */
+const LITERAL_KEYS = ["value", "date", "timestamp", "relative"] as const;
+export const isLiteralObject = (v: unknown): boolean =>
+  isPlainObject(v) && LITERAL_KEYS.some((k) => k in v);
+
+const notStar = (v: unknown) => v !== "*";
+
+const tooDeepCalc = z.never({
+  error: `Calculations nest at most ${MAX_CALC_DEPTH} levels deep`,
+});
+const nestedAggregate = z.never({
+  error: "An aggregate does not contain another aggregate",
+});
+
+/** A measure's name: the form of an `as` alias. */
+const measureNameSchema = z.string().regex(/^[a-z][a-z0-9_]{0,62}$/, {
+  error:
+    "A measure's name is a lowercase letter then up to 62 of a-z, 0-9 and _",
+});
+const measureRefSchema = z.strictObject({ measure: measureNameSchema });
+
+/**
+ * An expression and a nested schema's issues, forwarded with their paths: a
+ * union here would bury the exact path of a bad operand under invalid_union.
+ */
+const dispatching = <T>(
+  check: (value: unknown) => z.ZodSafeParseResult<unknown> | undefined,
+  description: string,
+  jsonSchema: Record<string, unknown> = {}
+): z.ZodType<T> =>
+  z
+    .unknown()
+    .superRefine((value, ctx) => {
+      const result = check(value);
+      if (result && !result.success) {
+        for (const issue of result.error.issues) {
+          ctx.addIssue({
+            code: "custom",
+            message: issue.message,
+            path: issue.path,
+          });
+        }
+      }
+    })
+    .meta({ ...jsonSchema, description }) as unknown as z.ZodType<T>;
+
+/**
+ * An expression whose operation or aggregate object, if it is one, is at
+ * `depth` (the outermost is 1); an object past the limit is refused at each key. Built out level by level like `filterAt`, so
+ * parsing stops at the limit. Inside an aggregate (`aggregates` false) a
+ * further aggregate is refused at its own key.
+ */
+const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
+  const deeper = depth <= MAX_CALC_DEPTH;
+  const inner = deeper ? calcAt(depth + 1, aggregates) : tooDeepCalc;
+  const insideAggregate = deeper ? calcAt(depth + 1, false) : tooDeepCalc;
+  const many = deeper
+    ? z.array(inner).min(2).max(MAX_CALC_OPERANDS).optional()
+    : tooDeepCalc.optional();
+  const two = deeper
+    ? z.tuple([inner, inner]).optional()
+    : tooDeepCalc.optional();
+  const aggregate = (schema: z.ZodType) =>
+    aggregates ? schema.optional() : nestedAggregate.optional();
+  const round = deeper
+    ? dispatching<unknown>(
+        (v) =>
+          Array.isArray(v)
+            ? z
+                .tuple([inner, z.int().min(0).max(MAX_ROUND_PLACES)])
+                .safeParse(v)
+            : inner.safeParse(v),
+        "An expression, or [expression, places] with places an integer 0–10"
+      ).optional()
+    : tooDeepCalc.optional();
+
+  const node = z
+    .strictObject({
+      add: many,
+      sub: two,
+      mul: many,
+      div: two,
+      abs: (deeper ? inner : tooDeepCalc).optional(),
+      round,
+      concat: many,
+      lower: (deeper ? inner : tooDeepCalc).optional(),
+      upper: (deeper ? inner : tooDeepCalc).optional(),
+      coalesce: many,
+      sum: aggregate(insideAggregate),
+      avg: aggregate(insideAggregate),
+      min: aggregate(insideAggregate),
+      max: aggregate(insideAggregate),
+      count: aggregate(insideAggregate),
+      countDistinct: aggregate(
+        insideAggregate.refine(notStar, {
+          error: 'countDistinct takes a column or an expression, not "*"',
+        })
+      ),
+      dateAdd: deeper
+        ? z
+            .tuple([
+              inner,
+              z.int().min(-MAX_DATE_ADD_AMOUNT).max(MAX_DATE_ADD_AMOUNT),
+              z.enum(DATE_ADD_UNITS),
+            ])
+            .optional()
+        : tooDeepCalc.optional(),
+      dateDiff: deeper
+        ? z.tuple([z.enum(DATE_ADD_UNITS), inner, inner]).optional()
+        : tooDeepCalc.optional(),
+      datePart: deeper
+        ? z.tuple([z.enum(DATE_PARTS), inner]).optional()
+        : tooDeepCalc.optional(),
+      businessDays: two,
+      businessDaysInMonth: (deeper ? inner : tooDeepCalc).optional(),
+      businessDaysElapsed: (deeper ? inner : tooDeepCalc).optional(),
+      businessDaysRemaining: (deeper ? inner : tooDeepCalc).optional(),
+      case: deeper
+        ? z
+            .strictObject({
+              when: z
+                .array(z.strictObject({ if: filterSchema, then: inner }))
+                .min(1)
+                .max(MAX_CASE_BRANCHES),
+              else: inner.optional(),
+            })
+            .optional()
+        : tooDeepCalc.optional(),
+    })
+    .superRefine((operation, ctx) => {
+      if (Object.keys(operation).length !== 1) {
+        ctx.addIssue({
+          code: "custom",
+          message: "An operation object has exactly one key",
+        });
+      }
+    });
+
+  return dispatching<CalcExpr>(
+    (value) => {
+      if (typeof value === "string") return pathSchema.safeParse(value);
+      if (typeof value === "number") return z.number().safeParse(value);
+      if (isPlainObject(value) && "value" in value) {
+        return textLiteralSchema.safeParse(value);
+      }
+      if (isPlainObject(value) && "date" in value) {
+        return dateLiteralSchema.safeParse(value);
+      }
+      if (isPlainObject(value) && "timestamp" in value) {
+        return timestampLiteralSchema.safeParse(value);
+      }
+      if (isPlainObject(value) && "relative" in value) {
+        return relativeDateSchema.safeParse(value);
+      }
+      // A measure is group-level: one operation, never inside an aggregate.
+      if (isPlainObject(value) && "measure" in value) {
+        return (
+          !deeper
+            ? tooDeepCalc
+            : aggregates
+              ? measureRefSchema
+              : nestedAggregate
+        ).safeParse(value);
+      }
+      return node.safeParse(value);
+    },
+    `A column path, a number, { value: "text" }, { date }, { timestamp }, { relative }, { measure: name }, or an object with exactly one of ${[...CALC_OPS, ...DATE_OPS, ...AGGREGATE_KEYS].join(", ")}`,
+    { $ref: "#/$defs/CalcExpr" }
+  );
+};
+
+/** A calculation, at the top of a select item or as an aggregate's argument. */
+const calcSchema = calcAt(1, true);
+/** The argument of a select-level aggregate: the aggregate itself is level 1. */
+const aggregateArgSchema = calcAt(2, false);
+
+/** A measure's formula: an expression as a calc select item holds one. */
+export const measureFormulaSchema = calcSchema;
+/** A measure's filter: a filter as a query's `where` holds one. */
+export const measureWhereSchema = filterSchema;
+/** A measure's name: the form of an `as` alias. */
+export const MEASURE_NAME_SCHEMA = measureNameSchema;
+
+/** sum, avg, min, max, count and countDistinct over an expression need a name; over a plain path they do not. */
+const needsAs = (key: string) => (item: object, ctx: z.RefinementCtx) => {
+  const { as, [key]: arg } = item as Record<string, unknown>;
+  if (typeof arg !== "string" && as === undefined) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["as"],
+      message: `A ${key} over an expression needs an "as" name`,
+    });
+  }
+};
+
+export type SelectItem =
+  | string
+  | { count: CalcExpr; as?: string }
+  | { countDistinct: CalcExpr; as?: string }
+  | { sum: CalcExpr; as?: string }
+  | { avg: CalcExpr; as?: string }
+  | { min: CalcExpr; as?: string }
+  | { max: CalcExpr; as?: string }
+  | { bucket: (typeof BUCKET_UNITS)[number]; column: string; as?: string }
+  | { calc: CalcExpr; as: string }
+  | { measure: string; as?: string };
+
+const expressionAggregate = (
+  key: "sum" | "avg" | "min" | "max" | "count" | "countDistinct"
+) =>
+  z
+    .strictObject({
+      [key]:
+        key === "countDistinct"
+          ? aggregateArgSchema.refine(notStar, {
+              error: 'countDistinct takes a column or an expression, not "*"',
+            })
+          : aggregateArgSchema,
+      as: aliasSchema.optional(),
+    })
+    .superRefine(needsAs(key));
+
+/** The form a select item's object is checked as, by the key that names it. */
+const selectForms: Record<string, z.ZodType> = {
+  count: expressionAggregate("count"),
+  countDistinct: expressionAggregate("countDistinct"),
+  sum: expressionAggregate("sum"),
+  avg: expressionAggregate("avg"),
+  min: expressionAggregate("min"),
+  max: expressionAggregate("max"),
+  bucket: z.strictObject({
+    bucket: z.enum(BUCKET_UNITS),
+    column: pathSchema,
+    as: aliasSchema.optional(),
+  }),
+  calc: z.strictObject({ calc: calcSchema, as: aliasSchema }),
+  measure: z.strictObject({
+    measure: measureNameSchema,
+    as: aliasSchema.optional(),
+  }),
+};
+
+const SELECT_ITEM_ERROR =
+  'A select item is a column path or one of { count }, { countDistinct }, { sum }, { avg }, { min }, { max }, { bucket, column }, { calc: expression, as } or { measure: name }; "as" is optional except on calc';
+
+/** Dispatched by key rather than a union, so an issue keeps its exact path. */
+const selectItemSchema = dispatching<SelectItem>(
+  (value) => {
+    if (typeof value === "string") return pathSchema.safeParse(value);
+    const form = isPlainObject(value)
+      ? Object.keys(value).find((k) => k in selectForms)
+      : undefined;
+    return form
+      ? selectForms[form]!.safeParse(value)
+      : z.never({ error: SELECT_ITEM_ERROR }).safeParse(value);
+  },
+  SELECT_ITEM_ERROR,
+  { $ref: "#/$defs/SelectItem" }
+);
+
+const operands = (min: number, max: number) => ({
+  type: "array",
+  items: { $ref: "#/$defs/CalcExpr" },
+  minItems: min,
+  maxItems: max,
+});
+const operation = (key: string, operand: object, description?: string) => ({
+  type: "object",
+  properties: { [key]: operand },
+  required: [key],
+  additionalProperties: false,
+  ...(description ? { description } : {}),
+});
+const calcRef = { $ref: "#/$defs/CalcExpr" };
+const pathJson = { type: "string", minLength: 1 };
+const asJson = { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" };
+
+/**
+ * The structured shape of expressions and select items, which the Zod
+ * schemas cannot show (they dispatch by key to keep exact error paths).
+ * Published by `describe()` beside the query schema; validation never reads it.
+ */
+const CALC_JSON_SCHEMA_DEFS = {
+  CalcExpr: {
+    description: `An expression nests at most ${MAX_CALC_DEPTH} levels (an aggregate counts as one); a query holds at most ${MAX_CALC_NODES} operations and aggregates`,
+    anyOf: [
+      { ...pathJson, description: "A column path" },
+      { type: "number", description: "A number literal" },
+      {
+        type: "object",
+        properties: {
+          value: { type: "string", maxLength: MAX_TEXT_LITERAL_CHARS },
+        },
+        required: ["value"],
+        additionalProperties: false,
+        description: "A text literal; a bare string is a column path",
+      },
+      operation("add", operands(2, MAX_CALC_OPERANDS), "Sum of numbers"),
+      operation("sub", operands(2, 2), "First minus second"),
+      operation("mul", operands(2, MAX_CALC_OPERANDS), "Product of numbers"),
+      operation(
+        "div",
+        operands(2, 2),
+        "First over second; division by zero gives null; keeps at least 6 decimal places"
+      ),
+      operation("abs", calcRef),
+      operation(
+        "round",
+        {
+          anyOf: [
+            calcRef,
+            {
+              type: "array",
+              prefixItems: [
+                calcRef,
+                { type: "integer", minimum: 0, maximum: MAX_ROUND_PLACES },
+              ],
+              minItems: 2,
+              maxItems: 2,
+            },
+          ],
+        },
+        "An expression (0 places) or [expression, places], places an integer 0 to 10; half away from zero"
+      ),
+      operation(
+        "concat",
+        operands(2, MAX_CALC_OPERANDS),
+        "Text or number operands joined; null counts as empty text"
+      ),
+      operation("lower", calcRef),
+      operation("upper", calcRef),
+      {
+        type: "object",
+        properties: { date: { type: "string", format: "date" } },
+        required: ["date"],
+        additionalProperties: false,
+        description: "A date literal, YYYY-MM-DD",
+      },
+      {
+        type: "object",
+        properties: { timestamp: { type: "string", format: "date-time" } },
+        required: ["timestamp"],
+        additionalProperties: false,
+        description: "A timestamp literal, ISO 8601 with an offset or Z",
+      },
+      {
+        type: "object",
+        properties: { relative: { type: "object" } },
+        required: ["relative"],
+        additionalProperties: false,
+        description:
+          "A date relative to today in the calendar's time zone, as in where: { unit, offset, startOf? }",
+      },
+      operation(
+        "dateAdd",
+        {
+          type: "array",
+          prefixItems: [
+            calcRef,
+            {
+              type: "integer",
+              minimum: -MAX_DATE_ADD_AMOUNT,
+              maximum: MAX_DATE_ADD_AMOUNT,
+            },
+            { enum: [...DATE_ADD_UNITS] },
+          ],
+          minItems: 3,
+          maxItems: 3,
+        },
+        "[date or timestamp, amount, unit]: the moment shifted; a month or year step clamps to the month's last day"
+      ),
+      operation(
+        "dateDiff",
+        {
+          type: "array",
+          prefixItems: [{ enum: [...DATE_ADD_UNITS] }, calcRef, calcRef],
+          minItems: 3,
+          maxItems: 3,
+        },
+        "[unit, start, end]: whole units completed from start to end, negative when end is before start"
+      ),
+      operation(
+        "datePart",
+        {
+          type: "array",
+          prefixItems: [{ enum: [...DATE_PARTS] }, calcRef],
+          minItems: 2,
+          maxItems: 2,
+        },
+        "[part, date or timestamp]: a number; weekday is 1 for Monday to 7 for Sunday; fiscal parts follow the calendar's fiscal year, named by the year it ends in"
+      ),
+      operation(
+        "businessDays",
+        {
+          type: "array",
+          prefixItems: [calcRef, calcRef],
+          minItems: 2,
+          maxItems: 2,
+        },
+        "[start, end]: the calendar's business days from start to end, both inclusive; each a date, timestamp or relative date literal"
+      ),
+      ...(
+        [
+          [
+            "businessDaysInMonth",
+            "The calendar's business days in the month of the date",
+          ],
+          [
+            "businessDaysElapsed",
+            "The calendar's business days from the 1st of the date's month through the date, inclusive",
+          ],
+          [
+            "businessDaysRemaining",
+            "The calendar's business days after the date through the end of its month",
+          ],
+        ] as const
+      ).map(([key, description]) =>
+        operation(
+          key,
+          calcRef,
+          `${description}; the date is a date, timestamp or relative date literal`
+        )
+      ),
+      operation(
+        "coalesce",
+        operands(2, MAX_CALC_OPERANDS),
+        "The first non-null of operands of one type"
+      ),
+      ...(["sum", "avg", "min", "max"] as const).map((key) =>
+        operation(
+          key,
+          calcRef,
+          "Aggregate over an expression; not nested in another aggregate"
+        )
+      ),
+      operation(
+        "count",
+        {
+          anyOf: [pathJson, calcRef],
+          description: 'A path or "*", or an expression',
+        },
+        "Counts the rows where the value is not null"
+      ),
+      operation("countDistinct", calcRef, "Counts distinct non-null values"),
+      operation(
+        "case",
+        {
+          type: "object",
+          properties: {
+            when: {
+              type: "array",
+              minItems: 1,
+              maxItems: MAX_CASE_BRANCHES,
+              items: {
+                type: "object",
+                properties: {
+                  if: {
+                    type: "object",
+                    description:
+                      "A filter over column paths, as in where; the first branch that holds gives its then",
+                  },
+                  then: calcRef,
+                },
+                required: ["if", "then"],
+                additionalProperties: false,
+              },
+            },
+            else: calcRef,
+          },
+          required: ["when"],
+          additionalProperties: false,
+        },
+        "The then of the first when whose if holds, else the else (null without one); every then and the else are of one type"
+      ),
+      operation(
+        "measure",
+        asJson,
+        "A measure of the from table, by name: group-level, so not inside an aggregate"
+      ),
+    ],
+  },
+  SelectItem: {
+    description: SELECT_ITEM_ERROR,
+    anyOf: [
+      { ...pathJson, description: "A column path" },
+      ...(["count", "countDistinct", "sum", "avg", "min", "max"] as const).map(
+        (key) => ({
+          type: "object",
+          properties: { [key]: calcRef, as: asJson },
+          required: [key],
+          additionalProperties: false,
+          description: `A path, or an expression, in which case "as" is required`,
+        })
+      ),
+      {
+        type: "object",
+        properties: {
+          bucket: { enum: [...BUCKET_UNITS] },
+          column: pathJson,
+          as: asJson,
+        },
+        required: ["bucket", "column"],
+        additionalProperties: false,
+      },
+      {
+        type: "object",
+        properties: { calc: calcRef, as: asJson },
+        required: ["calc", "as"],
+        additionalProperties: false,
+        description:
+          "A calculation: row-level (no aggregate) or group-level (every column inside an aggregate), not mixed",
+      },
+      {
+        type: "object",
+        properties: { measure: asJson, as: asJson },
+        required: ["measure"],
+        additionalProperties: false,
+        description:
+          "A measure of the from table; named by its own name unless as is given",
+      },
+    ],
+  },
+};
+
+/** Operation and aggregate objects in one expression; a measure is one. */
+export const countNodes = (expr: unknown): number => {
+  if (!isPlainObject(expr) || isLiteralObject(expr)) return 0;
+  const [key, operand] = Object.entries(expr)[0] ?? [];
+  if (key === undefined) return 0;
+  if (key === "case") {
+    const { when, else: otherwise } = (operand ?? {}) as {
+      when?: Array<{ then?: unknown }>;
+      else?: unknown;
+    };
+    return (
+      1 +
+      (Array.isArray(when) ? when : []).reduce(
+        (n, branch) => n + countNodes(branch?.then),
+        0
+      ) +
+      countNodes(otherwise)
+    );
+  }
+  if (Array.isArray(operand)) {
+    return 1 + operand.reduce<number>((n, e) => n + countNodes(e), 0);
+  }
+  return 1 + countNodes(operand);
+};
+
+const nodesInSelectItem = (item: unknown): number => {
+  if (!isPlainObject(item)) return 0;
+  if ("calc" in item) return countNodes(item.calc);
+  if ("measure" in item) return 1;
+  for (const key of ["sum", "avg", "min", "max", "count", "countDistinct"]) {
+    if (key in item && typeof item[key] !== "string") {
+      return 1 + countNodes(item[key]);
+    }
+  }
+  return 0;
+};
 
 const joinSchema = z.union([
   pathSchema,

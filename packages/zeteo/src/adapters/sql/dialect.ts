@@ -1,4 +1,5 @@
 import type { Expression, Kysely, SelectQueryBuilder, SqlBool } from "kysely";
+import type { DateAddUnit, DatePart } from "./language.js";
 import type {
   AggregateFn,
   BucketUnit,
@@ -29,6 +30,25 @@ export interface SelectItemRef {
  * The few places where SQL engines differ. Identifier quoting is not one of
  * them: it comes from the dialect's own Kysely instance, which never connects.
  */
+/**
+ * Months a fiscal bucket shifts back before truncating and forward after: its
+ * period starts that many months after the calendar year's (or quarter's)
+ * start. Zero for a calendar unit and when the fiscal year starts in January.
+ */
+export const fiscalShift = (unit: BucketUnit, startMonth: number): number => {
+  if (unit === "fiscal_year") return startMonth - 1;
+  if (unit === "fiscal_quarter") return (startMonth - 1) % 3;
+  return 0;
+};
+
+/** The calendar unit a bucket truncates to once shifted. */
+export const truncUnit = (unit: BucketUnit): string =>
+  unit === "fiscal_year"
+    ? "year"
+    : unit === "fiscal_quarter"
+      ? "quarter"
+      : unit;
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -52,13 +72,16 @@ export interface SqlDialect {
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
    * Truncates a `date` or `timestamp` column to the start of its UTC bucket,
-   * keeping its type. `nativeType` is the column's own type name.
+   * keeping its type. `nativeType` is the column's own type name. A fiscal
+   * unit starts its year at `fiscalStartMonth` (1-12) and returns the
+   * period's first day.
    */
   bucket(
     unit: BucketUnit,
     column: Expression<unknown>,
     type: "date" | "timestamp",
-    nativeType: string
+    nativeType: string,
+    fiscalStartMonth: number
   ): Expression<unknown>;
   /**
    * Case-insensitive match against a pattern whose `\`, `%` and `_` are
@@ -97,7 +120,52 @@ export interface SqlDialect {
    * any other number as an exact decimal where one holds it, text as text.
    * A number comes as plain decimal text (`plainNumber`).
    */
-  literal(value: string, type: "number" | "text"): Expression<unknown>;
+  literal(
+    value: string,
+    type: "number" | "text" | "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A date or timestamp shifted by `amount` (an integer from -10,000 to
+   * 10,000) units, keeping its type. A month, quarter or year step that lands
+   * past the end of a month gives that month's last day.
+   */
+  dateAdd(
+    expression: Expression<unknown>,
+    amount: number,
+    unit: DateAddUnit,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * The whole `unit`s completed from `start` to `end` as an integer,
+   * truncated toward zero (negative when `end` is before `start`). A month
+   * is complete when `start` plus those months, clamped as `dateAdd` clamps,
+   * is not past `end`. Both are read as `type`, the wider of their own.
+   */
+  dateDiff(
+    unit: DateAddUnit,
+    start: Expression<unknown>,
+    end: Expression<unknown>,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A part of a date or timestamp (a timestamp in UTC) as an integer;
+   * `weekday` is 1 for Monday to 7 for Sunday, a fiscal part follows a fiscal
+   * year starting in `fiscalStartMonth` (1-12) and named by the year it ends in.
+   */
+  datePart(
+    part: DatePart,
+    expression: Expression<unknown>,
+    fiscalStartMonth: number
+  ): Expression<unknown>;
+  /**
+   * A timestamp column as a calculation reads it: the instant in UTC, so a
+   * column with an offset (SQL Server's datetimeoffset) is not read as its
+   * local wall time. Other columns are returned as they are.
+   */
+  timestampUtc(
+    expression: Expression<unknown>,
+    nativeType: string
+  ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,

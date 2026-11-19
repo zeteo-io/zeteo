@@ -2,6 +2,7 @@
 // @module-tag platform
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -161,6 +162,34 @@ describe("compileSql on SQL Server: joins", () => {
 });
 
 describe("compileSql on SQL Server: aggregates and buckets", () => {
+  it("shifts a fiscal bucket back, truncates and shifts forward", () => {
+    const fiscal = (unit: string, startMonth: number, column: string) =>
+      compileSql(
+        planSql(
+          sqlQuerySchema.parse({
+            source: "shop",
+            from: "orders",
+            select: [{ bucket: unit, column, as: "f" }],
+          }),
+          {
+            ...shopCatalog({ engine: "mssql" }),
+            calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth: startMonth },
+          }
+        ),
+        mssqlDialect,
+        { limit: 1001, offset: 0 }
+      ).sql;
+    expect(fiscal("fiscal_year", 2, "ordered_on")).toContain(
+      "cast(dateadd(month, 1, datetrunc(year, dateadd(month, -1, [t0].[ordered_on]))) as date)"
+    );
+    expect(fiscal("fiscal_quarter", 5, "ordered_on")).toContain(
+      "datetrunc(quarter, dateadd(month, -1, [t0].[ordered_on]))"
+    );
+    expect(fiscal("fiscal_year", 1, "ordered_on")).toContain(
+      "cast(datetrunc(year, [t0].[ordered_on]) as date)"
+    );
+  });
+
   it("refuses * for any aggregate but count", () => {
     expect(() => mssqlDialect.aggregate("sum", "*")).toThrow(
       "sum cannot take *"

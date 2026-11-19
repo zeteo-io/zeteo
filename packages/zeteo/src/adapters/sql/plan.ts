@@ -1,20 +1,37 @@
-import { floorToMinute, isRelativeDate, resolveRelative } from "./relative.js";
+import { MAX_EXPANDED_NODES, MeasureError, expandMeasure } from "./measures.js";
 import type { SqlQueryErrorCode } from "./errors.js";
 import type {
   VisibleCatalog,
   VisibleColumn,
+  VisibleMeasure,
   VisibleTable,
 } from "../../grants/visibleCatalog.js";
+import {
+  businessDays,
+  businessDaysElapsed,
+  businessDaysInMonth,
+  businessDaysRemaining,
+  localDate,
+  type Calendar,
+} from "../../calendar/calendar.js";
 import {
   QueryError,
   notFound,
   notFoundMessage,
   type QueryPath,
 } from "../../engine/errors.js";
+import {
+  floorToMinute,
+  isRelativeDate,
+  resolveRelative,
+  resolveRelativeDate,
+} from "./relative.js";
 import type {
   CalcExpr,
   CalcOp,
   Compared,
+  DateAddUnit,
+  DatePart,
   Comparison,
   Condition,
   Filter,
@@ -163,6 +180,11 @@ interface Resolved {
 }
 
 /** A resolved calculation and what decides its level. */
+interface CaseOperand {
+  when: { if: Filter; then: CalcExpr }[];
+  else?: CalcExpr;
+}
+
 interface ResolvedCalc {
   resolved: ResolvedExpr;
   hasAggregate: boolean;
@@ -222,12 +244,40 @@ export const queryNameOf = (
     : `${table.schemaName}.${table.name}`;
 
 class Planner {
+  /** The query's own scopes: its `from` and its joins. */
   private readonly scopes = new Map<string, Scope>();
+  /**
+   * The joins measures added, by relation path. Seen only while a measure's
+   * expansion is resolved, so a query never reads through a join it did not
+   * make, and its validity never depends on a measure's definition.
+   */
+  private readonly measureScopes = new Map<string, Scope>();
+  /** Whether a measure's expansion is being resolved. */
+  private inMeasure = false;
   private readonly references = new Map<string, Reference>();
   private readonly tablesById: Map<string, VisibleTable>;
+  private readonly measures: Map<string, VisibleMeasure>;
+  /** The plan's joins: the query's own, then those its measures add. */
+  readonly joins: ResolvedJoin[] = [];
+  /** The first of the query's own joins that can repeat rows, if any. */
+  toManyJoin: string | undefined;
+  /** Operations and aggregates the query's measures have expanded to. */
+  private expandedNodes = 0;
 
-  constructor(private readonly catalog: VisibleCatalog) {
+  constructor(
+    private readonly catalog: VisibleCatalog,
+    private readonly now: Date
+  ) {
     this.tablesById = new Map(catalog.tables.map((t) => [t.id, t]));
+    this.measures = new Map(catalog.measures.map((m) => [m.name, m]));
+  }
+
+  /** The scope at `prefix`: the query's own, then, inside a measure, a measure's. */
+  private scopeOf(prefix: string): Scope | undefined {
+    return (
+      this.scopes.get(prefix) ??
+      (this.inMeasure ? this.measureScopes.get(prefix) : undefined)
+    );
   }
 
   private touch(reference: Reference): void {
@@ -298,7 +348,7 @@ class Planner {
     path: QueryPath
   ): { join: ResolvedJoin; toMany: boolean } {
     const { prefix, last } = splitPath(relationPath);
-    const parent = this.scopes.get(prefix);
+    const parent = this.scopeOf(prefix);
     if (!parent) {
       throw fail(
         "join_parent_missing",
@@ -336,7 +386,10 @@ class Planner {
       this.touch({ tableId: target.id, columnId: to.id });
       return [parent.alias, from.name, to.name];
     });
-    this.scopes.set(relationPath, { alias, table: target });
+    (this.inMeasure ? this.measureScopes : this.scopes).set(relationPath, {
+      alias,
+      table: target,
+    });
     return {
       join: {
         alias,
@@ -351,7 +404,7 @@ class Planner {
 
   resolveColumn(columnPath: string, path: QueryPath): Resolved {
     const { prefix, last } = splitPath(columnPath);
-    const scope = this.scopes.get(prefix);
+    const scope = this.scopeOf(prefix);
     if (!scope) {
       const joined = [...this.scopes.keys()].filter((k) => k !== "");
       throw notFound("relation", prefix, path, joined);
@@ -433,8 +486,67 @@ class Planner {
         hasAggregate: false,
       };
     }
+    if ("date" in expr || "timestamp" in expr) {
+      const type = "date" in expr ? "date" : "timestamp";
+      const given = "date" in expr ? expr.date : expr.timestamp;
+      const value = coerce(given, type);
+      if (value === undefined) {
+        throw fail(
+          "invalid_value",
+          `A ${type} literal is ${VALUE_FORMS[type]}`,
+          [...at, type]
+        );
+      }
+      return {
+        resolved: { kind: "literal", value: value as string, type },
+        hasAggregate: false,
+      };
+    }
+    if ("relative" in expr) {
+      return {
+        resolved: {
+          kind: "literal",
+          value: resolveRelativeDate(expr, this.now, this.catalog.calendar),
+          type: "date",
+        },
+        hasAggregate: false,
+      };
+    }
+    if ("measure" in expr) {
+      return this.resolveMeasure(
+        expr.measure,
+        [...at, "measure"],
+        reads,
+        insideAggregate
+      );
+    }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     const keyAt = [...at, key];
+    if (key === "dateAdd" || key === "dateDiff" || key === "datePart") {
+      return this.resolveDateOp(
+        key,
+        operand as unknown[],
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
+    if (
+      key === "businessDays" ||
+      key === "businessDaysInMonth" ||
+      key === "businessDaysElapsed" ||
+      key === "businessDaysRemaining"
+    ) {
+      return this.resolveCalendarFn(key, operand, keyAt);
+    }
+    if (key === "case") {
+      return this.resolveCase(
+        operand as CaseOperand,
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
     if (AGGREGATE_FNS.includes(key as AggregateFn)) {
       return {
         resolved: this.resolveAggregate(
@@ -509,6 +621,330 @@ class Planner {
     };
   }
 
+  /**
+   * `{ measure: name }` at `at`: the measure's expansion, resolved as an
+   * expression of the query. A measure the caller may not use, or one of
+   * another table, is not found, exactly as one that does not exist. Every
+   * error inside the expansion is reported at `at`, naming the measure, and
+   * never points into a definition the caller did not write.
+   */
+  private resolveMeasure(
+    name: string,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const from = this.scopes.get("")!;
+    const measure = this.measures.get(name);
+    if (!measure || measure.tableId !== from.table.id) {
+      const usable = this.catalog.measures
+        .filter((m) => m.tableId === from.table.id)
+        .map((m) => m.name);
+      throw notFound("measure", name, at, usable);
+    }
+    if (insideAggregate) {
+      throw fail(
+        "invalid_operator",
+        "An aggregate does not contain another aggregate",
+        at
+      );
+    }
+    const home = queryNameOf(this.catalog.tables, from.table);
+    if (this.toManyJoin !== undefined) {
+      throw fail(
+        "measure_needs_single_rows",
+        `${name} counts each ${home} row once; this query's join of ${this.toManyJoin} repeats rows. Query from ${home} without it.`,
+        at
+      );
+    }
+    try {
+      const expansion = expandMeasure(name, from.table.id, this.measures);
+      this.expandedNodes += expansion.nodes;
+      if (this.expandedNodes > MAX_EXPANDED_NODES) {
+        throw new MeasureError(
+          "too_complex",
+          `A query's measures expand to at most ${MAX_EXPANDED_NODES} operations and aggregates`
+        );
+      }
+      let calc: ResolvedCalc;
+      this.inMeasure = true;
+      try {
+        for (const relationPath of expansion.relationPaths) {
+          this.joinForMeasure(relationPath, at);
+        }
+        calc = this.resolveExpr(expansion.expr, at, reads);
+      } finally {
+        this.inMeasure = false;
+      }
+      if (!calc.hasAggregate || calc.bareColumn) {
+        throw new MeasureError(
+          "measure_not_aggregate",
+          "A measure must be group-level: every column it reads inside an aggregate"
+        );
+      }
+      return { resolved: calc.resolved, hasAggregate: true };
+    } catch (err) {
+      if (err instanceof MeasureError || err instanceof QueryError) {
+        throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * The join a measure needs at `relationPath`: the query's own when it made
+   * one, else one an earlier measure added, else a left join after the
+   * others, kept apart from the query's scopes. A measure reads to-one
+   * relations only, so its joins neither drop nor repeat rows.
+   */
+  private joinForMeasure(relationPath: string, at: QueryPath): void {
+    if (this.scopeOf(relationPath)) return;
+    const { join, toMany } = this.resolveJoin(
+      relationPath,
+      "left",
+      `t${this.joins.length + 1}`,
+      at
+    );
+    if (toMany) {
+      throw fail(
+        "measure_reads_to_many",
+        `"${relationPath}" can match several rows per row; a measure reads only to-one relations`,
+        at
+      );
+    }
+    this.joins.push(join);
+    const maxJoins = this.catalog.source.maxJoins;
+    if (this.joins.length > maxJoins) {
+      throw fail(
+        "too_many_joins",
+        `This source allows at most ${maxJoins} ${maxJoins === 1 ? "join" : "joins"}`,
+        at
+      );
+    }
+  }
+
+  /**
+   * A business-day function: its arguments are date, timestamp or relative
+   * literals, and the planner computes the number from the calendar, so the
+   * result is a bound number literal.
+   */
+  private resolveCalendarFn(
+    key:
+      | "businessDays"
+      | "businessDaysInMonth"
+      | "businessDaysElapsed"
+      | "businessDaysRemaining",
+    operand: unknown,
+    at: QueryPath
+  ): ResolvedCalc {
+    const calendar = this.catalog.calendar;
+    const args = (key === "businessDays" ? operand : [operand]) as CalcExpr[];
+    const dates = args.map((arg, i) => {
+      const argAt = key === "businessDays" ? [...at, i] : at;
+      if (typeof arg !== "object" || arg === null) {
+        throw fail(
+          "invalid_operator",
+          "calendar functions take a date or a relative date in this version",
+          argAt
+        );
+      }
+      if ("date" in arg) {
+        const value = coerce(arg.date, "date");
+        if (value === undefined) {
+          throw fail("invalid_value", `A date literal is ${VALUE_FORMS.date}`, [
+            ...argAt,
+            "date",
+          ]);
+        }
+        return value as string;
+      }
+      if ("timestamp" in arg) {
+        const value = coerce(arg.timestamp, "timestamp");
+        if (value === undefined) {
+          throw fail(
+            "invalid_value",
+            `A timestamp literal is ${VALUE_FORMS.timestamp}`,
+            [...argAt, "timestamp"]
+          );
+        }
+        return localDate(new Date(value as string), calendar.timeZone);
+      }
+      if ("relative" in arg) {
+        return resolveRelativeDate(arg, this.now, calendar);
+      }
+      throw fail(
+        "invalid_operator",
+        "calendar functions take a date or a relative date in this version",
+        argAt
+      );
+    });
+    const first = dates[0] as string;
+    const value =
+      key === "businessDays"
+        ? businessDays(calendar, first, dates[1] as string)
+        : key === "businessDaysInMonth"
+          ? businessDaysInMonth(calendar, first)
+          : key === "businessDaysElapsed"
+            ? businessDaysElapsed(calendar, first)
+            : businessDaysRemaining(calendar, first);
+    return {
+      resolved: { kind: "literal", value, type: "number" },
+      hasAggregate: false,
+    };
+  }
+
+  /**
+   * `dateAdd`, `dateDiff` or `datePart`: the operands that are expressions
+   * must be dates or timestamps; the others were checked by the language.
+   */
+  private resolveDateOp(
+    key: "dateAdd" | "dateDiff" | "datePart",
+    operand: unknown[],
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const exprIndexes =
+      key === "dateAdd" ? [0] : key === "dateDiff" ? [1, 2] : [1];
+    const operands = exprIndexes.map((i) => {
+      const e = operand[i] as CalcExpr;
+      const p = [...at, i];
+      const calc = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(calc.resolved);
+      if (type !== "date" && type !== "timestamp") {
+        throw fail(
+          "invalid_operator",
+          `${key} needs a date or timestamp; ${typeof e === "string" ? `"${e}"` : "the operand"} is ${type}`,
+          p
+        );
+      }
+      return { ...calc, type };
+    });
+    const common = {
+      hasAggregate: operands.some((o) => o.hasAggregate),
+      bareColumn: operands.find((o) => o.bareColumn)?.bareColumn,
+    };
+    const first = operands[0]!;
+    if (key === "dateAdd") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateAdd",
+          arg: first.resolved,
+          amount: operand[1] as number,
+          unit: operand[2] as DateAddUnit,
+          type: first.type,
+        },
+      };
+    }
+    if (key === "dateDiff") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateDiff",
+          unit: operand[0] as DateAddUnit,
+          start: first.resolved,
+          end: operands[1]!.resolved,
+          operand: operands.some((o) => o.type === "timestamp")
+            ? "timestamp"
+            : "date",
+          type: "number",
+        },
+      };
+    }
+    const part = operand[0] as DatePart;
+    return {
+      ...common,
+      resolved: {
+        kind: "datePart",
+        part,
+        arg: first.resolved,
+        // Read only by a fiscal part: a calendar change leaves other plans alone.
+        fiscalStartMonth: part.startsWith("fiscal_")
+          ? this.catalog.calendar.fiscalYearStartMonth
+          : 1,
+        type: "number",
+      },
+    };
+  }
+
+  /**
+   * A `case` at `at`. Each `if` filters column paths as `where` does, and the
+   * columns it reads count as reads, and as bare when the case is outside an
+   * aggregate; every `then` and the `else` share one type.
+   */
+  private resolveCase(
+    operand: CaseOperand,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    let bareColumn: ResolvedCalc["bareColumn"];
+    let hasAggregate = false;
+    let type: QueryableType | undefined;
+    const typed = (e: ResolvedCalc, p: QueryPath) => {
+      const t = typeOf(e.resolved);
+      if (type === undefined) {
+        refuseJson(t, "the expression", "a case", p);
+        type = t;
+      } else if (t !== type) {
+        throw fail(
+          "invalid_operator",
+          `case takes values of one type; this one is ${t}, not ${type}`,
+          p
+        );
+      }
+      hasAggregate ||= e.hasAggregate;
+      bareColumn ??= e.bareColumn;
+    };
+    const branches = operand.when.map((branch, i) => {
+      const whenAt = [...at, "when", i];
+      const when = resolveFilter<ColumnRef>(
+        branch.if,
+        [...whenAt, "if"],
+        (key, p) => {
+          const { ref, reference } = this.resolveColumn(key, p);
+          reads.set(referenceKey(reference), reference);
+          if (!insideAggregate) bareColumn ??= { path: key, at: p };
+          return { subject: ref, type: ref.type };
+        },
+        this.now,
+        this.catalog.calendar
+      );
+      const thenAt = [...whenAt, "then"];
+      const then = this.resolveExpr(
+        branch.then,
+        thenAt,
+        reads,
+        insideAggregate
+      );
+      typed(then, thenAt);
+      return { when, then: then.resolved };
+    });
+    let otherwise: ResolvedExpr | undefined;
+    if (operand.else !== undefined) {
+      const elseAt = [...at, "else"];
+      const resolved = this.resolveExpr(
+        operand.else,
+        elseAt,
+        reads,
+        insideAggregate
+      );
+      typed(resolved, elseAt);
+      otherwise = resolved.resolved;
+    }
+    return {
+      resolved: {
+        kind: "case",
+        branches,
+        ...(otherwise ? { otherwise } : {}),
+        type: type!,
+      },
+      hasAggregate,
+      bareColumn,
+    };
+  }
+
   /** An aggregate over `arg`, the argument at `at`. */
   private resolveAggregate(
     fn: AggregateFn,
@@ -551,7 +987,8 @@ const resolveCondition = <S>(
   label: string,
   condition: Condition,
   path: QueryPath,
-  now: Date
+  now: Date,
+  calendar: Calendar
 ): ResolvedFilter<S> => {
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
@@ -567,8 +1004,9 @@ const resolveCondition = <S>(
       // A relative moment is only for a date or a timestamp; elsewhere it is
       // the value error for the operator and path.
       if (type === "date" || type === "timestamp") {
-        const iso = resolveRelative(v, now).toISOString();
-        return type === "date" ? iso.slice(0, 10) : iso;
+        return type === "date"
+          ? resolveRelativeDate(v, now, calendar)
+          : resolveRelative(v, now, calendar).toISOString();
       }
       throw fail(
         "invalid_value",
@@ -627,13 +1065,14 @@ const resolveFilter = <S>(
     key: string,
     path: QueryPath
   ) => { subject: S; type: QueryableType },
-  now: Date
+  now: Date,
+  calendar: Calendar
 ): ResolvedFilter<S> => {
   if ("and" in filter && Array.isArray(filter.and)) {
     return {
       kind: "and",
       filters: (filter.and as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "and", i], subjectOf, now)
+        resolveFilter(f, [...path, "and", i], subjectOf, now, calendar)
       ),
     };
   }
@@ -641,7 +1080,7 @@ const resolveFilter = <S>(
     return {
       kind: "or",
       filters: (filter.or as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "or", i], subjectOf, now)
+        resolveFilter(f, [...path, "or", i], subjectOf, now, calendar)
       ),
     };
   }
@@ -652,7 +1091,8 @@ const resolveFilter = <S>(
         filter.not as Filter,
         [...path, "not"],
         subjectOf,
-        now
+        now,
+        calendar
       ),
     };
   }
@@ -660,7 +1100,7 @@ const resolveFilter = <S>(
     ([key, condition]) => {
       const at = [...path, key];
       const { subject, type } = subjectOf(key, at);
-      return resolveCondition(subject, type, key, condition, at, now);
+      return resolveCondition(subject, type, key, condition, at, now, calendar);
     }
   );
   return leaves.length === 1 ? leaves[0] : { kind: "and", filters: leaves };
@@ -706,10 +1146,10 @@ export const planSql = (
       ["join"]
     );
   }
-  const planner = new Planner(catalog);
+  const planner = new Planner(catalog, now);
   const from = planner.resolveFrom(query.from);
 
-  const joins: ResolvedJoin[] = [];
+  const joins = planner.joins;
   const toManyJoins: Array<{ relation: string; path: QueryPath }> = [];
   (query.join ?? []).forEach((item, i) => {
     const relation = typeof item === "string" ? item : item.relation;
@@ -725,6 +1165,7 @@ export const planSql = (
     joins.push(join);
     if (toMany) toManyJoins.push({ relation, path: ["join", i] });
   });
+  planner.toManyJoin = toManyJoins[0]?.relation;
 
   const select: ResolvedSelect[] = [];
   const columns: OutputColumn[] = [];
@@ -756,6 +1197,10 @@ export const planSql = (
       resolved = {
         kind: "bucket",
         unit: item.bucket,
+        // Read only by a fiscal unit: a calendar change leaves other plans alone.
+        fiscalStartMonth: item.bucket.startsWith("fiscal_")
+          ? catalog.calendar.fiscalYearStartMonth
+          : 1,
         column: ref,
         output: item.as ?? `${item.bucket}_${item.column.replaceAll(".", "_")}`,
         type: ref.type,
@@ -764,13 +1209,15 @@ export const planSql = (
       columnPath = item.column;
       if (item.as) outputPath = ["select", i, "as"];
     } else if (
+      "measure" in item ||
       "calc" in item ||
       typeof (item as Record<string, unknown>)[aggregateFnOf(item)!] !==
         "string"
     ) {
-      // A calc, or an aggregate over an expression: both named by their `as`.
+      // A calc, or an aggregate over an expression: both named by their `as`;
+      // a measure is named by its own name unless it has an `as`.
       const reads = new Map<string, Reference>();
-      const { as, ...rest } = item as { as: string } & Record<string, unknown>;
+      const { as, ...rest } = item as { as?: string } & Record<string, unknown>;
       const {
         resolved: expr,
         hasAggregate,
@@ -802,11 +1249,12 @@ export const planSql = (
         kind: "calc",
         expr,
         level: hasAggregate ? "group" : "row",
-        output: as,
+        output: as ?? (rest.measure as string),
         type: typeOf(expr),
       };
       references = [...reads.values()];
-      outputPath = ["select", i, "as"];
+      outputPath =
+        as === undefined ? ["select", i, "measure"] : ["select", i, "as"];
     } else {
       const fn = aggregateFnOf(item)!;
       const arg = (item as Record<AggregateFn, string>)[fn];
@@ -897,7 +1345,8 @@ export const planSql = (
         const { ref } = planner.resolveColumn(key, at);
         return { subject: ref, type: ref.type };
       },
-      now
+      now,
+      catalog.calendar
     );
 
   const grouped = hasAggregate || (query.groupBy?.length ?? 0) > 0;
@@ -967,7 +1416,8 @@ export const planSql = (
           type: select[index].type,
         };
       },
-      now
+      now,
+      catalog.calendar
     );
 
   const orderBy: ResolvedOrder[] = query.orderBy

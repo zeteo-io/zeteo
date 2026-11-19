@@ -1,5 +1,6 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
+import { fiscalShift } from "../dialect.js";
 import { plainNumber } from "../values.js";
 import {
   DummyDriver,
@@ -168,6 +169,8 @@ const DATEPART: Record<BucketUnit, string> = {
   month: "month",
   quarter: "quarter",
   year: "year",
+  fiscal_quarter: "quarter",
+  fiscal_year: "year",
 };
 
 /** The sum as SQL Server computes it without overflow or a float: bigint for small integers, decimal(38,0) for bigint. */
@@ -220,7 +223,7 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
         ? kindOfType(expr.column.nativeType)
         : undefined;
     case "literal": {
-      if (expr.type === "text") return undefined;
+      if (expr.type !== "number") return undefined;
       const { kind } = numberBinding(
         typeof expr.value === "number" ? plainNumber(expr.value) : expr.value
       );
@@ -240,6 +243,19 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
       // An integer expression is summed in decimal(38, 0), see `aggregate`.
       return expr.fn === "sum" && kind === "integer" ? "decimal" : kind;
     }
+    case "case":
+      return expr.type !== "number"
+        ? undefined
+        : widest(
+            [...expr.branches.map((b) => b.then), expr.otherwise].flatMap(
+              (e) => (e ? [exprKind(e)] : [])
+            )
+          );
+    case "dateAdd":
+      return undefined;
+    case "dateDiff":
+    case "datePart":
+      return "integer";
     case "op":
       if (expr.type !== "number") return undefined;
       if (expr.op === "div" || expr.op === "round") return "decimal";
@@ -301,15 +317,20 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type, nativeType) => {
+  bucket: (unit, column, type, nativeType, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
-    if (type === "date")
-      return sql`cast(datetrunc(${part}, ${column}) as date)`;
+    const shift = fiscalShift(unit, fiscalStartMonth);
+    // The shift is the planner's integer, so it is written as a literal.
+    const truncated = (input: Expression<unknown>) =>
+      shift === 0
+        ? sql`datetrunc(${part}, ${input})`
+        : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${input})))`;
+    if (type === "date") return sql`cast(${truncated(column)} as date)`;
     const utc =
       baseType(nativeType) === "datetimeoffset"
         ? sql`switchoffset(${column}, '+00:00')`
         : column;
-    return sql`cast(datetrunc(${part}, ${utc}) as datetime2(3))`;
+    return sql`cast(${truncated(utc)} as datetime2(3))`;
   },
   // LOWER on both sides makes the match case-insensitive whatever the
   // column's collation; `[` opens a character class in SQL Server's LIKE.
@@ -369,11 +390,67 @@ export const mssqlDialect: SqlDialect = {
   // decimal(38, s) would cut the result to 6 places.
   literal: (v, type) => {
     if (type === "text") return param("nvarchar", v);
+    // A timestamp literal is read as the naive UTC datetime2 a column holds.
+    if (type === "date" || type === "timestamp") {
+      return value(v, { type, nativeType: "datetime2" });
+    }
     const binding = numberBinding(v);
     if (binding.kind !== "decimal") return value(v, { type });
     const digits = DECIMAL_TEXT.exec(v)![1]!.replace(/^0+/, "").length;
     return sql`cast(${param("nvarchar", v)} as decimal(${sql.lit(Math.max(digits + binding.scale, 1))}, ${sql.lit(binding.scale)}))`;
   },
+  // The unit is a keyword and the amount a validated integer, both written
+  // into the SQL. DATEADD clamps a month step to the month's last day.
+  dateAdd: (expression, amount, unit) =>
+    sql`dateadd(${sql.raw(unit)}, ${sql.lit(amount)}, ${expression})`,
+  // DATEDIFF counts boundaries crossed, which is not whole units completed:
+  // days of a timestamp come from microseconds, and months are corrected
+  // against the clamped DATEADD, as Postgres's are.
+  dateDiff: (unit, start, end, type) => {
+    const read = (x: Expression<unknown>) =>
+      type === "date"
+        ? sql`cast(${x} as date)`
+        : sql`cast(${x} as datetime2(7))`;
+    const s = read(start);
+    const e = read(end);
+    const days =
+      type === "date"
+        ? sql`datediff(day, ${s}, ${e})`
+        : sql`cast(datediff_big(microsecond, ${s}, ${e}) / cast(86400000000 as bigint) as int)`;
+    if (unit === "day") return days;
+    if (unit === "week") return sql`(${days} / 7)`;
+    const boundaries = sql`datediff(month, ${s}, ${e})`;
+    const shifted = sql`dateadd(month, ${boundaries}, ${s})`;
+    const completed = sql`(case when ${boundaries} > 0 and ${shifted} > ${e} then ${boundaries} - 1 when ${boundaries} < 0 and ${shifted} < ${e} then ${boundaries} + 1 else ${boundaries} end)`;
+    if (unit === "month") return completed;
+    return sql`(${completed} / ${sql.lit(unit === "quarter" ? 3 : 12)})`;
+  },
+  datePart: (part, expression, fiscalStartMonth) => {
+    const field = (name: string) =>
+      sql`datepart(${sql.raw(name)}, ${expression})`;
+    switch (part) {
+      case "year":
+      case "quarter":
+      case "month":
+      case "day":
+        return field(part);
+      // Monday is 1 whatever the session's DATEFIRST.
+      case "weekday":
+        return sql`((${field("weekday")} + @@datefirst + 5) % 7 + 1)`;
+      case "fiscal_year":
+        return fiscalStartMonth === 1
+          ? field("year")
+          : sql`(${field("year")} + case when ${field("month")} >= ${sql.lit(fiscalStartMonth)} then 1 else 0 end)`;
+      case "fiscal_quarter":
+        return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
+    }
+  },
+  // A datetimeoffset keeps its own offset; date parts and differences are
+  // taken on the UTC wall clock, as a bucket's are.
+  timestampUtc: (expression, nativeType) =>
+    baseType(nativeType) === "datetimeoffset"
+      ? sql`cast(switchoffset(${expression}, '+00:00') as datetime2(7))`
+      : expression,
   // Lower-case, as Postgres prints a uuid.
   text: (expression, nativeType) =>
     baseType(nativeType) === "uniqueidentifier"

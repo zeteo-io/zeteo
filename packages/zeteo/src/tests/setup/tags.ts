@@ -23,6 +23,8 @@ export const ASPECTS = [
   "rows",
   "plugin",
   "sheets",
+  "calendar",
+  "measures",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

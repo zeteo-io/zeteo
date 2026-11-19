@@ -10,6 +10,7 @@ import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
 import * as cancel from "../../../adapters/postgres/cancel.js";
@@ -135,11 +136,18 @@ beforeAll(async () => {
   await refreshSource(id, randomUUID());
   const source = (await db.sources.findById(id))!;
   const { tables, columns, relations } = await db.catalog.loadSourceCatalog(id);
-  catalog = buildVisibleCatalog(source, tables, columns, relations, {
-    sourceIds: new Set([id]),
-    allows: () => true,
-    tableAccess: () => "all",
-  });
+  catalog = buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    {
+      sourceIds: new Set([id]),
+      allows: () => true,
+      tableAccess: () => "all",
+    },
+    { calendar: DEFAULT_CALENDAR, measures: [] }
+  );
   connection = await connectWith();
 });
 

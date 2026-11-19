@@ -567,3 +567,221 @@ describe("planSql: calculation references", () => {
     );
   });
 });
+
+describe("planSql: case", () => {
+  const PAID = { status: { eq: "paid" } };
+  const caseOf = (when: unknown[], otherwise?: unknown) => ({
+    case: { when, ...(otherwise === undefined ? {} : { else: otherwise }) },
+  });
+
+  it("plans a sum over a case as group-level, reading the if's columns", () => {
+    const { select, columns, groupBy } = plan({
+      select: [{ sum: caseOf([{ if: PAID, then: "total" }]), as: "paid" }],
+    });
+    expect(select[0]).toMatchObject({
+      kind: "calc",
+      level: "group",
+      output: "paid",
+      type: "number",
+      expr: {
+        kind: "aggregate",
+        fn: "sum",
+        arg: {
+          kind: "case",
+          type: "number",
+          branches: [
+            {
+              when: {
+                kind: "compare",
+                op: "eq",
+                subject: { name: "status" },
+                value: "paid",
+              },
+              then: { kind: "column" },
+            },
+          ],
+        },
+      },
+    });
+    expect(groupBy).toEqual([]);
+    expect(columns[0]?.references).toEqual(
+      expect.arrayContaining([ref("orders", "status"), ref("orders", "total")])
+    );
+  });
+
+  it("plans a case calc with no aggregate as row-level", () => {
+    const { select } = plan({
+      select: [
+        {
+          calc: caseOf([{ if: PAID, then: "total" }], 0),
+          as: "x",
+        },
+      ],
+    });
+    expect(select[0]).toMatchObject({
+      kind: "calc",
+      level: "row",
+      type: "number",
+      expr: { kind: "case", otherwise: { kind: "literal", value: 0 } },
+    });
+  });
+
+  it("plans a count over a case", () => {
+    const { select } = plan({
+      select: [{ count: caseOf([{ if: PAID, then: 1 }]), as: "paid_orders" }],
+    });
+    expect(select[0]).toMatchObject({
+      kind: "calc",
+      level: "group",
+      type: "number",
+      expr: { kind: "aggregate", fn: "count" },
+    });
+  });
+
+  it("plans a text case", () => {
+    const { select } = plan({
+      select: [
+        {
+          calc: caseOf(
+            [{ if: { total: { gte: 100 } }, then: { value: "big" } }],
+            "status"
+          ),
+          as: "size",
+        },
+      ],
+    });
+    expect(select[0]).toMatchObject({ type: "text" });
+  });
+
+  it("refuses branches of different types at the second then", () => {
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf([
+              { if: PAID, then: "total" },
+              { if: { status: { eq: "x" } }, then: "status" },
+            ]),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "case", "when", 1, "then"],
+    });
+  });
+
+  it("refuses an else of another type at the else", () => {
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf([{ if: PAID, then: "total" }], { value: "no" }),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "case", "else"],
+    });
+  });
+
+  it("does not let an if name a select alias", () => {
+    expect(
+      refusal({
+        select: [
+          { calc: { add: ["total", 1] }, as: "bumped" },
+          { calc: caseOf([{ if: { bumped: { gt: 1 } }, then: 1 }]), as: "x" },
+        ],
+      })
+    ).toMatchObject({
+      code: "not_found_or_not_accessible",
+      path: ["select", 1, "calc", "case", "when", 0, "if", "bumped"],
+    });
+  });
+
+  it("checks an if's operators and values as where does", () => {
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf([{ if: { total: { contains: "x" } }, then: 1 }]),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "case", "when", 0, "if", "total", "contains"],
+    });
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf([{ if: { ordered_on: { eq: "nope" } }, then: 1 }]),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({ code: "invalid_value" });
+  });
+
+  it("resolves a relative date in an if", () => {
+    const { select } = plan({
+      select: [
+        {
+          count: caseOf([
+            {
+              if: {
+                ordered_on: { gte: { relative: { unit: "day", offset: -7 } } },
+              },
+              then: 1,
+            },
+          ]),
+          as: "recent",
+        },
+      ],
+    });
+    expect(select[0]).toMatchObject({
+      expr: {
+        arg: { branches: [{ when: { kind: "compare", op: "gte" } }] },
+      },
+    });
+  });
+
+  it("refuses an aggregate in a branch beside a bare column in an if or a then", () => {
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf([{ if: PAID, then: { sum: "total" } }]),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({ code: "invalid_grouping" });
+    expect(
+      refusal({
+        select: [
+          {
+            calc: caseOf(
+              [{ if: { id: { eq: 1 } }, then: { sum: "total" } }],
+              "total"
+            ),
+            as: "x",
+          },
+        ],
+      })
+    ).toMatchObject({ code: "invalid_grouping" });
+  });
+
+  it("counts the columns an if reads as reads, so a case of constants plans", () => {
+    const { select, columns } = plan({
+      select: [{ calc: caseOf([{ if: PAID, then: 1 }], 0), as: "x" }],
+    });
+    expect(select[0]).toMatchObject({ kind: "calc", level: "row" });
+    expect(columns[0]?.references).toEqual([ref("orders", "status")]);
+  });
+});

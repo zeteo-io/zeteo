@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import type { ColumnType } from "../../../adapters/types.js";
 import type { Access } from "../../../grants/access.js";
 import type {
@@ -113,5 +114,8 @@ export const salesCatalog = (): VisibleCatalog => {
     allows: () => true,
     tableAccess: () => "all",
   };
-  return buildVisibleCatalog(SOURCE, tables, columns, relations, access);
+  return buildVisibleCatalog(SOURCE, tables, columns, relations, access, {
+    calendar: DEFAULT_CALENDAR,
+    measures: [],
+  });
 };

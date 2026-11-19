@@ -4,6 +4,7 @@ import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import type { SqlDialect } from "../../../adapters/sql/dialect.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -434,5 +435,185 @@ describe("compileSql on SQL Server: calculations", () => {
     expect(sql).toContain(
       "select cast((sum(cast(([t0].[customer_id] * [t0].[customer_id]) as decimal(38, 0))) + @1) as varchar(48)) as [c0]"
     );
+  });
+});
+
+describe("compileSql: case", () => {
+  const sumCase = {
+    select: [
+      {
+        sum: {
+          case: { when: [{ if: { status: { eq: "paid" } }, then: "total" }] },
+        },
+        as: "paid",
+      },
+    ],
+    orderBy: [],
+  };
+
+  it("compiles a case on Postgres, each when through the where compiler", () => {
+    const { sql, parameters } = pg(
+      calcQuery({
+        case: {
+          when: [
+            { if: { status: { eq: "paid" } }, then: { value: "a" } },
+            { if: { total: { gt: 100 } }, then: { value: "b" } },
+          ],
+          else: "status",
+        },
+      })
+    );
+    expect(sql).toBe(
+      'select case when "t0"."status" = $1 then cast($2 as text) when "t0"."total" > $3 then cast($4 as text) else "t0"."status" end as "c0" from "shop"."orders" as "t0" limit $5 offset $6'
+    );
+    expect(parameters.slice(0, 4)).toEqual(["paid", "a", 100, "b"]);
+  });
+
+  it("compiles a conditional sum on both engines", () => {
+    expect(pg(sumCase).sql).toContain(
+      'select sum(case when "t0"."status" = $1 then "t0"."total" end)'
+    );
+    expect(ms(sumCase).sql).toContain(
+      "sum(case when [t0].[status] = @1 then [t0].[total] end)"
+    );
+    expect(ms(sumCase).parameters[0]).toEqual(nvarchar("paid"));
+  });
+
+  it("compiles a case with an else on SQL Server", () => {
+    const { sql } = ms(
+      calcQuery({
+        case: {
+          when: [{ if: { status: { eq: "paid" } }, then: "total" }],
+          else: 0,
+        },
+      })
+    );
+    expect(sql).toContain(
+      "case when [t0].[status] = @1 then [t0].[total] else @2 end"
+    );
+  });
+
+  it("compiles count over a case", () => {
+    expect(
+      pg({
+        select: [
+          {
+            count: { case: { when: [{ if: { id: { eq: 1 } }, then: 1 }] } },
+            as: "n",
+          },
+        ],
+        orderBy: [],
+      }).sql
+    ).toContain('count(case when "t0"."id" = $1 then cast($2 as bigint) end)');
+  });
+});
+
+describe("planSql: bucket calendars", () => {
+  const planWith = (unit: string, fiscalYearStartMonth: number) =>
+    planSql(
+      sqlQuerySchema.parse({
+        source: "shop",
+        from: "orders",
+        select: [{ bucket: unit, column: "created_at", as: "b" }],
+      }),
+      {
+        ...shopCatalog(),
+        calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth },
+      }
+    );
+
+  it("plans a fiscal bucket differently when the fiscal year starts in another month", () => {
+    expect(planWith("fiscal_year", 2)).not.toEqual(planWith("fiscal_year", 4));
+    expect(planWith("fiscal_quarter", 2)).not.toEqual(
+      planWith("fiscal_quarter", 3)
+    );
+  });
+
+  it("plans a calendar bucket the same whatever the fiscal year start", () => {
+    expect(planWith("month", 2)).toEqual(planWith("month", 4));
+  });
+});
+
+describe("compileSql: date expressions", () => {
+  const item = (calc: unknown) => ({
+    select: [{ max: calc, as: "x" }],
+    orderBy: [],
+  });
+  const FROM = ' as "c0" from "shop"."orders" as "t0"';
+
+  it("binds a date literal on Postgres and shifts it by an interval", () => {
+    const { sql, parameters } = pg(
+      item({ dateAdd: [{ date: "2026-01-31" }, 1, "month"] })
+    );
+    expect(sql).toBe(
+      "select max(cast(cast($1 as date) + interval '1 months' as date))" +
+        FROM +
+        " limit $2 offset $3"
+    );
+    expect(parameters[0]).toBe("2026-01-31");
+  });
+
+  it("writes a quarter and a year step as months, a week as weeks", () => {
+    const step = (amount: number, unit: string) =>
+      pg(item({ dateAdd: ["created_at", amount, unit] })).sql;
+    expect(step(-2, "quarter")).toContain("interval '-6 months'");
+    expect(step(1, "year")).toContain("interval '12 months'");
+    expect(step(3, "week")).toContain("interval '3 weeks'");
+  });
+
+  it("binds a literal on SQL Server as a typed parameter and writes the step into the SQL", () => {
+    const { sql, parameters } = ms(
+      item({ dateAdd: [{ date: "2026-01-31" }, -3, "month"] })
+    );
+    expect(sql).toContain("dateadd(month, -3, cast(@1 as date))");
+    expect(parameters[0]).toEqual(nvarchar("2026-01-31"));
+  });
+
+  it("never writes a literal's text into the SQL", () => {
+    const text = "2026-01-31";
+    expect(pg(item({ dateAdd: [{ date: text }, 1, "day"] })).sql).not.toContain(
+      text
+    );
+    expect(ms(item({ dateAdd: [{ date: text }, 1, "day"] })).sql).not.toContain(
+      text
+    );
+    const stamp = "2026-01-31T10:00:00Z";
+    expect(
+      ms(item({ dateAdd: [{ timestamp: stamp }, 1, "day"] })).sql
+    ).not.toContain(stamp);
+  });
+
+  it("measures completed months against the clamped step, on both engines", () => {
+    const diff = item({ dateDiff: ["month", "ordered_on", "ordered_on"] });
+    expect(pg(diff).sql).toContain("* interval '1 month'");
+    expect(ms(diff).sql).toContain("dateadd(month, datediff(month,");
+  });
+
+  it("reads Monday as 1 whatever the session's first day of the week", () => {
+    const weekday = item({ datePart: ["weekday", "ordered_on"] });
+    expect(pg(weekday).sql).toContain("extract(isodow from");
+    expect(ms(weekday).sql).toContain("@@datefirst");
+  });
+
+  it("reads fiscal parts from the planned start month", () => {
+    const planned = (part: string) =>
+      compileSql(
+        planSql(
+          sqlQuerySchema.parse({
+            source: "shop",
+            from: "orders",
+            select: [{ calc: { datePart: [part, "ordered_on"] }, as: "x" }],
+          }),
+          {
+            ...shopCatalog(),
+            calendar: { ...DEFAULT_CALENDAR, fiscalYearStartMonth: 4 },
+          }
+        ),
+        postgresDialect,
+        { limit: 1, offset: 0 }
+      ).sql;
+    expect(planned("fiscal_year")).toContain("then 1 else 0 end");
+    expect(planned("fiscal_year")).toContain(">= 4");
+    expect(planned("fiscal_quarter")).toContain("- 4 + 12");
   });
 });

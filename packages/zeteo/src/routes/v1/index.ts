@@ -6,6 +6,7 @@ import { authenticate } from "../../middleware/auth.js";
 import connectionsRouter from "./connections/index.js";
 import dashboardsRouter from "./dashboards/index.js";
 import principalsRouter from "./principals/index.js";
+import calendarRouter from "./calendar/index.js";
 import catalogRouter from "./catalog/index.js";
 import sourcesRouter from "./sources/index.js";
 import uploadsRouter from "./uploads/index.js";
@@ -20,6 +21,7 @@ const v1Router = Router();
 
 v1Router.use("/me", dropCachedIntrospection);
 v1Router.use(authenticate);
+v1Router.use("/calendar", calendarRouter);
 v1Router.use("/catalog", catalogRouter);
 v1Router.use("/connections", connectionsRouter);
 v1Router.use("/dashboards", dashboardsRouter);

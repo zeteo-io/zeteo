@@ -1,4 +1,5 @@
 import { AzureSqlPreparedQuery } from "../../adapters/azure-sql/runQuery.js";
+import { DEFAULT_CALENDAR, type Calendar } from "../../calendar/calendar.js";
 import { AzureSqlConnection } from "../../adapters/azure-sql/connect.js";
 import { buildVisibleCatalog } from "../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../grants/visibleCatalog.js";
@@ -157,6 +158,18 @@ export const useMssqlRuns = () => {
     conn: SourceConnection = connection
   ) => runPlan("azure-sql", conn, plan(query), { ...LIMITS, ...limits });
 
+  /** A run of `query` under a catalogue whose calendar is `calendar`. */
+  const runWithCalendar = (calendar: Calendar, query: object) =>
+    runPlan(
+      "azure-sql",
+      connection,
+      planSql(sqlQuerySchema.parse({ source: catalog.source.slug, ...query }), {
+        ...catalog,
+        calendar,
+      }),
+      LIMITS
+    );
+
   /** Opens `query` as a row stream, prepared for every row it has. */
   const open = (
     query: object,
@@ -210,11 +223,18 @@ export const useMssqlRuns = () => {
     const source = (await db.sources.findById(id))!;
     const { tables, columns, relations } =
       await db.catalog.loadSourceCatalog(id);
-    catalog = buildVisibleCatalog(source, tables, columns, relations, {
-      sourceIds: new Set([id]),
-      allows: () => true,
-      tableAccess: () => "all",
-    });
+    catalog = buildVisibleCatalog(
+      source,
+      tables,
+      columns,
+      relations,
+      {
+        sourceIds: new Set([id]),
+        allows: () => true,
+        tableAccess: () => "all",
+      },
+      { calendar: DEFAULT_CALENDAR, measures: [] }
+    );
     connection = await connectWith();
   });
 
@@ -230,6 +250,8 @@ export const useMssqlRuns = () => {
   });
 
   return {
+    /** The visible catalogue of the fixture source. */
+    catalog: () => catalog,
     /** The shared connection, pool size 3. */
     connection: () => connection,
     connectWith,
@@ -238,5 +260,6 @@ export const useMssqlRuns = () => {
     open,
     plan,
     run,
+    runWithCalendar,
   };
 };

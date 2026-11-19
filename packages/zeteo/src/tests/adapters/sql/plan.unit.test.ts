@@ -112,6 +112,7 @@ describe("planSql: the spec's example", () => {
         {
           kind: "bucket",
           unit: "month",
+          fiscalStartMonth: 1,
           column: createdAt,
           output: "month",
           type: "timestamp",
