@@ -25,6 +25,8 @@ export const originView = (row: { origin: unknown }) => {
       spreadsheet_title: origin.spreadsheetTitle,
       url: `https://docs.google.com/spreadsheets/d/${encodeURIComponent(origin.spreadsheetId)}/edit#gid=${origin.sheetId}`,
       tab_id: origin.sheetId,
+      /** Absent only for a table added before tab titles were kept. */
+      ...(origin.tabTitle !== undefined && { tab_title: origin.tabTitle }),
     };
   }
   return origin;

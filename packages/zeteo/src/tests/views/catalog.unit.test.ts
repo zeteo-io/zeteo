@@ -24,6 +24,21 @@ describe("originView", () => {
     });
   });
 
+  it("gives a Sheets origin's tab title when it is kept", () => {
+    expect(
+      originView({
+        origin: {
+          kind: "google-sheets",
+          spreadsheetId: "abc",
+          spreadsheetTitle: "Budget",
+          sheetId: 7,
+          headerRow: 0,
+          tabTitle: "FBA Inventory Master",
+        },
+      })
+    ).toMatchObject({ tab_id: 7, tab_title: "FBA Inventory Master" });
+  });
+
   it("gives a file's origin as it is and a merged one as its member count", () => {
     expect(originView({ origin: { kind: "file", filename: "a.csv" } })).toEqual(
       { kind: "file", filename: "a.csv" }
