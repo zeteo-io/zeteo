@@ -112,7 +112,8 @@ and changes write audit entries to tereo's outbox.
   tereo: `list_sources`, `list_tables` and `describe_table` to discover what it may
   query, and `query`, which runs the same engine as `POST /v1/query` (100 rows by default, at most
   5,000 or 1 MB), `query_guide` (the full query and dashboard reference), and tools for saved
-  queries, dashboards and saved panels, with short instructions that say what zeteo is for.
+  queries, dashboards and saved panels, with short instructions that say what zeteo is for and list the
+  caller's own sources, and, in clients that support MCP Apps, preview cards for panels and dashboards.
   A Claude Code plugin in `plugins/zeteo/` adds the MCP server and querying and dashboard skills
   ([docs/mcp.md](packages/zeteo/docs/mcp.md#the-claude-code-plugin)). A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.

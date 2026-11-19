@@ -27,6 +27,13 @@ describe("MCP_INSTRUCTIONS", () => {
     }
   });
 
+  it("shows a chart by previewing a query, and saves it only to keep it", () => {
+    expect(MCP_INSTRUCTIONS).toContain("`preview_panel` with `query`");
+    expect(
+      MCP_INSTRUCTIONS.indexOf("`preview_panel` with `query`")
+    ).toBeLessThan(MCP_INSTRUCTIONS.lastIndexOf("`create_saved_query`"));
+  });
+
   it("names list_sources before query", () => {
     expect(MCP_INSTRUCTIONS.indexOf("`list_sources`")).toBeLessThan(
       MCP_INSTRUCTIONS.indexOf("`query`")

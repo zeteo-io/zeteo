@@ -15,6 +15,10 @@ const DEV_PUBLIC_URL = "http://localhost:4201";
 // packages/zeteo, whether this file runs from src/ (tsx) or dist/ (compiled).
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEFAULT_UI_DIST_PATH = path.resolve(PACKAGE_ROOT, "../zeteo-ui/dist");
+const DEFAULT_MCP_CARD_PATH = path.resolve(
+  PACKAGE_ROOT,
+  "../zeteo-ui/dist-mcp/card.html"
+);
 
 const corsOrigins = z.string().transform((val) =>
   val === "*"
@@ -241,6 +245,10 @@ const EnvFields = z
     MCP_ALLOWED_ORIGINS: originList,
     // MCP tool calls one user may make per minute, across every replica.
     MCP_RATE_LIMIT_PER_MINUTE: int(1, 10_000, 120),
+    // The MCP preview card (zeteo-ui's build, dist-mcp/card.html), read once at
+    // start; a relative path resolves from packages/zeteo. Missing: a warning,
+    // and MCP serves no cards.
+    MCP_CARD_PATH: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.DB_POOL_MIN > val.DB_POOL_MAX) {
@@ -358,6 +366,9 @@ const EnvFields = z
       UI_DIST_PATH: raw.UI_DIST_PATH
         ? path.resolve(PACKAGE_ROOT, raw.UI_DIST_PATH)
         : DEFAULT_UI_DIST_PATH,
+      MCP_CARD_PATH: raw.MCP_CARD_PATH
+        ? path.resolve(PACKAGE_ROOT, raw.MCP_CARD_PATH)
+        : DEFAULT_MCP_CARD_PATH,
       SERVICE_NAME: "zeteo" as const,
     };
   });

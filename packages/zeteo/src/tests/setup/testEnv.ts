@@ -10,6 +10,8 @@ export const TEST_MASTER_KEY = Buffer.alloc(32, 7).toString("base64url");
 export const TEST_MCP_CLIENT = "zeteo-test-connector";
 /** The one browser origin the test environment lets call the MCP endpoint. */
 export const TEST_MCP_ORIGIN = "https://connector.example.com";
+/** The MCP preview card the shared server serves, from packages/zeteo. */
+export const TEST_MCP_CARD_PATH = "src/tests/fixtures/mcp-card/card.html";
 
 /** The test database's uploads reader role; `globalSetup` creates it. */
 export const TEST_UPLOADS_READER = {
@@ -105,5 +107,8 @@ export function loadTestEnv(): Record<string, string> {
     // endpoint accepts.
     MCP_ALLOWED_CLIENTS: TEST_MCP_CLIENT,
     MCP_ALLOWED_ORIGINS: TEST_MCP_ORIGIN,
+    // A fixed card, so the tools the shared server lists do not depend on
+    // whether zeteo-ui has been built.
+    MCP_CARD_PATH: TEST_MCP_CARD_PATH,
   };
 }

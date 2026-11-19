@@ -1,11 +1,13 @@
 import { buildTereoDocument } from "../definitions/tereoDeclaration.js";
 import { defineSavedQueryTools } from "./savedQueryTools.js";
 import { defineSavedPanelTools } from "./savedPanelTools.js";
+import { callerInstructions } from "./callerInstructions.js";
 import { defineDashboardTools } from "./dashboardTools.js";
-import { MCP_INSTRUCTIONS } from "./instructions.js";
+import { defineCardResources, loadCard } from "./card.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
 import { defineGuideTool } from "./guideTool.js";
+import { defineCardTools } from "./cardTools.js";
 import { getTereo } from "../utils/tereo.js";
 import { rateLimitRedis } from "./redis.js";
 import { logger } from "../utils/logger.js";
@@ -40,7 +42,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   const mcp = createTereoMcp({
     name: "zeteo",
     version,
-    instructions: MCP_INSTRUCTIONS,
+    instructions: callerInstructions,
     core: getTereo(),
     publicUrl: env.PUBLIC_URL,
     path: MCP_PATH,
@@ -53,12 +55,17 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
     coreUrl: options.coreUrl,
     logger: logger.child({ component: "mcp" }),
   });
+  // Read once: the cards, their links on the tools and the tools they call
+  // all exist, or none does.
+  const cards = loadCard(env.MCP_CARD_PATH, MAX_RESULT_BYTES);
+  if (cards) defineCardResources(mcp, cards);
   defineDiscoveryTools(mcp);
   defineQueryTool(mcp);
   defineGuideTool(mcp);
   defineSavedQueryTools(mcp);
-  defineSavedPanelTools(mcp);
-  defineDashboardTools(mcp);
+  defineSavedPanelTools(mcp, cards !== null);
+  defineDashboardTools(mcp, cards !== null);
+  if (cards) defineCardTools(mcp);
   return mcp;
 };
 

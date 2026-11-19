@@ -6,18 +6,21 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build -c vite.mcp-card.config.ts",
     "check": "tsc --noEmit && node scripts/check-routes.mjs",
     "lint": "eslint src/",
     "test": "vitest run",
     "preview": "vite preview",
-    "clean": "rm -rf dist node_modules/.vite tsconfig.tsbuildinfo"
+    "clean": "rm -rf dist dist-mcp node_modules/.vite tsconfig.tsbuildinfo"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.3.1",
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "@kosmeo-ui/react": "^1.2.0",
+    "@modelcontextprotocol/client": "^2.4.0",
+    "@modelcontextprotocol/core": "^2.4.0",
+    "@modelcontextprotocol/ext-apps": "2.0.4",
     "@tanstack/react-query": "^5.104.2",
     "@tereo-io/react": "^0.1.1",
     "axios": "^1.20.0",
@@ -26,7 +29,8 @@
     "react-dom": "19.3.1",
     "react-grid-layout": "2.2.4",
     "react-router-dom": "^7.18.4",
-    "socket.io-client": "^4.8.4"
+    "socket.io-client": "^4.8.4",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^7.0.1",
@@ -38,6 +42,7 @@
     "jsdom": "^30.1.2",
     "typescript": "^6.0.3",
     "vite": "^8.3.4",
+    "vite-plugin-singlefile": "2.3.4",
     "vitest": "^5.0.4"
   }
 }

@@ -32,6 +32,8 @@ import {
 } from "../support/mcp.js";
 
 const READ_TOOLS = [
+  "card_dashboard",
+  "card_panel_rows",
   "describe_table",
   "get_dashboard",
   "get_saved_panel",
@@ -182,6 +184,8 @@ describe("MCP endpoint", () => {
           saved_query_id: "anything",
           chart: { type: "table", version: 1 },
         },
+        card_panel_rows: { saved_panel_id: "anything" },
+        card_dashboard: { dashboard_id: "anything" },
       };
       // The guide is a reference, not data: it answers without zeteo.data.read.
       const guide = await callTool(session.client, "query_guide");

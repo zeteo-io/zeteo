@@ -89,3 +89,5 @@ services:
       # The shared server serves MCP to this client; testEnv.ts names the same.
       MCP_ALLOWED_CLIENTS: zeteo-test-connector
       MCP_ALLOWED_ORIGINS: https://connector.example.com
+      # The card fixture, as testEnv.ts's TEST_MCP_CARD_PATH.
+      MCP_CARD_PATH: src/tests/fixtures/mcp-card/card.html

@@ -1,3 +1,4 @@
+import { listVisibleSources, visibleSlugs } from "./visibleSources.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { visibleCatalogViews } from "../views/visibleCatalog.js";
 import { loadAccess, type Access } from "../grants/access.js";
@@ -5,7 +6,6 @@ import { MCP_USE } from "../definitions/tereoDeclaration.js";
 import type { TereoMcp, ToolContext } from "@tereo-io/mcp";
 import { notFound } from "../engine/errors.js";
 import { requireDataRead } from "./caller.js";
-import { db } from "../utils/db/index.js";
 import { inToolCall } from "./errors.js";
 import { z } from "zod";
 
@@ -20,10 +20,6 @@ const TableInput = SourceInput.extend({
     .max(512)
     .describe("The table's name as list_tables gives it"),
 });
-
-/** The slugs of the sources the caller has a grant on, sorted. */
-const visibleSlugs = async (access: Access): Promise<string[]> =>
-  (await db.sources.listSlugs(access.sourceIds)).sort();
 
 /**
  * The caller's view of one source with MCP's row limits, or the one error a
@@ -59,12 +55,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     permission: MCP_USE,
     readOnly: true,
     handler: handled(async (_input: undefined, access) => {
-      const catalogs = [];
-      for (const slug of await visibleSlugs(access)) {
-        const catalog = await loadVisibleCatalog(slug, access);
-        if (catalog) catalogs.push(catalog);
-      }
-      const views = visibleCatalogViews(catalogs, () => null, "mcp");
+      const views = await listVisibleSources(access);
       return {
         sources: views.map((view) => ({
           slug: view.slug,
