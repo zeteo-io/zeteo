@@ -244,7 +244,16 @@ export const queryNameOf = (
     : `${table.schemaName}.${table.name}`;
 
 class Planner {
+  /** The query's own scopes: its `from` and its joins. */
   private readonly scopes = new Map<string, Scope>();
+  /**
+   * The joins measures added, by relation path. Seen only while a measure's
+   * expansion is resolved, so a query never reads through a join it did not
+   * make, and its validity never depends on a measure's definition.
+   */
+  private readonly measureScopes = new Map<string, Scope>();
+  /** Whether a measure's expansion is being resolved. */
+  private inMeasure = false;
   private readonly references = new Map<string, Reference>();
   private readonly tablesById: Map<string, VisibleTable>;
   private readonly measures: Map<string, VisibleMeasure>;
@@ -261,6 +270,14 @@ class Planner {
   ) {
     this.tablesById = new Map(catalog.tables.map((t) => [t.id, t]));
     this.measures = new Map(catalog.measures.map((m) => [m.name, m]));
+  }
+
+  /** The scope at `prefix`: the query's own, then, inside a measure, a measure's. */
+  private scopeOf(prefix: string): Scope | undefined {
+    return (
+      this.scopes.get(prefix) ??
+      (this.inMeasure ? this.measureScopes.get(prefix) : undefined)
+    );
   }
 
   private touch(reference: Reference): void {
@@ -331,7 +348,7 @@ class Planner {
     path: QueryPath
   ): { join: ResolvedJoin; toMany: boolean } {
     const { prefix, last } = splitPath(relationPath);
-    const parent = this.scopes.get(prefix);
+    const parent = this.scopeOf(prefix);
     if (!parent) {
       throw fail(
         "join_parent_missing",
@@ -369,7 +386,10 @@ class Planner {
       this.touch({ tableId: target.id, columnId: to.id });
       return [parent.alias, from.name, to.name];
     });
-    this.scopes.set(relationPath, { alias, table: target });
+    (this.inMeasure ? this.measureScopes : this.scopes).set(relationPath, {
+      alias,
+      table: target,
+    });
     return {
       join: {
         alias,
@@ -384,7 +404,7 @@ class Planner {
 
   resolveColumn(columnPath: string, path: QueryPath): Resolved {
     const { prefix, last } = splitPath(columnPath);
-    const scope = this.scopes.get(prefix);
+    const scope = this.scopeOf(prefix);
     if (!scope) {
       const joined = [...this.scopes.keys()].filter((k) => k !== "");
       throw notFound("relation", prefix, path, joined);
@@ -646,10 +666,16 @@ class Planner {
           `A query's measures expand to at most ${MAX_EXPANDED_NODES} operations and aggregates`
         );
       }
-      for (const relationPath of expansion.relationPaths) {
-        this.joinForMeasure(relationPath, at);
+      let calc: ResolvedCalc;
+      this.inMeasure = true;
+      try {
+        for (const relationPath of expansion.relationPaths) {
+          this.joinForMeasure(relationPath, at);
+        }
+        calc = this.resolveExpr(expansion.expr, at, reads);
+      } finally {
+        this.inMeasure = false;
       }
-      const calc = this.resolveExpr(expansion.expr, at, reads);
       if (!calc.hasAggregate || calc.bareColumn) {
         throw new MeasureError(
           "measure_not_aggregate",
@@ -667,11 +693,12 @@ class Planner {
 
   /**
    * The join a measure needs at `relationPath`: the query's own when it made
-   * one, else a left join after the others. A measure reads to-one relations
-   * only, so its joins neither drop nor repeat rows.
+   * one, else one an earlier measure added, else a left join after the
+   * others, kept apart from the query's scopes. A measure reads to-one
+   * relations only, so its joins neither drop nor repeat rows.
    */
   private joinForMeasure(relationPath: string, at: QueryPath): void {
-    if (this.scopes.has(relationPath)) return;
+    if (this.scopeOf(relationPath)) return;
     const { join, toMany } = this.resolveJoin(
       relationPath,
       "left",

@@ -491,3 +491,81 @@ describe("sqlQuerySchema: measures", () => {
     ).toBe(false);
   });
 });
+
+describe("planSql: a measure's joins stay the measure's", () => {
+  // The same query with the measure replaced by a plain sum of the same name.
+  const without = (query: { select: unknown[] }) => ({
+    ...query,
+    select: query.select.map((item) =>
+      typeof item === "object" && item !== null && "measure" in item
+        ? { sum: "total", as: (item as { measure: string }).measure }
+        : item
+    ),
+  });
+
+  it.each([
+    [
+      "a select item after the measure",
+      { select: [{ measure: "region_rev" }, "customer.region"] },
+    ],
+    [
+      "a select item before the measure",
+      { select: ["customer.region", { measure: "region_rev" }] },
+    ],
+    [
+      "a where",
+      {
+        select: [{ measure: "region_rev" }],
+        where: { "customer.region": { eq: "EU" } },
+      },
+    ],
+    [
+      "a calc",
+      {
+        select: [
+          { measure: "region_rev" },
+          { calc: { lower: "customer.region" }, as: "r" },
+        ],
+      },
+    ],
+  ])(
+    "refuses %s reading a relation only the measure joined, as without the measure",
+    (_, query) => {
+      const refused = refusal(query);
+      expect(refused).toMatchObject({ code: "not_found_or_not_accessible" });
+      expect(refused).toEqual(refusal(without(query)));
+    }
+  );
+
+  it("shares one added join between measures reading the same relation", () => {
+    const { joins } = plan(
+      {
+        select: [
+          { measure: "region_rev" },
+          { measure: "us_orders" },
+          { measure: "pro_rev" },
+        ],
+      },
+      catalogWith([
+        measure(
+          "us_orders",
+          { count: "*" },
+          { "customer.region": { eq: "US" } }
+        ),
+      ])
+    );
+    expect(joins.map((j) => [j.alias, j.relation, j.type])).toEqual([
+      ["t1", "customer", "left"],
+      ["t2", "customer.account", "left"],
+    ]);
+  });
+
+  it("lets a query join a relation a measure joined before it, as its own", () => {
+    const { joins } = plan({
+      join: ["customer"],
+      select: ["customer.region", { measure: "region_rev" }],
+      groupBy: ["customer.region"],
+    });
+    expect(joins.map((j) => [j.alias, j.type])).toEqual([["t1", "inner"]]);
+  });
+});

@@ -4,6 +4,7 @@ import { visibleMeasures } from "../measures/visible.js";
 import type { Calendar } from "../calendar/calendar.js";
 import { loadCalendar } from "../calendar/service.js";
 import { typeOf } from "../sources/types.js";
+import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import type { Access } from "./access.js";
 import type {
@@ -184,7 +185,15 @@ export const buildVisibleCatalog = (
     relations: visibleRelations,
     calendar: extras.calendar,
   };
-  return { ...catalog, measures: visibleMeasures(catalog, extras.measures) };
+  return {
+    ...catalog,
+    measures: visibleMeasures(catalog, extras.measures, (err, measureId) =>
+      logger.warn(
+        { err, measure_id: measureId },
+        "A stored measure could not be planned; it is hidden"
+      )
+    ),
+  };
 };
 
 /** What a catalogue carries besides the source's own rows: the stored calendar, and measures once there are any. */

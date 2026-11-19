@@ -1,5 +1,6 @@
+import { MeasureError, expandMeasure } from "../adapters/sql/measures.js";
 import { planSql, queryNameOf } from "../adapters/sql/plan.js";
-import { expandMeasure } from "../adapters/sql/measures.js";
+import { QueryError } from "../engine/errors.js";
 import type {
   MeasureRow,
   VisibleCatalog,
@@ -47,7 +48,9 @@ const toVisible = (row: MeasureRow): VisibleMeasure => ({
  */
 export const visibleMeasures = (
   catalog: Omit<VisibleCatalog, "measures">,
-  rows: readonly MeasureRow[]
+  rows: readonly MeasureRow[],
+  /** Told of a failure that is not a planner's refusal, such as a malformed stored formula. */
+  onUnexpected: (err: unknown, measureId: string) => void = () => {}
 ): VisibleMeasure[] => {
   const candidates = rows
     .filter((r) => r.sourceId === catalog.source.id)
@@ -75,8 +78,12 @@ export const visibleMeasures = (
           { now }
         );
         ok = true;
-      } catch {
-        // Any failure hides it: a broken measure is not one the caller can use.
+      } catch (err) {
+        // Any failure hides it: a broken measure is not one the caller can
+        // use. One the planner did not mean is reported, but hidden all the same.
+        if (!(err instanceof QueryError) && !(err instanceof MeasureError)) {
+          onUnexpected(err, m.id);
+        }
       }
     }
     plans.set(m.name, ok);
@@ -85,6 +92,8 @@ export const visibleMeasures = (
 
   return candidates.filter((m) => {
     if (!plansAlone(m)) return false;
+    // Defence in depth: planning a measure plans the measures it uses, so
+    // each of them plans alone too; this holds whatever the planner does.
     const { uses } = expandMeasure(m.name, m.tableId, byName);
     return uses.every((name) => {
       const used = byName.get(name);

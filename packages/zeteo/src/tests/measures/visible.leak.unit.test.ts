@@ -272,3 +272,34 @@ describe("planSql: a hidden measure fails as one that does not exist", () => {
     expect(plan(MEASURES)[0]).toBe("not_found_or_not_accessible");
   });
 });
+
+describe("visibleMeasures: unexpected failures", () => {
+  it("hides a malformed stored formula and reports it", () => {
+    const reported: Array<[unknown, string]> = [];
+    const rows = [
+      measure("malformed", { sum: { bogus: "total" } }),
+      measure("total_revenue", { sum: "total" }),
+    ];
+    const visible = visibleMeasures(shopCatalog(), rows, (err, id) =>
+      reported.push([err, id])
+    );
+    expect(visible.map((m) => m.name)).toEqual(["total_revenue"]);
+    expect(reported).toHaveLength(1);
+    expect(reported[0]![1]).toBe("m-malformed");
+    expect(reported[0]![0]).toBeInstanceOf(Error);
+  });
+
+  it("does not report a measure the planner refuses", () => {
+    const reported: unknown[] = [];
+    visibleMeasures(
+      shopCatalog({ hidden: ["orders.status"] }),
+      [
+        ...MEASURES,
+        measure("a", { measure: "b" }),
+        measure("b", { measure: "a" }),
+      ],
+      (err) => reported.push(err)
+    );
+    expect(reported).toEqual([]);
+  });
+});
