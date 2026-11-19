@@ -31,7 +31,7 @@ export interface DiscoveredTable {
   kind: "table" | "view";
   description: string | null;
   missing: boolean;
-  /** When an upload or Sheets source's table was last loaded (its data is as of then); null for a database table. */
+  /** When an upload source's table was last loaded (its data is as of then); null for a database table. */
   last_loaded_at: string | null;
   columns: DiscoveredColumn[];
   relations: DiscoveredRelation[];
@@ -44,7 +44,7 @@ export interface DiscoveredSource {
   /** What the source holds; empty when none was given. */
   description: string;
   type: SourceType;
-  /** `upload` for an upload or Google Sheets source. */
+  /** `upload` for an upload source. */
   kind: "database" | "upload";
   language: {
     id: "sql";

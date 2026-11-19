@@ -22,7 +22,7 @@ export interface CallContext {
 export interface SendOptions {
   op: OperationId;
   params?: Record<string, string>;
-  query?: Record<string, string | number | boolean | undefined>;
+  query?: Record<string, string | number | boolean | string[] | undefined>;
   body?: unknown;
   /** Use the client that never retries after a 5xx or a dropped connection. */
   once?: boolean;
@@ -186,15 +186,27 @@ async function execute(
   const requestId = transport.getRequestId?.();
   if (requestId) headers["X-Request-ID"] = requestId;
 
-  const params = Object.fromEntries(
-    Object.entries(options.query ?? {}).filter(([, v]) => v !== undefined)
+  const defined = Object.entries(options.query ?? {}).filter(
+    ([, v]) => v !== undefined
   );
+  // A list is sent as the key repeated (`member=a&member=b`), so a request
+  // with one carries its whole query in the URL.
+  const hasList = defined.some(([, v]) => Array.isArray(v));
+  const search = new URLSearchParams();
+  if (hasList) {
+    for (const [key, value] of defined) {
+      for (const one of Array.isArray(value) ? value : [value]) {
+        search.append(key, String(one));
+      }
+    }
+  }
+  const params = hasList ? {} : Object.fromEntries(defined);
 
   const config: RequestConfig = {
     clientName,
     requestName: `zeteo.${options.op}`,
     method: op.method,
-    url: path,
+    url: hasList ? `${path}?${search.toString()}` : path,
     headers,
     ...(Object.keys(params).length > 0 ? { params } : {}),
     ...(options.body !== undefined ? { data: options.body } : {}),

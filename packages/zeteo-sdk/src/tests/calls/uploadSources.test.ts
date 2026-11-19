@@ -120,8 +120,11 @@ describe("upload sources", () => {
       path: "/v1/uploads/links",
       body: { url: "https://x/abc" },
     });
-    await t.client.uploads.fromLink({ source_id: ID });
-    expect(t.stub.requests.at(-1)?.body).toEqual({ source_id: ID });
+    await t.client.uploads.fromLink({ source_id: ID, url: "https://x/abc" });
+    expect(t.stub.requests.at(-1)?.body).toEqual({
+      source_id: ID,
+      url: "https://x/abc",
+    });
   });
 
   it("connections.google.get and put use /v1/connections/google", async () => {
@@ -149,25 +152,69 @@ describe("upload sources", () => {
     });
   });
 
-  it("sources.create takes a Sheets source and refresh returns a sync summary", async () => {
+  it("sources.create takes a Sheets staging as an upload source and refresh returns a sync summary", async () => {
     t.stub.respond(() => ({ status: 201, body: source }));
     await t.client.sources.create({
-      type: "google-sheets",
+      type: "upload",
       staging_id: ID,
       name: "Budget",
       tables: [{ key: "sheet:Q1" }],
       sync_interval_minutes: 30,
     });
     expect(t.stub.requests.at(-1)?.body).toMatchObject({
-      type: "google-sheets",
+      type: "upload",
       sync_interval_minutes: 30,
     });
     const summary = {
       synced_at: "2026-11-18T10:00:00.000Z",
-      tables: [{ id: ID, name: "q1", row_count: 3, missing: false }],
+      tables: [
+        { id: ID, name: "q1", row_count: 3, missing: false, error: null },
+      ],
     };
     t.stub.respond(() => ({ body: summary }));
     const out = await t.client.sources.refresh(ID);
     expect("synced_at" in out && out.synced_at).toBe(summary.synced_at);
+  });
+
+  const merged = {
+    name: "all_years",
+    label_column: "year",
+    members: [
+      { table_id: ID, label: "2025" },
+      { table_id: USER, label: "2026" },
+    ],
+    columns: [{ name: "amount", from_name: "amount", include: true }],
+  };
+
+  it("sources.createMergedTable posts the definition", async () => {
+    t.stub.respond(() => ({ status: 201, body: { id: ID } }));
+    await t.client.sources.createMergedTable(ID, merged);
+    expect(t.stub.requests.at(-1)).toMatchObject({
+      method: "POST",
+      path: `/v1/sources/${ID}/merged-tables`,
+      body: merged,
+    });
+  });
+
+  it("sources.updateMergedTable puts the definition", async () => {
+    t.stub.respond(() => ({ body: { id: USER } }));
+    await t.client.sources.updateMergedTable(ID, USER, merged);
+    expect(t.stub.requests.at(-1)).toMatchObject({
+      method: "PUT",
+      path: `/v1/sources/${ID}/tables/${USER}/merged`,
+      body: merged,
+    });
+  });
+
+  it("sources.mergedColumns sends each member", async () => {
+    t.stub.respond(() => ({ body: { columns: [], labels: {} } }));
+    const out = await t.client.sources.mergedColumns(ID, [ID, USER]);
+    expect(out.labels).toEqual({});
+    const req = t.stub.requests.at(-1)!;
+    expect(req).toMatchObject({
+      method: "GET",
+      path: `/v1/sources/${ID}/merged-tables/columns`,
+    });
+    expect(req.search).toBe(`?member=${ID}&member=${USER}`);
   });
 });

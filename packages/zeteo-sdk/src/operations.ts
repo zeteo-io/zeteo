@@ -28,6 +28,10 @@ export const OPERATIONS = {
     method: "PUT",
     path: "/v1/sources/{sourceId}/tables/{tableId}",
   },
+  putMergedTable: {
+    method: "PUT",
+    path: "/v1/sources/{sourceId}/tables/{tableId}/merged",
+  },
   deleteTable: {
     method: "DELETE",
     path: "/v1/sources/{sourceId}/tables/{tableId}",
@@ -35,6 +39,14 @@ export const OPERATIONS = {
   updateColumn: {
     method: "PATCH",
     path: "/v1/sources/{sourceId}/tables/{tableId}/columns/{columnId}",
+  },
+  createMergedTable: {
+    method: "POST",
+    path: "/v1/sources/{sourceId}/merged-tables",
+  },
+  getMergedColumns: {
+    method: "GET",
+    path: "/v1/sources/{sourceId}/merged-tables/columns",
   },
   listRelations: { method: "GET", path: "/v1/sources/{sourceId}/relations" },
   declareRelation: {

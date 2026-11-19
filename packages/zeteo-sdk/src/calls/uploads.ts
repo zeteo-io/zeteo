@@ -12,7 +12,7 @@ export const uploadsCalls = (ctx: CallContext) => ({
     body.append("file", file, filename);
     return send(ctx, { op: "createUpload", body, once: true });
   },
-  /** Stages every tab of a Google spreadsheet, by its link or id or by an existing Sheets source. */
+  /** Stages every tab of a Google spreadsheet, by its link or id; with `source_id`, for tables to add to that upload source. */
   fromLink: (body: LinkRequest): Promise<SheetsUploadResponse> =>
     send(ctx, { op: "createUploadFromLink", body, once: true }),
   /** Discards the caller's own staging. The API answers 204. */
