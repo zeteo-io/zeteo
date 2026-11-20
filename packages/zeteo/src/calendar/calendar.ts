@@ -59,8 +59,16 @@ export const isBusinessDay = (cal: Calendar, date: string): boolean =>
 /** The day business-day arithmetic counts from, a Monday; earlier dates have no business days. */
 export const BUSINESS_ANCHOR = "1900-01-01";
 const ANCHOR_MS = Date.UTC(1900, 0, 1);
-/** Days from the anchor to 9999-12-31, the last date both engines hold. */
-export const LAST_DAY_NUMBER = (Date.UTC(9999, 11, 31) - ANCHOR_MS) / DAY_MS;
+/**
+ * The last date business-day functions take or give: a year short of the
+ * engines' last, so a period's end is never past what they hold.
+ */
+export const LAST_BUSINESS_DATE = "9998-12-31";
+/** Days from the anchor to `LAST_BUSINESS_DATE`. */
+export const LAST_DAY_NUMBER = (Date.UTC(9998, 11, 31) - ANCHOR_MS) / DAY_MS;
+
+/** Whether day `n` is one the business-day functions take: 1900-01-01 to 9998-12-31. */
+const inRange = (n: number): boolean => n >= 0 && n <= LAST_DAY_NUMBER;
 /** The largest step `addBusinessDays` takes; past it the result is null. */
 export const MAX_BUSINESS_DAY_STEP = 3_000_000;
 
@@ -148,7 +156,8 @@ const businessOrdinal = (o: BusinessOrdinals, n: number): number => {
 /**
  * Business days from `start` to `end`, both inclusive; 0 when `end < start`
  * (Excel's NETWORKDAYS). Counted by arithmetic, so a range of centuries costs
- * no more than a week. Null when either is before the anchor.
+ * no more than a week. Null when either is outside 1900-01-01 to 9998-12-31,
+ * as for every business-day function.
  */
 export const businessDays = (
   cal: Calendar,
@@ -157,7 +166,7 @@ export const businessDays = (
 ): number | null => {
   const a = dayNumber(start);
   const b = dayNumber(end);
-  if (a < 0 || b < 0) return null;
+  if (!inRange(a) || !inRange(b)) return null;
   if (b < a) return 0;
   const o = businessOrdinals(cal);
   return businessOrdinal(o, b) - businessOrdinal(o, a - 1);
@@ -165,7 +174,7 @@ export const businessDays = (
 
 /**
  * Business days from `start` to `end` as a duration: `start` excluded, `end`
- * included, negative when `end < start`. Null when either is before the anchor.
+ * included, negative when `end < start`. Null when either is out of range.
  */
 export const businessDaysBetween = (
   cal: Calendar,
@@ -174,7 +183,7 @@ export const businessDaysBetween = (
 ): number | null => {
   const a = dayNumber(start);
   const b = dayNumber(end);
-  if (a < 0 || b < 0) return null;
+  if (!inRange(a) || !inRange(b)) return null;
   const o = businessOrdinals(cal);
   return businessOrdinal(o, b) - businessOrdinal(o, a);
 };
@@ -238,13 +247,14 @@ export const periodEnd = (
   );
 };
 
-/** Null when the period of `unit` holding `date` starts before the anchor, else `count(o, start)`. */
+/** Null when `date` is out of range or its period of `unit` starts before the anchor, else `count(o, start)`. */
 const fromPeriodStart = (
   cal: Calendar,
   unit: BusinessUnit,
   date: string,
   count: (o: BusinessOrdinals, start: number) => number
 ): number | null => {
+  if (!inRange(dayNumber(date))) return null;
   const start = dayNumber(periodStart(cal, unit, date));
   return start < 0 ? null : count(businessOrdinals(cal), start);
 };
@@ -308,8 +318,8 @@ export const businessDayOfMonth = (
  * The date `n` business days after `date` (before it when `n` is negative),
  * `n` truncated toward zero, the days counted from `date` itself (Excel's
  * WORKDAY): Saturday + 1 is Monday and Saturday - 1 is Friday; `n = 0` gives
- * `date` itself when it is a business day, else the next one. Null when `date` or the result is before the
- * anchor or after 9999-12-31, or `n` is more than 3,000,000 either way.
+ * `date` itself when it is a business day, else the next one. Null when `date` or the result is outside
+ * 1900-01-01 to 9998-12-31, or `n` is more than 3,000,000 either way.
  */
 export const addBusinessDays = (
   cal: Calendar,
@@ -317,7 +327,7 @@ export const addBusinessDays = (
   n: number
 ): string | null => {
   const d = dayNumber(date);
-  if (d < 0 || !(Math.abs(n) <= MAX_BUSINESS_DAY_STEP)) return null;
+  if (!inRange(d) || !(Math.abs(n) <= MAX_BUSINESS_DAY_STEP)) return null;
   const k = Math.trunc(n);
   const o = businessOrdinals(cal);
   const w = weekdayOrdinal(o, d);

@@ -10286,9 +10286,11 @@ components:
             is before start. A business day is a working weekday that is not a holiday. Each operand,
             here and in every business-day operation, is any date or timestamp expression (a column,
             a date operation, a literal or a relative date); a timestamp is read as its date in the
-            calendar's time zone, null more than 25 years either way from the current year in a zone
-            other than UTC; a date before 1900-01-01 gives null. With literal operands only, the value
-            is computed when the query is planned.
+            calendar's time zone (by the zone's offsets, the same on every engine), null more than 25
+            years either way from the current year in a zone other than UTC. Dates are supported from
+            1900-01-01 through 9998-12-31; outside that (Postgres infinities included) the result is
+            null, never an error. With literal operands only, the value is computed when the query is
+            planned.
           type: array
           minItems: 2
           maxItems: 2
@@ -10327,7 +10329,7 @@ components:
             `[date, n]`: the date `n` business days after the date (before it when `n` is negative), `n`
             a number expression truncated toward zero, counted from the date itself as Excel's WORKDAY
             (Saturday + 1 is Monday, Saturday - 1 is Friday); `n = 0` gives the date when it is a
-            business day, else the next one. A date; null past 9999-12-31 or for `n` beyond ±3,000,000.
+            business day, else the next one. A date; null past 9998-12-31 or for `n` beyond ±3,000,000.
           type: array
           minItems: 2
           maxItems: 2
@@ -10336,8 +10338,9 @@ components:
         businessDaysInPeriod:
           description: |
             In a metric's formula only (`invalid_operator` in a table query): the business days of each
-            period of the metric query's `bucket`, or without one of its `range`, from `gte`'s date up
-            to, not including, `lt`'s (both needed, else `invalid_operator`).
+            period of the metric query's `bucket`, or without one of its `range` (both bounds needed,
+            else `invalid_operator`): each local day with any instant in the range, `lt`'s own day
+            left out only when `lt` is at local midnight (or a date).
           type: boolean
           enum:
             - true

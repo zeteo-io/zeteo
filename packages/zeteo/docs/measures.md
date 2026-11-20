@@ -100,8 +100,7 @@ and `formula`: numbers, `{ "measure": name }` (fixed or not), `add`, `sub`, `mul
 `round`, `coalesce`, the calendar functions that count over literal dates (such as
 `businessDaysInMonth` of a relative date) and `{ "businessDaysInPeriod": true }`: the business days
 of each period of the query's `bucket`, read from the period's first day (a day bucket's is 1 or
-0), or, without a bucket, of its `range` from `gte`'s date up to, not including, `lt`'s (both needed,
-else `invalid_operator` at the metric). It reads no column and has no `case`; a metric does not use
+0), or, without a bucket, of its `range` (both bounds needed, else `invalid_operator` at the metric): each local day with any instant in the range: `gte`'s local date (a date bound is that day) through `lt`'s local date, or the day before when `lt` is at local midnight (a date `lt` always). It reads no column and has no `case`; a metric does not use
 another metric.
 
 ```json

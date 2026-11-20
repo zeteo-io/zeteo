@@ -369,7 +369,7 @@ first day to `date`, inclusive; the month without a unit), `{ "businessDaysRemai
 [unit, date] }` (after `date` to the period's end) and `{ "addBusinessDays": [date, n] }` (a date).
 The filter operator `{ "isBusinessDay": true | false }` takes a date or timestamp path in `where` and
 in a `case`'s `if`, not in `having`. A timestamp is read as its date in the calendar's time zone;
-dates before 1900 give null. All-literal operands are computed when the query is planned. Details,
+dates outside 1900-01-01 to 9998-12-31 give null. All-literal operands are computed when the query is planned. Details,
 nulls and how it is computed: [calendar.md](calendar.md). `bucket` also takes `fiscal_quarter` and
 `fiscal_year` (the period's start date), and relative dates follow the calendar's time zone (UTC by
 default); buckets and the other `datePart` parts on timestamp columns stay in UTC.

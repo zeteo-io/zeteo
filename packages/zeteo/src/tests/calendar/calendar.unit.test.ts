@@ -2,7 +2,10 @@
 // @module-tag platform
 import { describe, expect, it } from "vitest";
 import {
+  addBusinessDays,
   businessDays,
+  businessDaysBetween,
+  businessDaysIn,
   businessDaysElapsed,
   businessDaysInMonth,
   businessDaysRemaining,
@@ -97,12 +100,15 @@ describe("calendar", () => {
     );
   });
 
-  it("counts a multi-century range arithmetically, and nothing before 1900", () => {
+  it("counts a multi-century range arithmetically, and nothing outside 1900 to 9998", () => {
     expect(businessDays(DEFAULT_CALENDAR, "2000-01-01", "2099-12-31")).toBe(
       26089
     );
-    expect(businessDays(DEFAULT_CALENDAR, "1900-01-01", "9999-12-31")).toBe(
-      2_113_190
+    expect(businessDays(DEFAULT_CALENDAR, "1900-01-01", "9998-12-31")).toBe(
+      2_112_929
+    );
+    expect(businessDays(DEFAULT_CALENDAR, "1900-01-01", "9999-01-01")).toBe(
+      null
     );
     expect(businessDays(DEFAULT_CALENDAR, "1899-12-31", "2000-01-01")).toBe(
       null
@@ -149,5 +155,25 @@ describe("calendar", () => {
       }
       expect(businessDays(cal, a, b)).toBe(n);
     }
+  });
+});
+
+describe("business days at the ends of the range", () => {
+  it("count 1900-01-01 and 9998-12-31, and give null a day outside either", () => {
+    const cal = withCal({ fiscalYearStartMonth: 7 });
+    for (const outside of ["1899-12-31", "9999-01-01", "9999-12-31"]) {
+      expect(businessDays(cal, outside, outside)).toBe(null);
+      expect(businessDaysBetween(cal, "2026-01-01", outside)).toBe(null);
+      expect(businessDaysIn(cal, "month", outside)).toBe(null);
+      expect(businessDaysElapsed(cal, outside, "fiscal_year")).toBe(null);
+      expect(businessDaysRemaining(cal, outside, "week")).toBe(null);
+      expect(addBusinessDays(cal, outside, 0)).toBe(null);
+    }
+    expect(businessDaysIn(cal, "fiscal_year", "9998-12-31")).toBe(261);
+    expect(businessDaysIn(cal, "month", "1900-01-01")).toBe(23);
+    // A period that starts before 1900 is null, though its date is not.
+    expect(businessDaysIn(cal, "fiscal_year", "1900-01-01")).toBe(null);
+    // A result past 9998-12-31 is null.
+    expect(addBusinessDays(cal, "9998-12-30", 5)).toBe(null);
   });
 });

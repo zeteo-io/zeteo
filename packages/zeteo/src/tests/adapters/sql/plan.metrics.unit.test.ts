@@ -584,21 +584,32 @@ describe("metric formulas: business days", () => {
     });
   });
 
-  it("folds it to the range's business days without a bucket, lt excluded", () => {
-    const term = termOf(
-      plan(
-        {
-          metrics: ["per_day"],
-          range: {
-            gte: { date: "2026-06-01" },
-            lt: { timestamp: "2026-07-01T05:00:00Z" },
-          },
-        },
-        catalog({ timeZone: "America/New_York" })
+  it("folds it to the business days of each local day with an instant in the range", () => {
+    const days = (gte: object, lt: object) =>
+      termOf(
+        plan(
+          { metrics: ["per_day"], range: { gte, lt } },
+          catalog({ timeZone: "America/New_York" })
+        )
+      );
+    const n = (value: number) => ({ kind: "literal", value, type: "number" });
+    const march = { date: "2026-03-01" };
+    // March 2026 has 22 weekdays. 00:00 UTC on 1 April is 20:00 on 31 March
+    // in New York: the 31st has instants in the range, so it counts.
+    expect(days(march, { timestamp: "2026-04-01T00:00:00Z" })).toEqual(n(22));
+    // 04:00 UTC is New York's midnight: 1 April has none, the 31st counts.
+    expect(days(march, { timestamp: "2026-04-01T04:00:00Z" })).toEqual(n(22));
+    // Midnight starting the 31st leaves it out.
+    expect(days(march, { timestamp: "2026-03-31T04:00:00Z" })).toEqual(n(21));
+    // A date lt leaves its day out; a timestamp gte counts its local date
+    // (Monday 2 March, though 3 March in UTC).
+    expect(days(march, { date: "2026-04-01" })).toEqual(n(22));
+    expect(
+      days(
+        { timestamp: "2026-03-03T03:00:00Z" },
+        { timestamp: "2026-04-01T04:00:00Z" }
       )
-    );
-    // June 2026: 22 weekdays; lt is 1 July 01:00 in New York.
-    expect(term).toEqual({ kind: "literal", value: 22, type: "number" });
+    ).toEqual(n(22));
   });
 
   it("refuses it without a bucket or a whole range, at the metric", () => {

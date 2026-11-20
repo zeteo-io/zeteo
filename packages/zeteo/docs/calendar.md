@@ -58,7 +58,7 @@ plans and with them the dashboard cache's identity: nothing else is invalidated.
 | `{ "addBusinessDays": [date, n] }` | the date `n` business days after `date` (before it when `n` is negative), `n` any number expression truncated toward zero; counted from `date` itself as Excel's WORKDAY (Saturday + 1 is Monday, Saturday - 1 is Friday), except that `n = 0` gives `date` when it is a business day, else the next one |
 | `{ "datePart": ["business_day", date] }` | which business day of its month `date` is (`businessDaysElapsed` of the month); 0 before the month's first |
 | `where: { path: { "isBusinessDay": true \| false } }` | rows whose date or timestamp is (or is not) a business day; also in a `case`'s `if`, not in `having`; a null date matches neither |
-| `{ "businessDaysInPeriod": true }` | in a metric's formula only: the business days of each period of the query's `bucket`, or of its `range` without one ([measures.md](measures.md)) |
+| `{ "businessDaysInPeriod": true }` | in a metric's formula only: the business days of each period of the query's `bucket`, or of its `range` without one: each local day with any instant in the range: `gte`'s local date (a date bound is that day) through `lt`'s local date, or the day before when `lt` is at local midnight (a date `lt` always) ([measures.md](measures.md)) |
 
 A `unit` is `week` (ISO, from Monday, as the `week` bucket), `month`, `quarter`, `year`,
 `fiscal_quarter` or `fiscal_year`. Each operand is a column, a bucket's column, a date operation, a
@@ -76,22 +76,24 @@ integers in the SQL. Each function is one scalar subquery; on SQL Server, which 
 subquery, a per-row one is applied to every row (`OUTER APPLY`) and read as a column. Any date
 counts, however far from now.
 
-A timestamp's date in the calendar's zone: Postgres converts natively (`AT TIME ZONE`, the zone
-name bound). SQL Server knows only Windows zone names, so Zeteo binds the zone's UTC offsets from
-January 1st 25 years before the current year to January 1st 26 years after it, computed from the
-same zone rules, and adds the one in effect. Outside that window a timestamp's business days are
-null on both engines, so both give the same answers. A calendar in `UTC` (or any zone at UTC
-throughout) converts nothing and has no window.
+A timestamp's date in the calendar's zone, the same way on both engines: Zeteo binds the zone's
+UTC offsets from January 1st 25 years before the current year to January 1st 26 years after it,
+computed from the IANA rules the server runs with, and adds the one in effect at the instant. Not
+the engines' own conversion: SQL Server knows only Windows zone names, and Postgres reads a name
+it also knows as an abbreviation (`CET`, `EET`, `MET`, `WET`) as a fixed offset with no summer
+time. Outside the window a timestamp's business days are null. A calendar in `UTC` (or any zone at
+UTC throughout) converts nothing and has no window.
 
-Null: when an operand is null; when a date, or the first day of its period, is before 1900-01-01;
-when `addBusinessDays`' result would be before 1900-01-01 or after 9999-12-31, or `n` is beyond
-±3,000,000.
+**Supported dates: 1900-01-01 through 9998-12-31**, on both engines and when computed at planning.
+Null, never an error: when an operand is null; when a date (a timestamp's date in the zone) is
+outside that range, Postgres's `infinity` and `-infinity` and BC dates included; when the first day
+of its period is before 1900-01-01 (a fiscal year from July holding a January 1900 date); when
+`addBusinessDays`' result would be outside the range, or `n` is beyond ±3,000,000. The range stops a
+year short of 9999-12-31 so that no period's end goes past what SQL Server holds.
 
 ## Not supported
 
 - Business hours, and a calendar per location or per source: one calendar for the install.
-- On SQL Server, a period that ends after 9999-12-31 (in the last days of year 9999) cannot be
-  counted: the server refuses the date.
 - The admin UI keeps the holiday list by year and shows which years have holidays entered; queries
   give no warning when a year has none.
 

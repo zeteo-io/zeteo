@@ -350,8 +350,8 @@ class MetricPlanner {
   /**
    * `businessDaysInPeriod`: the business days of each period of the bucket,
    * read from the union's `period` (the bucket's first day, in UTC as buckets
-   * are); without a bucket, those of the range, from `gte`'s date up to, not
-   * including, `lt`'s, each bound's date in the calendar's zone.
+   * are); without a bucket, those of each local day (in the calendar's zone)
+   * with an instant in the range.
    */
   private businessDaysInPeriod(at: QueryPath): ResolvedExpr {
     const { calendar } = this.catalog;
@@ -389,15 +389,36 @@ class MetricPlanner {
         at
       );
     }
-    const dateOf = (bound: RangeBound): string =>
+    // Each local day with any instant in [gte, lt): a date bound is that
+    // day's midnight; a timestamp or relative bound counts its local date,
+    // and lt excludes its own only when it falls at local midnight.
+    const instantOf = (bound: RangeBound): Date | undefined =>
       "date" in bound
-        ? bound.date
+        ? undefined
         : "timestamp" in bound
-          ? localDate(new Date(bound.timestamp), calendar.timeZone)
-          : resolveRelativeDate(bound, this.now, calendar);
-    const last = dateOfDayNumber(dayNumber(dateOf(lt)) - 1);
+          ? new Date(bound.timestamp)
+          : resolveRelative(bound, this.now, calendar);
+    const firstDay = (bound: RangeBound): string => {
+      const instant = instantOf(bound);
+      return instant === undefined
+        ? (bound as { date: string }).date
+        : localDate(instant, calendar.timeZone);
+    };
+    const lastDay = (bound: RangeBound): string => {
+      const instant = instantOf(bound);
+      const day =
+        instant === undefined
+          ? (bound as { date: string }).date
+          : localDate(instant, calendar.timeZone);
+      const atMidnight =
+        instant === undefined ||
+        zonedMidnight(day, calendar.timeZone).getTime() === instant.getTime();
+      return atMidnight ? dateOfDayNumber(dayNumber(day) - 1) : day;
+    };
+    const first = firstDay(gte);
+    const last = lastDay(lt);
     return this.outer.resolveExpr(
-      { businessDays: [{ date: dateOf(gte) }, { date: last }] },
+      { businessDays: [{ date: first }, { date: last }] },
       at,
       new Map()
     ).resolved;

@@ -623,7 +623,7 @@ const unitAndDate = {
   maxItems: 2,
 };
 const DATES_IN_ZONE =
-  "each date a date, a timestamp (its date in the calendar's time zone) or any date expression; null before 1900-01-01";
+  "each date a date, a timestamp (its date in the calendar's time zone) or any date expression; null outside 1900-01-01 to 9998-12-31";
 const boundJson = {
   description: RANGE_BOUND_ERROR_TEXT,
   anyOf: [

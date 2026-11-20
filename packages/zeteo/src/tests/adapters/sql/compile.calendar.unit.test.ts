@@ -57,7 +57,7 @@ describe("compileSql: business days", () => {
       calc({ businessDaysBetween: ["ordered_on", "ordered_on"] })
     );
     expect(sql).toMatch(
-      /^select \(select cast\(case when "bd3"\."na" >= 0 and "bd3"\."nb" >= 0 then .* end as int\) as "n" from \(select "bd2"\.\*, .* from \(select "bd1"\.\*, .* from \(select "bd0"\.\*, .* from \(select cast\("t0"\."ordered_on" as date\) as "a", cast\("t0"\."ordered_on" as date\) as "b"\) as "bd0"\) as "bd1"\) as "bd2"\) as "bd3"\) as "c0" from "shop"\."orders" as "t0"/
+      /^select \(select cast\(case when "bd4"\."na" >= 0 and "bd4"\."nb" >= 0 then .* end as int\) as "n" from \(select "bd3"\.\*, .* from \(select "bd2"\.\*, .* from \(select "bd1"\.\*, .* from \(select "bd0"\.\*, case when "bd0"\."a0" >= cast\('1900-01-01' as date\) and "bd0"\."a0" <= cast\('9998-12-31' as date\) then "bd0"\."a0" end as "a", .* from \(select cast\("t0"\."ordered_on" as date\) as "a0", cast\("t0"\."ordered_on" as date\) as "b0"\) as "bd0"\) as "bd1"\) as "bd2"\) as "bd3"\) as "bd4"\) as "c0" from "shop"\."orders" as "t0"/
     );
   });
 
@@ -115,19 +115,17 @@ describe("compileSql: business days", () => {
     expect(sql).toContain("min([t0].[ordered_on])");
   });
 
-  it("reads a timestamp in the calendar's zone: natively on Postgres, by bound offsets on SQL Server", () => {
+  it("reads a timestamp in the calendar's zone by the same bound offsets on both engines", () => {
     const zoned = { timeZone: "America/Los_Angeles" };
     const query = calc({ businessDaysIn: ["week", "created_at"] });
     const postgres = pg(query, zoned);
+    // Not AT TIME ZONE, which reads CET and the like as fixed offsets.
+    expect(postgres.sql).not.toContain("at time zone cast(");
     expect(postgres.sql).toContain(
-      'case when cast("t0"."created_at" as timestamptz) >= cast($3 as timestamptz) and cast("t0"."created_at" as timestamptz) < cast($4 as timestamptz) then cast(cast("t0"."created_at" as timestamptz) at time zone cast($5 as text) as date) end as "d"'
+      `select cast((cast("t0"."created_at" as timestamptz) at time zone 'UTC') + (select z.o from jsonb_to_recordset(cast($3 as jsonb)) as z(s timestamp, e timestamp, o int) where z.s <= (cast("t0"."created_at" as timestamptz) at time zone 'UTC') and (cast("t0"."created_at" as timestamptz) at time zone 'UTC') < z.e) * interval '1 second' as date) as "d0"`
     );
-    // After the bucket's unit, twice, in the outer steps.
-    expect(postgres.parameters.slice(2, 5)).toEqual([
-      "2001-01-01T00:00:00.000Z",
-      "2052-01-01T00:00:00.000Z",
-      "America/Los_Angeles",
-    ]);
+    // After the bucket's unit, twice, in the outer steps: the same spans as SQL Server's.
+    const postgresSpans = postgres.parameters[2] as string;
     const mssql = ms(query, zoned);
     expect(mssql.sql).toContain(
       "cast(dateadd(second, (select z.o from openjson(@1) with (s datetime2(7) '$.s', e datetime2(7) '$.e', o int '$.o') as z where z.s <= cast(cast(switchoffset([t0].[created_at], '+00:00') as datetime2(7)) as datetime2(7))"
@@ -141,20 +139,21 @@ describe("compileSql: business days", () => {
       o: -28_800,
     });
     expect(spans.at(-1)!.e).toBe("2052-01-01T00:00:00");
+    expect(JSON.parse(postgresSpans)).toEqual(spans);
   });
 
   it("reads a UTC timestamp as its date, with nothing bound for the zone", () => {
     const { sql, parameters } = pg(
       calc({ businessDaysIn: ["week", "created_at"] })
     );
-    expect(sql).toContain('(select cast("t0"."created_at" as date) as "d")');
+    expect(sql).toContain('(select cast("t0"."created_at" as date) as "d0")');
     // Only the bucket's unit, twice, and the page.
     expect(parameters).toEqual(["week", "week", 1001, 0]);
   });
 
   it("makes addBusinessDays a date from the subquery's day number", () => {
     expect(pg(calc({ addBusinessDays: ["ordered_on", "id"] })).sql).toMatch(
-      /^select \(date '1900-01-01' \+ \(select cast\(case when "bd6"\."n" >= 0 and "bd6"\."t" >= 1 and "bd6"\."r" <= 2958463 then "bd6"\."r" end as int\)/
+      /^select \(date '1900-01-01' \+ \(select cast\(case when "bd7"\."n" >= 0 and "bd7"\."t" >= 1 and "bd7"\."r" <= 2958098 then "bd7"\."r" end as int\)/
     );
     expect(ms(calc({ addBusinessDays: ["ordered_on", "id"] })).sql).toMatch(
       /^select dateadd\(day, \[m0\]\.\[n\], cast\('1900-01-01' as date\)\) as \[c0\]/

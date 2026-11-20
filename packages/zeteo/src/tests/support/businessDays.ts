@@ -230,6 +230,109 @@ export const describeBusinessDays = (engine: string, run: Run): void => {
       ]);
     });
 
+    it("gives null outside 1900-01-01 to 9998-12-31, never an error, for every function and a fiscal year from July", async () => {
+      const july = { ...cal, fiscalYearStartMonth: 7 };
+      const edges = [
+        "0001-01-01",
+        "0001-03-01",
+        "1899-12-31",
+        "1900-01-01",
+        "9998-12-31",
+        "9999-12-31",
+      ];
+      // A literal before year 1000 is refused, so those are reached by dateAdd.
+      const at = (d: string) =>
+        d < "1000"
+          ? {
+              dateAdd: [
+                { date: `${Number(d.slice(0, 4)) + 1900}${d.slice(4)}` },
+                -1900,
+                "year",
+              ],
+            }
+          : asDate(d);
+      const exprs = edges.flatMap((d) => [
+        { businessDays: [at(d), at(d)] },
+        { businessDaysBetween: [at(d), asDate("2026-01-01")] },
+        { businessDaysBetween: [asDate("2026-01-01"), at(d)] },
+        ...PERIODS.flatMap((unit) => [
+          { businessDaysIn: [unit, at(d)] },
+          { businessDaysElapsed: [unit, at(d)] },
+          { businessDaysRemaining: [unit, at(d)] },
+        ]),
+        { datePart: ["business_day", at(d)] },
+        { addBusinessDays: [at(d), 1] },
+        { addBusinessDays: [at(d), -1] },
+        { addBusinessDays: [at(d), 0] },
+      ]);
+      const expected = edges.flatMap((d) => [
+        businessDays(july, d, d),
+        businessDaysBetween(july, d, "2026-01-01"),
+        businessDaysBetween(july, "2026-01-01", d),
+        ...PERIODS.flatMap((unit) => [
+          businessDaysIn(july, unit, d),
+          businessDaysElapsed(july, d, unit),
+          businessDaysRemaining(july, d, unit),
+        ]),
+        businessDayOfMonth(july, d),
+        addBusinessDays(july, d, 1),
+        addBusinessDays(july, d, -1),
+        addBusinessDays(july, d, 0),
+      ]);
+      const perEdge = expected.length / edges.length;
+      const of = (d: string) =>
+        expected.slice(
+          edges.indexOf(d) * perEdge,
+          (edges.indexOf(d) + 1) * perEdge
+        );
+      for (const outside of [
+        "0001-01-01",
+        "0001-03-01",
+        "1899-12-31",
+        "9999-12-31",
+      ]) {
+        expect(
+          of(outside).every((v) => v === null),
+          outside
+        ).toBe(true);
+      }
+      expect(of("9998-12-31").filter((v) => v !== null).length).toBeGreaterThan(
+        20
+      );
+      expect(businessDaysIn(july, "fiscal_year", "9998-12-31")).toBeGreaterThan(
+        0
+      );
+      expect(await valuesOf(run, july, exprs)).toEqual(expected);
+    });
+
+    it("reads a zone Postgres also knows as an abbreviation by its rules: CET in summer", async () => {
+      const cet = { ...cal, timeZone: "CET" };
+      const stamps = [
+        "2026-07-01T21:59:59Z",
+        "2026-07-01T22:00:00Z",
+        "2026-07-01T22:30:00Z",
+        "2026-07-01T22:59:59Z",
+        "2026-07-01T23:00:00Z",
+      ];
+      const local = (t: string) => localDate(new Date(t), "CET");
+      expect(stamps.map(local)).toEqual([
+        "2026-07-01",
+        "2026-07-02",
+        "2026-07-02",
+        "2026-07-02",
+        "2026-07-02",
+      ]);
+      const exprs = stamps.flatMap((t) => [
+        { businessDaysElapsed: asTimestamp(t) },
+        { addBusinessDays: [asTimestamp(t), 0] },
+      ]);
+      const expected = stamps.flatMap((t) => [
+        businessDaysElapsed(cet, local(t)),
+        addBusinessDays(cet, local(t), 0),
+      ]);
+      expect(await valuesOf(run, cet, exprs)).toEqual(expected);
+    });
+
     it("reads a timestamp as its date in the calendar's zone, across midnight and the change to summer time", async () => {
       // Los Angeles moves to summer time at 10:00 UTC on 8 March 2026.
       const stamps = [
