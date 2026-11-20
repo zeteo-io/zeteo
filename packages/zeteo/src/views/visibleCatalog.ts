@@ -1,5 +1,6 @@
 import type { VisibleCatalog } from "../grants/visibleCatalog.js";
 import { adapterFor, NoAdapterError } from "../adapters/index.js";
+import { visibleDateColumn } from "../measures/visible.js";
 import type { SourceType } from "../adapters/types.js";
 import { logger } from "../utils/logger.js";
 import {
@@ -13,7 +14,7 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /**
  * What a caller may discover about one source: the names a query is written
  * with, and nothing else. Ids, native types, settings and every name outside
- * their grants stay out. The row limits are those of `entryPoint`.
+ * their grants stay out. Measures and metrics are the visible ones only, by name; a measure's date column shows only when the caller can read it. The row limits are those of `entryPoint`.
  */
 export const visibleCatalogView = (
   catalog: VisibleCatalog,
@@ -32,6 +33,14 @@ export const visibleCatalogView = (
     const list = relationsByTable.get(r.fromTableId) ?? [];
     list.push(r);
     relationsByTable.set(r.fromTableId, list);
+  }
+  const measuresByTable = new Map<string, VisibleCatalog["measures"]>();
+  for (const m of [...catalog.measures].sort((a, b) =>
+    compare(a.name, b.name)
+  )) {
+    const list = measuresByTable.get(m.tableId) ?? [];
+    list.push(m);
+    measuresByTable.set(m.tableId, list);
   }
   const exports = source.exportEnabled && source.exportRowCap > 0;
   const tables = [...catalog.tables].sort(
@@ -82,7 +91,23 @@ export const visibleCatalogView = (
           ? []
           : [{ name: r.name, to, to_many: r.toMany, missing: r.missing }];
       }),
+      measures: (measuresByTable.get(table.id) ?? []).map((m) => ({
+        name: m.name,
+        description: m.description,
+        formula: m.formula,
+        where: m.where,
+        fixed: m.fixed,
+        // Never the stored path: only when the caller can resolve it.
+        date_column: visibleDateColumn(catalog, m),
+      })),
     })),
+    metrics: [...catalog.metrics]
+      .sort((a, b) => compare(a.name, b.name))
+      .map((m) => ({
+        name: m.name,
+        description: m.description,
+        formula: m.formula,
+      })),
   };
 };
 

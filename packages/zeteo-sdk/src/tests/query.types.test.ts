@@ -1,5 +1,11 @@
-import type { CalcExpr, Query, SelectItem } from "../types/query.js";
+import type { ChartSettings } from "../types/dashboards.js";
 import { describe, expect, it } from "vitest";
+import type {
+  CalcExpr,
+  MetricQuery,
+  Query,
+  SelectItem,
+} from "../types/query.js";
 
 describe("query types", () => {
   it("accept calculations, nested and in aggregates", () => {
@@ -65,5 +71,86 @@ describe("query types", () => {
       where: { at: { lt: { relative: { unit: "fortnight", offset: 1 } } } },
     };
     expect(bad).toBeDefined();
+  });
+
+  it("accept measures, case, dates and the calendar functions", () => {
+    const items: SelectItem[] = [
+      { measure: "total_revenue" },
+      { measure: "orders", as: "n" },
+      { bucket: "fiscal_quarter", column: "created_at", as: "q" },
+      {
+        count: {
+          case: {
+            when: [{ if: { status: { eq: "open" } }, then: 1 }],
+            else: 0,
+          },
+        },
+        as: "open_orders",
+      },
+      {
+        calc: {
+          div: [
+            { measure: "spend_mtd" },
+            { businessDaysElapsed: { relative: { unit: "day", offset: 0 } } },
+          ],
+        },
+        as: "daily_pace",
+      },
+      {
+        calc: {
+          datePart: [
+            "fiscal_year",
+            { dateAdd: [{ date: "2026-01-31" }, 1, "month"] },
+          ],
+        },
+        as: "fy",
+      },
+    ];
+    const gauge: ChartSettings = {
+      type: "gauge",
+      version: 1,
+      value: "a",
+      max: "b",
+      min: 0,
+    };
+    expect(items).toHaveLength(6);
+    expect(gauge.type).toBe("gauge");
+    // @ts-expect-error a count over an expression needs a name
+    const bad: SelectItem = { count: { add: ["a", "b"] } };
+    void bad;
+  });
+});
+
+describe("metric queries", () => {
+  it("are told apart from table queries by their metrics key", () => {
+    const query: Query = {
+      source: "s",
+      metrics: ["revenue", "cost_per_dollar"],
+      bucket: "month",
+      range: {
+        gte: { relative: { unit: "year", offset: 0, startOf: true } },
+        lt: { date: "2027-01-01" },
+      },
+      orderBy: [{ period: "asc" }],
+      limit: 100,
+    };
+    if ("metrics" in query) expect(query.metrics).toHaveLength(2);
+    const bad: MetricQuery = {
+      source: "s",
+      metrics: ["a"],
+      // @ts-expect-error a range has gte, lt or both
+      range: {},
+    };
+    expect(bad).toBeDefined();
+  });
+
+  it("take a fixed measure as a comparison value", () => {
+    const query: Query = {
+      source: "s",
+      from: "orders",
+      select: ["id"],
+      where: { total: { gt: { measure: "avg_order_value" } } },
+    };
+    expect(query).toBeDefined();
   });
 });

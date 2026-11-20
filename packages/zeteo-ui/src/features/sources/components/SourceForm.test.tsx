@@ -83,7 +83,10 @@ const fillConnection = async (user: ReturnType<typeof userEvent.setup>) => {
   await type(user, "Password", "s3cret");
 };
 
-describe("SourceForm", () => {
+// The form is long and every test types it field by field: on a busy CI
+// runner one test can pass the default 5 s, and its typing then runs on into
+// the next test.
+describe("SourceForm", { timeout: 20_000 }, () => {
   beforeEach(() => {
     post.mockReset().mockResolvedValue({ data: makeSource() });
     patch.mockReset().mockResolvedValue({ data: makeSource() });

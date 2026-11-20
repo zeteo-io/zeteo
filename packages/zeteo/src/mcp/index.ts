@@ -4,6 +4,7 @@ import { defineSavedPanelTools } from "./savedPanelTools.js";
 import { callerInstructions } from "./callerInstructions.js";
 import { defineDashboardTools } from "./dashboardTools.js";
 import { defineCardResources, loadCard } from "./card.js";
+import { defineMeasureTools } from "./measureTools.js";
 import { defineDiscoveryTools } from "./tools.js";
 import { defineQueryTool } from "./queryTool.js";
 import { defineGuideTool } from "./guideTool.js";
@@ -63,6 +64,7 @@ export const createZeteoMcp = (options: ZeteoMcpOptions = {}): TereoMcp => {
   defineQueryTool(mcp);
   defineGuideTool(mcp);
   defineSavedQueryTools(mcp);
+  defineMeasureTools(mcp);
   defineSavedPanelTools(mcp, cards !== null);
   defineDashboardTools(mcp, cards !== null);
   if (cards) defineCardTools(mcp);

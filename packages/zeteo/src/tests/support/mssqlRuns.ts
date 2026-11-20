@@ -1,4 +1,5 @@
 import { AzureSqlPreparedQuery } from "../../adapters/azure-sql/runQuery.js";
+import { DEFAULT_CALENDAR, type Calendar } from "../../calendar/calendar.js";
 import { AzureSqlConnection } from "../../adapters/azure-sql/connect.js";
 import { buildVisibleCatalog } from "../../grants/visibleCatalog.js";
 import type { VisibleCatalog } from "../../grants/visibleCatalog.js";
@@ -8,8 +9,8 @@ import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { sealSettings } from "../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
+import type { TablePlan } from "../../adapters/sql/types.js";
 import { afterAll, afterEach, beforeAll, vi } from "vitest";
-import type { SqlPlan } from "../../adapters/sql/types.js";
 import { removeSources, uniqueSlug } from "./sources.js";
 import { refreshSource } from "../../catalog/refresh.js";
 import { runPlan, type TestLimits } from "./runPlan.js";
@@ -145,7 +146,7 @@ export const useMssqlRuns = () => {
     return conn;
   };
 
-  const plan = (query: object): SqlPlan =>
+  const plan = (query: object): TablePlan =>
     planSql(
       sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
       catalog
@@ -156,6 +157,18 @@ export const useMssqlRuns = () => {
     limits: Partial<TestLimits> = {},
     conn: SourceConnection = connection
   ) => runPlan("azure-sql", conn, plan(query), { ...LIMITS, ...limits });
+
+  /** A run of `query` under a catalogue whose calendar is `calendar`. */
+  const runWithCalendar = (calendar: Calendar, query: object) =>
+    runPlan(
+      "azure-sql",
+      connection,
+      planSql(sqlQuerySchema.parse({ source: catalog.source.slug, ...query }), {
+        ...catalog,
+        calendar,
+      }),
+      LIMITS
+    );
 
   /** Opens `query` as a row stream, prepared for every row it has. */
   const open = (
@@ -210,11 +223,18 @@ export const useMssqlRuns = () => {
     const source = (await db.sources.findById(id))!;
     const { tables, columns, relations } =
       await db.catalog.loadSourceCatalog(id);
-    catalog = buildVisibleCatalog(source, tables, columns, relations, {
-      sourceIds: new Set([id]),
-      allows: () => true,
-      tableAccess: () => "all",
-    });
+    catalog = buildVisibleCatalog(
+      source,
+      tables,
+      columns,
+      relations,
+      {
+        sourceIds: new Set([id]),
+        allows: () => true,
+        tableAccess: () => "all",
+      },
+      { calendar: DEFAULT_CALENDAR, measures: [] }
+    );
     connection = await connectWith();
   });
 
@@ -230,6 +250,8 @@ export const useMssqlRuns = () => {
   });
 
   return {
+    /** The visible catalogue of the fixture source. */
+    catalog: () => catalog,
     /** The shared connection, pool size 3. */
     connection: () => connection,
     connectWith,
@@ -238,5 +260,6 @@ export const useMssqlRuns = () => {
     open,
     plan,
     run,
+    runWithCalendar,
   };
 };

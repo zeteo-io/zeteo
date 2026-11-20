@@ -1,5 +1,10 @@
+import { visibleMeasures, visibleMetrics } from "../measures/visible.js";
+import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
+import type { Calendar } from "../calendar/calendar.js";
+import { loadCalendar } from "../calendar/service.js";
 import { typeOf } from "../sources/types.js";
+import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
 import type { Access } from "./access.js";
 import type {
@@ -60,6 +65,58 @@ export interface VisibleCatalog {
   };
   tables: VisibleTable[];
   relations: VisibleRelation[];
+  calendar: Calendar;
+  /** The measures whose expansion plans cleanly against this catalogue; see `visibleMeasures`. */
+  measures: VisibleMeasure[];
+  /** The metrics whose every measure is among `measures`; see `visibleMetrics`. */
+  metrics: VisibleMetric[];
+}
+
+/** A stored metric: a named formula over measures of any tables of one source. */
+export interface MetricRow {
+  id: string;
+  sourceId: string;
+  name: string;
+  description: string;
+  /** Numbers, `{ measure }`, arithmetic and constant calendar functions; see `metricFormulaProblem`. */
+  formula: CalcExpr;
+}
+
+/** A metric the caller may see and use: every measure it uses is theirs. */
+export interface VisibleMetric {
+  id: string;
+  name: string;
+  description: string;
+  formula: CalcExpr;
+}
+
+/** A stored measure: a named group-level expression on one home table. */
+export interface MeasureRow {
+  id: string;
+  sourceId: string;
+  tableId: string;
+  name: string;
+  description: string;
+  formula: CalcExpr;
+  where: Filter | null;
+  /** Computed over its whole home table, ignoring the query it is used in: a scalar subquery. */
+  fixed: boolean;
+  /** A date or timestamp column path from its home table, for metric queries; null when it has none. */
+  dateColumn: string | null;
+}
+
+/** A measure the caller may see and use: every column and relation it reads is theirs. */
+export interface VisibleMeasure {
+  id: string;
+  name: string;
+  description: string;
+  tableId: string;
+  formula: CalcExpr;
+  where: Filter | null;
+  /** Computed over its whole home table, ignoring the query it is used in: a scalar subquery. */
+  fixed: boolean;
+  /** A date or timestamp column path from its home table, for metric queries; null when it has none. */
+  dateColumn: string | null;
 }
 
 export const buildVisibleCatalog = (
@@ -67,7 +124,8 @@ export const buildVisibleCatalog = (
   tables: SourceTable[],
   columns: SourceColumn[],
   relations: Relation[],
-  access: Access
+  access: Access,
+  extras: { calendar: Calendar; measures: MeasureRow[]; metrics?: MetricRow[] }
 ): VisibleCatalog => {
   const columnsByTable = new Map<string, SourceColumn[]>();
   for (const column of columns) {
@@ -136,7 +194,7 @@ export const buildVisibleCatalog = (
       missing: r.missingSince !== null,
     }));
 
-  return {
+  const catalog: Omit<VisibleCatalog, "measures" | "metrics"> = {
     source: {
       id: source.id,
       slug: source.slug,
@@ -153,7 +211,38 @@ export const buildVisibleCatalog = (
     },
     tables: visibleTables,
     relations: visibleRelations,
+    calendar: extras.calendar,
   };
+  const measures = visibleMeasures(catalog, extras.measures, (err, measureId) =>
+    logger.warn(
+      { err, measure_id: measureId },
+      "A stored measure could not be planned; it is hidden"
+    )
+  );
+  return {
+    ...catalog,
+    measures,
+    metrics: visibleMetrics(
+      { source: catalog.source, measures },
+      extras.metrics ?? []
+    ),
+  };
+};
+
+/** What a catalogue carries besides the source's own rows: the stored calendar and the source's measures and metrics. */
+const loadExtras = async (
+  sourceId: string
+): Promise<{
+  calendar: Calendar;
+  measures: MeasureRow[];
+  metrics: MetricRow[];
+}> => {
+  const [calendar, measures, metrics] = await Promise.all([
+    loadCalendar(),
+    db.measures.listBySource(sourceId),
+    db.metrics.listBySource(sourceId),
+  ]);
+  return { calendar, measures, metrics };
 };
 
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
@@ -168,7 +257,14 @@ export const loadVisibleCatalog = async (
   const { tables, columns, relations } = await db.catalog.loadSourceCatalog(
     source.id
   );
-  return buildVisibleCatalog(source, tables, columns, relations, access);
+  return buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    access,
+    await loadExtras(source.id)
+  );
 };
 
 /**
@@ -192,8 +288,11 @@ export const loadSourceVisibleCatalog = async (
     tables,
     columns,
     relations,
-    access
+    access,
+    await loadExtras(source.id)
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
-  return visible ? catalog : { ...catalog, tables: [], relations: [] };
+  return visible
+    ? catalog
+    : { ...catalog, tables: [], relations: [], measures: [], metrics: [] };
 };

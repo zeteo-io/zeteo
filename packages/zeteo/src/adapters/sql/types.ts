@@ -1,5 +1,15 @@
 import type { ColumnType, QueryPlan } from "../types.js";
-import type { CalcOp } from "./language.js";
+import type {
+  BusinessUnit,
+  CompiledCalendar,
+  ZoneWindow,
+} from "../../calendar/calendar.js";
+import type {
+  CalcOp,
+  DateAddUnit,
+  DateDiffUnit,
+  DatePart,
+} from "./language.js";
 
 // The plan the SQL compiler consumes. It is complete: the compiler never reads
 // the catalogue or the query. Every name in it is a real catalogue name, every
@@ -12,8 +22,15 @@ export type QueryableType = Exclude<ColumnType, "other">;
 export type JoinType = "inner" | "left";
 export type AggregateFn =
   "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
-/** Buckets truncate in UTC. */
-export type BucketUnit = "day" | "week" | "month" | "quarter" | "year";
+/** Buckets truncate a date, a timestamp's in the calendar's zone. */
+export type BucketUnit =
+  | "day"
+  | "week"
+  | "month"
+  | "quarter"
+  | "year"
+  | "fiscal_quarter"
+  | "fiscal_year";
 export type Direction = "asc" | "desc";
 
 export interface TableName {
@@ -48,19 +65,119 @@ export interface ResolvedJoin {
 }
 
 /**
+ * A fixed measure's own query: one row, one value, computed over its home
+ * table whatever query it is used in. Its aliases (`f1_t0`, `f1_t1`…) are its
+ * own, so they never meet the outer query's.
+ */
+export interface ScalarPlan {
+  /** `f1`…: its alias when it is read per row, as a joined one-row table with column `v`. */
+  alias: string;
+  from: TableName & { alias: string };
+  /** Left joins along to-one relations, each parent before its children. */
+  joins: ResolvedJoin[];
+  /** Group-level: the subquery has no GROUP BY, so it yields exactly one row. */
+  expr: ResolvedExpr;
+}
+
+/** A fixed measure's value: a scalar subquery. */
+export interface ScalarExpr {
+  kind: "scalar";
+  plan: ScalarPlan;
+  type: QueryableType;
+}
+
+/** A business-day function's date: a date as it is, a timestamp as its date in the calendar's zone. */
+export interface BusinessDate {
+  expr: ResolvedExpr;
+  type: "date" | "timestamp";
+}
+
+/**
  * A calculation. Aggregates may appear only inside `group`-level calcs, and a
  * calc's `type` is the type its value has.
  */
 export type ResolvedExpr =
   | { kind: "column"; column: ColumnRef }
-  | { kind: "literal"; value: number | string; type: "number" | "text" }
+  | {
+      kind: "literal";
+      /** A date as `YYYY-MM-DD`, a timestamp as ISO 8601 with an offset or `Z`. */
+      value: number | string;
+      type: "number" | "text" | "date" | "timestamp";
+    }
   | {
       kind: "op";
       op: CalcOp;
       args: ResolvedExpr[];
       /** `round` only: decimal places. */
       places?: number;
-      type: "number" | "text";
+      /** `coalesce` yields its operands' type; every other operation a number or text. */
+      type: QueryableType;
+    }
+  | {
+      kind: "dateAdd";
+      arg: ResolvedExpr;
+      /** A validated integer, -10,000 to 10,000. */
+      amount: number;
+      unit: DateAddUnit;
+      /** The operand's type. */
+      type: "date" | "timestamp";
+    }
+  | {
+      kind: "dateDiff";
+      unit: DateDiffUnit;
+      start: ResolvedExpr;
+      end: ResolvedExpr;
+      /** `timestamp` when either operand is one: both are read as that. */
+      operand: "date" | "timestamp";
+      type: "number";
+    }
+  | {
+      kind: "datePart";
+      /** `business_day` is planned as a `businessPeriod`. */
+      part: Exclude<DatePart, "business_day">;
+      arg: ResolvedExpr;
+      /** The calendar's fiscal year start month (1-12); only a fiscal part reads it. */
+      fiscalStartMonth: number;
+      /** For a timestamp `arg` in a calendar that is not UTC: the zone its date is read in. */
+      zone?: ZoneWindow;
+      type: "number";
+    }
+  | {
+      kind: "businessDays";
+      /** `inclusive`: both ends, 0 when end < start; `between`: start excluded, negative when end < start. */
+      fn: "inclusive" | "between";
+      start: BusinessDate;
+      end: BusinessDate;
+      calendar: CompiledCalendar;
+      type: "number";
+    }
+  | {
+      kind: "businessPeriod";
+      /** The period's business days, those through the date, or those after it. */
+      fn: "in" | "elapsed" | "remaining";
+      unit: BusinessUnit;
+      /** The calendar's fiscal year start month (1-12); only a fiscal unit reads it. */
+      fiscalStartMonth: number;
+      date: BusinessDate;
+      calendar: CompiledCalendar;
+      type: "number";
+    }
+  | {
+      kind: "addBusinessDays";
+      date: BusinessDate;
+      /** A number, truncated toward zero. */
+      amount: ResolvedExpr;
+      calendar: CompiledCalendar;
+      type: "date";
+    }
+  | {
+      kind: "case";
+      /** In order; the first `when` that holds gives its `then`. */
+      branches: { when: ResolvedFilter<ColumnRef>; then: ResolvedExpr }[];
+      /** Null when absent. */
+      otherwise?: ResolvedExpr;
+      /** The type every `then` and the `otherwise` share. */
+      type: QueryableType;
     }
   | {
       kind: "aggregate";
@@ -68,7 +185,25 @@ export type ResolvedExpr =
       /** `"*"` only for `count`. */
       arg: ResolvedExpr | "*";
       type: QueryableType;
-    };
+    }
+  | ScalarExpr
+  | PivotExpr;
+
+/** The alias of a metric query's union of parts, whose `period` column is the bucket's start. */
+export const METRIC_UNION = "u";
+
+/**
+ * A measure's value in a metric query, per period: its part's column `v<index>`
+ * of the union, picked out by `max` in the pivot. `of` is the part's own
+ * expression, so the value keeps the type (and, per engine, the kind of
+ * number) the measure has in a table query.
+ */
+export interface PivotExpr {
+  kind: "pivot";
+  index: number;
+  of: ResolvedExpr;
+  type: QueryableType;
+}
 
 /**
  * One result column. `output` is its name in the result, unique in the plan;
@@ -88,10 +223,14 @@ export type ResolvedSelect =
   | {
       kind: "bucket";
       unit: BucketUnit;
-      /** A `date` or `timestamp` column; the bucket keeps its type. */
+      /** The calendar's fiscal year start month (1-12); only a fiscal unit reads it. */
+      fiscalStartMonth: number;
+      /** A `date` or `timestamp` column; the bucket is the first day of the period, a date. */
       column: ColumnRef;
+      /** For a timestamp column in a calendar that is not UTC: the zone its date is read in. */
+      zone?: ZoneWindow;
       output: string;
-      type: QueryableType;
+      type: "date";
     }
   | {
       kind: "calc";
@@ -114,6 +253,9 @@ export type ResolvedSelect =
  */
 export type PlanValue = string | number | boolean;
 
+/** What a comparison compares with: a value, or a fixed measure of the subject's type. */
+export type FilterValue = PlanValue | ScalarExpr;
+
 export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 
 /**
@@ -123,9 +265,9 @@ export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
 export type ResolvedFilter<S> =
   | { kind: "and" | "or"; filters: ResolvedFilter<S>[] }
   | { kind: "not"; filter: ResolvedFilter<S> }
-  | { kind: "compare"; op: CompareOp; subject: S; value: PlanValue }
+  | { kind: "compare"; op: CompareOp; subject: S; value: FilterValue }
   /** Inclusive at both ends. */
-  | { kind: "between"; subject: S; low: PlanValue; high: PlanValue }
+  | { kind: "between"; subject: S; low: FilterValue; high: FilterValue }
   /** One to 1,000 values. */
   | { kind: "in"; op: "in" | "notIn"; subject: S; values: PlanValue[] }
   /** Case-insensitive; `value` is the raw text, `%` and `_` not yet escaped. Text only. */
@@ -136,7 +278,14 @@ export type ResolvedFilter<S> =
       value: string;
     }
   /** `isNull: false` means IS NOT NULL. */
-  | { kind: "isNull"; subject: S; isNull: boolean };
+  | { kind: "isNull"; subject: S; isNull: boolean }
+  /** A date or timestamp subject read as a date in the calendar's zone; a null date matches neither. */
+  | {
+      kind: "businessDay";
+      subject: S;
+      is: boolean;
+      calendar: CompiledCalendar;
+    };
 
 /** A row-level calculation select item, by index into `select`, and the type it yields. */
 export interface CalcSubject {
@@ -162,7 +311,12 @@ export interface ResolvedOrder {
   direction: Direction;
 }
 
-export interface SqlPlan extends QueryPlan {
+/** Either shape a SQL query plans to: a table query or a metric query. */
+export type SqlPlan = TablePlan | MetricPlan;
+
+/** A table query's plan: one `from` table, its joins and select items. */
+export interface TablePlan extends QueryPlan {
+  kind: "table";
   from: ResolvedTable;
   /** In query order; each join's parent alias is the `from` table's or an earlier join's. */
   joins: ResolvedJoin[];
@@ -187,5 +341,57 @@ export interface SqlPlan extends QueryPlan {
    * True when the query names no order of its own (no `orderBy`, or an empty
    * one), so `orderBy` is the planner's, or empty for an empty `orderBy`.
    */
+  defaultOrder: boolean;
+}
+
+/**
+ * One distinct non-fixed measure of a metric query: an aggregate subquery
+ * over its home table and its to-one left joins, its rows cut to the range on
+ * its date column and grouped by the bucket of it. Its aliases (`t0`, `t1`…)
+ * are its own: each part is a branch of a union.
+ */
+export interface MetricPart {
+  from: TableName & { alias: "t0" };
+  /** Left joins along to-one relations, each parent before its children. */
+  joins: ResolvedJoin[];
+  /** Group-level: the measure's expansion. */
+  expr: ResolvedExpr;
+  /** The measure's date column; absent only when the query has neither bucket nor range. */
+  date: ColumnRef | undefined;
+  /** Half-open bounds on `date`, coerced to its type. */
+  range: { gte?: PlanValue; lt?: PlanValue };
+}
+
+/** A metric query's result column besides `period`: a formula over the parts' values and fixed measures. */
+export interface MetricSelect {
+  output: string;
+  expr: ResolvedExpr;
+  type: QueryableType;
+}
+
+/**
+ * A metric query's plan. Each part is a branch of a `UNION ALL` with columns
+ * `period` (when bucketed) and `v0`…`v<n-1>`, its own value in its column and
+ * null in the others; the union is pivoted by `GROUP BY period` (one group
+ * without a bucket), each value read with `max`, and each select item
+ * computed over the pivoted values and fixed measures' scalar subqueries.
+ */
+export interface MetricPlan extends QueryPlan {
+  kind: "metrics";
+  parts: MetricPart[];
+  /** The bucket every part's date column is truncated to, as `period`. */
+  bucket:
+    | {
+        unit: BucketUnit;
+        /** Read only by a fiscal unit. */
+        fiscalStartMonth: number;
+        /** For a calendar that is not UTC: the zone a timestamp date column's date is read in. */
+        zone?: ZoneWindow;
+      }
+    | undefined;
+  /** In the order of `columns`, after `period` when bucketed. */
+  select: MetricSelect[];
+  /** By index into `columns` (`period` is 0 when bucketed). */
+  orderBy: { index: number; direction: Direction }[];
   defaultOrder: boolean;
 }

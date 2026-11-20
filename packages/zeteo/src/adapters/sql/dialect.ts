@@ -1,4 +1,6 @@
 import type { Expression, Kysely, SelectQueryBuilder, SqlBool } from "kysely";
+import type { DateAddUnit, DateDiffUnit, DatePart } from "./language.js";
+import type { ZoneWindow } from "../../calendar/calendar.js";
 import type {
   AggregateFn,
   BucketUnit,
@@ -8,6 +10,9 @@ import type {
   ResolvedExpr,
   ResolvedSelect,
 } from "./types.js";
+
+/** The `dateDiff` units within a day, in seconds. */
+export const SECONDS_IN = { second: 1, minute: 60, hour: 3600 } as const;
 
 // The compile-only instance has no schema, so its tables and columns are untyped.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -29,6 +34,25 @@ export interface SelectItemRef {
  * The few places where SQL engines differ. Identifier quoting is not one of
  * them: it comes from the dialect's own Kysely instance, which never connects.
  */
+/**
+ * Months a fiscal bucket shifts back before truncating and forward after: its
+ * period starts that many months after the calendar year's (or quarter's)
+ * start. Zero for a calendar unit and when the fiscal year starts in January.
+ */
+export const fiscalShift = (unit: BucketUnit, startMonth: number): number => {
+  if (unit === "fiscal_year") return startMonth - 1;
+  if (unit === "fiscal_quarter") return (startMonth - 1) % 3;
+  return 0;
+};
+
+/** The calendar unit a bucket truncates to once shifted. */
+export const truncUnit = (unit: BucketUnit): string =>
+  unit === "fiscal_year"
+    ? "year"
+    : unit === "fiscal_quarter"
+      ? "quarter"
+      : unit;
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -51,14 +75,14 @@ export interface SqlDialect {
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
-   * Truncates a `date` or `timestamp` column to the start of its UTC bucket,
-   * keeping its type. `nativeType` is the column's own type name.
+   * The first day of the period holding `date` (a date expression), as a
+   * date. A fiscal unit starts its year at `fiscalStartMonth` (1-12). A
+   * timestamp is bucketed by its date, which the compiler reads first.
    */
   bucket(
     unit: BucketUnit,
-    column: Expression<unknown>,
-    type: "date" | "timestamp",
-    nativeType: string
+    date: Expression<unknown>,
+    fiscalStartMonth: number
   ): Expression<unknown>;
   /**
    * Case-insensitive match against a pattern whose `\`, `%` and `_` are
@@ -97,7 +121,96 @@ export interface SqlDialect {
    * any other number as an exact decimal where one holds it, text as text.
    * A number comes as plain decimal text (`plainNumber`).
    */
-  literal(value: string, type: "number" | "text"): Expression<unknown>;
+  literal(
+    value: string,
+    type: "number" | "text" | "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A date or timestamp shifted by `amount` (an integer from -10,000 to
+   * 10,000) units, keeping its type. A month, quarter or year step that lands
+   * past the end of a month gives that month's last day.
+   */
+  dateAdd(
+    expression: Expression<unknown>,
+    amount: number,
+    unit: DateAddUnit,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * The whole `unit`s completed from `start` to `end` as an integer,
+   * truncated toward zero (negative when `end` is before `start`). A month
+   * is complete when `start` plus those months, clamped as `dateAdd` clamps,
+   * is not past `end`. Both are read as `type`, the wider of their own.
+   */
+  dateDiff(
+    unit: DateDiffUnit,
+    start: Expression<unknown>,
+    end: Expression<unknown>,
+    type: "date" | "timestamp"
+  ): Expression<unknown>;
+  /**
+   * A part of a date or timestamp (a timestamp's UTC wall clock: the compiler
+   * reads a timestamp's date in a calendar's zone first) as an integer;
+   * `weekday` is 1 for Monday to 7 for Sunday, a fiscal part follows a fiscal
+   * year starting in `fiscalStartMonth` (1-12) and named by the year it ends in.
+   */
+  datePart(
+    part: Exclude<DatePart, "business_day">,
+    expression: Expression<unknown>,
+    fiscalStartMonth: number
+  ): Expression<unknown>;
+  /**
+   * A null standing for a number in a union's column: a float when
+   * `approximate`, else an exact decimal (which every integer and decimal
+   * value of the column keeps its digits in).
+   */
+  typedNull(approximate: boolean): Expression<unknown>;
+  /**
+   * A timestamp column as a calculation reads it: the instant in UTC, so a
+   * column with an offset (SQL Server's datetimeoffset) is not read as its
+   * local wall time. Other columns are returned as they are.
+   */
+  timestampUtc(
+    expression: Expression<unknown>,
+    nativeType: string
+  ): Expression<unknown>;
+  /**
+   * Whether an aggregate may take a scalar subquery (Postgres); where it may
+   * not (SQL Server), a row-level business-day computation is applied to the
+   * rows instead and read as a column.
+   */
+  subqueryInAggregate: boolean;
+  /**
+   * How each one-row step of a business-day subquery is fenced so its values
+   * are computed once per row: `offset 0` after it (Postgres keeps such a
+   * subquery a step), or each value through MAX over the step's one row (SQL
+   * Server substitutes a derived table's expressions into every reference,
+   * `top 1` or not, but reads an aggregate's output as a column). Unfenced,
+   * a step's expression (a timestamp's conversion among them) would be
+   * repeated wherever a later step reads it.
+   */
+  stepFence: "offset" | "aggregate";
+  /** The date `days` (an integer expression) days after 1900-01-01. */
+  anchorPlus(days: Expression<unknown>): Expression<unknown>;
+  /** A number truncated toward zero to an integer; the caller keeps it within ±3,000,000. */
+  truncate(n: Expression<unknown>): Expression<unknown>;
+  /**
+   * How many of `values` (integers from the plan's calendar) are `op`
+   * `bound`: with `=`, 1 or 0, as the values are distinct.
+   */
+  countWhere(
+    values: readonly number[],
+    op: "<=" | "=",
+    bound: Expression<unknown>
+  ): Expression<unknown>;
+  /**
+   * A UTC timestamp's date in `zone`, null outside the zone's window. The
+   * timestamp is the instant as a calculation reads it (`timestampUtc`).
+   */
+  zoneDate(
+    timestamp: Expression<unknown>,
+    zone: ZoneWindow
+  ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(
     expression: Expression<unknown>,

@@ -11,6 +11,8 @@ export interface CatalogTable {
   schema_name?: string;
   kind: string;
   description?: string | null;
+  /** Measures usable on this table; absent where the server does not list them. */
+  measures?: { name: string; description: string }[];
 }
 
 export interface CatalogSource {
@@ -18,6 +20,8 @@ export interface CatalogSource {
   name: string;
   type: SourceType;
   tables: CatalogTable[];
+  /** Metrics usable in this source; absent where the server does not list them. */
+  metrics?: { name: string; description: string }[];
 }
 
 /** True for the placeholder of a run whose query could not be recorded. */

@@ -1,4 +1,5 @@
 import { TimeColumnSchema } from "../routes/v1/dashboards/dashboard/panels/schemas.js";
+import { RANGE_TIME_COLUMN, withTimeFilter } from "../dashboards/timeRange.js";
 import { TimeRangeSchema } from "../routes/v1/dashboards/schemas.js";
 import { chartProblems, chartSchema } from "../dashboards/chart.js";
 import { NotFoundError, ValidationError } from "../utils/errors.js";
@@ -6,7 +7,7 @@ import { QUERY_TOOL_TIMEOUT_MS, QueryInput } from "./queryTool.js";
 import type { TimeRangeKey } from "../dashboards/timeRange.js";
 import { savedQueryToRun } from "../saved-queries/service.js";
 import { MCP_USE } from "../definitions/tereoDeclaration.js";
-import { withTimeFilter } from "../dashboards/timeRange.js";
+import { isMetricBody } from "../adapters/sql/language.js";
 import { PANEL_CARD_URI, withCardNote } from "./card.js";
 import { LIMIT_PROFILES } from "../engine/limits.js";
 import type { Caller } from "../middleware/auth.js";
@@ -48,6 +49,8 @@ const forModel = <T extends { owner: { id: string; name: string | null } }>(
 export interface PreviewRun {
   body: Record<string, unknown>;
   savedQuery?: { id: string; sourceId: string };
+  /** A metric query given a time column other than "range": not filtered, and reported as a problem. */
+  wrongTimeColumn?: boolean;
 }
 
 /**
@@ -72,6 +75,12 @@ export const previewRun = async (
     run = { body: found.body, savedQuery: found.savedQuery };
   }
   if (input.time_column !== undefined && input.time_range !== undefined) {
+    // "range" is the metric range for a metric query only; a table query
+    // reads it as a column like any other.
+    if (isMetricBody(run.body) && input.time_column !== RANGE_TIME_COLUMN) {
+      run.wrongTimeColumn = true;
+      return run;
+    }
     run.body = withTimeFilter(
       run.body,
       input.time_column,
@@ -256,7 +265,12 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
           row_count: result.rows.length,
           truncated: result.truncated,
           rows: result.rows.slice(0, PREVIEW_ROWS),
-          problems: chartProblems(input.chart, result.columns, run.body),
+          problems: [
+            ...(run.wrongTimeColumn
+              ? [{ setting: "time_column", problem: "wrong_type" as const }]
+              : []),
+            ...chartProblems(input.chart, result.columns, run.body),
+          ],
         };
       }),
   });

@@ -1,3 +1,4 @@
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import type { ColumnType } from "../../../adapters/types.js";
 import type { Access } from "../../../grants/access.js";
 import type {
@@ -39,6 +40,12 @@ const TABLES: Record<string, Array<[string, ColumnType]>> = {
     ["quantity", "number"],
     ["discount", "number"],
     ["unit_cost", "number"],
+  ],
+  ad_spend: [
+    ["id", "number"],
+    ["day", "date"],
+    ["channel", "text"],
+    ["cost", "number"],
   ],
   products: [
     ["id", "number"],
@@ -113,5 +120,64 @@ export const salesCatalog = (): VisibleCatalog => {
     allows: () => true,
     tableAccess: () => "all",
   };
-  return buildVisibleCatalog(SOURCE, tables, columns, relations, access);
+  return buildVisibleCatalog(SOURCE, tables, columns, relations, access, {
+    calendar: DEFAULT_CALENDAR,
+    // The example's measures: paid revenue of an order, revenue and ad spend
+    // by their dates, and the average order as a fixed measure; and ROAS.
+    metrics: [
+      {
+        id: "roas",
+        sourceId: SOURCE.id,
+        name: "roas",
+        description: "Revenue per unit of ad spend",
+        formula: { div: [{ measure: "revenue" }, { measure: "spend" }] },
+      },
+    ],
+    measures: [
+      {
+        id: "revenue",
+        sourceId: SOURCE.id,
+        tableId: "orders",
+        name: "revenue",
+        description: "Revenue of orders",
+        formula: { sum: "total" },
+        where: null,
+        fixed: false,
+        dateColumn: "created_at",
+      },
+      {
+        id: "spend",
+        sourceId: SOURCE.id,
+        tableId: "ad_spend",
+        name: "spend",
+        description: "Ad spend",
+        formula: { sum: "cost" },
+        where: null,
+        fixed: false,
+        dateColumn: "day",
+      },
+      {
+        id: "avg_order_total",
+        sourceId: SOURCE.id,
+        tableId: "orders",
+        name: "avg_order_total",
+        description: "The average order total",
+        formula: { avg: "total" },
+        where: null,
+        fixed: true,
+        dateColumn: null,
+      },
+      {
+        id: "paid_revenue",
+        sourceId: SOURCE.id,
+        tableId: "orders",
+        name: "paid_revenue",
+        description: "Revenue of paid orders",
+        formula: { sum: "total" },
+        where: { status: { eq: "paid" } },
+        fixed: false,
+        dateColumn: null,
+      },
+    ],
+  });
 };

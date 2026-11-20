@@ -1,7 +1,11 @@
 // @module-tag unit
 // @module-tag platform
-import { sqlLanguage, sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { describe, expect, it } from "vitest";
+import {
+  sqlLanguage,
+  sqlLanguageSchema,
+  sqlQuerySchema,
+} from "../../../adapters/sql/language.js";
 
 const SPEC_EXAMPLE = {
   source: "sales-db",
@@ -214,11 +218,30 @@ describe("sqlQuerySchema", () => {
 describe("sqlLanguage", () => {
   it("is the sql language with the schema and the planner", () => {
     expect(sqlLanguage.id).toBe("sql");
-    expect(sqlLanguage.schema).toBe(sqlQuerySchema);
+    expect(sqlLanguage.schema).toBe(sqlLanguageSchema);
+    // A body without metrics is a table query, checked as before.
+    expect(sqlLanguage.schema.safeParse(SPEC_EXAMPLE).success).toBe(true);
+    expect(sqlQuerySchema.safeParse(SPEC_EXAMPLE).success).toBe(true);
   });
 
-  it("describes itself as a JSON Schema", () => {
-    const described = sqlLanguage.describe() as {
+  it("describes itself as a JSON Schema: a table query or a metric query", () => {
+    const schema = sqlLanguage.describe() as {
+      anyOf: { $ref: string }[];
+      $defs: Record<string, Record<string, unknown>>;
+    };
+    expect(schema.anyOf).toEqual([
+      { $ref: "#/$defs/TableQuery" },
+      { $ref: "#/$defs/MetricQuery" },
+    ]);
+    const metric = schema.$defs.MetricQuery as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    expect(Object.keys(metric.properties)).toEqual(
+      expect.arrayContaining(["source", "metrics", "bucket", "range"])
+    );
+    expect(metric.required).toEqual(["source", "metrics"]);
+    const described = schema.$defs.TableQuery as {
       type: string;
       properties: Record<string, unknown>;
       required: string[];
@@ -249,6 +272,10 @@ const calcPaths = (select: unknown) =>
 /** `{ abs: { abs: … "a" } }` with `levels` operation objects. */
 const absChain = (levels: number): unknown =>
   levels === 0 ? "a" : { abs: absChain(levels - 1) };
+
+/** `{ abs: … leaf }` with `levels` abs objects around `leaf`. */
+const nest = (levels: number, leaf: unknown): unknown =>
+  levels === 0 ? leaf : { abs: nest(levels - 1, leaf) };
 
 describe("calculations", () => {
   it.each([
@@ -291,6 +318,69 @@ describe("calculations", () => {
       },
     ],
     ["a number literal", { calc: { add: ["a", 1.5] }, as: "c" }],
+    [
+      "a case with an else",
+      {
+        calc: {
+          case: {
+            when: [{ if: { a: { eq: "x" } }, then: 1 }],
+            else: { add: ["b", 1] },
+          },
+        },
+        as: "c",
+      },
+    ],
+    [
+      "a sum over a case",
+      {
+        sum: {
+          case: {
+            when: [
+              { if: { a: { eq: "x" } }, then: "b" },
+              { if: { or: [{ a: { isNull: true } }] }, then: 0 },
+            ],
+          },
+        },
+        as: "s",
+      },
+    ],
+    [
+      "date, timestamp and relative literals",
+      {
+        calc: {
+          coalesce: [
+            "a",
+            { date: "2026-01-31" },
+            { relative: { unit: "day", offset: -1 } },
+          ],
+        },
+        as: "d",
+      },
+    ],
+    [
+      "a timestamp literal",
+      { calc: { max: { timestamp: "2026-01-31T10:00:00Z" } }, as: "t" },
+    ],
+    [
+      "dateAdd, dateDiff and datePart",
+      {
+        calc: {
+          add: [
+            { dateDiff: ["month", { dateAdd: ["a", -10000, "year"] }, "b"] },
+            { datePart: ["fiscal_quarter", "c"] },
+          ],
+        },
+        as: "d",
+      },
+    ],
+    [
+      "count and countDistinct over an expression",
+      { count: { lower: "a" }, as: "n" },
+    ],
+    [
+      "countDistinct over an expression",
+      { countDistinct: { abs: "a" }, as: "n" },
+    ],
     ["depth 8", { calc: absChain(8), as: "c" }],
   ])("accepts %s", (_name, item) => {
     const query = { ...base, select: [item] };
@@ -360,6 +450,92 @@ describe("calculations", () => {
       ["select", 0, "calc", "countDistinct"],
     ],
     [
+      "a dateAdd amount of 10,001",
+      { calc: { dateAdd: ["a", 10001, "day"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 1],
+    ],
+    [
+      "a dateAdd amount that is not an integer",
+      { calc: { dateAdd: ["a", 1.5, "day"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 1],
+    ],
+    [
+      "a dateAdd unit that is not a date unit",
+      { calc: { dateAdd: ["a", 1, "hour"] }, as: "x" },
+      ["select", 0, "calc", "dateAdd", 2],
+    ],
+    [
+      "a datePart part that is unknown",
+      { calc: { datePart: ["century", "a"] }, as: "x" },
+      ["select", 0, "calc", "datePart", 0],
+    ],
+    [
+      "a date literal with a stray key",
+      { calc: { date: "2026-01-01", value: "x" }, as: "x" },
+      ["select", 0, "calc"],
+    ],
+    [
+      "a case with no branches",
+      { calc: { case: { when: [] } }, as: "x" },
+      ["select", 0, "calc", "case", "when"],
+    ],
+    [
+      "a case with eleven branches",
+      {
+        calc: {
+          case: {
+            when: Array(11).fill({ if: { a: { eq: "x" } }, then: 1 }),
+          },
+        },
+        as: "x",
+      },
+      ["select", 0, "calc", "case", "when"],
+    ],
+    [
+      "a case branch with an unknown key",
+      {
+        calc: {
+          case: { when: [{ if: { a: { eq: 1 } }, then: 1, when: 2 }] },
+        },
+        as: "x",
+      },
+      ["select", 0, "calc", "case", "when", 0],
+    ],
+    [
+      "a case with an unknown key",
+      {
+        calc: { case: { when: [{ if: { a: { eq: 1 } }, then: 1 }], or: 1 } },
+        as: "x",
+      },
+      ["select", 0, "calc", "case"],
+    ],
+    [
+      "a case with a bad operator in an if",
+      {
+        calc: { case: { when: [{ if: { a: { like: "x" } }, then: 1 }] } },
+        as: "x",
+      },
+      ["select", 0, "calc", "case", "when", 0, "if", "a"],
+    ],
+    [
+      "a case nested past the depth limit",
+      {
+        calc: nest(8, { case: { when: [{ if: { a: { eq: 1 } }, then: 1 }] } }),
+        as: "x",
+      },
+      ["select", 0, "calc", ...Array(8).fill("abs"), "case"],
+    ],
+    [
+      "countDistinct of * as a select item",
+      { countDistinct: "*", as: "x" },
+      ["select", 0, "countDistinct"],
+    ],
+    [
+      "a count over an expression without as",
+      { count: { abs: "a" } },
+      ["select", 0, "as"],
+    ],
+    [
       "a text literal over 1000 characters",
       { calc: { value: "x".repeat(1001) }, as: "x" },
       ["select", 0, "calc", "value"],
@@ -410,6 +586,32 @@ describe("calculations", () => {
     ]);
   });
 
+  it("counts a case and its branch expressions", () => {
+    const item = (i: number) => ({
+      calc: {
+        case: {
+          when: [{ if: { a: { eq: 1 } }, then: { abs: "a" } }],
+          else: { abs: "b" },
+        },
+      },
+      as: `c${i}`,
+    });
+    // case + 2 abs = 3 objects per item.
+    const items = (n: number) => Array.from({ length: n }, (_, i) => item(i));
+    expect(
+      sqlQuerySchema.safeParse({ ...base, select: items(33) }).success
+    ).toBe(true);
+    expect(issuesOf({ ...base, select: items(34) })).toEqual([
+      expect.objectContaining({ path: ["select", 33] }),
+    ]);
+  });
+
+  it("describes case and count over an expression in its JSON Schema", () => {
+    const text = JSON.stringify(sqlLanguage.describe());
+    expect(text).toContain('"case"');
+    expect(text).toContain('"maxItems":10');
+  });
+
   it("names calc beside the existing forms in a select item's error", () => {
     const issues = issuesOf({ ...base, select: [{ nope: 1 }] });
     expect(issues[0]?.message).toContain("{ calc: expression, as }");
@@ -440,7 +642,8 @@ const operationNamed = (key: string): Json =>
 describe("sqlLanguage.describe, calculations", () => {
   it("points select items and calculations at structured definitions", () => {
     const schema = described();
-    const select = schema.$defs[schema.properties.select.$ref.split("/").pop()];
+    const table = schema.$defs.TableQuery;
+    const select = schema.$defs[table.properties.select.$ref.split("/").pop()];
     expect(select.items.$ref).toBe("#/$defs/SelectItem");
     expect(Object.keys(schema.$defs)).toEqual(
       expect.arrayContaining(["CalcExpr", "SelectItem"])
@@ -467,10 +670,14 @@ describe("sqlLanguage.describe, calculations", () => {
       "max",
       "bucket",
       "calc",
+      "measure",
     ]);
     const calc = items.find((i) => i.properties?.calc)!;
     expect(calc.required).toEqual(["calc", "as"]);
     expect(calc.properties.calc.$ref).toBe("#/$defs/CalcExpr");
+    expect(items.find((i) => i.properties?.measure)!.required).toEqual([
+      "measure",
+    ]);
   });
 
   it("shows paths, numbers and text literals as expressions", () => {

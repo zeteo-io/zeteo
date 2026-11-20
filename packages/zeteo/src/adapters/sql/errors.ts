@@ -11,4 +11,11 @@ export type SqlQueryErrorCode =
   | "duplicate_output_name"
   | "join_parent_missing"
   | "too_many_joins"
-  | "too_many_parameters";
+  | "too_many_parameters"
+  | "measure_needs_single_rows"
+  | "measure_reads_to_many"
+  | "measure_cycle"
+  | "measure_too_deep"
+  | "measure_not_aggregate"
+  | "too_complex"
+  | "measure_has_no_date";

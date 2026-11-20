@@ -67,6 +67,7 @@ describe("/v1/sources/:sourceId/tables", () => {
       expect(res.body.next_cursor).toBeNull();
       expect(res.body.data.map((t: { name: string }) => t.name)).toEqual([
         "accounts",
+        "ad_spend",
         "blobs",
         "broken_orders",
         "customers",
@@ -101,24 +102,25 @@ describe("/v1/sources/:sourceId/tables", () => {
     });
 
     it("pages with limit and cursor", async () => {
-      const first = await call("GET", `/${sourceId}/tables?limit=4`);
-      expect(first.body.data).toHaveLength(4);
+      const first = await call("GET", `/${sourceId}/tables?limit=5`);
+      expect(first.body.data).toHaveLength(5);
       expect(first.body.next_cursor).toEqual(expect.any(String));
       const second = await call(
         "GET",
-        `/${sourceId}/tables?limit=4&cursor=${first.body.next_cursor}`
+        `/${sourceId}/tables?limit=5&cursor=${first.body.next_cursor}`
       );
       expect(second.body.data.map((t: { name: string }) => t.name)).toEqual([
         "ledger",
         "moods",
         "order_lines",
         "orders",
+        "paid_orders",
       ]);
       const last = await call(
         "GET",
-        `/${sourceId}/tables?limit=4&cursor=${second.body.next_cursor}`
+        `/${sourceId}/tables?limit=5&cursor=${second.body.next_cursor}`
       );
-      expect(last.body.data).toHaveLength(4);
+      expect(last.body.data).toHaveLength(3);
       expect(last.body.next_cursor).toBeNull();
       expect(
         (await call("GET", `/${sourceId}/tables?cursor=garbage`)).status

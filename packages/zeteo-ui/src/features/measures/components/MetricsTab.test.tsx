@@ -1,0 +1,96 @@
+import { makeMeasure, makeMetric, makeRedactedMetric } from "../testFixtures";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SOURCE_ID } from "@/features/sources/testFixtures";
+import { renderWithProviders } from "@/test/render";
+import userEvent from "@testing-library/user-event";
+import { screen } from "@testing-library/react";
+import { MetricsTab } from "./MetricsTab";
+
+const get = vi.hoisted(() => vi.fn());
+const del = vi.hoisted(() => vi.fn());
+vi.mock("@tereo-io/react", async () =>
+  (await import("@/test/authMock")).mockTereo({ api: { get, delete: del } })
+);
+
+const respond = (can_edit: boolean, can_manage_editors = false) =>
+  get.mockReset().mockImplementation(async (url: string) => {
+    if (url.endsWith("/metrics"))
+      return {
+        data: {
+          data: [makeMetric(), makeRedactedMetric()],
+          can_edit,
+          can_manage_editors,
+        },
+      };
+    return { data: { data: [makeMeasure()], can_edit, next_cursor: null } };
+  });
+
+describe("MetricsTab", () => {
+  beforeEach(() => {
+    del.mockReset().mockResolvedValue({});
+    respond(true);
+  });
+
+  it("lists metrics with the measures they use and marks a redacted one", async () => {
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    const row = (await screen.findByText("margin_pct")).closest("tr")!;
+    expect(row).toHaveTextContent("Margin as a share of revenue");
+    expect(row).toHaveTextContent("paid_revenue");
+    expect(row).toHaveTextContent("total_cost");
+    expect(row).toHaveTextContent("1 saved query");
+    const redacted = screen.getByText("churn").closest("tr")!;
+    expect(redacted).toHaveTextContent("Not usable by you");
+    expect(redacted.querySelector("button")).toBeNull();
+  });
+
+  it("deletes after confirming with the used-by counts", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    const row = (await screen.findByText("margin_pct")).closest("tr")!;
+    await user.click(row.querySelector("button[aria-label='Delete']")!);
+    expect(
+      await screen.findByText(/is used by 1 saved query and 0 panels/)
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete metric" }));
+    expect(del).toHaveBeenCalledWith(
+      `/v1/sources/${SOURCE_ID}/metrics/${makeMetric().id}`
+    );
+  });
+
+  it("shows why a delete is refused, with the dependents", async () => {
+    del.mockReset().mockRejectedValue({
+      status: 409,
+      code: "measure_in_use",
+      message: "Other metrics use this one and would break",
+      dependents: [{ kind: "metric", name: "roas_v2" }],
+    });
+    const user = userEvent.setup();
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    const row = (await screen.findByText("margin_pct")).closest("tr")!;
+    await user.click(row.querySelector("button[aria-label='Delete']")!);
+    await user.click(screen.getByRole("button", { name: "Delete metric" }));
+    expect(
+      await screen.findByText("Other metrics use this one and would break")
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Used by metrics: roas_v2/)).toBeInTheDocument();
+  });
+
+  it("hides the actions from one who is not an editor", async () => {
+    respond(false, true);
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
+    await screen.findByText("margin_pct");
+    expect(screen.queryByRole("button", { name: "New metric" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(
+      screen.getByText("Add yourself as an editor to create or change metrics.")
+    ).toBeInTheDocument();
+  });
+});

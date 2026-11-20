@@ -13,6 +13,7 @@ const ENTRY_LABEL = {
   mcp: "MCP",
   export: "Export",
   dashboard: "Dashboard",
+  measure_preview: "Measure preview",
 } as const;
 
 const COPIED_MS = 2000;

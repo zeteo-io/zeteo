@@ -141,9 +141,21 @@ const CONNECTION_CODES = new Set([
 // Conversion errors a bound value the planner accepted still raises when the
 // server converts it: 241 (a date or time from text), 242 (out of a date
 // type's range), 8169 (a uniqueidentifier from text), 8114 (a type from
-// nvarchar: a timestamp that leaves its type's range in UTC). Numbers bind
+// nvarchar: a timestamp that leaves its type's range in UTC), 517 and 8115
+// (a date a calculation shifts out of range or overflows, an extreme
+// dateAdd). Numbers bind
 // in types every numeric column compares with, so none overflows.
-const VALUE_ERRORS = new Set([241, 242, 8169, 8114]);
+const VALUE_ERRORS = new Set([241, 242, 8169, 8114, 517]);
+/**
+ * 8115 is also an integer product that overflows, a failure of the source: it
+ * is a value error only for a date type. SQL Server names the type only in
+ * the message, so it is matched by its English text ("Arithmetic overflow
+ * error converting expression to data type datetime."). A server or login set
+ * to another language does not match, and the error then fails safe as the
+ * generic 502 `query_failed`, never as a caller's `invalid_value`.
+ */
+export const DATE_OVERFLOW =
+  /data type (date|datetime|datetime2|datetimeoffset|smalldatetime)\b/i;
 /** Errors of this severity end the session on the server: KILL, a crash, a shutdown. */
 const SESSION_FATAL_SEVERITY = 20;
 
@@ -186,7 +198,12 @@ const callerError = (err: unknown): AppError => {
     logger.warn({ err }, "source connection failed during a query");
     return new SourceUnreachableError();
   }
-  if (e.code === "EREQUEST" && VALUE_ERRORS.has(e.number ?? 0)) {
+  if (
+    e.code === "EREQUEST" &&
+    (VALUE_ERRORS.has(e.number ?? 0) ||
+      (e.number === 8115 &&
+        DATE_OVERFLOW.test(String((err as Error).message ?? ""))))
+  ) {
     logger.info({ err }, "the source could not convert a query's value");
     return invalidValue();
   }

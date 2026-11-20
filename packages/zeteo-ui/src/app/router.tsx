@@ -32,6 +32,9 @@ const pages = {
   "/limits": lazy(() =>
     import("@/features/limits").then((m) => ({ default: m.LimitsPage }))
   ),
+  "/calendar": lazy(() =>
+    import("@/features/calendar").then((m) => ({ default: m.CalendarPage }))
+  ),
   "/runs": lazy(() =>
     import("@/features/runs").then((m) => ({ default: m.RunsPage }))
   ),

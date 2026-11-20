@@ -1,6 +1,6 @@
 // @module-tag unit
 // @module-tag platform
-import type { ColumnRef, SqlPlan } from "../../../adapters/sql/types.js";
+import type { ColumnRef, TablePlan } from "../../../adapters/sql/types.js";
 import type { VisibleCatalog } from "../../../grants/visibleCatalog.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { planSql } from "../../../adapters/sql/plan.js";
@@ -84,7 +84,8 @@ describe("planSql: the spec's example", () => {
       type: "text",
       nativeType: "text",
     };
-    expect(plan(example)).toEqual<SqlPlan>({
+    expect(plan(example)).toEqual<TablePlan>({
+      kind: "table",
       from: { alias: "t0", schemaName: "shop", name: "orders" },
       joins: [
         {
@@ -112,9 +113,10 @@ describe("planSql: the spec's example", () => {
         {
           kind: "bucket",
           unit: "month",
+          fiscalStartMonth: 1,
           column: createdAt,
           output: "month",
-          type: "timestamp",
+          type: "date",
         },
         {
           kind: "aggregate",
@@ -158,7 +160,7 @@ describe("planSql: the spec's example", () => {
         },
         {
           name: "month",
-          type: "timestamp",
+          type: "date",
           references: [ref("orders", "created_at")],
         },
         {

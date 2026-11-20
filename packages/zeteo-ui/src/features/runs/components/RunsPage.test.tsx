@@ -174,12 +174,15 @@ describe("RunsPage", () => {
     );
   });
 
-  it("labels a dashboard panel's run Dashboard", async () => {
+  it.each([
+    ["dashboard", "Dashboard"],
+    ["measure_preview", "Measure preview"],
+  ] as const)("labels a %s run %s", async (entryPoint, label) => {
     get.mockImplementation(async (url: string) => {
       if (url === "/v1/runs") {
         return {
           data: {
-            data: [makeRun({ entry_point: "dashboard" })],
+            data: [makeRun({ entry_point: entryPoint })],
             next_cursor: null,
           },
         };
@@ -192,7 +195,7 @@ describe("RunsPage", () => {
     renderWithProviders(<RunsPage />);
     await screen.findAllByText("Ada Lovelace");
     const rows = screen.getAllByRole("row").slice(1);
-    expect(rows[0]).toHaveTextContent("Dashboard");
+    expect(rows[0]).toHaveTextContent(label);
   });
 
   it("shows the raw source id without zeteo.sources.read", async () => {

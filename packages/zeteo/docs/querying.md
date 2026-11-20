@@ -58,8 +58,9 @@ results for the same data:
   column on both sides is granted.
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
-  `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year",
-  "column": path }`, truncated in UTC, weeks starting on Monday. Each takes an optional `"as"`
+  `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year" | "fiscal_quarter" | "fiscal_year",
+  "column": path }`, each the first day of its period as a date (weeks start on Monday); a timestamp
+  is bucketed by its date in the calendar's time zone (UTC by default). Each takes an optional `"as"`
   (a lowercase letter, then up to 62 of `a-z`, `0-9`, `_`). Without one an item is named by its
   path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on. A calculation
   (`{ "calc": expression, "as": name }`) and an aggregate over an expression always need one
@@ -157,11 +158,14 @@ text and a money column computes as numeric (see *Postgres's own types*); float 
 
 A date or timestamp in a comparison (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`) or in `between` (not `in`) may be
 a moment relative to now: `{ "relative": { "unit": "day", "offset": -30 } }`. `unit` is `minute`,
-`hour`, `day`, `week`, `month`, `quarter` or `year`; `offset` is a whole number from -1000 to 1000;
-`startOf: true` cuts the result back to the start of the unit (a week starts on Monday). It is
-resolved in UTC when the query is planned: `now` is the minute the run started (the dashboard
-run's own minute, for all of its panels), a date column takes the date of the moment, and a
-relative moment against any other type is `invalid_value`. Orders in the last 30 days:
+`hour`, `day`, `week`, `month`, `quarter`, `year`, `fiscal_quarter` or `fiscal_year` (fiscal units
+follow the [calendar](calendar.md)'s fiscal year start month); `offset` is a whole number from -1000
+to 1000; `startOf: true` cuts the result back to the start of the unit (a week starts on Monday). It
+is resolved when the query is planned, in the calendar's time zone (UTC by default): `minute` and
+`hour` shift the instant, and every larger unit works on that zone's wall clock, so `startOf` a day
+is local midnight. `now` is the minute the run started (the dashboard run's own minute, for all of
+its panels), a date column takes the date of the moment, and a relative moment against any other
+type is `invalid_value`. Orders in the last 30 days:
 
 ```json
 { "source": "sales-db", "from": "orders", "select": [{ "count": "*", "as": "orders" }],
@@ -337,6 +341,60 @@ Full name (row-level); a null last name counts as empty text:
   ]
 }
 ```
+
+### Case, dates and the calendar
+
+`case` (`{ "case": { "when": [{ "if": <filter>, "then": <expression> }], "else": <expression> } }`):
+1 to 10 branches; `if` is a filter in the `where` syntax over column paths (never select names);
+every `then` and `else` has one type (number, text, date or timestamp; a number literal fits any
+number); `else` is optional (null). It is row-level unless a branch holds an aggregate, and the
+rule against mixing bare columns with aggregates applies. Booleans stay refused as values.
+
+Dates and timestamps are allowed in expressions:
+
+| Operation | Operands | Result |
+|---|---|---|
+| `{ "date": "2026-01-01" }`, `{ "timestamp": "...Z" }` | a literal | date, timestamp |
+| `{ "relative": {...} }` | the relative date shape, also with units `fiscal_quarter` and `fiscal_year` | date |
+| `dateAdd` | `[expression, amount, unit]`, `amount` an integer from -10,000 to 10,000, unit `day` to `year` | the operand's type |
+| `dateDiff` | `[unit, start, end]`, unit `second`, `minute`, `hour`, `day`, `week`, `month`, `quarter` or `year` | number: whole units completed from start to end, truncated toward zero, the same on both engines (seconds, minutes and hours as a big integer, so in text on the wire; a date counts from midnight) |
+| `datePart` | `[part, expression]`, part `year`, `quarter`, `month`, `day`, `weekday` (1 = Monday), `fiscal_year`, `fiscal_quarter` or `business_day` (which business day of its month, in the calendar's zone) | number |
+
+`min`, `max`, `case` and `coalesce` also take dates. **Business-day functions** count with the
+admin's [calendar](calendar.md), over columns or any date or timestamp expression:
+`{ "businessDays": [start, end] }` (both inclusive, 0 when end is first), `{ "businessDaysBetween":
+[start, end] }` (start excluded, negative backwards), `{ "businessDaysIn": [unit, date] }` (the
+period's; `unit` `week`, `month`, `quarter`, `year`, `fiscal_quarter` or `fiscal_year`),
+`{ "businessDaysInMonth": date }`, `{ "businessDaysElapsed": date | [unit, date] }` (the period's
+first day to `date`, inclusive; the month without a unit), `{ "businessDaysRemaining": date |
+[unit, date] }` (after `date` to the period's end) and `{ "addBusinessDays": [date, n] }` (a date).
+The filter operator `{ "isBusinessDay": true | false }` takes a date or timestamp path in `where` and
+in a `case`'s `if`, not in `having`. A timestamp is read as its date in the calendar's time zone;
+dates outside 1900-01-01 to 9998-12-31 give null. All-literal operands are computed when the query is planned. Details,
+nulls and how it is computed: [calendar.md](calendar.md). `bucket` also takes `fiscal_quarter` and
+`fiscal_year` (the period's start date). Relative dates, buckets and every `datePart` part follow the
+calendar's time zone (UTC by default): a timestamp is read as its date there, so a range and the
+buckets agree on which day an instant is.
+
+### Measures
+
+`{ "measure": "paid_revenue" }` is a select item or an operand of a `calc`: a named, described
+aggregate on one table that an editor defined, expanded by the planner so grants, filters and
+grouping apply as to an inline aggregate. `from` must be its home table; a query that joins a
+to-many relation cannot use one (`measure_needs_single_rows`). A caller who lacks any column a
+measure reads does not see it (`not_found_or_not_accessible`). A **fixed** measure ignores the
+query's filters and grouping, is usable from any table and as a comparison value in filters.
+
+### Metric queries
+
+A second query shape, told apart by `metrics`: `{ "source", "metrics": [names], "bucket"?,
+"range"?, "orderBy"?, "limit"?, "offset"? }`, with no `from`, `join`, `select`, `where`, `groupBy`
+or `having`. Each name is a metric (a stored formula over measures of different tables) or a
+measure; the result is one column per name, preceded by `period` when `bucket` is given, a row per
+period, null where a measure has no rows. `bucket` and `range` cut each measure by its own date
+column (`measure_has_no_date` when it has none). The run, caps, saved queries, exports and
+dashboards treat it as any query. Filters on other dimensions and metrics using metrics do not
+exist. Details: [measures.md](measures.md).
 
 ## Discovering what you can query
 
@@ -568,7 +626,7 @@ recorded, refused and failed ones included, in one transaction that writes a `qu
 recorded in the same table, with their own audit entries ([export.md](export.md#what-is-recorded)).
 
 - The row holds the query as sent, who ran it, the source (null when the caller could not see the
-  one named), the entry point (`api`, `mcp`, `export`, `dashboard`), the duration, the rows returned, the
+  one named), the entry point (`api`, `mcp`, `export`, `dashboard`, `measure_preview`), the duration, the rows returned, the
   outcome, the error code and whether rows were left out. It never holds result data.
 - The audit entry's metadata is `{ source_id, entry_point, outcome, error_code, row_count,
   duration_ms }`; the query itself is only in the row.

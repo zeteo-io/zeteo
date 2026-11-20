@@ -196,7 +196,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(results).toHaveLength(2);
-      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
+      expect(await counts()).toEqual({ tables: 13, columns: 59, relations: 6 });
 
       const again = await Promise.all([
         refreshSource(sourceId, ACTOR),
@@ -204,7 +204,7 @@ describe("refreshSource", () => {
         refreshSource(sourceId, ACTOR),
       ]);
       expect(again).toHaveLength(3);
-      expect(await counts()).toEqual({ tables: 12, columns: 55, relations: 6 });
+      expect(await counts()).toEqual({ tables: 13, columns: 59, relations: 6 });
     });
 
     it("ends matching the newer snapshot when an older read lands last", async () => {
@@ -280,7 +280,7 @@ describe("refreshSource", () => {
       await slow;
 
       const tables = await prisma.sourceTable.findMany({ where: { sourceId } });
-      expect(tables).toHaveLength(12);
+      expect(tables).toHaveLength(13);
       for (const table of tables) {
         expect(table.missingSince).not.toBeNull();
       }

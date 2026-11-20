@@ -73,6 +73,7 @@ item's `as`, else its path). `decimals` (0 to 6) and `legend` (`auto`, `none`) a
 | `area` | as `line`, and `stacked` | as `line` |
 | `bar` | `x`, `y`, `series`, `stacked`, `horizontal` | `y` number; `series` text |
 | `pie` | `label`, `value`, `donut` | `label` text; `value` number |
+| `gauge` | `value`, `max`, `target`, `min` (a column or a number, default 0), `unit` | `value`, `max`, `target` number; read from the first row; drawn as an arc that the value fills, the target a marker, `max` the end of the scale; a null value or `max` shows "No data", a null target no marker |
 | `table` | `columns` (all when absent) | any |
 
 A chart is checked against the columns of the plan, so nothing runs to check it. The problems
@@ -92,6 +93,13 @@ time column has it filtered: an own panel's `time_column`, or for a linked panel
 `previous_year`. They are built from relative dates ([querying.md](querying.md#relative-dates)),
 in UTC and against one `now`, floored to the minute, for all of a run's panels. A week starts on
 Monday.
+
+A panel over a **metric query** ([measures.md](measures.md#metric-queries)) uses the time column
+`"range"`: the time range then replaces the query's `range` (each measure is cut on its own date
+column), instead of adding a `where`. Any other time column on a metric query is a `wrong_type`
+problem at `time_column` (`needs_update` for a viewer); a panel without a time column keeps the
+query's own `range`. Only a metric query reads `"range"` so: on a table query it is an ordinary
+column path, so a table with a date column named `range` can follow the time range by it.
 
 ## Running a dashboard
 

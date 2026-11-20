@@ -1,9 +1,12 @@
 import { deleteSource, getSource, updateSource } from "./controllers.js";
 import { allowOwnerOr } from "../../../../middleware/uploadOwner.js";
+import measureEditorsRouter from "./measure-editors/index.js";
 import mergedTablesRouter from "./merged-tables/index.js";
 import relationsRouter from "./relations/index.js";
+import measuresRouter from "./measures/index.js";
 import transferRouter from "./transfer/index.js";
 import { sourceOfParams } from "./middleware.js";
+import metricsRouter from "./metrics/index.js";
 import refreshRouter from "./refresh/index.js";
 import archiveRouter from "./archive/index.js";
 import tablesRouter from "./tables/index.js";
@@ -19,7 +22,10 @@ const sourceRouter = Router({ mergeParams: true });
 const json64k = express.json({ limit: "64kb" });
 
 sourceRouter.use("/archive", archiveRouter);
+sourceRouter.use("/measure-editors", measureEditorsRouter);
+sourceRouter.use("/measures", measuresRouter);
 sourceRouter.use("/merged-tables", mergedTablesRouter);
+sourceRouter.use("/metrics", metricsRouter);
 sourceRouter.use("/refresh", refreshRouter);
 sourceRouter.use("/relations", relationsRouter);
 sourceRouter.use("/tables", tablesRouter);

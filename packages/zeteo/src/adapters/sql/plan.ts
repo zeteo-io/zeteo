@@ -1,20 +1,51 @@
-import { floorToMinute, isRelativeDate, resolveRelative } from "./relative.js";
 import type { SqlQueryErrorCode } from "./errors.js";
+import { aggregatesRows } from "./aggregates.js";
 import type {
   VisibleCatalog,
   VisibleColumn,
+  VisibleMeasure,
   VisibleTable,
 } from "../../grants/visibleCatalog.js";
+import {
+  addBusinessDays,
+  businessDays,
+  businessDaysBetween,
+  businessDaysElapsed,
+  businessDaysIn,
+  businessDaysRemaining,
+  compiledCalendar,
+  windowedLocalDate,
+  type BusinessUnit,
+  type Calendar,
+  type CompiledCalendar,
+  type ZoneWindow,
+} from "../../calendar/calendar.js";
 import {
   QueryError,
   notFound,
   notFoundMessage,
   type QueryPath,
 } from "../../engine/errors.js";
+import {
+  MAX_EXPANDED_NODES,
+  MAX_FIXED_MEASURES,
+  MAX_MEASURE_NESTING,
+  MeasureError,
+  expandMeasure,
+} from "./measures.js";
+import {
+  floorToMinute,
+  isRelativeDate,
+  resolveRelative,
+  resolveRelativeDate,
+} from "./relative.js";
 import type {
   CalcExpr,
   CalcOp,
   Compared,
+  DateAddUnit,
+  DatePart,
+  PeriodUnit,
   Comparison,
   Condition,
   Filter,
@@ -22,6 +53,7 @@ import type {
   Scalar,
   SelectItem,
   SqlQuery,
+  DateDiffUnit,
 } from "./language.js";
 import type {
   OutputColumn,
@@ -32,6 +64,7 @@ import type {
 import type {
   AggregateFn,
   ColumnRef,
+  FilterValue,
   HavingSubject,
   PlanValue,
   QueryableType,
@@ -40,7 +73,9 @@ import type {
   ResolvedJoin,
   ResolvedOrder,
   ResolvedSelect,
-  SqlPlan,
+  BusinessDate,
+  ScalarExpr,
+  TablePlan,
   WhereSubject,
 } from "./types.js";
 
@@ -66,11 +101,12 @@ const ALL_OPERATORS: readonly Operator[] = [
 const NOT_TEXT = ALL_OPERATORS.filter(
   (op) => op !== "contains" && op !== "startsWith"
 );
+const DATES: readonly Operator[] = [...NOT_TEXT, "isBusinessDay"];
 const OPERATORS_BY_TYPE: Record<QueryableType, ReadonlySet<Operator>> = {
   text: new Set(ALL_OPERATORS),
   number: new Set(NOT_TEXT),
-  date: new Set(NOT_TEXT),
-  timestamp: new Set(NOT_TEXT),
+  date: new Set(DATES),
+  timestamp: new Set(DATES),
   boolean: new Set(["eq", "ne", "isNull"]),
   json: new Set(["isNull"]),
 };
@@ -110,7 +146,7 @@ const isCalendarDate = (y: string, m: string, d: string): boolean => {
   );
 };
 
-const VALUE_FORMS: Record<QueryableType, string> = {
+export const VALUE_FORMS: Record<QueryableType, string> = {
   text: "a string",
   number: "a number or a decimal string",
   boolean: "true or false",
@@ -120,7 +156,10 @@ const VALUE_FORMS: Record<QueryableType, string> = {
 };
 
 /** `value` as a value for a subject of `type`, or undefined when it is not one. */
-const coerce = (value: Scalar, type: QueryableType): PlanValue | undefined => {
+export const coerce = (
+  value: Scalar,
+  type: QueryableType
+): PlanValue | undefined => {
   switch (type) {
     case "text":
       return typeof value === "string" ? value : undefined;
@@ -163,9 +202,16 @@ interface Resolved {
 }
 
 /** A resolved calculation and what decides its level. */
-interface ResolvedCalc {
+interface CaseOperand {
+  when: { if: Filter; then: CalcExpr }[];
+  else?: CalcExpr;
+}
+
+export interface ResolvedCalc {
   resolved: ResolvedExpr;
   hasAggregate: boolean;
+  /** Holds a fixed measure outside any aggregate: one value per query. */
+  hasFixed?: boolean;
   /** The first column read outside any aggregate. */
   bareColumn?: { path: string; at: QueryPath };
 }
@@ -186,10 +232,10 @@ const OP_TYPES: Record<
   concat: { takes: ["text", "number"], yields: "text" },
 };
 
-const typeOf = (e: ResolvedExpr): QueryableType =>
+export const typeOf = (e: ResolvedExpr): QueryableType =>
   e.kind === "column" ? e.column.type : e.type;
 
-const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
+export const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
 
 /** `customer.account.plan` → relation path `customer.account`, column `plan`. */
 const splitPath = (path: string): { prefix: string; last: string } => {
@@ -202,7 +248,7 @@ const splitPath = (path: string): { prefix: string; last: string } => {
 const joinPath = (prefix: string, name: string) =>
   prefix === "" ? name : `${prefix}.${name}`;
 
-const fail = (
+export const fail = (
   code: SqlQueryErrorCode,
   message: string,
   path: QueryPath
@@ -221,17 +267,165 @@ export const queryNameOf = (
     ? table.name
     : `${table.schemaName}.${table.name}`;
 
-class Planner {
-  private readonly scopes = new Map<string, Scope>();
-  private readonly references = new Map<string, Reference>();
-  private readonly tablesById: Map<string, VisibleTable>;
+/**
+ * What one query and the fixed measures' subqueries in it share: the columns
+ * read, the expansion budget and the fixed measures planned so far.
+ */
+export interface QueryState {
+  references: Map<string, Reference>;
+  expandedNodes: number;
+  /** Each fixed measure is planned once per query, by name. */
+  fixed: Map<string, ScalarExpr>;
+  /** The fixed measures being planned, outermost first. */
+  fixedStack: string[];
+  /** Per fixed measure planned: the subqueries one use compiles to, its nested ones included. */
+  fixedWeight: Map<string, number>;
+  /** Per fixed measure planned: the columns it reads, merged into every use's reads. */
+  fixedReads: Map<string, Map<string, Reference>>;
+  /** The subqueries the fixed measures used so far compile to, at most `MAX_FIXED_MEASURES`. */
+  subqueries: number;
+}
 
-  constructor(private readonly catalog: VisibleCatalog) {
+/** The values a filter compares with besides literals: relative dates and fixed measures. */
+interface ValueContext {
+  now: Date;
+  calendar: Calendar;
+  /** The calendar as `isBusinessDay` binds it; absent where rows are not filtered (`having`). */
+  compiled?: () => CompiledCalendar;
+  /** `{ measure: name }` at `path`, compared with a subject of `type`. */
+  measure: (name: string, path: QueryPath, type: QueryableType) => ScalarExpr;
+}
+
+/** What a business-day function computes, before its operands are resolved. */
+type BusinessShape =
+  | { kind: "businessDays"; fn: "inclusive" | "between" }
+  | {
+      kind: "businessPeriod";
+      fn: "in" | "elapsed" | "remaining";
+      unit: BusinessUnit;
+    }
+  | { kind: "addBusinessDays" };
+
+const BUSINESS_KEYS = new Set([
+  "businessDays",
+  "businessDaysBetween",
+  "businessDaysIn",
+  "businessDaysInMonth",
+  "businessDaysElapsed",
+  "businessDaysRemaining",
+  "addBusinessDays",
+]);
+
+/** A business-day operation's shape, and its date (and amount) operands with their paths. */
+const businessShape = (
+  key: string,
+  operand: unknown,
+  at: QueryPath
+): {
+  shape: BusinessShape;
+  dates: Array<[CalcExpr, QueryPath]>;
+  amount?: [CalcExpr, QueryPath];
+} => {
+  const list = operand as CalcExpr[];
+  const pair = (): Array<[CalcExpr, QueryPath]> => [
+    [list[0]!, [...at, 0]],
+    [list[1]!, [...at, 1]],
+  ];
+  /** A date (its month), or `[unit, date]`. */
+  const inPeriod = (): { unit: BusinessUnit; date: [CalcExpr, QueryPath] } =>
+    Array.isArray(operand)
+      ? { unit: list[0] as unknown as PeriodUnit, date: [list[1]!, [...at, 1]] }
+      : { unit: "month", date: [operand as CalcExpr, at] };
+  switch (key) {
+    case "businessDays":
+    case "businessDaysBetween":
+      return {
+        shape: {
+          kind: "businessDays",
+          fn: key === "businessDays" ? "inclusive" : "between",
+        },
+        dates: pair(),
+      };
+    case "addBusinessDays":
+      return {
+        shape: { kind: "addBusinessDays" },
+        dates: [[list[0]!, [...at, 0]]],
+        amount: [list[1]!, [...at, 1]],
+      };
+    default: {
+      const { unit, date } = inPeriod();
+      const fn =
+        key === "businessDaysElapsed"
+          ? "elapsed"
+          : key === "businessDaysRemaining"
+            ? "remaining"
+            : "in";
+      return {
+        shape: { kind: "businessPeriod", fn, unit },
+        dates: [date],
+      };
+    }
+  }
+};
+
+/** A query's shared state before anything is planned. */
+export const newQueryState = (): QueryState => ({
+  references: new Map(),
+  expandedNodes: 0,
+  fixed: new Map(),
+  fixedStack: [],
+  fixedWeight: new Map(),
+  fixedReads: new Map(),
+  subqueries: 0,
+});
+
+export class Planner {
+  /** The query's own scopes: its `from` and its joins. */
+  private readonly scopes = new Map<string, Scope>();
+  /**
+   * The joins measures added, by relation path. Seen only while a measure's
+   * expansion is resolved, so a query never reads through a join it did not
+   * make, and its validity never depends on a measure's definition.
+   */
+  private readonly measureScopes = new Map<string, Scope>();
+  /** Whether a measure's expansion is being resolved. */
+  private inMeasure = false;
+  private readonly tablesById: Map<string, VisibleTable>;
+  private readonly measures: Map<string, VisibleMeasure>;
+  /** The plan's joins: the query's own, then those its measures add. */
+  readonly joins: ResolvedJoin[] = [];
+  /** The first of the query's own joins that can repeat rows, if any. */
+  toManyJoin: string | undefined;
+  /** The values filters compare with, for `resolveFilter`. */
+  readonly values: ValueContext;
+
+  constructor(
+    private readonly catalog: VisibleCatalog,
+    private readonly now: Date,
+    private readonly state: QueryState = newQueryState(),
+    /** Before every alias: empty for the query, `f1_`… in a fixed measure's subquery. */
+    private readonly aliasPrefix = ""
+  ) {
     this.tablesById = new Map(catalog.tables.map((t) => [t.id, t]));
+    this.measures = new Map(catalog.measures.map((m) => [m.name, m]));
+    this.values = {
+      now,
+      calendar: catalog.calendar,
+      compiled: () => compiledCalendar(catalog.calendar, now),
+      measure: (name, path, type) => this.fixedValue(name, path, type),
+    };
+  }
+
+  /** The scope at `prefix`: the query's own, then, inside a measure, a measure's. */
+  private scopeOf(prefix: string): Scope | undefined {
+    return (
+      this.scopes.get(prefix) ??
+      (this.inMeasure ? this.measureScopes.get(prefix) : undefined)
+    );
   }
 
   private touch(reference: Reference): void {
-    this.references.set(referenceKey(reference), reference);
+    this.state.references.set(referenceKey(reference), reference);
   }
 
   private displayNames(): string[] {
@@ -269,6 +463,51 @@ class Planner {
     return scope;
   }
 
+  /**
+   * `table` as the `from` of a query the planner makes itself (a metric
+   * query's part), alias `t0`. A missing table cannot be read.
+   */
+  fromTable(table: VisibleTable, path: QueryPath): Scope {
+    if (table.missing) {
+      throw fail(
+        "missing_in_source",
+        `Table "${queryNameOf(this.catalog.tables, table)}" is missing from the source`,
+        path
+      );
+    }
+    const scope = { alias: "t0", table };
+    this.scopes.set("", scope);
+    return scope;
+  }
+
+  /**
+   * A column path of a measure's definition (its date column), from the
+   * `from` table: each relation on the way is joined as a measure's joins
+   * are, a to-one left join after the others, and the column is read through
+   * them.
+   */
+  resolveMeasureColumn(columnPath: string, path: QueryPath): Resolved {
+    const segments = columnPath.split(".");
+    this.inMeasure = true;
+    try {
+      for (let i = 1; i < segments.length; i++) {
+        this.joinForMeasure(segments.slice(0, i).join("."), path);
+      }
+      return this.resolveColumn(columnPath, path);
+    } finally {
+      this.inMeasure = false;
+    }
+  }
+
+  /** Fixed measure `measure` at `at`, alone: its scalar subquery, from no table of the query's. */
+  resolveFixedMeasure(
+    measure: VisibleMeasure,
+    at: QueryPath,
+    reads: Map<string, Reference>
+  ): ResolvedCalc {
+    return this.resolveFixed(measure, at, reads);
+  }
+
   /** The key column `name` of a relation's table; the relation is unusable without it. */
   private keyColumn(
     table: VisibleTable,
@@ -298,7 +537,7 @@ class Planner {
     path: QueryPath
   ): { join: ResolvedJoin; toMany: boolean } {
     const { prefix, last } = splitPath(relationPath);
-    const parent = this.scopes.get(prefix);
+    const parent = this.scopeOf(prefix);
     if (!parent) {
       throw fail(
         "join_parent_missing",
@@ -336,7 +575,10 @@ class Planner {
       this.touch({ tableId: target.id, columnId: to.id });
       return [parent.alias, from.name, to.name];
     });
-    this.scopes.set(relationPath, { alias, table: target });
+    (this.inMeasure ? this.measureScopes : this.scopes).set(relationPath, {
+      alias,
+      table: target,
+    });
     return {
       join: {
         alias,
@@ -351,7 +593,7 @@ class Planner {
 
   resolveColumn(columnPath: string, path: QueryPath): Resolved {
     const { prefix, last } = splitPath(columnPath);
-    const scope = this.scopes.get(prefix);
+    const scope = this.scopeOf(prefix);
     if (!scope) {
       const joined = [...this.scopes.keys()].filter((k) => k !== "");
       throw notFound("relation", prefix, path, joined);
@@ -433,8 +675,87 @@ class Planner {
         hasAggregate: false,
       };
     }
+    if ("date" in expr || "timestamp" in expr) {
+      const type = "date" in expr ? "date" : "timestamp";
+      const given = "date" in expr ? expr.date : expr.timestamp;
+      const value = coerce(given, type);
+      if (value === undefined) {
+        throw fail(
+          "invalid_value",
+          `A ${type} literal is ${VALUE_FORMS[type]}`,
+          [...at, type]
+        );
+      }
+      return {
+        resolved: { kind: "literal", value: value as string, type },
+        hasAggregate: false,
+      };
+    }
+    if ("relative" in expr) {
+      return {
+        resolved: {
+          kind: "literal",
+          value: resolveRelativeDate(expr, this.now, this.catalog.calendar),
+          type: "date",
+        },
+        hasAggregate: false,
+      };
+    }
+    if ("measure" in expr) {
+      return this.resolveMeasure(
+        expr.measure,
+        [...at, "measure"],
+        reads,
+        insideAggregate
+      );
+    }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     const keyAt = [...at, key];
+    if (key === "datePart" && (operand as unknown[])[0] === "business_day") {
+      return this.resolveBusiness(
+        { kind: "businessPeriod", fn: "elapsed", unit: "month" },
+        [[(operand as CalcExpr[])[1]!, [...keyAt, 1]]],
+        undefined,
+        key,
+        reads,
+        insideAggregate
+      );
+    }
+    if (key === "dateAdd" || key === "dateDiff" || key === "datePart") {
+      return this.resolveDateOp(
+        key,
+        operand as unknown[],
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
+    if (key === "businessDaysInPeriod") {
+      throw fail(
+        "invalid_operator",
+        "businessDaysInPeriod is for a metric's formula only; in a query, use businessDaysIn",
+        keyAt
+      );
+    }
+    if (BUSINESS_KEYS.has(key)) {
+      const { shape, dates, amount } = businessShape(key, operand, keyAt);
+      return this.resolveBusiness(
+        shape,
+        dates,
+        amount,
+        key,
+        reads,
+        insideAggregate
+      );
+    }
+    if (key === "case") {
+      return this.resolveCase(
+        operand as CaseOperand,
+        keyAt,
+        reads,
+        insideAggregate
+      );
+    }
     if (AGGREGATE_FNS.includes(key as AggregateFn)) {
       return {
         resolved: this.resolveAggregate(
@@ -505,7 +826,580 @@ class Planner {
         type: type as "number" | "text",
       },
       hasAggregate: resolvedOperands.some((o) => o.hasAggregate),
+      hasFixed: resolvedOperands.some((o) => o.hasFixed),
       bareColumn: resolvedOperands.find((o) => o.bareColumn)?.bareColumn,
+    };
+  }
+
+  /**
+   * `{ measure: name }` at `at`: the measure's expansion, resolved as an
+   * expression of the query. A measure the caller may not use, or one of
+   * another table, is not found, exactly as one that does not exist. Every
+   * error inside the expansion is reported at `at`, naming the measure, and
+   * never points into a definition the caller did not write.
+   */
+  private resolveMeasure(
+    name: string,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const from = this.scopes.get("")!;
+    const measure = this.measures.get(name);
+    if (measure?.fixed) return this.resolveFixed(measure, at, reads);
+    if (!measure || measure.tableId !== from.table.id) {
+      const usable = this.catalog.measures
+        .filter((m) => m.fixed || m.tableId === from.table.id)
+        .map((m) => m.name);
+      throw notFound("measure", name, at, usable);
+    }
+    if (insideAggregate) {
+      throw fail(
+        "invalid_operator",
+        "An aggregate does not contain another aggregate",
+        at
+      );
+    }
+    const home = queryNameOf(this.catalog.tables, from.table);
+    if (this.toManyJoin !== undefined) {
+      throw fail(
+        "measure_needs_single_rows",
+        `${name} counts each ${home} row once; this query's join of ${this.toManyJoin} repeats rows. Query from ${home} without it.`,
+        at
+      );
+    }
+    try {
+      const expansion = expandMeasure(name, from.table.id, this.measures);
+      this.state.expandedNodes += expansion.nodes;
+      if (this.state.expandedNodes > MAX_EXPANDED_NODES) {
+        throw new MeasureError(
+          "too_complex",
+          `A query's measures expand to at most ${MAX_EXPANDED_NODES} operations and aggregates`
+        );
+      }
+      let calc: ResolvedCalc;
+      this.inMeasure = true;
+      try {
+        for (const relationPath of expansion.relationPaths) {
+          this.joinForMeasure(relationPath, at);
+        }
+        calc = this.resolveExpr(expansion.expr, at, reads);
+      } finally {
+        this.inMeasure = false;
+      }
+      if (!calc.hasAggregate || calc.bareColumn) {
+        throw new MeasureError(
+          "measure_not_aggregate",
+          "A measure must be group-level: every column it reads inside an aggregate"
+        );
+      }
+      return { resolved: calc.resolved, hasAggregate: true };
+    } catch (err) {
+      if (err instanceof MeasureError || err instanceof QueryError) {
+        throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Fixed measure `measure` at `at`: its own query over its home table, a
+   * scalar subquery with its own aliases and joins, planned once per query.
+   * The query's joins, filters and grouping never reach it, so it reads no
+   * row of the query and is usable from any table and inside an aggregate.
+   */
+  private resolveFixed(
+    measure: VisibleMeasure,
+    at: QueryPath,
+    reads: Map<string, Reference>
+  ): ResolvedCalc {
+    const { name } = measure;
+    try {
+      const known = this.state.fixed.get(name);
+      if (known) {
+        this.countSubqueries(this.state.fixedWeight.get(name)!);
+        for (const [key, ref] of this.state.fixedReads.get(name)!) {
+          reads.set(key, ref);
+        }
+        return { resolved: known, hasAggregate: false, hasFixed: true };
+      }
+      const stack = this.state.fixedStack;
+      if (stack.includes(name)) {
+        throw new MeasureError(
+          "measure_cycle",
+          `"${name}" uses itself: ${[...stack, name].join(" → ")}`
+        );
+      }
+      if (stack.length > MAX_MEASURE_NESTING) {
+        throw new MeasureError(
+          "measure_too_deep",
+          `Measures use other measures at most ${MAX_MEASURE_NESTING} levels deep`
+        );
+      }
+      // Each use is counted with what it nests, as each compiles on its own.
+      this.countSubqueries(1);
+      const before = this.state.subqueries;
+      const n = this.state.fixed.size + stack.length + 1;
+      const home = this.tablesById.get(measure.tableId);
+      if (!home) throw notFound("measure", name, at, []);
+      if (home.missing) {
+        throw fail(
+          "missing_in_source",
+          `Table "${queryNameOf(this.catalog.tables, home)}" is missing from the source`,
+          at
+        );
+      }
+      const prefix = `f${n}_`;
+      const inner = new Planner(this.catalog, this.now, this.state, prefix);
+      const from = { alias: `${prefix}t0`, table: home };
+      inner.scopes.set("", from);
+      stack.push(name);
+      const ownReads = new Map<string, Reference>();
+      let calc: ResolvedCalc;
+      try {
+        const expansion = expandMeasure(name, home.id, this.measures);
+        this.state.expandedNodes += expansion.nodes;
+        if (this.state.expandedNodes > MAX_EXPANDED_NODES) {
+          throw new MeasureError(
+            "too_complex",
+            `A query's measures expand to at most ${MAX_EXPANDED_NODES} operations and aggregates`
+          );
+        }
+        inner.inMeasure = true;
+        for (const relationPath of expansion.relationPaths) {
+          inner.joinForMeasure(relationPath, at);
+        }
+        calc = inner.resolveExpr(expansion.expr, at, ownReads);
+      } finally {
+        stack.pop();
+      }
+      for (const [key, ref] of ownReads) reads.set(key, ref);
+      if (!calc.hasAggregate || calc.bareColumn) {
+        throw new MeasureError(
+          "measure_not_aggregate",
+          "A measure must be group-level: every column it reads inside an aggregate"
+        );
+      }
+      const scalar: ScalarExpr = {
+        kind: "scalar",
+        plan: {
+          alias: `f${n}`,
+          from: {
+            alias: from.alias,
+            schemaName: home.schemaName,
+            name: home.name,
+          },
+          joins: inner.joins,
+          expr: calc.resolved,
+        },
+        type: typeOf(calc.resolved),
+      };
+      this.state.fixed.set(name, scalar);
+      this.state.fixedWeight.set(name, 1 + this.state.subqueries - before);
+      this.state.fixedReads.set(name, ownReads);
+      return { resolved: scalar, hasAggregate: false, hasFixed: true };
+    } catch (err) {
+      if (err instanceof MeasureError || err instanceof QueryError) {
+        throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
+      }
+      throw err;
+    }
+  }
+
+  /** Counts `n` more fixed-measure subqueries toward the query's limit. */
+  private countSubqueries(n: number): void {
+    this.state.subqueries += n;
+    if (this.state.subqueries > MAX_FIXED_MEASURES) {
+      throw new MeasureError(
+        "too_complex",
+        `A query holds at most ${MAX_FIXED_MEASURES} fixed-measure subqueries, those inside fixed measures included`
+      );
+    }
+  }
+
+  /**
+   * `{ measure: name }` as a comparison value at `path`, compared with a
+   * subject of `type`: a fixed measure of that type. One the caller cannot
+   * see is not found, exactly as one that does not exist.
+   */
+  private fixedValue(
+    name: string,
+    path: QueryPath,
+    type: QueryableType
+  ): ScalarExpr {
+    const measure = this.measures.get(name);
+    if (!measure) {
+      const fixed = this.catalog.measures
+        .filter((m) => m.fixed)
+        .map((m) => m.name);
+      throw notFound("measure", name, [...path, "measure"], fixed);
+    }
+    if (!measure.fixed) {
+      throw fail(
+        "invalid_value",
+        `A comparison compares with a fixed measure; "${name}" is not fixed`,
+        path
+      );
+    }
+    const resolved = this.resolveFixed(measure, path, new Map())
+      .resolved as ScalarExpr;
+    if (resolved.type !== type) {
+      throw fail(
+        "invalid_value",
+        `The value is ${type}; "${name}" is ${resolved.type}`,
+        path
+      );
+    }
+    return resolved;
+  }
+
+  /**
+   * The join a measure needs at `relationPath`: the query's own when it made
+   * one, else one an earlier measure added, else a left join after the
+   * others, kept apart from the query's scopes. A measure reads to-one
+   * relations only, so its joins neither drop nor repeat rows.
+   */
+  private joinForMeasure(relationPath: string, at: QueryPath): void {
+    if (this.scopeOf(relationPath)) return;
+    const { join, toMany } = this.resolveJoin(
+      relationPath,
+      "left",
+      `${this.aliasPrefix}t${this.joins.length + 1}`,
+      at
+    );
+    if (toMany) {
+      throw fail(
+        "measure_reads_to_many",
+        `"${relationPath}" can match several rows per row; a measure reads only to-one relations`,
+        at
+      );
+    }
+    this.joins.push(join);
+    const maxJoins = this.catalog.source.maxJoins;
+    if (this.joins.length > maxJoins) {
+      throw fail(
+        "too_many_joins",
+        `This source allows at most ${maxJoins} ${maxJoins === 1 ? "join" : "joins"}`,
+        at
+      );
+    }
+  }
+
+  /**
+   * A business-day function. Its dates are any date or timestamp
+   * expressions; when every operand is a literal (a date, timestamp or
+   * relative date, and a number of days) the planner computes the value from
+   * the calendar and binds it, else the compiler computes it per row from the
+   * calendar the plan carries. A value the calendar leaves null (a date before
+   * 1900) is left to the compiler too, which gives null.
+   */
+  private resolveBusiness(
+    shape: BusinessShape,
+    dates: Array<[CalcExpr, QueryPath]>,
+    amount: [CalcExpr, QueryPath] | undefined,
+    key: string,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const label = (e: CalcExpr) =>
+      typeof e === "string" ? `"${e}"` : "the operand";
+    const resolvedDates = dates.map(([e, p]) => {
+      const calc = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(calc.resolved);
+      if (type !== "date" && type !== "timestamp") {
+        throw fail(
+          "invalid_operator",
+          `${key} needs a date or timestamp; ${label(e)} is ${type}`,
+          p
+        );
+      }
+      return { calc, date: { expr: calc.resolved, type } as BusinessDate };
+    });
+    let resolvedAmount: ResolvedCalc | undefined;
+    if (amount) {
+      const [e, p] = amount;
+      resolvedAmount = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(resolvedAmount.resolved);
+      if (type !== "number") {
+        throw fail(
+          "invalid_operator",
+          `${key} takes a number of business days; ${label(e)} is ${type}`,
+          p
+        );
+      }
+    }
+    const calendar = compiledCalendar(this.catalog.calendar, this.now);
+    const folded = this.foldBusiness(
+      shape,
+      resolvedDates.map((d) => d.date),
+      resolvedAmount?.resolved,
+      calendar
+    );
+    if (folded !== undefined) return { resolved: folded, hasAggregate: false };
+    const all = [
+      ...resolvedDates.map((d) => d.calc),
+      ...(resolvedAmount ? [resolvedAmount] : []),
+    ];
+    const common = {
+      hasAggregate: all.some((c) => c.hasAggregate),
+      hasFixed: all.some((c) => c.hasFixed),
+      bareColumn: all.find((c) => c.bareColumn)?.bareColumn,
+    };
+    const [first, second] = resolvedDates.map((d) => d.date) as [
+      BusinessDate,
+      BusinessDate | undefined,
+    ];
+    switch (shape.kind) {
+      case "businessDays":
+        return {
+          ...common,
+          resolved: {
+            kind: "businessDays",
+            fn: shape.fn,
+            start: first,
+            end: second!,
+            calendar,
+            type: "number",
+          },
+        };
+      case "businessPeriod":
+        return {
+          ...common,
+          resolved: {
+            kind: "businessPeriod",
+            fn: shape.fn,
+            unit: shape.unit,
+            // Read only by a fiscal unit: a calendar change leaves other plans alone.
+            fiscalStartMonth: shape.unit.startsWith("fiscal_")
+              ? this.catalog.calendar.fiscalYearStartMonth
+              : 1,
+            date: first,
+            calendar,
+            type: "number",
+          },
+        };
+      case "addBusinessDays":
+        return {
+          ...common,
+          resolved: {
+            kind: "addBusinessDays",
+            date: first,
+            amount: resolvedAmount!.resolved,
+            calendar,
+            type: "date",
+          },
+        };
+    }
+  }
+
+  /**
+   * The value of a business-day function whose operands are all literals,
+   * from the calendar; undefined when one is not a literal or the calendar
+   * gives null, for the compiler to compute.
+   */
+  private foldBusiness(
+    shape: BusinessShape,
+    dates: BusinessDate[],
+    amount: ResolvedExpr | undefined,
+    calendar: CompiledCalendar
+  ): ResolvedExpr | undefined {
+    const cal = this.catalog.calendar;
+    const locals: string[] = [];
+    for (const { expr } of dates) {
+      if (expr.kind !== "literal") return undefined;
+      const local =
+        expr.type === "timestamp"
+          ? windowedLocalDate(
+              new Date(expr.value as string),
+              cal.timeZone,
+              calendar.zone
+            )
+          : (expr.value as string);
+      if (local === null) return undefined;
+      locals.push(local);
+    }
+    if (amount && amount.kind !== "literal") return undefined;
+    const [a, b] = locals as [string, string];
+    let value: number | string | null;
+    switch (shape.kind) {
+      case "businessDays":
+        value =
+          shape.fn === "inclusive"
+            ? businessDays(cal, a, b)
+            : businessDaysBetween(cal, a, b);
+        break;
+      case "businessPeriod":
+        value =
+          shape.fn === "in"
+            ? businessDaysIn(cal, shape.unit, a)
+            : shape.fn === "elapsed"
+              ? businessDaysElapsed(cal, a, shape.unit)
+              : businessDaysRemaining(cal, a, shape.unit);
+        break;
+      case "addBusinessDays":
+        value = addBusinessDays(cal, a, Number(amount!.value));
+        break;
+    }
+    if (value === null) return undefined;
+    return typeof value === "number"
+      ? { kind: "literal", value, type: "number" }
+      : { kind: "literal", value, type: "date" };
+  }
+
+  /**
+   * `dateAdd`, `dateDiff` or `datePart`: the operands that are expressions
+   * must be dates or timestamps; the others were checked by the language.
+   */
+  private resolveDateOp(
+    key: "dateAdd" | "dateDiff" | "datePart",
+    operand: unknown[],
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    const exprIndexes =
+      key === "dateAdd" ? [0] : key === "dateDiff" ? [1, 2] : [1];
+    const operands = exprIndexes.map((i) => {
+      const e = operand[i] as CalcExpr;
+      const p = [...at, i];
+      const calc = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(calc.resolved);
+      if (type !== "date" && type !== "timestamp") {
+        throw fail(
+          "invalid_operator",
+          `${key} needs a date or timestamp; ${typeof e === "string" ? `"${e}"` : "the operand"} is ${type}`,
+          p
+        );
+      }
+      return { ...calc, type };
+    });
+    const common = {
+      hasAggregate: operands.some((o) => o.hasAggregate),
+      hasFixed: operands.some((o) => o.hasFixed),
+      bareColumn: operands.find((o) => o.bareColumn)?.bareColumn,
+    };
+    const first = operands[0]!;
+    if (key === "dateAdd") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateAdd",
+          arg: first.resolved,
+          amount: operand[1] as number,
+          unit: operand[2] as DateAddUnit,
+          type: first.type,
+        },
+      };
+    }
+    if (key === "dateDiff") {
+      return {
+        ...common,
+        resolved: {
+          kind: "dateDiff",
+          unit: operand[0] as DateDiffUnit,
+          start: first.resolved,
+          end: operands[1]!.resolved,
+          operand: operands.some((o) => o.type === "timestamp")
+            ? "timestamp"
+            : "date",
+          type: "number",
+        },
+      };
+    }
+    const part = operand[0] as Exclude<DatePart, "business_day">;
+    return {
+      ...common,
+      resolved: {
+        kind: "datePart",
+        part,
+        arg: first.resolved,
+        // Read only by a fiscal part: a calendar change leaves other plans alone.
+        fiscalStartMonth: part.startsWith("fiscal_")
+          ? this.catalog.calendar.fiscalYearStartMonth
+          : 1,
+        // A timestamp's date is read in the calendar's zone (none for UTC).
+        ...zoneFor(first.type, this.catalog, this.now),
+        type: "number",
+      },
+    };
+  }
+
+  /**
+   * A `case` at `at`. Each `if` filters column paths as `where` does, and the
+   * columns it reads count as reads, and as bare when the case is outside an
+   * aggregate; every `then` and the `else` share one type.
+   */
+  private resolveCase(
+    operand: CaseOperand,
+    at: QueryPath,
+    reads: Map<string, Reference>,
+    insideAggregate: boolean
+  ): ResolvedCalc {
+    let bareColumn: ResolvedCalc["bareColumn"];
+    let hasAggregate = false;
+    let hasFixed = false;
+    let type: QueryableType | undefined;
+    const typed = (e: ResolvedCalc, p: QueryPath) => {
+      const t = typeOf(e.resolved);
+      if (type === undefined) {
+        refuseJson(t, "the expression", "a case", p);
+        type = t;
+      } else if (t !== type) {
+        throw fail(
+          "invalid_operator",
+          `case takes values of one type; this one is ${t}, not ${type}`,
+          p
+        );
+      }
+      hasAggregate ||= e.hasAggregate;
+      hasFixed ||= e.hasFixed ?? false;
+      bareColumn ??= e.bareColumn;
+    };
+    const branches = operand.when.map((branch, i) => {
+      const whenAt = [...at, "when", i];
+      const when = resolveFilter<ColumnRef>(
+        branch.if,
+        [...whenAt, "if"],
+        (key, p) => {
+          const { ref, reference } = this.resolveColumn(key, p);
+          reads.set(referenceKey(reference), reference);
+          if (!insideAggregate) bareColumn ??= { path: key, at: p };
+          return { subject: ref, type: ref.type };
+        },
+        this.values
+      );
+      const thenAt = [...whenAt, "then"];
+      const then = this.resolveExpr(
+        branch.then,
+        thenAt,
+        reads,
+        insideAggregate
+      );
+      typed(then, thenAt);
+      return { when, then: then.resolved };
+    });
+    let otherwise: ResolvedExpr | undefined;
+    if (operand.else !== undefined) {
+      const elseAt = [...at, "else"];
+      const resolved = this.resolveExpr(
+        operand.else,
+        elseAt,
+        reads,
+        insideAggregate
+      );
+      typed(resolved, elseAt);
+      otherwise = resolved.resolved;
+    }
+    return {
+      resolved: {
+        kind: "case",
+        branches,
+        ...(otherwise ? { otherwise } : {}),
+        type: type!,
+      },
+      hasAggregate,
+      hasFixed,
+      bareColumn,
     };
   }
 
@@ -540,7 +1434,7 @@ class Planner {
   }
 
   referenceList(): Reference[] {
-    return [...this.references.values()];
+    return [...this.state.references.values()];
   }
 }
 
@@ -551,8 +1445,9 @@ const resolveCondition = <S>(
   label: string,
   condition: Condition,
   path: QueryPath,
-  now: Date
+  values: ValueContext
 ): ResolvedFilter<S> => {
+  const { now, calendar } = values;
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
   if (!OPERATORS_BY_TYPE[type].has(op)) {
@@ -562,13 +1457,17 @@ const resolveCondition = <S>(
       at
     );
   }
-  const value = (v: Compared, valuePath: QueryPath): PlanValue => {
+  const value = (v: Compared, valuePath: QueryPath): FilterValue => {
+    if (typeof v === "object" && "measure" in v) {
+      return values.measure(v.measure, valuePath, type);
+    }
     if (isRelativeDate(v)) {
       // A relative moment is only for a date or a timestamp; elsewhere it is
       // the value error for the operator and path.
       if (type === "date" || type === "timestamp") {
-        const iso = resolveRelative(v, now).toISOString();
-        return type === "date" ? iso.slice(0, 10) : iso;
+        return type === "date"
+          ? resolveRelativeDate(v, now, calendar)
+          : resolveRelative(v, now, calendar).toISOString();
       }
       throw fail(
         "invalid_value",
@@ -589,6 +1488,20 @@ const resolveCondition = <S>(
   switch (op) {
     case "isNull":
       return { kind: "isNull", subject, isNull: raw as boolean };
+    case "isBusinessDay":
+      if (!values.compiled) {
+        throw fail(
+          "invalid_operator",
+          "isBusinessDay filters rows, in where or a case's if; having filters groups",
+          at
+        );
+      }
+      return {
+        kind: "businessDay",
+        subject,
+        is: raw as boolean,
+        calendar: values.compiled(),
+      };
     case "contains":
     case "startsWith":
       return { kind: "match", op, subject, value: raw as string };
@@ -607,7 +1520,9 @@ const resolveCondition = <S>(
         kind: "in",
         op,
         subject,
-        values: (raw as Scalar[]).map((v, i) => value(v, [...at, i])),
+        values: (raw as Scalar[]).map(
+          (v, i) => value(v, [...at, i]) as PlanValue
+        ),
       };
     default:
       return {
@@ -627,13 +1542,13 @@ const resolveFilter = <S>(
     key: string,
     path: QueryPath
   ) => { subject: S; type: QueryableType },
-  now: Date
+  values: ValueContext
 ): ResolvedFilter<S> => {
   if ("and" in filter && Array.isArray(filter.and)) {
     return {
       kind: "and",
       filters: (filter.and as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "and", i], subjectOf, now)
+        resolveFilter(f, [...path, "and", i], subjectOf, values)
       ),
     };
   }
@@ -641,7 +1556,7 @@ const resolveFilter = <S>(
     return {
       kind: "or",
       filters: (filter.or as Filter[]).map((f, i) =>
-        resolveFilter(f, [...path, "or", i], subjectOf, now)
+        resolveFilter(f, [...path, "or", i], subjectOf, values)
       ),
     };
   }
@@ -652,7 +1567,7 @@ const resolveFilter = <S>(
         filter.not as Filter,
         [...path, "not"],
         subjectOf,
-        now
+        values
       ),
     };
   }
@@ -660,7 +1575,7 @@ const resolveFilter = <S>(
     ([key, condition]) => {
       const at = [...path, key];
       const { subject, type } = subjectOf(key, at);
-      return resolveCondition(subject, type, key, condition, at, now);
+      return resolveCondition(subject, type, key, condition, at, values);
     }
   );
   return leaves.length === 1 ? leaves[0] : { kind: "and", filters: leaves };
@@ -683,6 +1598,20 @@ const refuseJson = (
   }
 };
 
+/**
+ * `{ zone }` for a timestamp in a calendar whose zone is not UTC, so the plan
+ * (and a run's fingerprint) changes with the zone; else nothing.
+ */
+export const zoneFor = (
+  type: QueryableType,
+  catalog: VisibleCatalog,
+  now: Date
+): { zone?: ZoneWindow } => {
+  if (type !== "timestamp") return {};
+  const { zone } = compiledCalendar(catalog.calendar, now);
+  return zone ? { zone } : {};
+};
+
 /** Evaluated per group rather than per row: an aggregate or a group-level calc. */
 const perGroup = (s: ResolvedSelect): boolean =>
   s.kind === "aggregate" || (s.kind === "calc" && s.level === "group");
@@ -696,7 +1625,7 @@ export const planSql = (
   query: SqlQuery,
   catalog: VisibleCatalog,
   ctx?: PlanContext
-): SqlPlan => {
+): TablePlan => {
   const now = ctx?.now ?? floorToMinute(new Date());
   const maxJoins = catalog.source.maxJoins;
   if ((query.join?.length ?? 0) > maxJoins) {
@@ -706,10 +1635,10 @@ export const planSql = (
       ["join"]
     );
   }
-  const planner = new Planner(catalog);
+  const planner = new Planner(catalog, now);
   const from = planner.resolveFrom(query.from);
 
-  const joins: ResolvedJoin[] = [];
+  const joins = planner.joins;
   const toManyJoins: Array<{ relation: string; path: QueryPath }> = [];
   (query.join ?? []).forEach((item, i) => {
     const relation = typeof item === "string" ? item : item.relation;
@@ -725,6 +1654,7 @@ export const planSql = (
     joins.push(join);
     if (toMany) toManyJoins.push({ relation, path: ["join", i] });
   });
+  planner.toManyJoin = toManyJoins[0]?.relation;
 
   const select: ResolvedSelect[] = [];
   const columns: OutputColumn[] = [];
@@ -756,24 +1686,33 @@ export const planSql = (
       resolved = {
         kind: "bucket",
         unit: item.bucket,
+        // Read only by a fiscal unit: a calendar change leaves other plans alone.
+        fiscalStartMonth: item.bucket.startsWith("fiscal_")
+          ? catalog.calendar.fiscalYearStartMonth
+          : 1,
         column: ref,
+        // A timestamp's date is read in the calendar's zone (none for UTC).
+        ...zoneFor(ref.type, catalog, now),
         output: item.as ?? `${item.bucket}_${item.column.replaceAll(".", "_")}`,
-        type: ref.type,
+        type: "date",
       };
       references = [reference];
       columnPath = item.column;
       if (item.as) outputPath = ["select", i, "as"];
     } else if (
+      "measure" in item ||
       "calc" in item ||
       typeof (item as Record<string, unknown>)[aggregateFnOf(item)!] !==
         "string"
     ) {
-      // A calc, or an aggregate over an expression: both named by their `as`.
+      // A calc, or an aggregate over an expression: both named by their `as`;
+      // a measure is named by its own name unless it has an `as`.
       const reads = new Map<string, Reference>();
-      const { as, ...rest } = item as { as: string } & Record<string, unknown>;
+      const { as, ...rest } = item as { as?: string } & Record<string, unknown>;
       const {
         resolved: expr,
         hasAggregate,
+        hasFixed,
         bareColumn,
       } = "calc" in rest
         ? planner.resolveExpr(
@@ -784,7 +1723,7 @@ export const planSql = (
         : planner.resolveExpr(rest as CalcExpr, ["select", i], reads);
       // A constant item is pointless, and SQL Server refuses a constant in
       // ORDER BY and GROUP BY, both of which a select item may land in.
-      if (reads.size === 0 && !hasAggregate) {
+      if (!bareColumn && !hasAggregate && !hasFixed) {
         throw fail(
           "invalid_operator",
           "A calculation reads at least one column",
@@ -801,12 +1740,14 @@ export const planSql = (
       resolved = {
         kind: "calc",
         expr,
-        level: hasAggregate ? "group" : "row",
-        output: as,
+        // Fixed measures alone are one value per group, never grouped by.
+        level: hasAggregate || !bareColumn ? "group" : "row",
+        output: as ?? (rest.measure as string),
         type: typeOf(expr),
       };
       references = [...reads.values()];
-      outputPath = ["select", i, "as"];
+      outputPath =
+        as === undefined ? ["select", i, "measure"] : ["select", i, "as"];
     } else {
       const fn = aggregateFnOf(item)!;
       const arg = (item as Record<AggregateFn, string>)[fn];
@@ -897,7 +1838,7 @@ export const planSql = (
         const { ref } = planner.resolveColumn(key, at);
         return { subject: ref, type: ref.type };
       },
-      now
+      planner.values
     );
 
   const grouped = hasAggregate || (query.groupBy?.length ?? 0) > 0;
@@ -936,7 +1877,7 @@ export const planSql = (
       if (!perGroup(s) && !groupedItems.has(i)) {
         throw fail(
           "invalid_grouping",
-          `"${s.output}" must be in groupBy or be an aggregate`,
+          `"${s.output}" must be in groupBy or be an aggregate or a fixed measure`,
           ["select", i]
         );
       }
@@ -967,7 +1908,7 @@ export const planSql = (
           type: select[index].type,
         };
       },
-      now
+      { ...planner.values, compiled: undefined }
     );
 
   const orderBy: ResolvedOrder[] = query.orderBy
@@ -996,7 +1937,7 @@ export const planSql = (
           : [{ target: { kind: "output", index }, direction: "asc" }]
       );
 
-  const warnings: QueryWarning[] = hasAggregate
+  const warnings: QueryWarning[] = select.some(aggregatesRows)
     ? toManyJoins.map(({ relation, path }) => ({
         code: "join_multiplies_rows",
         message: `"${relation}" can match several rows per row it joins to, so aggregates may count a row more than once`,
@@ -1005,6 +1946,7 @@ export const planSql = (
     : [];
 
   return {
+    kind: "table",
     from: {
       alias: "t0",
       schemaName: from.table.schemaName,

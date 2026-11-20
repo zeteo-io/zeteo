@@ -222,7 +222,102 @@ function alignSeries(
   return { xs, values };
 }
 
-/** The ECharts option for a line, area, bar or pie chart over a result. Pure. */
+/** A gauge: the first row's value as a progress arc, a pointer at the target. */
+function gaugeOption(
+  chart: Extract<ChartSettings, { type: "gauge" }>,
+  result: RunResult,
+  theme: ChartTheme
+): EChartsOption {
+  const row = result.rows[0];
+  if (!row) throw new Error("The result has no rows.");
+  const at = (name: string) => toNumber(row[indexOfColumn(result, name)]);
+  // Without a value or an end of scale there is nothing to draw: the
+  // chart's note says so rather than drawing 0 of 100. A null target only
+  // drops the marker.
+  const value = at(chart.value);
+  const max = at(chart.max);
+  if (value === null) throw new Error("No data: the value is empty.");
+  if (max === null) throw new Error("No data: the maximum is empty.");
+  const target = chart.target === undefined ? null : at(chart.target);
+  const min =
+    typeof chart.min === "number"
+      ? chart.min
+      : chart.min
+        ? (at(chart.min) ?? 0)
+        : 0;
+  const fmt = (v: unknown) => formatNumber(v, chart.decimals);
+  const scale = {
+    min,
+    max,
+    startAngle: 210,
+    endAngle: -30,
+    radius: "90%",
+    center: ["50%", "62%"],
+  };
+  const series: unknown[] = [
+    {
+      ...scale,
+      type: "gauge",
+      color: theme.palette[0],
+      progress: { show: true, width: 14 },
+      axisLine: { lineStyle: { width: 14, color: [[1, theme.border]] } },
+      pointer: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: {
+        color: theme.textSecondary,
+        distance: 22,
+        formatter: (v: number) => formatAxisNumber(v, chart.decimals),
+      },
+      anchor: { show: false },
+      title: { show: false },
+      detail: {
+        valueAnimation: true,
+        offsetCenter: [0, "10%"],
+        color: theme.text,
+        fontSize: 24,
+        formatter: (v: number) =>
+          chart.unit ? `${fmt(v)} ${chart.unit}` : fmt(v),
+      },
+      data: [{ value }],
+    },
+  ];
+  if (target !== null)
+    series.push({
+      ...scale,
+      type: "gauge",
+      pointer: {
+        show: true,
+        length: "100%",
+        width: 3,
+        offsetCenter: [0, 0],
+        itemStyle: { color: theme.text },
+      },
+      progress: { show: false },
+      axisLine: { show: false },
+      axisTick: { show: false },
+      splitLine: { show: false },
+      axisLabel: { show: false },
+      anchor: { show: false },
+      title: { show: false },
+      detail: { show: false },
+      silent: true,
+      data: [{ value: target, name: "Target" }],
+    });
+  return {
+    backgroundColor: "transparent",
+    textStyle: { color: theme.text },
+    tooltip: {
+      valueFormatter: fmt,
+      backgroundColor: theme.background,
+      borderColor: theme.border,
+      textStyle: { color: theme.text },
+    },
+    series,
+  } as EChartsOption;
+}
+
+/** The ECharts option for a line, area, bar, pie or gauge chart over a result. Pure. */
 export function toOption(
   chart: ChartSettings,
   result: RunResult,
@@ -230,6 +325,7 @@ export function toOption(
 ): EChartsOption {
   if (chart.type === "stat" || chart.type === "table")
     throw new Error(`A ${chart.type} is not drawn by ECharts.`);
+  if (chart.type === "gauge") return gaugeOption(chart, result, theme);
 
   const fmt = (v: unknown) => formatNumber(v, chart.decimals);
   const textStyle = { color: theme.textSecondary };
@@ -355,6 +451,11 @@ export function toOption(
 
   return {
     ...base,
+    // A date (a bucket's first day) is a day, not an instant: its axis and
+    // tooltip labels are read at its UTC midnight, never shifted into the
+    // viewer's zone (a Los Angeles viewer would see the day before).
+    ...(axis === "time" &&
+      result.columns[xi].type === "date" && { useUTC: true }),
     grid: { left: 12, right: 16, top: 16, bottom: 36, containLabel: true },
     legend: {
       show: chart.legend !== "none" && series.length > 1,

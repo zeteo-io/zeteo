@@ -1,0 +1,81 @@
+/v1/sources/{sourceId}/metrics:
+  get:
+    tags: [Metrics]
+    summary: List a source's metrics
+    description: |
+      The metrics of the source as the caller may see them, in full with whether the caller can use
+      one (`usable`: every measure it uses is theirs). Those who see every metric
+      (`zeteo.sources.read`, or the owner of an upload source) get each in full, with whether it is
+      `broken`. Anyone else gets the ones whose measures are all in their own visible catalogue. A
+      measure editor also sees the others, redacted (name, description and `usable: false`, never
+      the formula). Editors and those who see every metric get `used_by`. `can_edit` and
+      `can_manage_editors` are as for measures.
+
+      A source the caller has nothing of is `404 not_found`.
+
+      **Required permissions:** `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` (`403 forbidden` without).
+    operationId: listMetrics
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    responses:
+      '200':
+        description: The metrics
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/ListMetricsResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Metrics]
+    summary: Create a metric
+    description: |
+      Saves a metric: a named, described formula over measures of any tables of the source, which a
+      metric query then asks for by name. The draft's formula is checked to hold only numbers,
+      measures and arithmetic (`invalid_operator`) and planned against the editor's own catalogue,
+      so an editor cannot use measures they cannot see. A name is unique across the source's
+      measures and metrics. A `zeteo.metric.created` audit entry is written.
+
+      **Required permissions:** `zeteo.measures.write`, and being an editor of the source (`403 forbidden` otherwise).
+
+      **Errors:** `400` with `error` the query error code of the first problem and `path`
+      (`["formula", ...]`); `404 not_found` (source); `409 measure_name_taken`, `409 source_archived`.
+    operationId: createMetric
+    parameters:
+      - $ref: '../../components/parameters.yaml#/SourceIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/measures/schemas.yaml#/CreateMetricRequest'
+          example:
+            name: cost_per_dollar
+            description: Ad spend per dollar of revenue. Lower is better.
+            formula: { div: [{ measure: spend }, { measure: revenue }] }
+    responses:
+      '201':
+        description: The metric
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/Metric'
+      '400':
+        description: |
+          Bad request - `invalid_request`, with `issues`; or the formula does not plan, with the
+          query error code of the problem and the `path` at fault
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/measures/schemas.yaml#/InvalidMeasureError'
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

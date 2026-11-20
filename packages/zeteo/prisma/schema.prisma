@@ -130,11 +130,14 @@ model Source {
   lastSyncAttemptAt    DateTime?    @map("last_sync_attempt_at") @db.Timestamp(3)
   lastSyncError        Json?        @map("last_sync_error")
 
-  tables       SourceTable[]
-  relations    Relation[]
-  runs         QueryRun[]
-  savedQueries SavedQuery[]
-  uploadClaims UploadClaim[]
+  tables         SourceTable[]
+  relations      Relation[]
+  runs           QueryRun[]
+  savedQueries   SavedQuery[]
+  uploadClaims   UploadClaim[]
+  measures       Measure[]
+  measureEditors MeasureEditor[]
+  metrics        Metric[]
 
   @@index([ownerId])
   @@map("sources")
@@ -166,6 +169,7 @@ model SourceTable {
   relationsFrom Relation[]     @relation("RelationFrom")
   relationsTo   Relation[]     @relation("RelationTo")
   grants        Grant[]
+  measures      Measure[]
 
   @@unique([sourceId, schemaName, name])
   @@map("source_tables")
@@ -239,6 +243,7 @@ enum EntryPoint {
   mcp
   export
   dashboard
+  measure_preview
 
   @@map("entry_point")
   @@schema("zeteo")
@@ -563,5 +568,92 @@ model Connection {
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
 
   @@map("connections")
+  @@schema("zeteo")
+}
+
+// The one calendar of the deployment (a single row, id = 1; no row means the
+// defaults). CHECK constraints in the migration: id = 1,
+// fiscal_year_start_month 1..12.
+model Calendar {
+  id                   Int      @id
+  workingDays          Int[]    @map("working_days")
+  fiscalYearStartMonth Int      @map("fiscal_year_start_month")
+  timeZone             String   @map("time_zone")
+  updatedBy            String?  @map("updated_by") @db.Uuid
+  updatedAt            DateTime @default(now()) @map("updated_at") @db.Timestamp(3)
+
+  @@map("calendar")
+  @@schema("zeteo")
+}
+
+model CalendarHoliday {
+  date DateTime @id @db.Date
+  name String
+
+  @@map("calendar_holidays")
+  @@schema("zeteo")
+}
+
+// A named group-level expression on one home table of a source. CHECK in the
+// migration: description is 1..2000 characters.
+model Measure {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  tableId     String   @map("table_id") @db.Uuid
+  name        String
+  description String
+  formula     Json
+  where       Json?
+  // Computed over its whole home table, ignoring the query it is used in.
+  fixed       Boolean  @default(false)
+  // A date or timestamp column path from the home table, for metric queries.
+  dateColumn  String?  @map("date_column")
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedBy   String   @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  source Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  table  SourceTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, name])
+  @@index([tableId])
+  @@map("measures")
+  @@schema("zeteo")
+}
+
+// A named formula over measures of any tables of one source. Its name is
+// unique per source across measures and metrics (checked by the service under
+// the source's measures lock).
+model Metric {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  sourceId    String   @map("source_id") @db.Uuid
+  name        String
+  description String
+  formula     Json
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedBy   String   @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, name])
+  @@map("metrics")
+  @@schema("zeteo")
+}
+
+// Who besides the admins may change a source's measures.
+model MeasureEditor {
+  sourceId      String        @map("source_id") @db.Uuid
+  principalType PrincipalType @map("principal_type")
+  principalId   String        @map("principal_id") @db.Uuid
+  createdBy     String        @map("created_by") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+
+  source Source @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@id([sourceId, principalType, principalId])
+  @@map("measure_editors")
   @@schema("zeteo")
 }

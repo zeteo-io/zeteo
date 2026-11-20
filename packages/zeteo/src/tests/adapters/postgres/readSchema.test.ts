@@ -37,6 +37,7 @@ describe("postgres readSchema", () => {
       .sort();
     expect(found).toEqual([
       "sales.accounts:table",
+      "sales.ad_spend:table",
       "sales.blobs:table",
       "sales.broken_orders:view",
       "sales.customers:table",

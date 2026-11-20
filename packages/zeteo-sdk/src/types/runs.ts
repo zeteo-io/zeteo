@@ -7,7 +7,7 @@ export interface QueryRun {
   user_id: string;
   /** Null when the query named no source the caller could see. */
   source_id: string | null;
-  entry_point: "api" | "mcp" | "export" | "dashboard";
+  entry_point: "api" | "mcp" | "export" | "dashboard" | "measure_preview";
   /**
    * The query as it was sent; `{ withheld: true }` in `me.runs` for a run of a
    * saved query the caller cannot open (such as a panel of someone else's

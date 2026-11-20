@@ -4,7 +4,7 @@ import { AzureSqlPreparedQuery } from "../../../adapters/azure-sql/runQuery.js";
 import { AzureSqlConnection } from "../../../adapters/azure-sql/connect.js";
 import { toMssqlConfig } from "../../../adapters/azure-sql/settings.js";
 import { mssqlDialect } from "../../../adapters/sql/dialects/mssql.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
 import { QueryError } from "../../../engine/errors.js";
 import { runPlan } from "../../support/runPlan.js";
@@ -456,7 +456,7 @@ describe("azure-sql runQuery: safety", () => {
               },
             } as never,
           },
-        } as SqlPlan,
+        } as TablePlan,
         LIMITS
       )
     );

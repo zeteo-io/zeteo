@@ -8,6 +8,11 @@ import { TEST_MCP_CLIENT } from "../../../setup/testEnv.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { tokenFor } from "../../../support/tokens.js";
 import {
+  measureBody,
+  metricBody,
+  seedMeasures,
+} from "../../../support/measures.js";
+import {
   grantTo,
   newQueryUser,
   postQuery,
@@ -21,9 +26,21 @@ interface Table {
   schema_name: string;
   columns: Array<{ name: string }>;
   relations: Array<{ name: string; to: string }>;
+  measures: Array<{
+    name: string;
+    description: string;
+    formula: unknown;
+    where: unknown;
+    fixed: boolean;
+    date_column: string | null;
+  }>;
 }
 interface Listed {
-  sources: Array<{ slug: string; tables: Table[] }>;
+  sources: Array<{
+    slug: string;
+    tables: Table[];
+    metrics: Array<{ name: string; description: string; formula: unknown }>;
+  }>;
 }
 
 describeEachEngine("GET /v1/catalog", (engine) => {
@@ -32,6 +49,8 @@ describeEachEngine("GET /v1/catalog", (engine) => {
   const wide = newQueryUser();
   const narrow = newQueryUser();
   const nobody = newQueryUser();
+  /** Granted every column of orders, so it can read a date column. */
+  const dated = newQueryUser();
 
   const catalog = (token: string, search = "") =>
     fetchJson("GET", `${BASE_URL}/v1/catalog${search}`, token);
@@ -48,10 +67,55 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     ]);
     await grantTo(wide.principal, source.tables.customers!, ["id", "region"]);
     await grantTo(narrow.principal, source.tables.orders!, ["id", "status"]);
+    await grantTo(dated.principal, source.tables.orders!, "all");
     await grantTo(wide.principal, other.tables.accounts!, "all");
+    await seedMeasures(
+      BASE_URL,
+      source,
+      [
+        {
+          ...measureBody(
+            "paid_orders",
+            { count: "*" },
+            { status: { eq: "paid" } }
+          ),
+          description: "Orders that are paid",
+        },
+        {
+          ...measureBody("a_order_count", { count: "*" }),
+          description: "All orders",
+        },
+        measureBody("total_revenue", { sum: "total" }),
+        {
+          ...measureBody("dated_orders", { count: "*" }),
+          description: "Orders by their creation",
+          date_column: "created_at",
+        },
+        {
+          ...measureBody("dated_revenue", { sum: "total" }),
+          date_column: "created_at",
+        },
+        {
+          ...measureBody("all_customers", { count: "*" }),
+          table: "customers",
+          fixed: true,
+        },
+      ],
+      [
+        metricBody("paid_share", {
+          div: [{ measure: "paid_orders" }, { measure: "dated_orders" }],
+        }),
+        metricBody("a_orders_per_customer", {
+          div: [{ measure: "a_order_count" }, { measure: "all_customers" }],
+        }),
+        metricBody("revenue_per_order", {
+          div: [{ measure: "dated_revenue" }, { measure: "dated_orders" }],
+        }),
+      ]
+    );
   });
   afterAll(async () => {
-    await removeRunsOf([wide.id, narrow.id]);
+    await removeRunsOf([wide.id, narrow.id, dated.id]);
     await removeSources([source.id, other.id]);
   });
 
@@ -107,6 +171,106 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     expect(tableOf(res.body, source.slug, "customers").relations).toEqual([
       { name: "orders", to: "orders", to_many: true, missing: false },
     ]);
+  });
+
+  it("lists the visible measures of each table by name, with description, formula and filter, and no id", async () => {
+    for (const user of [wide, narrow]) {
+      const res = await catalog(user.token, `?source=${source.slug}`);
+      const orders = tableOf(res.body, source.slug, "orders");
+      expect(orders.measures).toEqual([
+        {
+          name: "a_order_count",
+          description: "All orders",
+          formula: { count: "*" },
+          where: null,
+          fixed: false,
+          date_column: null,
+        },
+        {
+          // Stored with date_column created_at, which neither user is granted.
+          name: "dated_orders",
+          description: "Orders by their creation",
+          formula: { count: "*" },
+          where: null,
+          fixed: false,
+          date_column: null,
+        },
+        {
+          name: "paid_orders",
+          description: "Orders that are paid",
+          formula: { count: "*" },
+          where: { status: { eq: "paid" } },
+          fixed: false,
+          date_column: null,
+        },
+      ]);
+      // total_revenue reads `total`, which neither user is granted.
+      expect(JSON.stringify(res.body)).not.toContain("total_revenue");
+      expect(JSON.stringify(res.body)).not.toContain("created_at");
+    }
+    const customers = tableOf(
+      (await catalog(wide.token, `?source=${source.slug}`)).body,
+      source.slug,
+      "customers"
+    );
+    // Only the fixed all_customers, which is usable from any table.
+    expect(customers.measures.map((m) => m.name)).toEqual(["all_customers"]);
+  });
+
+  it("shows a measure's date column to a caller who can read it, and whether it is fixed", async () => {
+    const res = await catalog(dated.token, `?source=${source.slug}`);
+    const measures = tableOf(res.body, source.slug, "orders").measures;
+    expect(measures.map((m) => [m.name, m.fixed, m.date_column])).toEqual([
+      ["a_order_count", false, null],
+      ["dated_orders", false, "created_at"],
+      ["dated_revenue", false, "created_at"],
+      ["paid_orders", false, null],
+      ["total_revenue", false, null],
+    ]);
+  });
+
+  it("shows a fixed measure on its home table only to a caller who sees it", async () => {
+    const wideRes = await catalog(wide.token, `?source=${source.slug}`);
+    const customers = tableOf(wideRes.body, source.slug, "customers");
+    expect(customers.measures).toMatchObject([
+      { name: "all_customers", fixed: true, date_column: null },
+    ]);
+    // narrow has no customers table: no all_customers, and no metric using it.
+    const narrowRes = await catalog(narrow.token, `?source=${source.slug}`);
+    expect(JSON.stringify(narrowRes.body)).not.toContain("all_customers");
+  });
+
+  it("lists the visible metrics of a source, sorted, and never one using a measure the caller cannot see", async () => {
+    const wideRes = await catalog(wide.token, `?source=${source.slug}`);
+    expect(wideRes.body.sources[0].metrics).toEqual([
+      {
+        name: "a_orders_per_customer",
+        description: "The a orders per customer",
+        formula: {
+          div: [{ measure: "a_order_count" }, { measure: "all_customers" }],
+        },
+      },
+      {
+        name: "paid_share",
+        description: "The paid share",
+        formula: {
+          div: [{ measure: "paid_orders" }, { measure: "dated_orders" }],
+        },
+      },
+    ]);
+    // revenue_per_order uses dated_revenue, over `total`: not wide's.
+    expect(JSON.stringify(wideRes.body)).not.toContain("revenue_per_order");
+    const narrowRes = await catalog(narrow.token, `?source=${source.slug}`);
+    expect(
+      narrowRes.body.sources[0].metrics.map((m: { name: string }) => m.name)
+    ).toEqual(["paid_share"]);
+    const datedRes = await catalog(dated.token, `?source=${source.slug}`);
+    expect(
+      datedRes.body.sources[0].metrics.map((m: { name: string }) => m.name)
+    ).toEqual(["paid_share", "revenue_per_order"]);
+    // A source with none lists an empty array.
+    const otherRes = await catalog(wide.token, `?source=${other.slug}`);
+    expect(otherRes.body.sources[0].metrics).toEqual([]);
   });
 
   it("shows a column-list grant exactly, and drops a relation whose key is not granted", async () => {
@@ -178,6 +342,7 @@ describeEachEngine("GET /v1/catalog", (engine) => {
       "kind",
       "language",
       "limits",
+      "metrics",
       "name",
       "slug",
       "tables",
@@ -195,12 +360,20 @@ describeEachEngine("GET /v1/catalog", (engine) => {
     ).toBe(true);
   });
 
-  it("describes the language as a JSON Schema that names select", async () => {
+  it("describes the language as a JSON Schema: a table query that names select, or a metric query", async () => {
     const res = await catalog(wide.token, `?source=${source.slug}`);
     const { language } = res.body.sources[0];
     expect(language.id).toBe("sql");
-    expect(language.schema.type).toBe("object");
-    expect(language.schema.properties.select).toBeDefined();
+    expect(language.schema.anyOf).toEqual([
+      { $ref: "#/$defs/TableQuery" },
+      { $ref: "#/$defs/MetricQuery" },
+    ]);
+    const { TableQuery, MetricQuery } = language.schema.$defs;
+    expect(TableQuery.type).toBe("object");
+    expect(TableQuery.properties.select).toBeDefined();
+    expect(MetricQuery.type).toBe("object");
+    expect(MetricQuery.required).toEqual(["source", "metrics"]);
+    expect(MetricQuery.properties.range).toBeDefined();
   });
 
   it("answers a query written only from the response", async () => {

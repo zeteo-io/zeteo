@@ -61,15 +61,15 @@ describeEachEngine("POST /v1/query", (engine) => {
     expect(res.body).toEqual({
       columns: [
         { name: "customers.region", type: "text" },
-        { name: "month", type: "timestamp" },
+        { name: "month", type: "date" },
         { name: "revenue", type: "number" },
       ],
       rows: [
-        ["EU", "2026-02-01T00:00:00.000Z", "1200.00"],
-        ["EU", "2026-06-01T00:00:00.000Z", "999.99"],
-        ["US", "2026-04-01T00:00:00.000Z", "640.10"],
-        ["EU", "2026-05-01T00:00:00.000Z", "410.00"],
-        ["EU", "2026-01-01T00:00:00.000Z", "260.50"],
+        ["EU", "2026-02-01", "1200.00"],
+        ["EU", "2026-06-01", "999.99"],
+        ["US", "2026-04-01", "640.10"],
+        ["EU", "2026-05-01", "410.00"],
+        ["EU", "2026-01-01", "260.50"],
       ],
       truncated: false,
       warnings: [],
@@ -174,46 +174,49 @@ describeEachEngine("POST /v1/query", (engine) => {
     [
       "day",
       [
-        ["2026-03-01T00:00:00.000Z", "1"],
-        ["2026-03-31T00:00:00.000Z", "1"],
-        ["2026-04-01T00:00:00.000Z", "1"],
+        ["2026-03-01", "1"],
+        ["2026-03-31", "1"],
+        ["2026-04-01", "1"],
       ],
     ],
     [
       "week",
       [
-        ["2026-02-23T00:00:00.000Z", "1"],
-        ["2026-03-30T00:00:00.000Z", "2"],
+        ["2026-02-23", "1"],
+        ["2026-03-30", "2"],
       ],
     ],
     [
       "month",
       [
-        ["2026-03-01T00:00:00.000Z", "2"],
-        ["2026-04-01T00:00:00.000Z", "1"],
+        ["2026-03-01", "2"],
+        ["2026-04-01", "1"],
       ],
     ],
     [
       "quarter",
       [
-        ["2026-01-01T00:00:00.000Z", "2"],
-        ["2026-04-01T00:00:00.000Z", "1"],
+        ["2026-01-01", "2"],
+        ["2026-04-01", "1"],
       ],
     ],
-    ["year", [["2026-01-01T00:00:00.000Z", "3"]]],
-  ])("buckets by %s in UTC, weeks from Monday", async (unit, rows) => {
-    expect(
-      await rowsOf({
-        from: "orders",
-        select: [
-          { bucket: unit, column: "created_at", as: "b" },
-          { count: "*", as: "n" },
-        ],
-        where: { id: { in: [5, 6, 7] } },
-        groupBy: ["b"],
-      })
-    ).toEqual(rows);
-  });
+    ["year", [["2026-01-01", "3"]]],
+  ])(
+    "buckets by %s, the UTC date in a UTC calendar, weeks from Monday",
+    async (unit, rows) => {
+      expect(
+        await rowsOf({
+          from: "orders",
+          select: [
+            { bucket: unit, column: "created_at", as: "b" },
+            { count: "*", as: "n" },
+          ],
+          where: { id: { in: [5, 6, 7] } },
+          groupBy: ["b"],
+        })
+      ).toEqual(rows);
+    }
+  );
 
   it.each([
     ["eq", { status: { eq: "shipped" } }, [3, 7, 11]],

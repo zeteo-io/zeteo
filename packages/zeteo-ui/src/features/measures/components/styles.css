@@ -1,0 +1,122 @@
+.z-measure-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-measure-json textarea {
+  font-family: var(--k-font-mono, monospace);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-measure-field-error {
+  color: var(--k-danger-color);
+  font-size: var(--k-text-size-sm);
+  margin: 0.25rem 0 0;
+}
+
+.z-measure-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.z-measure-broken {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--k-text-color-secondary);
+  font-size: var(--k-text-size-sm);
+}
+
+.z-measure-preview {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-measure-preview-value {
+  font-size: var(--k-text-size-xl, 1.5rem);
+}
+
+.z-measure-preview table {
+  border-collapse: collapse;
+}
+
+.z-measure-preview th,
+.z-measure-preview td {
+  text-align: left;
+  padding: 0.25rem 0.75rem 0.25rem 0;
+}
+
+.z-measure-editors {
+  min-width: min(34rem, 80vw);
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-measure-editor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-measure-editor-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+/* Name and table side by side on a measure's page. */
+.z-measure-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 40rem) {
+  .z-measure-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.z-measure-form .k-form {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Fields inside a section of a measure's or metric's page. */
+.z-measure-form [data-field] + [data-field]:not(.z-measure-pair > *),
+.z-measure-pair + [data-field] {
+  margin-top: 1rem;
+}
+
+.z-measure-note {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+/* A measure's or metric's page: the details on the left, the JSON on the right. */
+.z-form-page.z-measure-page {
+  max-width: 80rem;
+}
+
+.z-measure-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.z-measure-column {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (max-width: 60rem) {
+  .z-measure-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

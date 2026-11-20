@@ -15,6 +15,7 @@ vi.mock("echarts/charts", () => ({
   LineChart: {},
   BarChart: {},
   PieChart: {},
+  GaugeChart: {},
 }));
 vi.mock("echarts/components", () => ({
   GridComponent: {},
@@ -115,6 +116,17 @@ describe("Chart", () => {
   it("says so when a setting names a column the result lacks", () => {
     render(<Chart chart={{ ...line, x: "gone" }} result={result} />);
     expect(screen.getByText(/gone/)).toBeInTheDocument();
+  });
+
+  it("shows No data for a gauge whose value is null, drawing nothing", () => {
+    render(
+      <Chart
+        chart={{ version: 1, type: "gauge", value: "revenue", max: "revenue" }}
+        result={{ ...result, rows: [["jan", null]] }}
+      />
+    );
+    expect(screen.getByText(/^No data/)).toHaveClass("z-chart-note");
+    expect(init).not.toHaveBeenCalled();
   });
 });
 

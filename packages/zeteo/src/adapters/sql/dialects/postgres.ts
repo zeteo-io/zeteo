@@ -1,6 +1,8 @@
+import { fiscalShift, SECONDS_IN, truncUnit } from "../dialect.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { postgresBaseType } from "../../postgres/types.js";
 import { invalidValue } from "../../../engine/errors.js";
+import type { DateAddUnit } from "../language.js";
 import type { PlanValue } from "../types.js";
 import {
   DummyDriver,
@@ -102,6 +104,19 @@ const value = (
 
 const ESCAPE = "\\";
 
+/** `n` units as an interval; the number and unit are the planner's, never user text. */
+const intervalOf = (n: number, unit: DateAddUnit) =>
+  sql.raw(
+    unit === "quarter"
+      ? `interval '${n * 3} months'`
+      : unit === "year"
+        ? `interval '${n * 12} months'`
+        : `interval '${n} ${unit === "week" ? "weeks" : unit === "month" ? "months" : "days"}'`
+  );
+
+/** A whole number of months; the number is the planner's integer, never user text. */
+const months = (n: number) => sql.raw(`interval '${n} months'`);
+
 /**
  * A column as every part of a query reads it. Money compares and sums only
  * with money, and prints with a currency symbol: it is read as numeric. An
@@ -146,9 +161,11 @@ export const postgresDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type) => {
-    const truncated = sql`date_trunc(${unit}, ${column})`;
-    return type === "date" ? sql`${truncated}::date` : truncated;
+  bucket: (unit, date, fiscalStartMonth) => {
+    const shift = fiscalShift(unit, fiscalStartMonth);
+    return shift === 0
+      ? sql`date_trunc(${truncUnit(unit)}, ${date})::date`
+      : sql`(date_trunc(${truncUnit(unit)}, ${date} - ${months(shift)}) + ${months(shift)})::date`;
   },
   like: (expression, pattern, nativeType): Expression<SqlBool> =>
     sql<SqlBool>`${asText(expression, nativeType)} ilike ${pattern} escape ${sql.lit(ESCAPE)}`,
@@ -188,8 +205,93 @@ export const postgresDialect: SqlDialect = {
   // type to pick an operator or function by.
   literal: (v, type) => {
     if (type === "text") return sql`cast(${v} as text)`;
+    if (type === "date") return sql`cast(${v} as date)`;
+    if (type === "timestamp") return sql`cast(${v} as timestamptz)`;
     checkNumeric(v);
     return isBigint(v) ? sql`cast(${v} as bigint)` : sql`cast(${v} as numeric)`;
+  },
+  // The amount and unit are validated, so they are written as an interval
+  // literal. Postgres clamps a month step to the month's last day.
+  dateAdd: (expression, amount, unit, type) => {
+    const shifted = sql`${expression} + ${intervalOf(amount, unit)}`;
+    return type === "date" ? sql`cast(${shifted} as date)` : shifted;
+  },
+  dateDiff: (unit, start, end, type) => {
+    const s =
+      type === "date"
+        ? sql`cast(${start} as date)`
+        : sql`cast(${start} as timestamp)`;
+    const e =
+      type === "date"
+        ? sql`cast(${end} as date)`
+        : sql`cast(${end} as timestamp)`;
+    const days =
+      type === "date"
+        ? sql`(${e} - ${s})`
+        : sql`cast(trunc(extract(epoch from (${e} - ${s})) / 86400) as integer)`;
+    if (unit in SECONDS_IN) {
+      const per = SECONDS_IN[unit as keyof typeof SECONDS_IN];
+      return type === "date"
+        ? sql`(cast(${e} - ${s} as bigint) * ${sql.lit(86400 / per)})`
+        : sql`cast(trunc(extract(epoch from (${e} - ${s})) / ${sql.lit(per)}) as bigint)`;
+    }
+    if (unit === "day") return days;
+    if (unit === "week") return sql`(${days} / 7)`;
+    const field = (part: "year" | "month", x: Expression<unknown>) =>
+      sql`cast(extract(${sql.raw(part)} from ${x}) as integer)`;
+    const boundaries = sql`((${field("year", e)} - ${field("year", s)}) * 12 + ${field("month", e)} - ${field("month", s)})`;
+    const shifted = sql`${s} + ${boundaries} * interval '1 month'`;
+    const completed = sql`(case when ${boundaries} > 0 and ${shifted} > ${e} then ${boundaries} - 1 when ${boundaries} < 0 and ${shifted} < ${e} then ${boundaries} + 1 else ${boundaries} end)`;
+    if (unit === "month") return completed;
+    return sql`(${completed} / ${sql.lit(unit === "quarter" ? 3 : 12)})`;
+  },
+  datePart: (part, expression, fiscalStartMonth) => {
+    const field = (name: string) =>
+      sql`cast(extract(${sql.raw(name)} from ${expression}) as integer)`;
+    switch (part) {
+      case "year":
+      case "quarter":
+      case "month":
+      case "day":
+        return field(part);
+      case "weekday":
+        return field("isodow");
+      case "fiscal_year":
+        return fiscalStartMonth === 1
+          ? field("year")
+          : sql`(${field("year")} + case when ${field("month")} >= ${sql.lit(fiscalStartMonth)} then 1 else 0 end)`;
+      case "fiscal_quarter":
+        return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
+    }
+  },
+  // Unconstrained numeric keeps each value's own scale.
+  typedNull: (approximate) =>
+    approximate ? sql`cast(null as float8)` : sql`cast(null as numeric)`,
+  // timestamptz is an instant, and the session runs in UTC.
+  timestampUtc: (expression) => expression,
+  stepFence: "offset",
+  subqueryInAggregate: true,
+  anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
+  truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
+  // WIDTH_BUCKET binary-searches the sorted array (bound as one parameter):
+  // the count of values at most the bound. Equality is the difference of
+  // two such counts.
+  countWhere: (values, op, bound) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const atMost = (x: Expression<unknown>) =>
+      sql`width_bucket(${x}, cast(${sorted} as int[]))`;
+    return op === "<="
+      ? atMost(bound)
+      : sql`(${atMost(bound)} - ${atMost(sql`${bound} - 1`)})`;
+  },
+  // Native conversion, the zone name bound: the calendar takes only `UTC`
+  // and region names (with a "/"), which Postgres reads by their rules, never
+  // as fixed-offset abbreviations. The session runs in UTC, so a timestamp
+  // without a zone is a UTC instant. Outside the window SQL Server knows the
+  // zone's offsets for, null, as there, so both engines answer alike.
+  zoneDate: (timestamp, zone) => {
+    const instant = sql`cast(${timestamp} as timestamptz)`;
+    return sql`case when ${instant} >= cast(${zone.from} as timestamptz) and ${instant} < cast(${zone.to} as timestamptz) then cast(${instant} at time zone cast(${zone.name} as text) as date) end`;
   },
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),

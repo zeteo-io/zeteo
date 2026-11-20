@@ -1,12 +1,16 @@
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
+import { toRow as toMeasureRow } from "../utils/db/measures.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { isUploadSource, typeOf } from "../sources/types.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { discardStaging, getStaging } from "./staging.js";
 import { presentSourceById } from "../sources/present.js";
+import { lockSourceMeasures } from "../measures/lock.js";
+import { tableRemoval } from "../measures/dependents.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
+import { toMetricRow } from "../utils/db/metrics.js";
 import type { SourceView } from "../views/source.js";
 import type { Caller } from "../middleware/auth.js";
 import type { UploadColumnType } from "./types.js";
@@ -30,6 +34,7 @@ import {
   UploadSourceBusyError,
   UploadsNotConfiguredError,
   isDatabaseBusy,
+  MeasureInUseError,
   NotAFileUploadError,
   NotAnUploadSourceError,
   NotFoundError,
@@ -550,6 +555,11 @@ export const deleteUploadSource = async (
         data: { ownerGrant: false },
       });
       await releaseAllClaims(tx, id);
+      // Its measures, metrics and their editors go with the source.
+      await lockSourceMeasures(tx, id);
+      const measures = await tx.measure.deleteMany({ where: { sourceId: id } });
+      const metrics = await tx.metric.deleteMany({ where: { sourceId: id } });
+      await tx.measureEditor.deleteMany({ where: { sourceId: id } });
       await dropSourceSchema(id, tx);
       audit({
         action: AUDIT_EVENTS.sourceDeleted,
@@ -561,6 +571,8 @@ export const deleteUploadSource = async (
           type: typeOf(row),
           name: row.name,
           owner_id: row.ownerId,
+          measures_removed: measures.count,
+          metrics_removed: metrics.count,
         },
       });
     })
@@ -946,7 +958,8 @@ const removable = (table: { missingSince: Date | null; origin: unknown }) => {
  * claim of its spreadsheet is released when no other table uses it; a Sheets
  * table a sync marked missing can be removed so too. A merged table's view
  * is dropped. A table a live merged table reads is 409
- * `table_in_merged_table`.
+ * `table_in_merged_table`. Its measures, and the metrics using them, go with
+ * it; one of another table using its measures is 409 `measure_in_use`.
  */
 export const removeTable = async (
   caller: Caller,
@@ -969,6 +982,21 @@ export const removeTable = async (
         throw new NotFoundError("Table not found");
       }
       await assertNotMerged(tx, id, tableId);
+      // A measure lives on its home table: it goes with it, as does a metric
+      // using one. A measure of another table using one (a fixed measure is
+      // usable from any table) would be left broken: as for a measure's
+      // delete, that refuses the removal before anything changes.
+      await lockSourceMeasures(tx, id);
+      const removal = tableRemoval(
+        tableId,
+        (await tx.measure.findMany({ where: { sourceId: id } })).map(
+          toMeasureRow
+        ),
+        (await tx.metric.findMany({ where: { sourceId: id } })).map(toMetricRow)
+      );
+      if (removal.blocking.length > 0) {
+        throw new MeasureInUseError(removal.blocking, "this table's measures");
+      }
       const now = new Date();
       const origin = originOf(table);
       // A merged table's view is already dropped (`inDrop`) and is not
@@ -994,6 +1022,48 @@ export const removeTable = async (
       if (origin?.kind === "google-sheets") {
         await releaseUnusedClaims(tx, id);
       }
+      const measuresRemoved = removal.measures.map((m) => ({
+        id: m.id,
+        name: m.name,
+      }));
+      const metricsRemoved = removal.metrics.map((m) => ({
+        id: m.id,
+        name: m.name,
+      }));
+      if (measuresRemoved.length > 0) {
+        await tx.measure.deleteMany({
+          where: { id: { in: measuresRemoved.map((m) => m.id) } },
+        });
+      }
+      if (metricsRemoved.length > 0) {
+        await tx.metric.deleteMany({
+          where: { id: { in: metricsRemoved.map((m) => m.id) } },
+        });
+      }
+      // Each one gone is recorded as its own delete would be, saying why.
+      const withTable = {
+        source_id: id,
+        slug: row.slug,
+        removed_with_table: { id: tableId, name: table.name },
+      };
+      for (const m of measuresRemoved) {
+        audit({
+          action: AUDIT_EVENTS.measureDeleted,
+          resourceType: "measure",
+          resourceId: m.id,
+          actorId: caller.userId,
+          metadata: { ...withTable, name: m.name },
+        });
+      }
+      for (const m of metricsRemoved) {
+        audit({
+          action: AUDIT_EVENTS.metricDeleted,
+          resourceType: "metric",
+          resourceId: m.id,
+          actorId: caller.userId,
+          metadata: { ...withTable, name: m.name },
+        });
+      }
       audit({
         action: AUDIT_EVENTS.sourceTableRemoved,
         resourceType: "source",
@@ -1004,6 +1074,8 @@ export const removeTable = async (
           type: typeOf(row),
           changed: ["tables"],
           tables_removed: [{ id: tableId, name: table.name }],
+          measures_removed: measuresRemoved,
+          metrics_removed: metricsRemoved,
         },
       });
     })

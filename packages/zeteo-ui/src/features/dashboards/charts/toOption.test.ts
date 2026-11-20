@@ -201,6 +201,8 @@ describe("toOption", () => {
         toOption({ version: 1, type: "line", x: "day", y: ["n"] }, r, theme)
       );
       expect(o.xAxis.type).toBe("time");
+      // A date is a day: labelled at its UTC midnight, whatever the viewer's zone.
+      expect(o.useUTC).toBe(type === "date" ? true : undefined);
     }
   });
 
@@ -654,5 +656,137 @@ describe("formatAxisNumber", () => {
   it("keeps smaller values as they are, with their decimals", () => {
     expect(formatAxisNumber(9_999)).toBe((9_999).toLocaleString());
     expect(formatAxisNumber(2, 1)).toBe("2.0");
+  });
+});
+
+describe("toOption gauge", () => {
+  const r = result(
+    [
+      ["spend", "number"],
+      ["pace", "number"],
+      ["budget", "number"],
+    ],
+    [[42, 50, 100]]
+  );
+
+  it("draws one gauge with the value, scale and a marker at the target", () => {
+    const o = opt(
+      toOption(
+        {
+          version: 1,
+          type: "gauge",
+          value: "spend",
+          target: "pace",
+          max: "budget",
+          unit: "USD",
+        },
+        r,
+        theme
+      )
+    );
+    expect(o.series[0].type).toBe("gauge");
+    expect(o.series[0].max).toBe(100);
+    expect(o.series[0].min).toBe(0);
+    expect(o.series[0].data[0].value).toBe(42);
+    expect(o.series[0].progress.show).toBe(true);
+    const marker = o.series[1];
+    expect(marker.type).toBe("gauge");
+    expect(marker.max).toBe(100);
+    expect(marker.data[0].value).toBe(50);
+    expect(o.series[0].detail.formatter(42)).toContain("USD");
+  });
+
+  it("takes min from a number or a column, and has no marker without target", () => {
+    const o = opt(
+      toOption(
+        { version: 1, type: "gauge", value: "spend", max: "budget", min: 10 },
+        r,
+        theme
+      )
+    );
+    expect(o.series).toHaveLength(1);
+    expect(o.series[0].min).toBe(10);
+    const c = opt(
+      toOption(
+        {
+          version: 1,
+          type: "gauge",
+          value: "spend",
+          max: "budget",
+          min: "pace",
+        },
+        r,
+        theme
+      )
+    );
+    expect(c.series[0].min).toBe(50);
+  });
+
+  it("says so when the result has no rows", () => {
+    expect(() =>
+      toOption(
+        { version: 1, type: "gauge", value: "spend", max: "budget" },
+        result(
+          [
+            ["spend", "number"],
+            ["budget", "number"],
+          ],
+          []
+        ),
+        theme
+      )
+    ).toThrow(/no rows/);
+  });
+
+  const nulls = result(
+    [
+      ["spend", "number"],
+      ["pace", "number"],
+      ["budget", "number"],
+    ],
+    [[null, null, null]]
+  );
+  const withBudget = result(
+    [
+      ["spend", "number"],
+      ["pace", "number"],
+      ["budget", "number"],
+    ],
+    [[42, null, 100]]
+  );
+
+  it("says No data for a null value or a null max, never 0 of 100", () => {
+    expect(() =>
+      toOption(
+        { version: 1, type: "gauge", value: "spend", max: "budget" },
+        nulls,
+        theme
+      )
+    ).toThrow(/^No data: the value is empty/);
+    expect(() =>
+      toOption(
+        { version: 1, type: "gauge", value: "budget", max: "pace" },
+        withBudget,
+        theme
+      )
+    ).toThrow(/^No data: the maximum is empty/);
+  });
+
+  it("drops only the marker for a null target", () => {
+    const o = opt(
+      toOption(
+        {
+          version: 1,
+          type: "gauge",
+          value: "spend",
+          max: "budget",
+          target: "pace",
+        },
+        withBudget,
+        theme
+      )
+    );
+    expect(o.series).toHaveLength(1);
+    expect(o.series[0].data[0].value).toBe(42);
   });
 });

@@ -1,5 +1,6 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
+import { fiscalShift, SECONDS_IN } from "../dialect.js";
 import { plainNumber } from "../values.js";
 import {
   DummyDriver,
@@ -69,6 +70,55 @@ class BracketQueryCompiler extends MssqlQueryCompiler {
     return identifier.replaceAll("]", "]]");
   }
 }
+
+const NAIVE_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
+
+/** A naive UTC instant from the planner (`YYYY-MM-DDTHH:MM:SS`) as a literal. */
+const instantLit = (instant: string): Expression<unknown> => {
+  if (!NAIVE_INSTANT.test(instant)) throw new Error("not a naive instant");
+  return sql.lit(instant);
+};
+
+/**
+ * How deep a search's CASE tree splits before a ladder takes over: SQL
+ * Server nests CASE at most 10 deep, and a search is one or two levels more
+ * than this (the ladder, an equality or a guard around it).
+ */
+const SEARCH_DEPTH = 7;
+
+/**
+ * `at(i)` for the i of the ascending `keys` at most `x`, found by a CASE
+ * tree of comparisons, so a row compares `x` with a few keys and not all of
+ * them. The keys are the planner's numbers, written as literals by `key`.
+ * `x` must be a plain column (a fenced step's value): an inline expression
+ * holding a CASE would add to the nesting and could pass SQL Server's limit
+ * of 10. A null `x` falls through to the last branch, not 0: callers rely on
+ * their own result being null when `x` is.
+ */
+const search = (
+  x: Expression<unknown>,
+  keys: readonly Expression<unknown>[],
+  at: (i: number) => Expression<unknown>
+): Expression<unknown> => {
+  // Between lo and hi of the keys are at most x.
+  const within = (
+    lo: number,
+    hi: number,
+    depth: number
+  ): Expression<unknown> => {
+    if (lo === hi) return at(lo);
+    if (depth === SEARCH_DEPTH) {
+      const steps = [];
+      for (let i = lo; i < hi; i++) {
+        steps.push(sql`when ${x} < ${keys[i]!} then ${at(i)}`);
+      }
+      return sql`case ${sql.join(steps, sql` `)} else ${at(hi)} end`;
+    }
+    const mid = (lo + hi + 1) >> 1;
+    return sql`case when ${x} < ${keys[mid - 1]!} then ${within(lo, mid - 1, depth + 1)} else ${within(mid, hi, depth + 1)} end`;
+  };
+  return within(0, keys.length, 0);
+};
 
 /** A native type's name without its length, precision or scale. */
 const baseType = (nativeType: string | undefined): string =>
@@ -168,6 +218,8 @@ const DATEPART: Record<BucketUnit, string> = {
   month: "month",
   quarter: "quarter",
   year: "year",
+  fiscal_quarter: "quarter",
+  fiscal_year: "year",
 };
 
 /** The sum as SQL Server computes it without overflow or a float: bigint for small integers, decimal(38,0) for bigint. */
@@ -220,7 +272,7 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
         ? kindOfType(expr.column.nativeType)
         : undefined;
     case "literal": {
-      if (expr.type === "text") return undefined;
+      if (expr.type !== "number") return undefined;
       const { kind } = numberBinding(
         typeof expr.value === "number" ? plainNumber(expr.value) : expr.value
       );
@@ -240,6 +292,27 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
       // An integer expression is summed in decimal(38, 0), see `aggregate`.
       return expr.fn === "sum" && kind === "integer" ? "decimal" : kind;
     }
+    case "case":
+      return expr.type !== "number"
+        ? undefined
+        : widest(
+            [...expr.branches.map((b) => b.then), expr.otherwise].flatMap(
+              (e) => (e ? [exprKind(e)] : [])
+            )
+          );
+    case "dateAdd":
+      return undefined;
+    case "dateDiff":
+    case "datePart":
+    case "businessDays":
+    case "businessPeriod":
+      return "integer";
+    case "addBusinessDays":
+      return undefined;
+    case "scalar":
+      return exprKind(expr.plan.expr);
+    case "pivot":
+      return exprKind(expr.of);
     case "op":
       if (expr.type !== "number") return undefined;
       if (expr.op === "div" || expr.op === "round") return "decimal";
@@ -301,15 +374,15 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type, nativeType) => {
+  bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
-    if (type === "date")
-      return sql`cast(datetrunc(${part}, ${column}) as date)`;
-    const utc =
-      baseType(nativeType) === "datetimeoffset"
-        ? sql`switchoffset(${column}, '+00:00')`
-        : column;
-    return sql`cast(datetrunc(${part}, ${utc}) as datetime2(3))`;
+    const shift = fiscalShift(unit, fiscalStartMonth);
+    // The shift is the planner's integer, so it is written as a literal.
+    const truncated =
+      shift === 0
+        ? sql`datetrunc(${part}, ${date})`
+        : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${date})))`;
+    return sql`cast(${truncated} as date)`;
   },
   // LOWER on both sides makes the match case-insensitive whatever the
   // column's collation; `[` opens a character class in SQL Server's LIKE.
@@ -369,11 +442,116 @@ export const mssqlDialect: SqlDialect = {
   // decimal(38, s) would cut the result to 6 places.
   literal: (v, type) => {
     if (type === "text") return param("nvarchar", v);
+    // A timestamp literal is read as the naive UTC datetime2 a column holds.
+    if (type === "date" || type === "timestamp") {
+      return value(v, { type, nativeType: "datetime2" });
+    }
     const binding = numberBinding(v);
     if (binding.kind !== "decimal") return value(v, { type });
     const digits = DECIMAL_TEXT.exec(v)![1]!.replace(/^0+/, "").length;
     return sql`cast(${param("nvarchar", v)} as decimal(${sql.lit(Math.max(digits + binding.scale, 1))}, ${sql.lit(binding.scale)}))`;
   },
+  // The unit is a keyword and the amount a validated integer, both written
+  // into the SQL. DATEADD clamps a month step to the month's last day.
+  dateAdd: (expression, amount, unit) =>
+    sql`dateadd(${sql.raw(unit)}, ${sql.lit(amount)}, ${expression})`,
+  // DATEDIFF counts boundaries crossed, which is not whole units completed:
+  // days of a timestamp come from microseconds, and months are corrected
+  // against the clamped DATEADD, as Postgres's are.
+  dateDiff: (unit, start, end, type) => {
+    const read = (x: Expression<unknown>) =>
+      type === "date"
+        ? sql`cast(${x} as date)`
+        : sql`cast(${x} as datetime2(7))`;
+    const s = read(start);
+    const e = read(end);
+    const days =
+      type === "date"
+        ? sql`datediff(day, ${s}, ${e})`
+        : sql`cast(datediff_big(microsecond, ${s}, ${e}) / cast(86400000000 as bigint) as int)`;
+    if (unit in SECONDS_IN) {
+      const per = SECONDS_IN[unit as keyof typeof SECONDS_IN];
+      // Integer division truncates toward zero, as Postgres's trunc does.
+      return type === "date"
+        ? sql`(cast(datediff(day, ${s}, ${e}) as bigint) * ${sql.lit(86400 / per)})`
+        : sql`(datediff_big(microsecond, ${s}, ${e}) / cast(${sql.lit(per * 1_000_000)} as bigint))`;
+    }
+    if (unit === "day") return days;
+    if (unit === "week") return sql`(${days} / 7)`;
+    const boundaries = sql`datediff(month, ${s}, ${e})`;
+    const shifted = sql`dateadd(month, ${boundaries}, ${s})`;
+    const completed = sql`(case when ${boundaries} > 0 and ${shifted} > ${e} then ${boundaries} - 1 when ${boundaries} < 0 and ${shifted} < ${e} then ${boundaries} + 1 else ${boundaries} end)`;
+    if (unit === "month") return completed;
+    return sql`(${completed} / ${sql.lit(unit === "quarter" ? 3 : 12)})`;
+  },
+  datePart: (part, expression, fiscalStartMonth) => {
+    const field = (name: string) =>
+      sql`datepart(${sql.raw(name)}, ${expression})`;
+    switch (part) {
+      case "year":
+      case "quarter":
+      case "month":
+      case "day":
+        return field(part);
+      // Monday is 1 whatever the session's DATEFIRST.
+      case "weekday":
+        return sql`((${field("weekday")} + @@datefirst + 5) % 7 + 1)`;
+      case "fiscal_year":
+        return fiscalStartMonth === 1
+          ? field("year")
+          : sql`(${field("year")} + case when ${field("month")} >= ${sql.lit(fiscalStartMonth)} then 1 else 0 end)`;
+      case "fiscal_quarter":
+        return sql`((${field("month")} - ${sql.lit(fiscalStartMonth)} + 12) % 12 / 3 + 1)`;
+    }
+  },
+  // A datetimeoffset keeps its own offset; date parts and differences are
+  // taken on the UTC wall clock, or on the calendar zone's, read first.
+  stepFence: "aggregate",
+  subqueryInAggregate: false,
+  anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
+  // Truncates a float, an integer or a decimal toward zero alike.
+  truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,
+  // A CASE tree over the calendar's ordinals (integers the planner computed
+  // from the admin's calendar, never query input): a row compares the bound
+  // with a few of them, where a VALUES list or OPENJSON (which parses its
+  // text on every row) reads them all.
+  countWhere: (values, op, bound) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const keys = sorted.map((v) => sql.lit(v));
+    return op === "<="
+      ? search(bound, keys, (i) => sql.lit(i))
+      : search(bound, keys, (i) =>
+          i === 0
+            ? sql.lit(0)
+            : sql`case when ${bound} = ${keys[i - 1]!} then 1 else 0 end`
+        );
+  },
+  // SQL Server knows Windows zone names only: the offset in effect is found
+  // among the zone's spans over the window by a CASE tree on their starts,
+  // and added to the instant; null outside the window. The instant passes
+  // through MAX over its one row first, so the tree compares a value: SQL
+  // Server would otherwise repeat its expression in every comparison. The
+  // spans are the planner's, computed from the zone's rules, in a fixed form
+  // checked here, never query input.
+  zoneDate: (timestamp, zone) => {
+    const instant = (at: string) =>
+      sql`cast(${instantLit(at)} as datetime2(7))`;
+    const { spans } = zone;
+    const t = sql.id("zt", "t");
+    const offset = search(
+      t,
+      spans.slice(1).map(({ s }) => instant(s)),
+      (i) => sql.lit(spans[i]!.o)
+    );
+    return sql`(select cast(dateadd(second, case when ${t} >= ${instant(spans[0]!.s)} and ${t} < ${instant(spans.at(-1)!.e)} then ${offset} end, ${t}) as date) from (select max(${sql.id("zr", "t")}) as ${sql.id("t")} from (select ${timestamp} as ${sql.id("t")}) as ${sql.id("zr")}) as ${sql.id("zt")})`;
+  },
+  // SQL Server types a union's column over all its branches, and a bare null
+  // (an int) takes the type of the others: no cast, so no decimal is resized.
+  typedNull: () => sql`null`,
+  timestampUtc: (expression, nativeType) =>
+    baseType(nativeType) === "datetimeoffset"
+      ? sql`cast(switchoffset(${expression}, '+00:00') as datetime2(7))`
+      : expression,
   // Lower-case, as Postgres prints a uuid.
   text: (expression, nativeType) =>
     baseType(nativeType) === "uniqueidentifier"

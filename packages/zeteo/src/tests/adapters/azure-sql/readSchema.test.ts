@@ -43,6 +43,7 @@ describe("azure-sql readSchema", () => {
       .sort();
     expect(found).toEqual([
       "sales.accounts:table",
+      "sales.ad_spend:table",
       "sales.broken_orders:view",
       "sales.customers:table",
       "sales.ledger:table",
@@ -85,7 +86,7 @@ describe("azure-sql readSchema", () => {
     ];
     const result = await connection.readSchema(hostile);
     expect(result.tables.map((t) => t.schemaName)).toEqual(
-      Array(8).fill("sales")
+      Array(9).fill("sales")
     );
     const again = await connection.readSchema(["sales"]);
     expect(again.tables.map((t) => t.name)).toContain("accounts");
@@ -239,7 +240,7 @@ describe("azure-sql readSchema on a reused connection", () => {
       await single.pool.request().batch("SELECT 1 AS object_id INTO #visible");
       const first = await single.readSchema(["sales"]);
       const second = await single.readSchema(["sales"]);
-      expect(first.tables).toHaveLength(8);
+      expect(first.tables).toHaveLength(9);
       expect(second).toEqual(first);
       const left = await single.pool
         .request()

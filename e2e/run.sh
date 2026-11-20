@@ -11,7 +11,8 @@
 # ghcr.io/tereo-io/tereo:0.8.2), pulled when missing. zeteo's image is built
 # from this checkout as zeteo:e2e (ZETEO_IMAGE).
 #
-# Everything runs in the compose project zeteo-e2e on free host ports bound to
+# Everything runs in the compose project zeteo-e2e (E2E_PROJECT, so a second
+# checkout can run beside a stack kept with KEEP=1) on free host ports bound to
 # 127.0.0.1. Secrets and the source's certificates are generated for the run
 # and removed with the containers, networks and volumes at the end, pass or
 # fail, unless KEEP=1. Extra arguments are passed to vitest, or with
@@ -21,7 +22,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 E2E="$ROOT/e2e"
-PROJECT=zeteo-e2e
+PROJECT="${E2E_PROJECT:-zeteo-e2e}"
 ENV_FILE="$E2E/.env.run"
 CERTS="$E2E/certs"
 # Files generated for the run's ports: Tereo's provisioning of the login clients.

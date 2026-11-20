@@ -1,6 +1,7 @@
 import { TableView, TablesList, useAllTables } from "@/features/tables";
 import { UploadOriginsPage } from "../upload/components/UploadOrigins";
 import { NoAccessSection } from "@/components/NoAccessSection";
+import { MeasuresTab, MetricsTab } from "@/features/measures";
 import { isUploadType, sourceHref } from "./sourceLabels";
 import { RelationsList } from "@/features/relations";
 import { useUuidParam } from "@/lib/useUuidParam";
@@ -108,4 +109,28 @@ export const SourceSharingPage = () => {
 export const SourceUploadsPage = () => {
   const { source } = useSourceContext();
   return isUploadType(source.type) ? <UploadOriginsPage /> : <NotFound />;
+};
+
+/** Measures: named calculations on a table; who writes them is `zeteo.measures.write`, who edits the editor list a sources admin or an upload's owner. */
+export const SourceMeasuresPage = () => {
+  const { source, access } = useSourceContext();
+  return (
+    <MeasuresTab
+      sourceId={source.id}
+      canWrite={access.canWriteMeasures}
+      canManageEditors={access.canManageMeasureEditors}
+    />
+  );
+};
+
+/** Metrics: formulas over measures; the same editors and permissions as measures. */
+export const SourceMetricsPage = () => {
+  const { source, access } = useSourceContext();
+  return (
+    <MetricsTab
+      sourceId={source.id}
+      canWrite={access.canWriteMeasures}
+      canManageEditors={access.canManageMeasureEditors}
+    />
+  );
 };

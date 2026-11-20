@@ -37,6 +37,10 @@ const sourceView = async (access: Access, slug: string) => {
   return view;
 };
 
+/** How many measures a source's visible tables hold. */
+const measureCount = (view: { tables: { measures: unknown[] }[] }): number =>
+  view.tables.reduce((sum, t) => sum + t.measures.length, 0);
+
 /** Runs `handler` for a caller with `zeteo.data.read`; zeteo's errors become tool errors. */
 const handled =
   <I, R>(handler: (input: I, access: Access) => Promise<R>) =>
@@ -51,7 +55,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "list_sources",
     title: "List sources",
     description:
-      "List the data sources you can query: each one's slug, name, description of what it holds (empty when it has none), database type, kind (database or upload), query language, how many tables you can see, and its row and time limits.",
+      "List the data sources you can query: each one's slug, name, description of what it holds (empty when it has none), database type, kind (database or upload), query language, how many tables, measures and metrics you can see, and its row and time limits.",
     permission: MCP_USE,
     readOnly: true,
     handler: handled(async (_input: undefined, access) => {
@@ -65,6 +69,8 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
           kind: view.kind,
           language: view.language.id,
           tables: view.tables.length,
+          measures: measureCount(view),
+          metrics: view.metrics.length,
           limits: {
             default_rows: view.limits.default_rows,
             max_rows: view.limits.max_rows,
@@ -80,7 +86,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "list_tables",
     title: "List tables",
     description:
-      "List the tables and views of a source that you can query, with their descriptions and how many of their columns you can see. Use describe_table for the columns.",
+      "List the tables and views of a source that you can query, with their descriptions and how many of their columns and measures you can see, and the source's metrics (name, description, formula): cross-table calculations such as ROAS, queried with { metrics: [...] } (see query_guide). Use describe_table for the columns.",
     permission: MCP_USE,
     readOnly: true,
     input: SourceInput,
@@ -97,7 +103,9 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
             missing: table.missing,
             last_loaded_at: table.last_loaded_at,
             columns: table.columns.length,
+            measures: table.measures.length,
           })),
+          metrics: view.metrics,
         };
       }
     ),
@@ -107,7 +115,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "describe_table",
     title: "Describe a table",
     description:
-      "Show one table of a source: the columns you can query, with their types and descriptions, and its relations to other tables you can see. An upload source's table has last_loaded_at: the data is as of that time.",
+      "Show one table of a source: the columns you can query, with their types and descriptions, its relations to other tables you can see, and its measures (name, description, formula, filter, fixed, date_column): ready-made calculations to use in a query as { measure: name }; metrics are listed by list_tables. An upload source's table has last_loaded_at: the data is as of that time.",
     permission: MCP_USE,
     readOnly: true,
     input: TableInput,

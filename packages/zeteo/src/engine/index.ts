@@ -1,6 +1,7 @@
+import { withDraftMeasure, withDraftMetric } from "../measures/draft.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
-import type { VisibleCatalog } from "../grants/visibleCatalog.js";
+import type { PreviewProfile, QueryEntryPoint } from "./limits.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { stampSavedQueryRun } from "../saved-queries/stamps.js";
@@ -11,7 +12,6 @@ import { loadUserLimits } from "../limits/resolve.js";
 import type { CachedResult } from "./resultCache.js";
 import type { Caller } from "../middleware/auth.js";
 import { planFor, type Progress } from "./plan.js";
-import type { QueryEntryPoint } from "./limits.js";
 import * as resultCache from "./resultCache.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
@@ -20,6 +20,11 @@ import { notFound } from "./errors.js";
 import { collect } from "./collect.js";
 import env from "../env.js";
 import { z } from "zod";
+import type {
+  MeasureRow,
+  MetricRow,
+  VisibleCatalog,
+} from "../grants/visibleCatalog.js";
 import type {
   ColumnType,
   PlanContext,
@@ -77,6 +82,24 @@ export interface RunQueryInput {
    * process, waits for its leases, and is recorded at most once per window.
    */
   dashboard?: DashboardRun;
+  /**
+   * Set only by src/measures/ for a measure's preview: the catalogue's
+   * measures for this one run are decided again with this draft in place of
+   * the stored measure of its id or name. Never with `savedQuery`.
+   */
+  draftMeasure?: MeasureRow;
+  /**
+   * Set only by src/measures/ for a metric's preview: the catalogue's metrics
+   * for this one run are decided again with this draft in place of the stored
+   * metric of its id or name. Never with `savedQuery` or `draftMeasure`.
+   */
+  draftMetric?: MetricRow;
+  /**
+   * Set only by src/measures/ for a preview from MCP: the run takes this
+   * profile's limits in place of its entry point's, and is still recorded
+   * under its entry point.
+   */
+  limitProfile?: PreviewProfile;
 }
 
 /** A dashboard's run of one panel's query. */
@@ -317,13 +340,20 @@ const execute = async (
   slug: string,
   progress: Progress
 ): Promise<{ plan: QueryPlan; result: QueryResult }> => {
-  const { caller, body, savedQuery } = input;
+  const { caller, body, savedQuery, draftMeasure, draftMetric } = input;
   const planned = savedQuery
     ? await loadAndPlanSaved(caller, savedQuery, body, progress)
-    : await loadCatalogFor(caller, slug, progress).then((loaded) => ({
-        ...loaded,
-        ...planFor(body, loaded.access, loaded.catalog, progress),
-      }));
+    : await loadCatalogFor(caller, slug, progress).then(async (loaded) => {
+        let catalog = loaded.catalog;
+        if (draftMeasure)
+          catalog = await withDraftMeasure(catalog, draftMeasure);
+        if (draftMetric) catalog = await withDraftMetric(catalog, draftMetric);
+        return {
+          ...loaded,
+          catalog,
+          ...planFor(body, loaded.access, catalog, progress),
+        };
+      });
   return { plan: planned.plan, result: await runPlanned(input, planned) };
 };
 
@@ -333,13 +363,24 @@ const execute = async (
  * entry point's limits and one deadline, and checked against the plan.
  */
 const runPlanned = async (
-  { caller, entryPoint, signal, userLimits, dashboard }: RunQueryInput,
+  {
+    caller,
+    entryPoint,
+    signal,
+    userLimits,
+    dashboard,
+    limitProfile,
+  }: RunQueryInput,
   { access, catalog, adapter, plan }: Planned
 ): Promise<QueryResult> => {
   const sourceId = catalog.source.id;
   const ownLimits = userLimits ?? (await loadUserLimits(access));
 
-  const limits = runLimits(entryPoint, plan.limit, catalog.source);
+  const limits = runLimits(
+    limitProfile ?? entryPoint,
+    plan.limit,
+    catalog.source
+  );
   // Compiled before any lease is taken, so a query the source cannot take is
   // refused as such, never as busy.
   const prepared = adapter.prepare(plan, {
@@ -406,6 +447,15 @@ export async function runQuery(
     throw new Error(
       "a dashboard run needs the dashboard entry point, the dashboard option and a saved query, all three"
     );
+  }
+  if (
+    (input.draftMeasure || input.draftMetric) &&
+    (input.savedQuery || input.dashboard)
+  ) {
+    throw new Error("a draft measure is previewed in a query of its own");
+  }
+  if (input.draftMeasure && input.draftMetric) {
+    throw new Error("a preview has one draft, a measure or a metric");
   }
   if (input.dashboard && input.savedQuery) {
     return runDashboardQuery(input, input.dashboard, input.savedQuery);

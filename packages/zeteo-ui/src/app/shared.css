@@ -116,7 +116,9 @@
 
 .z-segmented {
   display: inline-flex;
+  /* As wide as its options, in a flex or a grid parent. */
   align-self: flex-start;
+  justify-self: start;
   border: 1px solid var(--k-border-color);
   border-radius: 0.5rem;
   overflow: hidden;

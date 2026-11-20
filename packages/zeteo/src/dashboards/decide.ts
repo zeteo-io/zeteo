@@ -1,7 +1,7 @@
 import type { DashboardWithPanels } from "../utils/db/dashboards.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
-import { withTimeFilter, type TimeRangeKey } from "./timeRange.js";
 import { SavedQueryNotAccessibleError } from "../utils/errors.js";
+import { isMetricBody } from "../adapters/sql/language.js";
 import { planSavedAgainst } from "../engine/savedPlan.js";
 import type { OutputColumn } from "../adapters/types.js";
 import { groupIdsOf } from "../grants/principals.js";
@@ -17,6 +17,11 @@ import {
   loadSourceVisibleCatalog,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
+import {
+  RANGE_TIME_COLUMN,
+  withTimeFilter,
+  type TimeRangeKey,
+} from "./timeRange.js";
 import {
   chartProblems,
   chartSchema,
@@ -170,7 +175,15 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
           r.timeColumn,
           ctx.timeRange ?? CHECK_RANGE
         );
-  const columns = planColumns(ctx.access, savedQuery.sourceId, query, catalog);
+  // A metric query follows the range through `time_column: "range"` only;
+  // for a table query "range" is a column path like any other.
+  const wrongForMetrics =
+    r.timeColumn !== null &&
+    isMetricBody(savedQuery.query) &&
+    r.timeColumn !== RANGE_TIME_COLUMN;
+  const columns = wrongForMetrics
+    ? null
+    : planColumns(ctx.access, savedQuery.sourceId, query, catalog);
   if (columns === null) {
     // The editor chose the time column: when only it fails, they are told.
     if (
@@ -187,7 +200,12 @@ const decideRun = (ctx: DecideContext, r: Resolved): PanelDecision => {
         ...found,
         state: "needs_update",
         message: PANEL_MESSAGES.needs_update,
-        problems: [{ setting: "time_column", problem: "missing_column" }],
+        problems: [
+          {
+            setting: "time_column",
+            problem: wrongForMetrics ? "wrong_type" : "missing_column",
+          },
+        ],
       };
     }
     return {

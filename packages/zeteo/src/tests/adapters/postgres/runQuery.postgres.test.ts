@@ -8,8 +8,9 @@ import { initializeTereo, stopTereo } from "../../../utils/tereo.js";
 import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { QueryError } from "../../../engine/errors.js";
@@ -46,7 +47,7 @@ let connection: SourceConnection;
 let catalog: VisibleCatalog;
 let sourceId: string;
 
-const plan = (query: object): SqlPlan =>
+const plan = (query: object): TablePlan =>
   planSql(
     sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
     catalog
@@ -89,11 +90,18 @@ beforeAll(async () => {
   const source = (await db.sources.findById(sourceId))!;
   const { tables, columns, relations } =
     await db.catalog.loadSourceCatalog(sourceId);
-  catalog = buildVisibleCatalog(source, tables, columns, relations, {
-    sourceIds: new Set([sourceId]),
-    allows: () => true,
-    tableAccess: () => "all",
-  });
+  catalog = buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    {
+      sourceIds: new Set([sourceId]),
+      allows: () => true,
+      tableAccess: () => "all",
+    },
+    { calendar: DEFAULT_CALENDAR, measures: [] }
+  );
   connection = await postgresAdapter.connect(
     fixtureSettings("ro"),
     await fixtureTarget(),

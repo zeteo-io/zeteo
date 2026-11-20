@@ -92,6 +92,17 @@ page and no sections.
   connection; for an upload source its owner, size, tables and when it was added. With
   `zeteo.sources.write`, the Querying and Exports sections each have an **Edit** that opens the
   limits dialog (time limit, row cap, concurrency, exports), for both kinds of source.
+- **Measures**, a source's tab (`/sources/<id>/measures`; read by anyone who may see measures,
+  changed with `zeteo.measures.write` as an editor of the source): the list with description,
+  used-by counts and a broken flag; a dialog to create or edit with JSON editors for the formula and
+  filter, validated live against the server with plan errors shown at their paths, and **Preview**
+  of the draft; who may edit measures (users and groups, changed with `zeteo.sources.write` or by an
+  upload source's owner). Details: [measures.md](measures.md).
+- **Calendar** (`/calendar`, open to anyone with `zeteo.data.read`, listed in the Admin menu only
+  for `zeteo.calendar.write` or `zeteo.sources.read`, changed with `zeteo.calendar.write`): working days, fiscal year start month, time zone on the left, and a
+  table of holidays on the right (Add holidays opens a dialog to add them row by row or paste a list;
+  remove per row), noting this year or next when it has none. Details:
+  [calendar.md](calendar.md).
 - **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
   columns and relations and edits the table's and columns' descriptions; Relations lists the
   relations read from the database and declares, renames or removes the ones it lacks.
@@ -160,9 +171,39 @@ page and no sections.
   saved panels in a table filtered by name and owner. A row's panels, charts and queries are not
   shown here and the sections have no edit: only the owner changes one.
 
+- **Measures** tab on a source (`/sources/<id>/measures`): name, table, description, used-by counts and a
+  Broken pill with the server's message; rows an editor may not use show "Not usable by you" and no
+  formula. `zeteo.measures.write`, for an editor of the source (the list's `can_edit`), adds New and
+  Edit (a page of its own, `/sources/<id>/measures/new` and `/sources/<id>/measures/<measureId>/edit`:
+  name, table, description, Fixed and date column on the left, JSON editors for `formula` and `where`
+  on the right, the server's plan errors, the
+  preview's included, shown under the field at their path, and Preview, which runs the draft and is
+  cleared when the draft changes; renaming a measure that saved queries or panels use warns they
+  will stop working) and Delete (confirmed with what uses it; refused with the measures that use
+  it). A sources admin or an upload's owner also gets **Editors**, the users and groups who may
+  manage the source's measures, and, while not an editor themselves, a hint to add themselves. The
+  Date column select offers the home table's date and timestamp columns and its to-one relations'
+  (changing the table clears it).
+- **Metrics** tab on a source (`/sources/<id>/metrics`): metrics with the measures they use and
+  their used-by counts, the same editors, Editors button and hint as Measures; New and Edit are
+  pages (`/sources/<id>/metrics/new`, `…/metrics/<metricId>/edit`) with name and description on the
+  left and the JSON formula on the right, live validation and Preview (a month-bucketed metric query
+  over the last 12 months), and
+  Delete is confirmed with what uses it and, when refused, shows the server's message and the
+  measures or metrics that depend on it.
+- **Calendar** under Admin (`/calendar`): working days, fiscal year start month and time zone on
+  the left; on the right a table of holidays (date, weekday, name, remove), with **Add holidays**
+  opening a dialog that takes them one row at a time or as pasted `date,name` lines (a date already
+  listed is replaced); a year with none says so. Anyone who can query may open it, read-only; the
+  menu lists it only to those with `zeteo.calendar.write` or `zeteo.sources.read`.
+  `zeteo.calendar.write` changes it: **Save calendar**, top right, is enabled only while something
+  differs from the saved calendar, and replaces the whole calendar.
+- My Zeteo's catalogue lists each table's measures with their descriptions where the catalogue has them.
+
 The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that
-lists the admin sections the person may see (Sources, Grants, Limits, Runs, Saved queries,
-Dashboards, Saved panels) and is absent when they may see none; it is marked active under any of
+lists the admin sections the person may see (Sources, Grants, Limits, Calendar, Runs, Saved queries,
+Dashboards, Saved panels) and is absent when they may see none (so someone who can only query has
+no Admin menu); it is marked active under any of
 their paths. `/` lands on My Zeteo for anyone holding `zeteo.data.read`, admins included, and
 otherwise on their first admin section. The sections are listed once, in `src/app/sections.tsx`.
 

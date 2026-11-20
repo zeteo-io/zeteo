@@ -1,8 +1,11 @@
 // @module-tag unit
 // @module-tag platform
 import { resolveRelative } from "../../adapters/sql/relative.js";
-import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { describe, expect, it } from "vitest";
+import {
+  sqlLanguageSchema,
+  sqlQuerySchema,
+} from "../../adapters/sql/language.js";
 import {
   TIME_RANGE_KEYS,
   TIME_RANGES,
@@ -176,6 +179,49 @@ describe("withTimeFilter", () => {
       const filtered = withTimeFilter(query, "created_at", "this_quarter");
       expect(sqlQuerySchema.safeParse(filtered).success).toBe(true);
     }
+  });
+
+  it("sets a metric query's range for the time column range, replacing the stored one", () => {
+    const query = {
+      source: "s",
+      metrics: ["roas"],
+      bucket: "month",
+      range: { gte: { date: "2020-01-01" } },
+    };
+    const filtered = withTimeFilter(query, "range", "last_30_days");
+    expect(filtered).toEqual({
+      ...query,
+      range: { gte: range.start, lt: range.end },
+    });
+    expect(query.range).toEqual({ gte: { date: "2020-01-01" } });
+    expect(sqlLanguageSchema.safeParse(filtered).success).toBe(true);
+    const { range: _stored, ...none } = query;
+    expect(withTimeFilter(none, "range", "this_year")).toEqual({
+      ...none,
+      range: {
+        gte: TIME_RANGES.this_year.start,
+        lt: TIME_RANGES.this_year.end,
+      },
+    });
+  });
+
+  it("keeps a table query's behaviour for a column named range, and a metric query's other columns", () => {
+    const table = { source: "s", from: "orders", select: ["id"] };
+    expect(withTimeFilter(table, "range", "today")).toEqual({
+      ...table,
+      where: {
+        and: [
+          { range: { gte: TIME_RANGES.today.start } },
+          { range: { lt: TIME_RANGES.today.end } },
+        ],
+      },
+    });
+    // A metric query has no where: the language refuses what this gives.
+    const metric = { source: "s", metrics: ["roas"] };
+    expect(
+      sqlLanguageSchema.safeParse(withTimeFilter(metric, "created_at", "today"))
+        .success
+    ).toBe(false);
   });
 
   it("leaves anything but an object as it was", () => {

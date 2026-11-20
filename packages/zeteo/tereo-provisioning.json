@@ -89,6 +89,18 @@
         "displayName": "Manage upload sources",
         "description": "Create upload sources from uploaded files, and manage and grant the ones the holder owns",
         "orgAssignable": false
+      },
+      {
+        "name": "zeteo.measures.write",
+        "displayName": "Manage measures",
+        "description": "Create, change and delete measures: named group-level calculations that queries on a source can use",
+        "orgAssignable": false
+      },
+      {
+        "name": "zeteo.calendar.write",
+        "displayName": "Manage the calendar",
+        "description": "Change the working days, holidays, fiscal year start and time zone that dates and business-day functions use",
+        "orgAssignable": false
       }
     ],
     "systemRoles": [
@@ -109,7 +121,9 @@
           "zeteo.saved_queries.write",
           "zeteo.dashboards.read",
           "zeteo.dashboards.write",
-          "zeteo.uploads.write"
+          "zeteo.uploads.write",
+          "zeteo.measures.write",
+          "zeteo.calendar.write"
         ]
       },
       {
@@ -117,7 +131,8 @@
         "displayName": "Zeteo user",
         "description": "Queries the data they are granted",
         "permissions": [
-          "zeteo.data.read"
+          "zeteo.data.read",
+          "zeteo.measures.write"
         ]
       },
       {
@@ -320,6 +335,46 @@
         "eventType": "zeteo.saved_panel.copied",
         "description": "A saved panel was copied",
         "readPermission": "zeteo.dashboards.read"
+      },
+      {
+        "eventType": "zeteo.calendar.updated",
+        "description": "The calendar's working days, holidays, fiscal year or time zone were changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.measure.created",
+        "description": "A measure was created",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.measure.updated",
+        "description": "A measure was changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.measure.deleted",
+        "description": "A measure was deleted",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.measure_editors.updated",
+        "description": "The people and groups who may change a source's measures were changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.metric.created",
+        "description": "A metric was created",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.metric.updated",
+        "description": "A metric was changed",
+        "readPermission": "zeteo.sources.read"
+      },
+      {
+        "eventType": "zeteo.metric.deleted",
+        "description": "A metric was deleted",
+        "readPermission": "zeteo.sources.read"
       },
       {
         "eventType": "zeteo.query.run",

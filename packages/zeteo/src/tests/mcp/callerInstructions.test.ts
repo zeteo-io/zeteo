@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { measureBody, metricBody, seedMeasures } from "../support/measures.js";
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { createTestClient, startStubCore } from "@tereo-io/mcp/testing";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -8,6 +9,7 @@ import { MCP_INSTRUCTIONS } from "../../mcp/instructions.js";
 import { connectMcp, mcpToken } from "../support/mcp.js";
 import { removeSources } from "../support/sources.js";
 import { ENGINES } from "../support/engines.js";
+import { BASE_URL } from "../support/http.js";
 import { redis } from "../../utils/redis.js";
 import { randomUUID } from "crypto";
 
@@ -43,6 +45,23 @@ describe("per-caller MCP instructions", () => {
     );
     sourceIds.push(granted.id, later.id);
     await grantTo({ type: "user", id: userId }, granted.tables.orders!, "all");
+    await seedMeasures(
+      BASE_URL,
+      granted,
+      [
+        measureBody("total_revenue", { sum: "total" }),
+        measureBody(
+          "paid_revenue",
+          { measure: "total_revenue" },
+          { status: { eq: "paid" } }
+        ),
+      ],
+      [
+        metricBody("paid_share", {
+          div: [{ measure: "paid_revenue" }, { measure: "total_revenue" }],
+        }),
+      ]
+    );
   });
   afterAll(async () => {
     await redis.del(cacheKey);
@@ -58,6 +77,18 @@ describe("per-caller MCP instructions", () => {
     const ttl = await redis.ttl(cacheKey);
     expect(ttl).toBeGreaterThan(290);
     expect(ttl).toBeLessThanOrEqual(300);
+  });
+
+  it("count the source's measures the caller may use on its line, and name none", async () => {
+    await redis.del(cacheKey);
+    const text = (await instructionsOf(token))!;
+    const line = text
+      .split("\n")
+      .find((l) => l.includes(`\`${granted.slug}\``))!;
+    expect(line).toContain(", 2 measures, 1 metric)");
+    expect(text).not.toContain("paid_share");
+    expect(text).not.toContain("paid_revenue");
+    expect(text).not.toContain("total_revenue");
   });
 
   it("keep the cached list on a second connect after a new grant, and show it once the key is gone", async () => {

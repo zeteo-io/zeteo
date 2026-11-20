@@ -153,7 +153,9 @@ change; a new column is added and is covered only by `all_columns` grants; a col
 the file gets `missing_since`. A column renamed with `PATCH` and then re-uploaded under its old
 header comes back as a **new column**, because matching is by name against the table's current
 names. A table removed with `DELETE` is dropped and marked missing; its name cannot be added again
-to that source.
+to that source. Its measures, and the metrics using them, are deleted with it; a measure of
+another table that uses one of them refuses the removal with `409 measure_in_use`
+([measures.md](measures.md#changing-measures)).
 
 ### Retyping a column
 
@@ -164,7 +166,9 @@ order of the table's last load, which is the file's order: a value an upload rep
 a file with a header is data row 2 here.
 Saved queries and dashboards are not checked at retype time: one the new type no longer allows (a
 `sum` over a column now `text`) fails when it runs, and for a recipient of a saved query that is the
-usual `saved_query_not_accessible`.
+usual `saved_query_not_accessible`. Measures are not checked either, at a retype, a rename or a
+re-upload: a measure the change breaks is kept and shows as broken
+([measures.md](measures.md#changing-measures)) until an editor fixes it.
 
 ## Owning, granting and sharing
 

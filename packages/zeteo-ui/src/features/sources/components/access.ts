@@ -23,6 +23,10 @@ export interface SourceAccess {
   canShare: boolean;
   /** Removing grants: as canShare, or a grants admin once it is archived or deleted. */
   canRemoveGrants: boolean;
+  /** Creating, changing and deleting measures: `zeteo.measures.write`, on a source that is not archived. */
+  canWriteMeasures: boolean;
+  /** Replacing who may edit measures: as `canManage` (a sources admin, or an upload's owner). */
+  canManageMeasureEditors: boolean;
 }
 
 export const useSourceAccess = (source: Source): SourceAccess => {
@@ -31,6 +35,7 @@ export const useSourceAccess = (source: Source): SourceAccess => {
   const sourcesAdmin = hasPermission("zeteo.sources.write");
   const grantsAdmin = hasPermission("zeteo.grants.write");
   const grantsReader = hasPermission("zeteo.grants.read");
+  const canWriteMeasures = !archived && hasPermission("zeteo.measures.write");
 
   if (!isUploadType(source.type)) {
     return {
@@ -41,6 +46,8 @@ export const useSourceAccess = (source: Source): SourceAccess => {
       canShare: !archived && grantsAdmin,
       // A grant on an archived source can still be removed.
       canRemoveGrants: grantsAdmin,
+      canWriteMeasures,
+      canManageMeasureEditors: !archived && sourcesAdmin,
     };
   }
 
@@ -58,5 +65,7 @@ export const useSourceAccess = (source: Source): SourceAccess => {
     // Once the source is deleted, a grants admin may still remove grants,
     // the former owner's included.
     canRemoveGrants: canShare || (archived && grantsAdmin),
+    canWriteMeasures,
+    canManageMeasureEditors: !archived && (asOwner || sourcesAdmin),
   };
 };

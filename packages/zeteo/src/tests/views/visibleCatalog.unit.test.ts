@@ -1,6 +1,7 @@
 // @module-tag unit
 // @module-tag platform
 import type { VisibleCatalog } from "../../grants/visibleCatalog.js";
+import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import { describe, expect, it } from "vitest";
 import {
   visibleCatalogView,
@@ -55,6 +56,9 @@ const catalog = (over: Partial<VisibleCatalog> = {}): VisibleCatalog => ({
     relation("r2", "mid", "customers"),
     relation("r4", "ghost", "unknown"),
   ],
+  calendar: DEFAULT_CALENDAR,
+  measures: [],
+  metrics: [],
   ...over,
 });
 

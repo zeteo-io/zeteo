@@ -10,10 +10,11 @@ import { runPlan, type TestLimits } from "../../support/runPlan.js";
 import { toPgConfig } from "../../../adapters/postgres/settings.js";
 import type { SourceConnection } from "../../../adapters/types.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { sealSettings } from "../../../utils/crypto/envelope.js";
 import { closeAllSourcePools } from "../../../sources/pools.js";
+import type { TablePlan } from "../../../adapters/sql/types.js";
 import * as cancel from "../../../adapters/postgres/cancel.js";
-import type { SqlPlan } from "../../../adapters/sql/types.js";
 import { refreshSource } from "../../../catalog/refresh.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -58,7 +59,7 @@ let catalog: VisibleCatalog;
 const sources: string[] = [];
 const opened: SourceConnection[] = [];
 
-const plan = (query: object): SqlPlan =>
+const plan = (query: object): TablePlan =>
   planSql(
     sqlQuerySchema.parse({ source: catalog.source.slug, ...query }),
     catalog
@@ -135,11 +136,18 @@ beforeAll(async () => {
   await refreshSource(id, randomUUID());
   const source = (await db.sources.findById(id))!;
   const { tables, columns, relations } = await db.catalog.loadSourceCatalog(id);
-  catalog = buildVisibleCatalog(source, tables, columns, relations, {
-    sourceIds: new Set([id]),
-    allows: () => true,
-    tableAccess: () => "all",
-  });
+  catalog = buildVisibleCatalog(
+    source,
+    tables,
+    columns,
+    relations,
+    {
+      sourceIds: new Set([id]),
+      allows: () => true,
+      tableAccess: () => "all",
+    },
+    { calendar: DEFAULT_CALENDAR, measures: [] }
+  );
   connection = await connectWith();
 });
 
@@ -318,7 +326,7 @@ describe("postgres runQuery", () => {
     ]);
   });
 
-  it("joins, buckets in UTC and groups", async () => {
+  it("joins, buckets by the UTC date in a UTC calendar and groups", async () => {
     const result = await run({
       from: "orders",
       join: ["customers"],
@@ -331,10 +339,10 @@ describe("postgres runQuery", () => {
       groupBy: ["customers.region", "quarter"],
     });
     expect(result.rows).toEqual([
-      ["EU", "2026-01-01T00:00:00.000Z", "1535.50", "4"],
-      ["EU", "2026-04-01T00:00:00.000Z", "1461.72", "4"],
-      ["US", "2026-01-01T00:00:00.000Z", "105.24", "2"],
-      ["US", "2026-04-01T00:00:00.000Z", "652.10", "2"],
+      ["EU", "2026-01-01", "1535.50", "4"],
+      ["EU", "2026-04-01", "1461.72", "4"],
+      ["US", "2026-01-01", "105.24", "2"],
+      ["US", "2026-04-01", "652.10", "2"],
     ]);
   });
 
@@ -679,7 +687,7 @@ describe("postgres runQuery", () => {
                 .column as never,
               value: unserialisable as never,
             },
-          } as SqlPlan,
+          } as TablePlan,
           LIMITS
         )
       );

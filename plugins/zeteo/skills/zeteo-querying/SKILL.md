@@ -11,5 +11,6 @@ Zeteo answers questions from databases the user has been granted access to, thro
 2. Write the query as one JSON object (no raw SQL) and run it with `query`.
 3. If a query is refused, read the error, fix the query and run it again.
 4. To keep or rerun a query, use the saved query tools (`list_saved_queries`, `run_saved_query`, `create_saved_query`).
+5. Only when the user asks, and only as one of the source's measure editors: create or change measures and metrics (`list_measures`, `preview_measure`, `create_measure`, `update_measure`; the same for metrics). Everyone who queries the source shares them.
 
 Read [reference.md](reference.md) when a query needs more than the basics (calculations, relative dates, grouping rules) or after an error you cannot fix: the full query language, results, limits, errors and saved queries.
