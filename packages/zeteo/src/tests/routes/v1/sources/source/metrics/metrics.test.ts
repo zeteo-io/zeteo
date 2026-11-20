@@ -131,6 +131,45 @@ describe("/v1/sources/:sourceId/metrics", () => {
     expect(Number(doubled)).toBeCloseTo(Number(revenue) * 2, 2);
   });
 
+  it("saves a metric over businessDaysInPeriod, which runs only with a bucket or a range", async () => {
+    const created = await api(
+      "POST",
+      `/${source.id}/metrics`,
+      editor.token,
+      metricBody("revenue_per_business_day", {
+        div: [{ measure: "revenue" }, { businessDaysInPeriod: true }],
+      })
+    );
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    const listed = await api(
+      "GET",
+      `/${source.id}/metrics`,
+      measuresAdminToken()
+    );
+    expect(
+      listed.body.data.find(
+        (m: { name: string }) => m.name === "revenue_per_business_day"
+      )
+    ).toMatchObject({ broken: null });
+    const bucketed = await postQuery(
+      reader.token,
+      {
+        source: source.slug,
+        metrics: ["revenue_per_business_day"],
+        bucket: "month",
+      },
+      app.url
+    );
+    expect(bucketed.status, JSON.stringify(bucketed.body)).toBe(200);
+    const plain = await postQuery(
+      reader.token,
+      { source: source.slug, metrics: ["revenue_per_business_day"] },
+      app.url
+    );
+    expect(plain.status).toBe(422);
+    expect(plain.body.error).toBe("invalid_operator");
+  });
+
   it("counts the saved queries asking for a metric", async () => {
     const created = await api(
       "POST",

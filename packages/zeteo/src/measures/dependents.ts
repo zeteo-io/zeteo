@@ -1,4 +1,3 @@
-import { metricFormulaMeasures, planMetrics } from "../adapters/sql/metrics.js";
 import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { MeasureError } from "../adapters/sql/measures.js";
@@ -9,6 +8,11 @@ import type {
   MetricRow,
   VisibleCatalog,
 } from "../grants/visibleCatalog.js";
+import {
+  metricFormulaMeasures,
+  planMetrics,
+  usesPeriodBusinessDays,
+} from "../adapters/sql/metrics.js";
 
 // What a change to one measure does to the others: which measures use it,
 // directly or through others, and whether every measure of a source still
@@ -206,11 +210,17 @@ export const checkMetricSet = (
   };
   return metrics
     .filter((m) => !only || only.has(m.name))
-    .map((m) => ({
-      name: m.name,
-      plain: attempt(m.name, false),
-      bucketed: attempt(m.name, true),
-    }));
+    .map((m) => {
+      const bucketed = attempt(m.name, true);
+      return {
+        name: m.name,
+        // One that needs a bucket (businessDaysInPeriod) is only ever run with one.
+        plain: usesPeriodBusinessDays(m.formula)
+          ? bucketed
+          : attempt(m.name, false),
+        bucketed,
+      };
+    });
 };
 
 /** The saved queries' JSON conditions for a use of a measure or a metric named `n`. */

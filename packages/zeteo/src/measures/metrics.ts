@@ -22,6 +22,7 @@ import {
   metricFormulaMeasures,
   metricFormulaProblem,
   planMetrics,
+  usesPeriodBusinessDays,
 } from "../adapters/sql/metrics.js";
 import {
   metricView,
@@ -126,7 +127,13 @@ const checkDraft = (mine: VisibleCatalog | null, draft: MetricRow): void => {
   };
   try {
     planMetrics(
-      { source: catalog.source.slug, metrics: [draft.name] },
+      {
+        source: catalog.source.slug,
+        metrics: [draft.name],
+        ...(usesPeriodBusinessDays(draft.formula) && {
+          bucket: "month" as const,
+        }),
+      },
       catalog,
       { now: new Date() }
     );

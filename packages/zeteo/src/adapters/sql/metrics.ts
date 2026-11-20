@@ -166,6 +166,21 @@ export const metricFormulaProblem = (
   return undefined;
 };
 
+/**
+ * Whether a metric's formula uses `businessDaysInPeriod`: such a metric runs
+ * only in a metric query with a bucket or a full range, so it is checked as
+ * one with a bucket.
+ */
+export const usesPeriodBusinessDays = (formula: CalcExpr): boolean => {
+  const walk = (e: unknown): boolean => {
+    if (Array.isArray(e)) return e.some(walk);
+    if (!isObject(e) || isDateLiteral(e) || "value" in e) return false;
+    const [key, operand] = Object.entries(e)[0] ?? [];
+    return key === "businessDaysInPeriod" || walk(operand);
+  };
+  return walk(formula);
+};
+
 /** The measures a metric's formula names, each once, in order. */
 export const metricFormulaMeasures = (formula: CalcExpr): string[] => {
   const names = new Set<string>();
