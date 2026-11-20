@@ -101,3 +101,22 @@ export const invalidValue = (): QueryError =>
     "A value in the query could not be converted to its column's type",
     []
   );
+
+/**
+ * A table the caller's row rule cannot be applied to as written (a column it
+ * reads is gone, or it resolves to too many values): the query is refused,
+ * never run unfiltered. A conflict with the caller's access, not with the
+ * query: 409.
+ */
+export const rowRuleUnavailable = (
+  table: string,
+  path: QueryPath
+): QueryError => {
+  const err = new QueryError(
+    "row_rule_unavailable",
+    `Your access to ${truncate(table, MAX_NAME_CHARS)} can't be applied right now; ask an admin`,
+    path
+  );
+  err.statusCode = 409;
+  return err;
+};

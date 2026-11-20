@@ -38,8 +38,28 @@ export interface TableName {
   name: string;
 }
 
+/**
+ * A column a row rule reads, by its bare name: a rule is compiled inside its
+ * table's own derived table, `(select * from <table> where <rule>)`, where no
+ * alias is in scope. It is never a reference of the plan.
+ */
+export interface RuleSubject {
+  name: string;
+  type: QueryableType;
+  nativeType: string;
+}
+
+/**
+ * A table the plan reads, with the caller's row rule on it when their rows
+ * are limited: the table is then read as `(select * from <table> where
+ * <rowFilter>)`, wherever it is read.
+ */
+export interface RowFiltered {
+  rowFilter?: ResolvedFilter<RuleSubject>;
+}
+
 /** The `from` table, always alias `t0`. */
-export interface ResolvedTable extends TableName {
+export interface ResolvedTable extends TableName, RowFiltered {
   alias: "t0";
 }
 
@@ -53,7 +73,7 @@ export interface ColumnRef {
   nativeType: string;
 }
 
-export interface ResolvedJoin {
+export interface ResolvedJoin extends RowFiltered {
   /** `t1`… in the order the query gave its joins. */
   alias: string;
   /** The relation path as the query wrote it (`customer.account`), for messages only. */
@@ -72,7 +92,7 @@ export interface ResolvedJoin {
 export interface ScalarPlan {
   /** `f1`…: its alias when it is read per row, as a joined one-row table with column `v`. */
   alias: string;
-  from: TableName & { alias: string };
+  from: TableName & { alias: string } & RowFiltered;
   /** Left joins along to-one relations, each parent before its children. */
   joins: ResolvedJoin[];
   /** Group-level: the subquery has no GROUP BY, so it yields exactly one row. */
@@ -264,6 +284,8 @@ export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
  */
 export type ResolvedFilter<S> =
   | { kind: "and" | "or"; filters: ResolvedFilter<S>[] }
+  /** No row: a row rule that keeps none. */
+  | { kind: "never" }
   | { kind: "not"; filter: ResolvedFilter<S> }
   | { kind: "compare"; op: CompareOp; subject: S; value: FilterValue }
   /** Inclusive at both ends. */
@@ -351,7 +373,7 @@ export interface TablePlan extends QueryPlan {
  * are its own: each part is a branch of a union.
  */
 export interface MetricPart {
-  from: TableName & { alias: "t0" };
+  from: TableName & { alias: "t0" } & RowFiltered;
   /** Left joins along to-one relations, each parent before its children. */
   joins: ResolvedJoin[];
   /** Group-level: the measure's expansion. */

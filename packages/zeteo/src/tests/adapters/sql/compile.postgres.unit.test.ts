@@ -504,21 +504,22 @@ describe("compileSql on Postgres: uuid, enum and money", () => {
 });
 
 describe("compileSql on Postgres: the parameter limit", () => {
+  // Lists of 100, each value its own parameter: a longer list binds as one.
   const lists = (count: number, extra: number) => ({
     or: [
       ...Array.from({ length: count }, (_, j) => ({
-        id: { in: Array.from({ length: 1000 }, (_, i) => j * 1000 + i) },
+        id: { in: Array.from({ length: 100 }, (_, i) => j * 100 + i) },
       })),
       { id: { in: Array.from({ length: extra }, (_, i) => -1 - i) } },
     ],
   });
 
   it("binds 65,535 parameters, paging included", () => {
-    expect(compile({ where: lists(65, 533) }).parameters).toHaveLength(65_535);
+    expect(compile({ where: lists(655, 33) }).parameters).toHaveLength(65_535);
   });
 
   it("refuses a query that binds more with too_many_parameters, naming the limit", () => {
-    expect(() => compile({ where: lists(65, 534) })).toThrow(
+    expect(() => compile({ where: lists(655, 34) })).toThrow(
       expect.objectContaining({
         code: "too_many_parameters",
         statusCode: 422,

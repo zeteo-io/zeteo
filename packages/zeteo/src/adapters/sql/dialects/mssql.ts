@@ -209,6 +209,79 @@ const value = (
   }
 };
 
+/**
+ * What a list of numbers is read as from JSON text: bigint when each binds as
+ * bigint, else a decimal with the list's widest scale when one holds every
+ * value, else float, as `value` binds one number.
+ */
+const numberListType = (texts: readonly string[]): Expression<unknown> => {
+  let integerDigits = 0;
+  let scale = 0;
+  let decimal = true;
+  let bigint = true;
+  for (const text of texts) {
+    const binding = numberBinding(text);
+    if (binding.kind !== "bigint") bigint = false;
+    const m = DECIMAL_TEXT.exec(text);
+    if (!m) {
+      decimal = false;
+      continue;
+    }
+    integerDigits = Math.max(integerDigits, m[1]!.replace(/^0+/, "").length);
+    scale = Math.max(scale, m[2]?.length ?? 0);
+  }
+  if (bigint) return sql`bigint`;
+  return decimal && integerDigits + scale <= DECIMAL_MAX_DIGITS
+    ? sql`decimal(38, ${sql.lit(scale)})`
+    : sql`float`;
+};
+
+/**
+ * `value`'s rules for a whole list, bound as one nvarchar parameter holding a
+ * JSON array of text and read back with `openjson`, so a list of thousands
+ * takes one of the request's 2,100 parameters. Text is cast to nvarchar,
+ * which takes the database's default collation, as a bound value has.
+ */
+const inSet = (
+  expression: Expression<unknown>,
+  values: readonly PlanValue[],
+  { type, nativeType }: ValueSubject,
+  negate: boolean
+): Expression<SqlBool> => {
+  const item = sql.id("value");
+  let texts = values.map(String);
+  let read: Expression<unknown>;
+  switch (type) {
+    case "number":
+      read = sql`cast(${item} as ${numberListType(texts)})`;
+      break;
+    case "boolean":
+      texts = values.map((v) => (v === true ? "1" : "0"));
+      read = sql`cast(${item} as bit)`;
+      break;
+    case "date":
+      read = sql`cast(${item} as date)`;
+      break;
+    case "timestamp": {
+      texts = texts.map((t) => t.replace(PAST_100_NS, "$1"));
+      const instant = sql`cast(${item} as datetimeoffset)`;
+      const base = baseType(nativeType);
+      read = !NAIVE_TIMESTAMPS.has(base)
+        ? instant
+        : base === "datetime"
+          ? sql`cast(switchoffset(${instant}, '+00:00') as datetime)`
+          : sql`cast(switchoffset(${instant}, '+00:00') as datetime2(7))`;
+      break;
+    }
+    default:
+      read = sql`cast(${item} as nvarchar(max))`;
+  }
+  const list = sql`(select ${read} from openjson(${param("nvarchar", JSON.stringify(texts))}))`;
+  return negate
+    ? sql<SqlBool>`${expression} not in ${list}`
+    : sql<SqlBool>`${expression} in ${list}`;
+};
+
 // A closed map: the unit is written into the SQL as a keyword, so the bucket
 // expression holds no parameter and can be repeated in GROUP BY and ORDER BY.
 // `iso_week` starts on Monday whatever the session's DATEFIRST.
@@ -374,6 +447,7 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
+  inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
     const shift = fiscalShift(unit, fiscalStartMonth);

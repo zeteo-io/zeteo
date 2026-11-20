@@ -29,12 +29,15 @@ import {
  * missing column is still granted, so a measure reading one stays visible and
  * a query using it is told `missing_in_source`; deciding with missing flags
  * would stop at the first missing column and could pass over an ungranted one.
+ * Row rules are left out too: they limit rows, not which measures a caller
+ * may use, and this probe is planned only, never run. A query using the
+ * measure is planned with them.
  */
 const withNothingMissing = (
   catalog: Omit<VisibleCatalog, "measures" | "metrics">
 ): Omit<VisibleCatalog, "measures" | "metrics"> => ({
   ...catalog,
-  tables: catalog.tables.map((t) => ({
+  tables: catalog.tables.map(({ rowRule: _rows, ...t }) => ({
     ...t,
     missing: false,
     columns: t.columns.map((c) => ({ ...c, missing: false })),

@@ -2,6 +2,7 @@ import { visibleMeasures, visibleMetrics } from "../measures/visible.js";
 import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
 import type { Calendar } from "../calendar/calendar.js";
+import type { RowRule } from "../row-rules/resolve.js";
 import { loadCalendar } from "../calendar/service.js";
 import { typeOf } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
@@ -34,6 +35,12 @@ export interface VisibleTable {
   /** When an upload source's table was last loaded; null for a database source. */
   lastSyncedAt: Date | null;
   columns: VisibleColumn[];
+  /**
+   * The caller's rows on the table when their grants limit them; absent when
+   * every row is theirs. The planner reads the table through it wherever the
+   * table is read. Its columns need not be granted, and are never shown.
+   */
+  rowRule?: RowRule;
 }
 
 export interface VisibleRelation {
@@ -147,6 +154,7 @@ export const buildVisibleCatalog = (
     const granted = rows.filter((c) => access.allows(table.id, c.id));
     if (granted.length === 0) continue;
     grantedNames.set(table.id, new Set(granted.map((c) => c.name)));
+    const rowRule = access.rowRule(table.id);
     visibleTables.push({
       id: table.id,
       schemaName: table.schemaName,
@@ -164,6 +172,7 @@ export const buildVisibleCatalog = (
         description: c.description,
         missing: c.missingSince !== null,
       })),
+      ...(rowRule && { rowRule }),
     });
   }
 

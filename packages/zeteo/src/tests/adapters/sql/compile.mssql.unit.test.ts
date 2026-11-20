@@ -632,25 +632,25 @@ describe("compileSql on SQL Server: filters", () => {
 });
 
 describe("compileSql on SQL Server: the parameter limit", () => {
-  const ids = (from: number) =>
-    Array.from({ length: 1000 }, (_, i) => from + i);
+  // Lists of 100, each value its own parameter: a longer list binds as one.
+  const ids = (from: number) => Array.from({ length: 100 }, (_, i) => from + i);
   const filters = (lists: number, extra: number) => ({
     or: [
       ...Array.from({ length: lists }, (_, j) => ({
-        id: { in: ids(j * 1000) },
+        id: { in: ids(j * 100) },
       })),
       ...(extra > 0 ? [{ id: { in: ids(100_000).slice(0, extra) } }] : []),
     ],
   });
 
   it("binds 2,098 parameters, paging included", () => {
-    expect(compile({ where: filters(2, 96) }).parameters).toHaveLength(2098);
+    expect(compile({ where: filters(20, 96) }).parameters).toHaveLength(2098);
   });
 
   it("refuses a query that binds more, before it runs, naming the limit", () => {
     let thrown: unknown;
     try {
-      compile({ where: filters(2, 97) });
+      compile({ where: filters(20, 97) });
     } catch (err) {
       thrown = err;
     }

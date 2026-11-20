@@ -75,6 +75,19 @@ export interface SqlDialect {
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
+   * `expression in (values)`, or `not in` when `negate`, with every value in
+   * one bound parameter, so a long list (a row rule's identity values) takes
+   * one of the engine's parameters, not one each: Postgres binds an array,
+   * SQL Server a JSON array read with `openjson`. Each value is converted as
+   * `value` converts it for the subject.
+   */
+  inSet(
+    expression: Expression<unknown>,
+    values: readonly PlanValue[],
+    subject: ValueSubject,
+    negate: boolean
+  ): Expression<SqlBool>;
+  /**
    * The first day of the period holding `date` (a date expression), as a
    * date. A fiscal unit starts its year at `fiscalStartMonth` (1-12). A
    * timestamp is bucketed by its date, which the compiler reads first.

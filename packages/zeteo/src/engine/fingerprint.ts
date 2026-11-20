@@ -27,10 +27,12 @@ const sha256 = (text: string): string =>
  * The plan stands in for the compiled SQL, and that is why a cache entry may
  * be shared between viewers: the planner builds a plan only from the viewer's
  * visible catalogue (granted tables and columns, relations whose keys are all
- * granted) and the query's bound values, and every reference in it is checked
- * against their grants. Equal plans therefore compile to the same SQL with the
- * same parameters, over data both viewers may read. A future row filter must
- * be part of the plan, or this stops being true.
+ * granted, and their row rules) and the query's bound values, and every
+ * reference in it is checked against their grants. Each table's resolved row
+ * rule is in the plan, as the `rowFilter` of the table that reads it, values
+ * and all. Equal plans therefore compile to the same SQL with the same
+ * parameters, over rows both viewers may read: two viewers share a cache
+ * entry or an execution only when their rules resolve the same.
  */
 export const fingerprintOf = (
   sourceId: string,

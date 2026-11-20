@@ -38,6 +38,7 @@ import {
   VALUE_FORMS,
   coerceValue,
   fail,
+  isRowRuleRefusal,
   newQueryState,
   referenceKey,
   typeOf,
@@ -284,7 +285,7 @@ class MetricPlanner {
     const home = this.catalog.tables.find((t) => t.id === measure.tableId);
     if (!home) throw notFound("measure", measure.name, at, []);
     const planner = new Planner(this.catalog, this.now, this.state);
-    planner.fromTable(home, at);
+    const { rowFilter } = planner.fromTable(home, at);
     const reads = new Map<string, Reference>();
     const calc = planner.resolveExpr({ measure: measure.name }, at, reads);
     const type = typeOf(calc.resolved);
@@ -313,7 +314,12 @@ class MetricPlanner {
     }
     const index = this.parts.length;
     this.parts.push({
-      from: { alias: "t0", schemaName: home.schemaName, name: home.name },
+      from: {
+        alias: "t0",
+        schemaName: home.schemaName,
+        name: home.name,
+        ...(rowFilter && { rowFilter }),
+      },
       joins: planner.joins,
       expr: calc.resolved,
       date,
@@ -347,6 +353,7 @@ class MetricPlanner {
       ref = resolved.ref;
       this.dates.set(referenceKey(resolved.reference), resolved.reference);
     } catch (err) {
+      if (isRowRuleRefusal(err)) throw err;
       if (err instanceof QueryError && UNUSABLE_DATE.has(err.code)) {
         throw noDate();
       }
@@ -560,6 +567,7 @@ export const planMetrics = (
       // refusal is reported at the name, naming the metric.
       if (
         metric &&
+        !isRowRuleRefusal(err) &&
         (err instanceof QueryError || err instanceof MeasureError)
       ) {
         throw new QueryError(err.code, `Metric "${name}": ${err.message}`, at);
@@ -642,5 +650,6 @@ export const planMetrics = (
     warnings: [],
     limit: query.limit,
     offset: query.offset ?? 0,
+    rowsLimited: planner.state.rowsLimited,
   };
 };

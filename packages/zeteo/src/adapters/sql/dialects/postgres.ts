@@ -102,6 +102,43 @@ const value = (
   return sql`${v}`;
 };
 
+/**
+ * `value`'s rules for a whole list, bound as one array. The server infers an
+ * uncast array parameter's type from the column, as it infers a value's: text,
+ * dates, booleans, a uuid, an enum (read as text) and integers that fit the
+ * column's integer type. Otherwise numbers are a numeric array, timestamps a
+ * timestamptz array, converted to UTC for a naive column.
+ */
+const inSet = (
+  expression: Expression<unknown>,
+  values: readonly PlanValue[],
+  { type, nativeType }: ValueSubject,
+  negate: boolean
+): Expression<SqlBool> => {
+  const base = postgresBaseType(nativeType);
+  const list = values.map((v) => (typeof v === "boolean" ? v : String(v)));
+  let array: Expression<unknown> = sql`${list}`;
+  if (type === "timestamp") {
+    const instants = sql`cast(${list} as timestamptz[])`;
+    const v = sql.id("v");
+    array = NAIVE_TIMESTAMP.test(base)
+      ? sql`array(select ${v} at time zone 'UTC' from unnest(${instants}) as ${sql.id("u")}(${v}))`
+      : instants;
+  } else if (type === "number") {
+    for (const text of list as string[]) checkNumeric(text);
+    const limit = integerLimit(base);
+    const fits = (list as string[]).every((text) => {
+      if (!INTEGER_TEXT.test(text)) return false;
+      const n = BigInt(text);
+      return n <= limit && n >= -limit - 1n;
+    });
+    if (!fits) array = sql`cast(${list} as numeric[])`;
+  }
+  return negate
+    ? sql<SqlBool>`${expression} <> all(${array})`
+    : sql<SqlBool>`${expression} = any(${array})`;
+};
+
 const ESCAPE = "\\";
 
 /** `n` units as an interval; the number and unit are the planner's, never user text. */
@@ -161,6 +198,7 @@ export const postgresDialect: SqlDialect = {
     },
   }),
   value,
+  inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const shift = fiscalShift(unit, fiscalStartMonth);
     return shift === 0

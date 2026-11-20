@@ -19,6 +19,8 @@ import type {
   ResolvedFilter,
   ResolvedJoin,
   ResolvedSelect,
+  RowFiltered,
+  RuleSubject,
   ScalarPlan,
   SqlPlan,
   TableName,
@@ -26,6 +28,7 @@ import type {
 } from "./types.js";
 import {
   sql,
+  type AliasedExpression,
   type JoinBuilder,
   type RawBuilder,
   type Expression,
@@ -54,9 +57,11 @@ const COMPARE_SQL: Record<CompareOp, RawBuilder<unknown>> = {
 const AND = sql` and `;
 const OR = sql` or `;
 
-const table = (t: TableName) => sql.id(t.schemaName, t.name);
 const column = (c: ColumnRef, dialect: SqlDialect) =>
   dialect.column(sql.id(c.alias, c.name), c.nativeType);
+
+/** More values than this in one `in` are bound as one list (`inSet`). */
+const IN_LIST_MAX = 100;
 
 const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
 
@@ -85,13 +90,47 @@ const rowContext = (): ExprContext => ({
   applied: new Map(),
 });
 
+/** A row rule's column, by its bare name inside its table's derived table. */
+const ruleSubject = (dialect: SqlDialect) => (c: RuleSubject) => ({
+  expression: dialect.column(sql.id(c.name), c.nativeType),
+  type: c.type,
+  nativeType: c.nativeType,
+});
+
+/**
+ * The one place a table reaches SQL: as itself under its alias, or, with the
+ * caller's row rule, as `(select * from <table> where <rule>) as <alias>`, so
+ * nothing outside the derived table sees a row the rule leaves out. Whatever
+ * reads a table (the from, every join, a fixed measure's query, a metric
+ * part) reads it through here.
+ */
+const tableSource = (
+  t: TableName & { alias: string } & RowFiltered,
+  dialect: SqlDialect
+): AliasedExpression<unknown, string> => {
+  const name = sql.id(t.schemaName, t.name);
+  if (!t.rowFilter) return sql`${name}`.as(t.alias);
+  // Not per row: a business-day check stays inline in the derived table's
+  // where, as nothing there aggregates it.
+  const rule = compileFilter(t.rowFilter, dialect, ruleSubject(dialect), {
+    row: false,
+    fixed: new Map(),
+    applied: new Map(),
+  });
+  return sql`(select * from ${name} where ${rule})`.as(t.alias);
+};
+
 /** Joins `joins` in order: inner or left, on their key equalities. */
 const withJoins = (
   qb: AnySelect,
-  joins: readonly ResolvedJoin[]
+  joins: readonly ResolvedJoin[],
+  dialect: SqlDialect
 ): AnySelect => {
   for (const join of joins) {
-    const target = sql`${table(join.table)}`.as(join.alias);
+    const target = tableSource(
+      { ...join.table, alias: join.alias, rowFilter: join.rowFilter },
+      dialect
+    );
     const on = (j: JoinBuilder<never, never>) =>
       j.on(
         sql<SqlBool>`${sql.join(
@@ -200,8 +239,9 @@ const scalarQuery = (plan: ScalarPlan, dialect: SqlDialect): AnySelect => {
   const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
   const value = compileExpr(plan.expr, dialect, ctx);
   const qb = withJoins(
-    dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
-    plan.joins
+    dialect.kysely.selectFrom(tableSource(plan.from, dialect)),
+    plan.joins,
+    dialect
   ).select(sql`${value}`.as("v"));
   return withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
 };
@@ -438,6 +478,8 @@ const compileFilter = <S>(
         )})`;
       case "not":
         return sql<SqlBool>`not (${go(f.filter)})`;
+      case "never":
+        return sql<SqlBool>`1 = 0`;
       case "compare": {
         const s = subject(f.subject);
         return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${valueOf(f.value, s)}`;
@@ -448,6 +490,9 @@ const compileFilter = <S>(
       }
       case "in": {
         const s = subject(f.subject);
+        if (f.values.length > IN_LIST_MAX) {
+          return dialect.inSet(s.expression, f.values, s, f.op === "notIn");
+        }
         const values = sql.join(
           f.values.map((v: PlanValue) => dialect.value(v, s))
         );
@@ -536,8 +581,9 @@ const partQuery = (
 ): AnySelect => {
   const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
   let qb = withJoins(
-    dialect.kysely.selectFrom(sql`${table(part.from)}`.as(part.from.alias)),
-    part.joins
+    dialect.kysely.selectFrom(tableSource(part.from, dialect)),
+    part.joins,
+    dialect
   );
   const items: unknown[] = [];
   const named: { expression: Expression<unknown>; alias: string }[] = [];
@@ -676,8 +722,9 @@ const compileTable = (
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
 ): AnySelect => {
   let qb: AnySelect = withJoins(
-    dialect.kysely.selectFrom(sql`${table(plan.from)}`.as(plan.from.alias)),
-    plan.joins
+    dialect.kysely.selectFrom(tableSource(plan.from, dialect)),
+    plan.joins,
+    dialect
   );
   // The fixed measures read per row, joined once all is compiled.
   const fixed = new Map<string, ScalarPlan>();
