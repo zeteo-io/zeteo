@@ -10882,7 +10882,7 @@ components:
           description: The month a fiscal year starts in; 1 is January
         time_zone:
           type: string
-          description: An IANA time zone name, or `UTC`
+          description: '`UTC`, or an IANA region name with a "/" (`Europe/Paris`, `Etc/GMT+5`). A name without one (`CET`, `EST5EDT`…) is refused: Postgres may read it as a fixed offset with no summer time.'
     GrantColumnIds:
       type: array
       minItems: 1

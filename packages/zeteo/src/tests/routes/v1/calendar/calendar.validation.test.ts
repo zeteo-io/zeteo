@@ -51,6 +51,21 @@ describe("PUT /v1/calendar validation", () => {
     ["an unknown time zone", { time_zone: "Mars/Olympus" }],
     ["a garbage time zone", { time_zone: "not a zone!" }],
     ["an offset for a time zone", { time_zone: "+05:00" }],
+    // Names Postgres may read as fixed-offset abbreviations, with no summer time.
+    ...[
+      "CET",
+      "EET",
+      "MET",
+      "WET",
+      "EST",
+      "MST",
+      "HST",
+      "EST5EDT",
+      "PST8PDT",
+    ].map((zone): [string, Record<string, unknown>] => [
+      `the zone name ${zone}, which has no "/"`,
+      { time_zone: zone },
+    ]),
     ["an unknown field", { extra: true }],
   ])("refuses %s with invalid_request and issues", async (_name, change) => {
     const res = await put(validCalendar(change));
@@ -60,7 +75,7 @@ describe("PUT /v1/calendar validation", () => {
     expect(res.body.issues.length).toBeGreaterThan(0);
   });
 
-  it.each(["Asia/Kolkata", "Europe/Kyiv", "Etc/UTC"])(
+  it.each(["Asia/Kolkata", "Europe/Kyiv", "Etc/UTC", "Etc/GMT+5"])(
     "accepts the current IANA name %s and keeps it as given",
     async (zone) => {
       const res = await put(validCalendar({ time_zone: zone }));

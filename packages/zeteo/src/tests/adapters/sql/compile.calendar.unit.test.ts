@@ -57,7 +57,7 @@ describe("compileSql: business days", () => {
       calc({ businessDaysBetween: ["ordered_on", "ordered_on"] })
     );
     expect(sql).toMatch(
-      /^select \(select cast\(case when "bd4"\."na" >= 0 and "bd4"\."nb" >= 0 then .* end as int\) as "n" from \(select "bd3"\.\*, .* from \(select "bd2"\.\*, .* from \(select "bd1"\.\*, .* from \(select "bd0"\.\*, case when "bd0"\."a0" >= cast\('1900-01-01' as date\) and "bd0"\."a0" <= cast\('9998-12-31' as date\) then "bd0"\."a0" end as "a", .* from \(select cast\("t0"\."ordered_on" as date\) as "a0", cast\("t0"\."ordered_on" as date\) as "b0"\) as "bd0"\) as "bd1"\) as "bd2"\) as "bd3"\) as "bd4"\) as "c0" from "shop"\."orders" as "t0"/
+      /^select \(select cast\(case when "bd5"\."na" >= 0 and "bd5"\."nb" >= 0 then .* end as int\) as "n" from \(select "bd4"\.\*, .* offset 0\) as "bd5"\) as "c0" from "shop"\."orders" as "t0"/
     );
   });
 
@@ -85,7 +85,7 @@ describe("compileSql: business days", () => {
     expect(sql).not.toContain("unnest");
   });
 
-  it("applies a per-row count to every row on SQL Server, the holidays bound once as JSON", () => {
+  it("applies a per-row count to every row on SQL Server, the holidays a VALUES list of ordinals", () => {
     const { sql, parameters } = ms(
       calc({ businessDays: ["ordered_on", "ordered_on"] }),
       { holidays: HOLIDAYS }
@@ -93,11 +93,11 @@ describe("compileSql: business days", () => {
     expect(sql).toMatch(
       /^select \[m0\]\.\[n\] as \[c0\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(.*\) as \[n\] from .*\) as \[m0\]/
     );
-    expect(sql.match(/openjson\(@1\) with \(v int '\$'\)/g)).toHaveLength(2);
-    expect(parameters[0]).toEqual({
-      type: "nvarchar",
-      value: expect.stringMatching(/^\[\d+,\d+\]$/),
-    });
+    // Not OPENJSON, which SQL Server parses again on every row.
+    expect(sql).not.toContain("openjson");
+    expect(sql.match(/\(values \(\d+\), \(\d+\)\) as h\(v\)/g)).toHaveLength(2);
+    // Only the page is bound.
+    expect(parameters).toHaveLength(2);
   });
 
   it("keeps a group-level count inline on SQL Server", () => {
@@ -115,45 +115,63 @@ describe("compileSql: business days", () => {
     expect(sql).toContain("min([t0].[ordered_on])");
   });
 
-  it("reads a timestamp in the calendar's zone by the same bound offsets on both engines", () => {
+  it("reads a timestamp in the calendar's zone: natively on Postgres, by the zone's offsets on SQL Server", () => {
     const zoned = { timeZone: "America/Los_Angeles" };
     const query = calc({ businessDaysIn: ["week", "created_at"] });
     const postgres = pg(query, zoned);
-    // Not AT TIME ZONE, which reads CET and the like as fixed offsets.
-    expect(postgres.sql).not.toContain("at time zone cast(");
     expect(postgres.sql).toContain(
-      `select cast((cast("t0"."created_at" as timestamptz) at time zone 'UTC') + (select z.o from jsonb_to_recordset(cast($3 as jsonb)) as z(s timestamp, e timestamp, o int) where z.s <= (cast("t0"."created_at" as timestamptz) at time zone 'UTC') and (cast("t0"."created_at" as timestamptz) at time zone 'UTC') < z.e) * interval '1 second' as date) as "d0"`
+      `(select "bd0".*, case when cast("bd0"."dx" as timestamptz) >= cast($3 as timestamptz) and cast("bd0"."dx" as timestamptz) < cast($4 as timestamptz) then cast(cast("bd0"."dx" as timestamptz) at time zone cast($5 as text) as date) end as "d0" from (select "t0"."created_at" as "dx" offset 0) as "bd0" offset 0)`
     );
-    // After the bucket's unit, twice, in the outer steps: the same spans as SQL Server's.
-    const postgresSpans = postgres.parameters[2] as string;
+    expect(postgres.parameters.slice(2, 5)).toEqual([
+      "2001-01-01T00:00:00.000Z",
+      "2052-01-01T00:00:00.000Z",
+      "America/Los_Angeles",
+    ]);
     const mssql = ms(query, zoned);
+    // No JSON read per row: the spans as a VALUES table of the planner's instants.
+    expect(mssql.sql).not.toContain("openjson");
     expect(mssql.sql).toContain(
-      "cast(dateadd(second, (select z.o from openjson(@1) with (s datetime2(7) '$.s', e datetime2(7) '$.e', o int '$.o') as z where z.s <= cast(cast(switchoffset([t0].[created_at], '+00:00') as datetime2(7)) as datetime2(7))"
+      "cast(dateadd(second, (select z.o from (values (cast('2001-01-01T00:00:00' as datetime2(7)), cast('2001-04-01T10:00:00' as datetime2(7)), -28800), "
     );
-    const spans = JSON.parse(
-      (mssql.parameters[0] as { value: string }).value
-    ) as { s: string; e: string; o: number }[];
-    expect(spans[0]).toEqual({
-      s: "2001-01-01T00:00:00",
-      e: "2001-04-01T10:00:00",
-      o: -28_800,
-    });
-    expect(spans.at(-1)!.e).toBe("2052-01-01T00:00:00");
-    expect(JSON.parse(postgresSpans)).toEqual(spans);
+    expect(mssql.sql).toContain(
+      ") as z(s, e, o) where z.s <= [bd0].[dx] and [bd0].[dx] < z.e), [bd0].[dx]) as date) as [d0]"
+    );
+  });
+
+  it("converts a timestamp once per function, in a fenced step, however often it reads the date", () => {
+    const zoned = { timeZone: "America/Los_Angeles" };
+    for (const expr of [
+      { businessDaysIn: ["fiscal_year", "created_at"] },
+      { addBusinessDays: ["created_at", 3] },
+      { businessDaysBetween: ["created_at", "created_at"] },
+    ]) {
+      const count = (sql: string, text: string) => sql.split(text).length - 1;
+      const operands = JSON.stringify(expr).split("created_at").length - 1;
+      expect(count(pg(calc(expr), zoned).sql, "at time zone cast(")).toBe(
+        operands
+      );
+      expect(count(ms(calc(expr), zoned).sql, "dateadd(second, ")).toBe(
+        operands
+      );
+      // Each step is fenced, so neither optimizer pulls it up and repeats it.
+      const pgSql = pg(calc(expr), zoned).sql;
+      expect(count(pgSql, " offset 0)")).toBe(count(pgSql, "(select ") - 1);
+      expect(ms(calc(expr), zoned).sql).toContain("(select top 1 [bd0].*, ");
+    }
   });
 
   it("reads a UTC timestamp as its date, with nothing bound for the zone", () => {
     const { sql, parameters } = pg(
       calc({ businessDaysIn: ["week", "created_at"] })
     );
-    expect(sql).toContain('(select cast("t0"."created_at" as date) as "d0")');
+    expect(sql).toContain('cast("bd0"."dx" as date) as "d0"');
     // Only the bucket's unit, twice, and the page.
     expect(parameters).toEqual(["week", "week", 1001, 0]);
   });
 
   it("makes addBusinessDays a date from the subquery's day number", () => {
     expect(pg(calc({ addBusinessDays: ["ordered_on", "id"] })).sql).toMatch(
-      /^select \(date '1900-01-01' \+ \(select cast\(case when "bd7"\."n" >= 0 and "bd7"\."t" >= 1 and "bd7"\."r" <= 2958098 then "bd7"\."r" end as int\)/
+      /^select \(date '1900-01-01' \+ \(select cast\(case when "bd8"\."n" >= 0 and "bd8"\."t" >= 1 and "bd8"\."r" <= 2958098 then "bd8"\."r" end as int\)/
     );
     expect(ms(calc({ addBusinessDays: ["ordered_on", "id"] })).sql).toMatch(
       /^select dateadd\(day, \[m0\]\.\[n\], cast\('1900-01-01' as date\)\) as \[c0\]/

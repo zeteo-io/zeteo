@@ -16,10 +16,15 @@ const DateSchema = z
  * An IANA time zone name the runtime can format in. `Intl.supportedValuesOf`
  * lists ICU's canonical names only (`Asia/Calcutta`, not `Asia/Kolkata`), so a
  * name is checked by formatting with it instead. Offsets (`+05:00`) are not
- * names and are refused. The name is stored as given.
+ * names and are refused, and so is any name but `UTC` without a "/" (CET,
+ * EST5EDT…), which Postgres may read as a fixed offset. The name is stored
+ * as given.
  */
 const isTimeZone = (zone: string): boolean => {
   if (!/^[A-Za-z]/.test(zone)) return false;
+  // `UTC`, or a region name: Postgres reads some names without a "/" (CET,
+  // EET, MET, WET, EST…) as fixed-offset abbreviations, with no summer time.
+  if (zone !== "UTC" && !zone.includes("/")) return false;
   try {
     new Intl.DateTimeFormat("en", { timeZone: zone });
     return true;
@@ -53,5 +58,8 @@ export const PutCalendarSchema = z.strictObject({
   time_zone: z
     .string()
     .max(100)
-    .refine(isTimeZone, "Not a known IANA time zone"),
+    .refine(
+      isTimeZone,
+      'Not a known IANA time zone: UTC or a region name such as "Europe/Paris"'
+    ),
 });

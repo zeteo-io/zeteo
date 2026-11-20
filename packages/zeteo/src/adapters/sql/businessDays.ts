@@ -35,8 +35,12 @@ const lit = (n: number) => sql.lit(n);
 /** `steps` as nested derived tables, then `final` over the last one, as one scalar subquery. */
 const stepped = (
   steps: Step[],
-  final: (ref: Ref) => Expression<unknown>
+  final: (ref: Ref) => Expression<unknown>,
+  dialect: SqlDialect
 ): Expression<unknown> => {
+  // Each step is one row: `top 1` or `offset 0` changes nothing but keeps it a step.
+  const top = dialect.stepFence === "top" ? sql`top 1 ` : sql``;
+  const fence = dialect.stepFence === "offset" ? sql` offset 0` : sql``;
   let from: Expression<unknown> | undefined;
   let alias = "";
   steps.forEach((step, i) => {
@@ -47,8 +51,8 @@ const stepped = (
     );
     from =
       from === undefined
-        ? sql`(select ${sql.join(items)})`
-        : sql`(select ${sql.id(prev)}.*, ${sql.join(items)} from ${from} as ${sql.id(prev)})`;
+        ? sql`(select ${top}${sql.join(items)}${fence})`
+        : sql`(select ${top}${sql.id(prev)}.*, ${sql.join(items)} from ${from} as ${sql.id(prev)}${fence})`;
     alias = `bd${i}`;
   });
   const last = alias;
@@ -77,36 +81,44 @@ const weekdayOrdinal = (n: Expression<unknown>, cal: CompiledCalendar) => {
 const isWorkingWeekday = (n: Expression<unknown>, cal: CompiledCalendar) =>
   sql`case when (${n} + 7) % 7 in (${sql.join(cal.weekdays.map(lit))}) then 1 else 0 end`;
 
-/** A date operand as a date: a timestamp's in the calendar's zone. */
-const dateOf = (
-  x: Expression<unknown>,
-  type: BusinessDate["type"],
-  cal: CompiledCalendar,
-  dialect: SqlDialect
-): Expression<unknown> =>
-  type === "timestamp" && cal.zone
-    ? dialect.zoneDate(x, cal.zone)
-    : sql`cast(${x} as date)`;
-
 const FIRST = sql`cast(${sql.lit(BUSINESS_ANCHOR)} as date)`;
 const LAST = sql`cast(${sql.lit(LAST_BUSINESS_DATE)} as date)`;
 
+/** A date operand: its expression where the function is, and its type. */
+interface DateOperand {
+  value: () => Expression<unknown>;
+  type: BusinessDate["type"];
+}
+
 /**
- * Two steps: each date operand of `dates` as a date, then (under the same
- * name) null unless it is within 1900-01-01 to 9998-12-31, before anything
- * shifts it: SQL Server refuses a date past either end of its range, and
- * Postgres an infinite one. `extra` joins the first step.
+ * Three steps for the date operands of `dates`: each as written (`<name>x`),
+ * then as a date (`<name>0`; a timestamp's in the calendar's zone, converted
+ * once per row however often the function reads it), then under its own
+ * name, null unless within 1900-01-01 to 9998-12-31, before anything shifts
+ * it: SQL Server refuses a date past either end of its range, and Postgres
+ * an infinite one. `extra` joins the first step.
  */
 const guardedDates = (
-  dates: Record<string, () => Expression<unknown>>,
+  dates: Record<string, DateOperand>,
+  cal: CompiledCalendar,
+  dialect: SqlDialect,
   extra: Step = {}
 ): Step[] => [
   {
     ...Object.fromEntries(
-      Object.entries(dates).map(([name, f]) => [`${name}0`, f])
+      Object.entries(dates).map(([name, d]) => [`${name}x`, d.value])
     ),
     ...extra,
   },
+  Object.fromEntries(
+    Object.entries(dates).map(([name, d]) => [
+      `${name}0`,
+      (ref: Ref) =>
+        d.type === "timestamp" && cal.zone
+          ? dialect.zoneDate(ref(`${name}x`), cal.zone)
+          : sql`cast(${ref(`${name}x`)} as date)`,
+    ])
+  ),
   Object.fromEntries(
     Object.keys(dates).map((name) => [
       name,
@@ -183,17 +195,20 @@ export const compileBusiness = (
   operand: (e: ResolvedExpr) => Expression<unknown>
 ): Expression<unknown> => {
   const cal = expr.calendar;
-  const date = (d: BusinessDate) =>
-    dateOf(operand(d.expr), d.type, cal, dialect);
+  const date = (d: BusinessDate): DateOperand => ({
+    value: () => operand(d.expr),
+    type: d.type,
+  });
   switch (expr.kind) {
     case "businessDays": {
       const inclusive = expr.fn === "inclusive";
       return stepped(
         [
-          ...guardedDates({
-            a: () => date(expr.start),
-            b: () => date(expr.end),
-          }),
+          ...guardedDates(
+            { a: date(expr.start), b: date(expr.end) },
+            cal,
+            dialect
+          ),
           {
             na: (ref) => dayNumber(ref("a"), dialect),
             nb: (ref) => dayNumber(ref("b"), dialect),
@@ -214,7 +229,8 @@ export const compileBusiness = (
             ? sql`case when ${ref("nb")} < ${ref("na")} then 0 else ${count} end`
             : count;
           return sql`case when ${ref("na")} >= 0 and ${ref("nb")} >= 0 then ${value} end`;
-        }
+        },
+        dialect
       );
     }
     case "businessPeriod": {
@@ -254,7 +270,7 @@ export const compileBusiness = (
             : ["n", "e"];
       return stepped(
         [
-          ...guardedDates({ d: () => date(expr.date) }),
+          ...guardedDates({ d: date(expr.date) }, cal, dialect),
           bounds,
           ...ordinalSteps(
             { [lo!]: days[lo!]!, [hi!]: days[hi!]! },
@@ -263,7 +279,8 @@ export const compileBusiness = (
           ),
         ],
         (ref) =>
-          sql`case when ${ref("s")} >= 0 then ${ordinal(ref, hi!)} - ${ordinal(ref, lo!)} end`
+          sql`case when ${ref("s")} >= 0 then ${ordinal(ref, hi!)} - ${ordinal(ref, lo!)} end`,
+        dialect
       );
     }
     case "addBusinessDays": {
@@ -271,13 +288,10 @@ export const compileBusiness = (
       const amount = operand(expr.amount);
       return stepped(
         [
-          ...guardedDates(
-            { d: () => date(expr.date) },
-            {
-              k: () =>
-                sql`case when abs(${amount}) <= ${lit(MAX_BUSINESS_DAY_STEP)} then ${dialect.truncate(amount)} end`,
-            }
-          ),
+          ...guardedDates({ d: date(expr.date) }, cal, dialect, {
+            k: () =>
+              sql`case when abs(${amount}) <= ${lit(MAX_BUSINESS_DAY_STEP)} then ${dialect.truncate(amount)} end`,
+          }),
           { n: (ref) => dayNumber(ref("d"), dialect) },
           {
             w: (ref) => weekdayOrdinal(ref("n"), cal),
@@ -309,7 +323,8 @@ export const compileBusiness = (
           },
         ],
         (ref) =>
-          sql`case when ${ref("n")} >= 0 and ${ref("t")} >= 1 and ${ref("r")} <= ${lit(LAST_DAY_NUMBER)} then ${ref("r")} end`
+          sql`case when ${ref("n")} >= 0 and ${ref("t")} >= 1 and ${ref("r")} <= ${lit(LAST_DAY_NUMBER)} then ${ref("r")} end`,
+        dialect
       );
     }
   }
@@ -327,7 +342,7 @@ export const compileBusinessDay = (
 ): Expression<unknown> =>
   stepped(
     [
-      ...guardedDates({ d: () => dateOf(subject, type, cal, dialect) }),
+      ...guardedDates({ d: { value: () => subject, type } }, cal, dialect),
       { n: (ref) => dayNumber(ref("d"), dialect) },
       {
         w: (ref) => weekdayOrdinal(ref("n"), cal),
@@ -341,5 +356,6 @@ export const compileBusinessDay = (
       },
     ],
     (ref) =>
-      sql`case when ${ref("n")} >= 0 then case when ${ref("wk")} = 1 and ${ref("h")} = 0 then 1 else 0 end end`
+      sql`case when ${ref("n")} >= 0 then case when ${ref("wk")} = 1 and ${ref("h")} = 0 then 1 else 0 end end`,
+    dialect
   );

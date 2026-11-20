@@ -277,18 +277,20 @@ export const postgresDialect: SqlDialect = {
   asTimestamp: (expression) => sql`cast(${expression} as timestamp)`,
   // timestamptz is an instant, and the session runs in UTC.
   timestampUtc: (expression) => expression,
+  stepFence: "offset",
   subqueryInAggregate: true,
   anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
   truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
   countWhere: (values, op, bound) =>
     sql`(select count(*) from unnest(cast(${[...values]} as int[])) as h(v) where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
-  // The zone's offsets over the window are bound and the one in effect is
-  // added, exactly as on SQL Server: AT TIME ZONE would read a name Postgres
-  // also knows as an abbreviation (CET, EET, MET, WET) as a fixed offset. The
-  // session runs in UTC, so a timestamp without a zone is a UTC instant.
+  // Native conversion, the zone name bound: the calendar takes only `UTC`
+  // and region names (with a "/"), which Postgres reads by their rules, never
+  // as fixed-offset abbreviations. The session runs in UTC, so a timestamp
+  // without a zone is a UTC instant. Outside the window SQL Server knows the
+  // zone's offsets for, null, as there, so both engines answer alike.
   zoneDate: (timestamp, zone) => {
-    const utc = sql`(cast(${timestamp} as timestamptz) at time zone 'UTC')`;
-    return sql`cast(${utc} + (select z.o from jsonb_to_recordset(cast(${JSON.stringify(zone.spans)} as jsonb)) as z(s timestamp, e timestamp, o int) where z.s <= ${utc} and ${utc} < z.e) * interval '1 second' as date)`;
+    const instant = sql`cast(${timestamp} as timestamptz)`;
+    return sql`case when ${instant} >= cast(${zone.from} as timestamptz) and ${instant} < cast(${zone.to} as timestamptz) then cast(${instant} at time zone cast(${zone.name} as text) as date) end`;
   },
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),

@@ -9,7 +9,7 @@ organisation, no external calendar, and a source's own date table is not used as
 | `working_days` | Weekdays as numbers, 1 (Monday) to 7 (Sunday), each once, at least one. Default Monday to Friday (`[1,2,3,4,5]`). |
 | `holidays` | `{ date, name }` entries, `date` as `YYYY-MM-DD`, unique by date, at most 5,000. A holiday on a non-working day has no effect. Default none. |
 | `fiscal_year_start_month` | 1 to 12. Default 1 (January). |
-| `time_zone` | An IANA name the server can format in, current or legacy (`Asia/Kolkata` and `Asia/Calcutta` both), kept as given; an offset such as `+05:00` is refused. Default `UTC`. |
+| `time_zone` | `UTC`, or an IANA region name (with a "/") the server can format in, current or legacy (`Asia/Kolkata` and `Asia/Calcutta` both, `Europe/Paris`, `Etc/GMT+5`), kept as given. Refused: an offset such as `+05:00`, and names without a "/" such as `CET`, `EET`, `MET`, `WET`, `EST`, `MST`, `HST`, `EST5EDT` or `PST8PDT`, which Postgres may read as fixed-offset abbreviations with no summer time (use `Europe/Paris`, `America/New_York`…). Default `UTC`. |
 
 A **business day** is a working weekday that is not a holiday. With the defaults, everything
 behaves as it did before the calendar existed.
@@ -76,13 +76,15 @@ integers in the SQL. Each function is one scalar subquery; on SQL Server, which 
 subquery, a per-row one is applied to every row (`OUTER APPLY`) and read as a column. Any date
 counts, however far from now.
 
-A timestamp's date in the calendar's zone, the same way on both engines: Zeteo binds the zone's
-UTC offsets from January 1st 25 years before the current year to January 1st 26 years after it,
-computed from the IANA rules the server runs with, and adds the one in effect at the instant. Not
-the engines' own conversion: SQL Server knows only Windows zone names, and Postgres reads a name
-it also knows as an abbreviation (`CET`, `EET`, `MET`, `WET`) as a fixed offset with no summer
-time. Outside the window a timestamp's business days are null. A calendar in `UTC` (or any zone at
-UTC throughout) converts nothing and has no window.
+A timestamp's date in the calendar's zone, the same answers on both engines, each converted once
+per row and function: Postgres converts natively (`AT TIME ZONE`, the zone name bound; the
+calendar takes only region names, which Postgres reads by their rules). SQL Server knows only
+Windows zone names, so Zeteo writes the zone's UTC offsets, computed from the IANA rules, as a
+small table in the query and adds the one in effect. Both cover January 1st 25 years before the
+current year to January 1st 26 years after it; outside that window a timestamp's business days
+are null on both engines. A calendar in `UTC` (or any zone at UTC throughout) converts nothing and
+has no window. On a 300,000-row table, an `isBusinessDay` filter on a timestamp in
+`America/Los_Angeles` takes about 1.2 times its UTC time on Postgres and 2 times on SQL Server.
 
 **Supported dates: 1900-01-01 through 9998-12-31**, on both engines and when computed at planning.
 Null, never an error: when an operand is null; when a date (a timestamp's date in the zone) is

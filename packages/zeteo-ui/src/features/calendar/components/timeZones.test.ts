@@ -18,4 +18,10 @@ describe("timeZoneOptions", () => {
   it("offers the saved zone even when the browser does not list it", () => {
     expect(timeZoneOptions("Etc/GMT+5")).toContain("Etc/GMT+5");
   });
+
+  it("offers only names the server takes: UTC or a region name", () => {
+    const zones = timeZoneOptions("CET");
+    expect(zones).not.toContain("CET");
+    expect(zones.every((z) => z === "UTC" || z.includes("/"))).toBe(true);
+  });
 });

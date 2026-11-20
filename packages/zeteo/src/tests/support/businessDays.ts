@@ -305,19 +305,29 @@ export const describeBusinessDays = (engine: string, run: Run): void => {
       expect(await valuesOf(run, july, exprs)).toEqual(expected);
     });
 
-    it("reads a zone Postgres also knows as an abbreviation by its rules: CET in summer", async () => {
-      const cet = { ...cal, timeZone: "CET" };
+    it("reads Europe/Paris by its rules: a summer evening and both changes of time", async () => {
+      // CET was refused as the calendar's zone (Postgres may read it as a
+      // fixed +01:00); its region name is read with summer time on both engines.
+      const paris = { ...cal, timeZone: "Europe/Paris" };
       const stamps = [
+        // Midnight in summer is 22:00 UTC.
         "2026-07-01T21:59:59Z",
         "2026-07-01T22:00:00Z",
         "2026-07-01T22:30:00Z",
-        "2026-07-01T22:59:59Z",
         "2026-07-01T23:00:00Z",
+        // Summer time starts at 01:00 UTC on 29 March, ends at 01:00 UTC on 25 October.
+        "2026-03-28T22:59:59Z",
+        "2026-03-28T23:00:00Z",
+        "2026-03-29T21:59:59Z",
+        "2026-03-29T22:00:00Z",
+        "2026-10-24T21:59:59Z",
+        "2026-10-24T22:00:00Z",
+        "2026-10-25T22:59:59Z",
+        "2026-10-25T23:00:00Z",
       ];
-      const local = (t: string) => localDate(new Date(t), "CET");
-      expect(stamps.map(local)).toEqual([
+      const local = (t: string) => localDate(new Date(t), "Europe/Paris");
+      expect(stamps.slice(0, 4).map(local)).toEqual([
         "2026-07-01",
-        "2026-07-02",
         "2026-07-02",
         "2026-07-02",
         "2026-07-02",
@@ -325,12 +335,14 @@ export const describeBusinessDays = (engine: string, run: Run): void => {
       const exprs = stamps.flatMap((t) => [
         { businessDaysElapsed: asTimestamp(t) },
         { addBusinessDays: [asTimestamp(t), 0] },
+        { businessDaysBetween: [asTimestamp(t), asDate("2026-12-31")] },
       ]);
       const expected = stamps.flatMap((t) => [
-        businessDaysElapsed(cet, local(t)),
-        addBusinessDays(cet, local(t), 0),
+        businessDaysElapsed(paris, local(t)),
+        addBusinessDays(paris, local(t), 0),
+        businessDaysBetween(paris, local(t), "2026-12-31"),
       ]);
-      expect(await valuesOf(run, cet, exprs)).toEqual(expected);
+      expect(await valuesOf(run, paris, exprs)).toEqual(expected);
     });
 
     it("reads a timestamp as its date in the calendar's zone, across midnight and the change to summer time", async () => {

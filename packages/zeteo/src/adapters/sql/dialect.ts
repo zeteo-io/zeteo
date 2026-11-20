@@ -184,6 +184,13 @@ export interface SqlDialect {
    * rows instead and read as a column.
    */
   subqueryInAggregate: boolean;
+  /**
+   * How each one-row step of a business-day subquery is fenced so the
+   * optimizer keeps it a step (`offset 0` after it, or `top 1` in it): it
+   * would otherwise pull the steps up and repeat each one's expression (a
+   * timestamp's conversion among them) wherever a later step reads it.
+   */
+  stepFence: "offset" | "top";
   /** The date `days` (an integer expression) days after 1900-01-01. */
   anchorPlus(days: Expression<unknown>): Expression<unknown>;
   /** A number truncated toward zero to an integer; the caller keeps it within ±3,000,000. */

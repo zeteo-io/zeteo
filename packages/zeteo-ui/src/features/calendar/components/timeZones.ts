@@ -19,8 +19,17 @@ const CURRENT_NAMES = [
 ];
 
 /**
+ * Whether the server takes `zone`: `UTC` or a region name with a "/". It
+ * refuses names such as `CET` or `EST5EDT`, which Postgres may read as fixed
+ * offsets with no summer time.
+ */
+export const isAcceptedZone = (zone: string): boolean =>
+  zone === "UTC" || zone.includes("/");
+
+/**
  * The time zones to offer: UTC first, then the browser's list with the current
- * names above and `saved` (whatever the calendar holds), each once, sorted.
+ * names above and `saved` (whatever the calendar holds), each once, sorted;
+ * only names the server takes.
  */
 export const timeZoneOptions = (saved?: string): string[] => {
   const zones = new Set<string>([
@@ -29,5 +38,5 @@ export const timeZoneOptions = (saved?: string): string[] => {
   ]);
   if (saved) zones.add(saved);
   zones.delete("UTC");
-  return ["UTC", ...[...zones].sort()];
+  return ["UTC", ...[...zones].filter(isAcceptedZone).sort()];
 };

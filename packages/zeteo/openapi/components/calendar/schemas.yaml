@@ -29,7 +29,11 @@ CalendarInput:
       description: Unique by date. A holiday on a non-working day has no effect.
       items: { $ref: '#/Holiday' }
     fiscal_year_start_month: { type: integer, minimum: 1, maximum: 12, description: The month a fiscal year starts in; 1 is January }
-    time_zone: { type: string, description: 'An IANA time zone name, or `UTC`' }
+    time_zone:
+      type: string
+      description: >-
+        `UTC`, or an IANA region name with a "/" (`Europe/Paris`, `Etc/GMT+5`). A name without one
+        (`CET`, `EST5EDT`…) is refused: Postgres may read it as a fixed offset with no summer time.
 
 Calendar:
   type: object

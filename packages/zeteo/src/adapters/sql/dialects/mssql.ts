@@ -71,19 +71,12 @@ class BracketQueryCompiler extends MssqlQueryCompiler {
   }
 }
 
-const jsonParams = new WeakMap<object, Expression<unknown>>();
+const NAIVE_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/;
 
-/**
- * Plan values as one JSON text parameter. The same array gives the same
- * parameter object, which the compiler binds once however often it appears.
- */
-const jsonParam = (values: object): Expression<unknown> => {
-  let bound = jsonParams.get(values);
-  if (!bound) {
-    bound = param("nvarchar", JSON.stringify(values));
-    jsonParams.set(values, bound);
-  }
-  return bound;
+/** A naive UTC instant from the planner (`YYYY-MM-DDTHH:MM:SS`) as a literal. */
+const instantLit = (instant: string): Expression<unknown> => {
+  if (!NAIVE_INSTANT.test(instant)) throw new Error("not a naive instant");
+  return sql.lit(instant);
 };
 
 /** A native type's name without its length, precision or scale. */
@@ -477,17 +470,28 @@ export const mssqlDialect: SqlDialect = {
   },
   // A datetimeoffset keeps its own offset; date parts and differences are
   // taken on the UTC wall clock, as a bucket's are.
+  stepFence: "top",
   subqueryInAggregate: false,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.
   truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,
+  // A VALUES list of the calendar's ordinals (integers the planner computed
+  // from the admin's calendar, never query input), so SQL Server reads no
+  // JSON per row: OPENJSON in a correlated subquery parses it on every row.
   countWhere: (values, op, bound) =>
-    sql`(select count(*) from openjson(${jsonParam(values)}) with (v int '$') as h where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
+    sql`(select count(*) from (values ${sql.join(values.map((v) => sql`(${sql.lit(v)})`))}) as h(v) where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
   // SQL Server knows Windows zone names only: the zone's offsets over the
-  // window are bound, and the one in effect at the instant is added to it.
+  // window are written as a VALUES table and the one in effect is added to
+  // the instant. Not OPENJSON, which parses its text on every row, and not a
+  // CASE, which the optimizer copies into every step that reads the date.
+  // The spans are the planner's, computed from the zone's rules, in a fixed
+  // form checked here, never query input.
   zoneDate: (timestamp, zone) => {
-    const at = sql`cast(${timestamp} as datetime2(7))`;
-    return sql`cast(dateadd(second, (select z.o from openjson(${jsonParam(zone.spans)}) with (s datetime2(7) '$.s', e datetime2(7) '$.e', o int '$.o') as z where z.s <= ${at} and ${at} < z.e), ${at}) as date)`;
+    const rows = zone.spans.map(
+      ({ s, e, o }) =>
+        sql`(cast(${instantLit(s)} as datetime2(7)), cast(${instantLit(e)} as datetime2(7)), ${sql.lit(o)})`
+    );
+    return sql`cast(dateadd(second, (select z.o from (values ${sql.join(rows)}) as z(s, e, o) where z.s <= ${timestamp} and ${timestamp} < z.e), ${timestamp}) as date)`;
   },
   // SQL Server types a union's column over all its branches, and a bare null
   // (an int) takes the type of the others: no cast, so no decimal is resized.
