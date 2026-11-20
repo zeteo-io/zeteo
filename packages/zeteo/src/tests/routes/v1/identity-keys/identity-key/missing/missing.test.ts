@@ -13,6 +13,7 @@ import {
   setTestGroupMembers,
 } from "../../../../../support/principals.js";
 import {
+  columnsOf,
   grantsReadToken,
   grantsWriteToken,
   registerSource,
@@ -26,6 +27,7 @@ describe("GET /v1/identity-keys/:keyId/missing", () => {
   const keyName = `mis_${randomUUID().slice(0, 8)}`;
   let keyId: string;
   const groupId = randomUUID();
+  const extraSources: string[] = [];
 
   const missing = (id: string, token = grantsReadToken()) =>
     fetchJson("GET", `${app.url}/v1/identity-keys/${id}/missing`, token);
@@ -63,7 +65,7 @@ describe("GET /v1/identity-keys/:keyId/missing", () => {
   });
   afterAll(async () => {
     await clearTestGroupMembers(groupId);
-    await removeSources([sourceId]);
+    await removeSources([sourceId, ...extraSources]);
     await prisma.identityValue.deleteMany({ where: { keyId } });
     await prisma.identityKey.deleteMany({ where: { id: keyId } });
     await app.close();
@@ -107,6 +109,55 @@ describe("GET /v1/identity-keys/:keyId/missing", () => {
       (res.body.users as { user_id: string }[]).map((u) => u.user_id)
     ).not.toContain(withValue);
     expect(withValueGrant).toBeTypeOf("string");
+  });
+
+  it("leaves out grants on an archived source and grants of no column", async () => {
+    const archivedSourceId = await registerSource(app.url);
+    extraSources.push(archivedSourceId);
+    const archivedOrders = await tableOf(archivedSourceId, "orders");
+    const onArchived = randomUUID();
+    const noColumns = randomUUID();
+    const res = await fetchJson(
+      "POST",
+      `${app.url}/v1/grants`,
+      grantsWriteToken(),
+      {
+        principal_type: "user",
+        principal_id: onArchived,
+        table_id: archivedOrders.id,
+        all_columns: true,
+        row_access: "rule",
+        row_rule: { notes: { in: { identity: keyName } } },
+      }
+    );
+    expect(res.status).toBe(201);
+    await prisma.source.update({
+      where: { id: archivedSourceId },
+      data: { archivedAt: new Date() },
+    });
+    // A grant left with no column (its columns gone) reaches no one.
+    await prisma.grant.create({
+      data: {
+        principalType: "user",
+        principalId: noColumns,
+        tableId: orders.id,
+        allColumns: false,
+        rowAccess: "rule",
+        rowRule: {
+          [(await columnsOf(orders.id)).find((c) => c.name === "notes")!.id]: {
+            in: { identity: keyId },
+          },
+        },
+        identityKeyIds: [keyId],
+        createdBy: noColumns,
+      },
+    });
+
+    const listed = (
+      (await missing(keyId)).body.users as { user_id: string }[]
+    ).map((u) => u.user_id);
+    expect(listed).not.toContain(onArchived);
+    expect(listed).not.toContain(noColumns);
   });
 
   it("is 404 for a key that does not exist", async () => {

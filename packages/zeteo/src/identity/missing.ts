@@ -25,7 +25,12 @@ export const missingValues = async (keyId: string): Promise<MissingUser[]> => {
   if (!key) throw new NotFoundError("Identity key not found");
 
   const grants = await prisma.grant.findMany({
-    where: { identityKeyIds: { has: keyId } },
+    // The grants loadAccess counts: on a live source, with at least one column.
+    where: {
+      identityKeyIds: { has: keyId },
+      table: { source: { archivedAt: null } },
+      OR: [{ allColumns: true }, { columns: { some: {} } }],
+    },
     select: { id: true, principalType: true, principalId: true },
     orderBy: { id: "asc" },
   });
