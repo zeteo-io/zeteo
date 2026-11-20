@@ -52,7 +52,9 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
   and volumes, then `e2e/.env.run`, `e2e/certs/` and `e2e/.run/`, unless `KEEP=1`. If `down` fails, the env file
   is kept and `e2e/run.sh down` tries again; without the env file it still uses the compose file, so
   the named volumes are found. The script refuses to start while any container or volume of the
-  `zeteo-e2e` project exists. It touches no other compose project.
+  `zeteo-e2e` project exists. It touches no other compose project. To run beside a stack kept with
+  `KEEP=1` (from another checkout, whose `e2e/.run` and `.env.run` are its own), give this run its own
+  project and image: `E2E_PROJECT=zeteo-e2e-pr ZETEO_IMAGE=zeteo:e2e-pr e2e/run.sh`.
 - **Images left behind**: the run keeps the images, so the next one starts faster:
   `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images
   `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
