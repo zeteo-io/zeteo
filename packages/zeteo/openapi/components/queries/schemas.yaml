@@ -136,7 +136,8 @@ CalcExpr:
     holds at most 100 operations and aggregates (a measure's expansion is counted apart, at most
     500 in all, and measures nest at most 8 levels). Operands are numbers for `add`, `sub`,
     `mul`, `div`, `abs` and `round`; text or numbers for `concat`; text for `lower` and `upper`;
-    one shared type for `coalesce`; dates or timestamps for `dateAdd`, `dateDiff` and `datePart`.
+    one shared type for `coalesce`; dates or timestamps for `dateAdd`, `dateDiff`, `datePart` and
+    the business-day operations (a timestamp read as its date in the calendar's time zone).
     `div` by zero gives null and keeps at least 6 decimal places; `round` gives exactly the places
     asked, half away from zero. Aggregates do not nest. A measure inside an aggregate is refused.
   oneOf:
@@ -244,25 +245,82 @@ CalcOperation:
       description: |
         `[part, date or timestamp]`: a number. `weekday` is 1 for Monday to 7 for Sunday. The
         fiscal parts follow the calendar's `fiscal_year_start_month`, a fiscal year named by the
-        calendar year in which it ends.
+        calendar year in which it ends. `business_day` is which business day of its month the date
+        is (0 before the month's first), a timestamp read in the calendar's time zone.
       type: array
       minItems: 2
       maxItems: 2
       prefixItems:
-        - { type: string, enum: [year, quarter, month, day, weekday, fiscal_year, fiscal_quarter] }
+        - { type: string, enum: [year, quarter, month, day, weekday, fiscal_year, fiscal_quarter, business_day] }
         - { $ref: '#/CalcExpr' }
     businessDays:
       description: |
-        `[start, end]`: the calendar's business days from start to end, both inclusive. A business
-        day is a working weekday that is not a holiday. Each argument is a date, timestamp or
-        relative date literal, not a column (`invalid_operator`).
+        `[start, end]`: the calendar's business days from start to end, both inclusive, 0 when end
+        is before start. A business day is a working weekday that is not a holiday. Each operand,
+        here and in every business-day operation, is any date or timestamp expression (a column,
+        a date operation, a literal or a relative date); a timestamp is read as its date in the
+        calendar's time zone, null more than 25 years either way from the current year in a zone
+        other than UTC; a date before 1900-01-01 gives null. With literal operands only, the value
+        is computed when the query is planned.
       type: array
       minItems: 2
       maxItems: 2
       items: { $ref: '#/CalcExpr' }
-    businessDaysInMonth: { $ref: '#/CalcExpr', description: "The calendar's business days in the month of the date; the argument is a date, timestamp or relative date literal, or a date or timestamp column or date expression, whose month is looked up in the calendar's counts for 25 years either side of now" }
-    businessDaysElapsed: { $ref: '#/CalcExpr', description: "The calendar's business days from the 1st of the date's month through the date, inclusive; the argument is a date, timestamp or relative date literal" }
-    businessDaysRemaining: { $ref: '#/CalcExpr', description: "The calendar's business days after the date through the end of its month; the argument is a date, timestamp or relative date literal" }
+    businessDaysBetween:
+      description: '`[start, end]`: the business days after start through end, a duration, negative when end is before start (Monday to Tuesday is 1)'
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { $ref: '#/CalcExpr' }
+    businessDaysIn:
+      description: '`[unit, date]`: the business days of the period of `unit` holding the date; a week starts on Monday, fiscal units follow the calendar'
+      type: array
+      minItems: 2
+      maxItems: 2
+      prefixItems:
+        - { $ref: '#/PeriodUnit' }
+        - { $ref: '#/CalcExpr' }
+    businessDaysInMonth: { $ref: '#/CalcExpr', description: "The business days of the date's month: `businessDaysIn` `[\"month\", date]`" }
+    businessDaysElapsed:
+      description: 'A date, or `[unit, date]`: the business days from the first day of its period (its month without a unit) through the date, inclusive'
+      oneOf:
+        - { $ref: '#/CalcExpr' }
+        - { $ref: '#/UnitAndDate' }
+    businessDaysRemaining:
+      description: 'A date, or `[unit, date]`: the business days after the date through the end of its period (its month without a unit)'
+      oneOf:
+        - { $ref: '#/CalcExpr' }
+        - { $ref: '#/UnitAndDate' }
+    addBusinessDays:
+      description: |
+        `[date, n]`: the date `n` business days after the date (before it when `n` is negative), `n`
+        a number expression truncated toward zero, counted from the date itself as Excel's WORKDAY
+        (Saturday + 1 is Monday, Saturday - 1 is Friday); `n = 0` gives the date when it is a
+        business day, else the next one. A date; null past 9999-12-31 or for `n` beyond ±3,000,000.
+      type: array
+      minItems: 2
+      maxItems: 2
+      items: { $ref: '#/CalcExpr' }
+    businessDaysInPeriod:
+      description: |
+        In a metric's formula only (`invalid_operator` in a table query): the business days of each
+        period of the metric query's `bucket`, or without one of its `range`, from `gte`'s date up
+        to, not including, `lt`'s (both needed, else `invalid_operator`).
+      type: boolean
+      enum: [true]
+
+PeriodUnit:
+  type: string
+  description: The period a business-day count spans; `week` is ISO, from Monday
+  enum: [week, month, quarter, year, fiscal_quarter, fiscal_year]
+
+UnitAndDate:
+  type: array
+  minItems: 2
+  maxItems: 2
+  prefixItems:
+    - { $ref: '#/PeriodUnit' }
+    - { $ref: '#/CalcExpr' }
 
 Filter:
   type: object
@@ -272,7 +330,9 @@ Filter:
     `eq`, `ne`, `gt`, `gte`, `lt`, `lte` and `between` (two values, inclusive), each of which also
     takes a `RelativeDate` in place of a value (`{ "created_at": { "gte": { "relative": { "unit": "day",
     "offset": -30 } } } }`), `in` and `notIn` (1-1,000 values), `contains` and `startsWith` (text, case-insensitive, `%` and `_` literal),
-    `isNull` (true or false). The comparison operators above, `between` included (not `in` or
+    `isNull` (true or false), `isBusinessDay` (true or false: whether a date or timestamp column,
+    a timestamp in the calendar's time zone, is a business day; in `where` and a `case`'s `if`,
+    `invalid_operator` in `having`; a null date matches neither). The comparison operators above, `between` included (not `in` or
     `notIn`), also take `{ "measure": name }`, a fixed measure of any table, as a value (`{ "total":
     { "gt": { "measure": "avg_order_value" } } }`); a measure that is not fixed is `invalid_value`. Filters nest at most 5 deep. `and`, `or` and `not` are reserved:
     a column with one of those names cannot be filtered on directly. In `having`, the keys are

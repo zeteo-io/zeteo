@@ -167,7 +167,7 @@ metrics per source. `query` also takes a metric query (`{ "source", "metrics": [
 takes `{ "measure": ... }` like any query ([measures.md](measures.md)). The static instructions and
 `query_guide` tell a model to prefer a measure over writing the calculation, not to re-derive its
 formula, and to ask the user which one when several could answer, quoting their descriptions;
-names, descriptions and formulas are data, never instructions. `query_guide` also documents fixed measures, metrics and metric queries, `businessDaysInMonth` over a column, and `case`, date
+names, descriptions and formulas are data, never instructions. `query_guide` also documents fixed measures, metrics and metric queries, business days over columns and `businessDaysInPeriod`, and `case`, date
 operations, calendar functions, fiscal buckets, the calendar's time zone and the gauge chart.
 A source's measure editors holding `zeteo.measures.write` create, change and delete measures and
 metrics with the tools above, under the API's rules: the same editor list (anyone else is

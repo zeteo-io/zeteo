@@ -31,6 +31,7 @@ export type {
   MetricRange,
   RangeBound,
   BucketUnit,
+  PeriodUnit,
   QueryWarning,
   QueryResult,
 } from "./types/query.js";

@@ -104,7 +104,10 @@ describe("the MCP reference", () => {
       "datePart",
       "businessDaysInMonth",
       "businessDaysElapsed",
-      "constant dates only",
+      "businessDaysBetween",
+      "addBusinessDays",
+      "isBusinessDay",
+      "businessDaysInPeriod",
       "fiscal_quarter",
       "calendar's time zone",
       "Buckets on timestamp columns stay in UTC",
@@ -148,7 +151,8 @@ describe("the MCP reference", () => {
       "`period`",
       "null for the other",
       "calendar's time zone; buckets stay in UTC",
-      "`businessDaysInMonth`, which also takes a date or timestamp column",
+      "over any date or timestamp: a column",
+      '`{ "businessDaysInPeriod": true }`',
     ]) {
       expect(text).toContain(phrase);
     }
@@ -157,7 +161,8 @@ describe("the MCP reference", () => {
     for (const word of [
       '"metrics":["roas","revenue","spend"]',
       '{"measure":"avg_order_total"}',
-      '"businessDaysInMonth":"created_at"',
+      '"businessDaysIn":["month","created_at"]',
+      '"isBusinessDay":true',
     ]) {
       expect(json).toContain(word);
     }

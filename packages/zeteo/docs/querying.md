@@ -357,17 +357,22 @@ Dates and timestamps are allowed in expressions:
 | `{ "relative": {...} }` | the relative date shape, also with units `fiscal_quarter` and `fiscal_year` | date |
 | `dateAdd` | `[expression, amount, unit]`, `amount` an integer from -10,000 to 10,000, unit `day` to `year` | the operand's type |
 | `dateDiff` | `[unit, start, end]`, unit `second`, `minute`, `hour`, `day`, `week`, `month`, `quarter` or `year` | number: whole units completed from start to end, truncated toward zero, the same on both engines (seconds, minutes and hours as a big integer, so in text on the wire; a date counts from midnight) |
-| `datePart` | `[part, expression]`, part `year`, `quarter`, `month`, `day`, `weekday` (1 = Monday), `fiscal_year` or `fiscal_quarter` | number |
+| `datePart` | `[part, expression]`, part `year`, `quarter`, `month`, `day`, `weekday` (1 = Monday), `fiscal_year`, `fiscal_quarter` or `business_day` (which business day of its month, in the calendar's zone) | number |
 
-`min`, `max`, `case` and `coalesce` also take dates. **Calendar functions** count with the admin's
-[calendar](calendar.md): `{ "businessDays": [start, end] }` (both inclusive), `{ "businessDaysInMonth":
-date }`, `{ "businessDaysElapsed": date }` (the month's first day to `date`, inclusive) and `{
-"businessDaysRemaining": date }` (after `date` to month end). Their arguments are constant, a date
-or relative literal; a column is refused with `invalid_operator`, except for `businessDaysInMonth`,
-which also takes a column or any date or timestamp expression (months within 25 years of now, else
-null; see [calendar.md](calendar.md)). `bucket` also takes `fiscal_quarter` and `fiscal_year` (the period's start date), and
-relative dates follow the calendar's time zone (UTC by default); buckets and `datePart` on
-timestamp columns stay in UTC.
+`min`, `max`, `case` and `coalesce` also take dates. **Business-day functions** count with the
+admin's [calendar](calendar.md), over columns or any date or timestamp expression:
+`{ "businessDays": [start, end] }` (both inclusive, 0 when end is first), `{ "businessDaysBetween":
+[start, end] }` (start excluded, negative backwards), `{ "businessDaysIn": [unit, date] }` (the
+period's; `unit` `week`, `month`, `quarter`, `year`, `fiscal_quarter` or `fiscal_year`),
+`{ "businessDaysInMonth": date }`, `{ "businessDaysElapsed": date | [unit, date] }` (the period's
+first day to `date`, inclusive; the month without a unit), `{ "businessDaysRemaining": date |
+[unit, date] }` (after `date` to the period's end) and `{ "addBusinessDays": [date, n] }` (a date).
+The filter operator `{ "isBusinessDay": true | false }` takes a date or timestamp path in `where` and
+in a `case`'s `if`, not in `having`. A timestamp is read as its date in the calendar's time zone;
+dates before 1900 give null. All-literal operands are computed when the query is planned. Details,
+nulls and how it is computed: [calendar.md](calendar.md). `bucket` also takes `fiscal_quarter` and
+`fiscal_year` (the period's start date), and relative dates follow the calendar's time zone (UTC by
+default); buckets and the other `datePart` parts on timestamp columns stay in UTC.
 
 ### Measures
 

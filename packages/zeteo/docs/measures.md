@@ -97,8 +97,19 @@ A **metric** is a named, described formula over measures of different tables of 
 as `roas` (`revenue` over `ad_spend`). Fields: `name` (`^[a-z][a-z0-9_]{0,62}$`, unique per source
 across measures **and** metrics), `description` (1 to 2,000 characters, data, never instructions)
 and `formula`: numbers, `{ "measure": name }` (fixed or not), `add`, `sub`, `mul`, `div`, `abs`,
-`round`, `coalesce` and the constant calendar functions (such as `businessDaysInMonth` of a relative
-date). It reads no column and has no `case`; a metric does not use another metric.
+`round`, `coalesce`, the calendar functions that count over literal dates (such as
+`businessDaysInMonth` of a relative date) and `{ "businessDaysInPeriod": true }`: the business days
+of each period of the query's `bucket`, read from the period's first day (a day bucket's is 1 or
+0), or, without a bucket, of its `range` from `gte`'s date up to, not including, `lt`'s (both needed,
+else `invalid_operator` at the metric). It reads no column and has no `case`; a metric does not use
+another metric.
+
+```json
+{ "name": "revenue_per_business_day", "description": "Revenue per business day of the period.",
+  "formula": { "div": [{ "measure": "revenue" }, { "businessDaysInPeriod": true }] } }
+```
+
+A day that is not a business day divides by 0: null.
 
 ```json
 { "name": "roas", "description": "Revenue per unit of ad spend.",
@@ -241,7 +252,5 @@ and `max` the end of the scale. A null value or `max` shows "No data"; a null ta
 ## Not supported
 
 - Filters on non-date dimensions in metric queries, and metrics using other metrics.
-- Elapsed and remaining business days over columns: `businessDaysInMonth` takes a column, the other
-  calendar functions a date or relative date only ([calendar.md](calendar.md)).
 - Using a non-fixed measure from a query whose `from` is not its home table, row-level reusable
   calculations, and a text formula syntax: they are written as JSON.

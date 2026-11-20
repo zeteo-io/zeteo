@@ -237,7 +237,8 @@ MetricFormula:
   description: |
     An expression whose leaves are numbers and `{ "measure": name }` (a measure of any table of
     the source, at least one), combined only by `add`, `sub`, `mul`, `div`, `abs` and `round` and
-    the calendar functions over date literals (`businessDaysInMonth` and the like). No columns,
+    the calendar functions over date literals (`businessDaysInMonth` and the like), and
+    `{ "businessDaysInPeriod": true }` (the business days of each period). No columns,
     `case`, aggregates, text or other metrics. Planned against the editor's own catalogue.
   $ref: '../queries/schemas.yaml#/CalcExpr'
 

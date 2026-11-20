@@ -30,7 +30,10 @@ export type DateUnit = "day" | "week" | "month" | "quarter" | "year";
 /** The unit of `dateDiff`: also whole seconds, minutes or hours. */
 export type DateDiffUnit = "second" | "minute" | "hour" | DateUnit;
 
-/** What `datePart` takes out of a date; `weekday` is 1 for Monday to 7 for Sunday. */
+/**
+ * What `datePart` takes out of a date; `weekday` is 1 for Monday to 7 for
+ * Sunday; `business_day` is which business day of its month the date is.
+ */
 export type DatePart =
   | "year"
   | "quarter"
@@ -38,7 +41,12 @@ export type DatePart =
   | "day"
   | "weekday"
   | "fiscal_year"
-  | "fiscal_quarter";
+  | "fiscal_quarter"
+  | "business_day";
+
+/** The period a business-day count spans; a week starts on Monday. */
+export type PeriodUnit =
+  "week" | "month" | "quarter" | "year" | "fiscal_quarter" | "fiscal_year";
 
 /**
  * A calculation expression: a column path, a number, a text, date or
@@ -84,11 +92,25 @@ export type CalcExpr =
   | { dateDiff: [DateDiffUnit, CalcExpr, CalcExpr] }
   /** `[part, date or timestamp]`: a number; fiscal parts follow the calendar. */
   | { datePart: [DatePart, CalcExpr] }
-  /** The calendar's business days from start to end, both inclusive. Arguments are date, timestamp or relative date literals, not columns. */
+  /**
+   * The calendar's business days from start to end, both inclusive, 0 when
+   * end is first. Every business-day operand is any date or timestamp
+   * expression; a timestamp is read as its date in the calendar's time zone.
+   */
   | { businessDays: [CalcExpr, CalcExpr] }
+  /** Business days after start through end: negative when end is first. */
+  | { businessDaysBetween: [CalcExpr, CalcExpr] }
+  /** The business days of the period of `unit` holding the date. */
+  | { businessDaysIn: [PeriodUnit, CalcExpr] }
   | { businessDaysInMonth: CalcExpr }
-  | { businessDaysElapsed: CalcExpr }
-  | { businessDaysRemaining: CalcExpr }
+  /** The period's (the month's without a unit) first day through the date. */
+  | { businessDaysElapsed: CalcExpr | [PeriodUnit, CalcExpr] }
+  /** After the date through the period's (the month's without a unit) end. */
+  | { businessDaysRemaining: CalcExpr | [PeriodUnit, CalcExpr] }
+  /** `[date, n]`: the date n business days later (earlier when n < 0), as WORKDAY; n = 0 gives the next business day. */
+  | { addBusinessDays: [CalcExpr, CalcExpr] }
+  /** In a metric's formula only: the business days of each period, or of the range. */
+  | { businessDaysInPeriod: true }
   /**
    * The `then` of the first branch whose `if` holds, else `else` (null without
    * one); 1 to 10 branches, every `then` and the `else` of one type.
@@ -197,6 +219,8 @@ export interface FilterOperators {
   contains?: string;
   startsWith?: string;
   isNull?: boolean;
+  /** A date or timestamp that is (true) or is not (false) a business day; not in `having`. */
+  isBusinessDay?: boolean;
 }
 
 /**

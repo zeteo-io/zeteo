@@ -112,16 +112,17 @@ and changes write audit entries to tereo's outbox.
   editor list) and used by name in any query (`{ "measure": "paid_revenue" }`), saved query,
   dashboard panel or MCP conversation; it shows only to callers granted everything it reads. The
   query language gains `case`, date arithmetic (`dateAdd`, `dateDiff`, `datePart`), business-day
-  functions over dates and relative dates, and fiscal buckets and relative units. One calendar for
-  the install (`/v1/calendar`, `zeteo.calendar.write`) keeps working days, holidays, the fiscal
-  year start and the time zone that relative dates follow. `businessDaysInMonth` also takes a
-  column. A measure can be **fixed** (one value that ignores the query's filters, usable from any
+  functions over columns at any grain (counts between dates, per period, elapsed and remaining,
+  `addBusinessDays`, the `isBusinessDay` filter), and fiscal buckets and relative units. One
+  calendar for the install (`/v1/calendar`, `zeteo.calendar.write`) keeps working days, holidays,
+  the fiscal year start and the time zone that relative dates and business days follow. A measure can be **fixed** (one value that ignores the query's filters, usable from any
   table and as a comparison value in filters) and can name a date column; a **metric** is a named
   formula over measures of different tables (`roas`), asked for by name in a metric query
   (`{ "metrics": [...], "bucket"?, "range"? }`) that lines each measure up per period by its own
   date column, also from dashboards (time column `"range"`), saved queries and MCP. Dashboards gain
-  a gauge chart. Not there: filters on non-date dimensions in metric queries, metrics using
-  metrics, and elapsed or remaining business days over columns.
+  a gauge chart; a metric's formula can divide by each period's business days
+  (`businessDaysInPeriod`). Not there: filters on non-date dimensions in metric queries, metrics
+  using metrics, and business hours.
   ([docs/measures.md](packages/zeteo/docs/measures.md), [docs/calendar.md](packages/zeteo/docs/calendar.md))
 - **Run log.** Every query and export is recorded, with an audit entry in tereo; a job closes
   exports whose process died and deletes runs older than `QUERY_RUNS_RETENTION_DAYS` (90).
