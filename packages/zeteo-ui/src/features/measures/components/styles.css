@@ -1,5 +1,4 @@
 .z-measure-form {
-  min-width: min(40rem, 80vw);
   display: grid;
   gap: 0.75rem;
 }

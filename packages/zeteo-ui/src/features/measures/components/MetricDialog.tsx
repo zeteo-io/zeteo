@@ -159,6 +159,7 @@ export const MetricDialog = ({
   return (
     <Modal
       show
+      size="lg"
       title={metric ? "Edit metric" : "New metric"}
       onClose={onClose}
       dismissible={!busy}

@@ -228,6 +228,7 @@ export const MeasureDialog = ({
   return (
     <Modal
       show
+      size="lg"
       title={measure ? "Edit measure" : "New measure"}
       onClose={onClose}
       dismissible={!busy}
