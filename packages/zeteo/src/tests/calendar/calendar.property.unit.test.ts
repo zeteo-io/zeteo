@@ -37,6 +37,20 @@ const dateArb = fc.oneof(
   fc.integer({ min: 0, max: 2000 }).map((n) => iso(ms("2024-06-01") + n * DAY))
 );
 
+/**
+ * Two dates within about two years of each other, so the day-by-day count
+ * stays cheap; spans of a century have their own, shorter run below.
+ */
+const pairArb = fc
+  .tuple(dateArb, fc.integer({ min: -800, max: 800 }))
+  .map(([a, offset]) => {
+    const t = Math.max(ms(a) + offset * DAY, ANCHOR);
+    return [a, iso(t)] as const;
+  });
+
+/** Dates around 1900 against dates around 2026: few runs, each a long walk. */
+const LONG_RUNS = 10;
+
 const calendarArb: fc.Arbitrary<Calendar> = fc
   .record({
     workingDays: fc.uniqueArray(fc.integer({ min: 1, max: 7 }), {
@@ -94,16 +108,30 @@ const params = { numRuns: NUM_RUNS, seed: SEED };
 describe("business days, against a day-by-day count", () => {
   it("counts businessDays both ends inclusive, 0 when the end is first", () => {
     fc.assert(
-      fc.property(calendarArb, dateArb, dateArb, (cal, a, b) => {
+      fc.property(calendarArb, pairArb, (cal, [a, b]) => {
         expect(businessDays(cal, a, b)).toBe(b < a ? 0 : naiveCount(cal, a, b));
       }),
       params
     );
   });
 
-  it("counts businessDaysBetween with the start excluded, negative backwards", () => {
+  it("counts century-long spans both ways as a day-by-day walk does", () => {
     fc.assert(
       fc.property(calendarArb, dateArb, dateArb, (cal, a, b) => {
+        const [lo, hi] = a < b ? [a, b] : [b, a];
+        const counted = naiveCount(cal, lo, hi);
+        expect(businessDays(cal, lo, hi)).toBe(counted);
+        expect(businessDaysBetween(cal, lo, hi)).toBe(
+          lo === hi ? 0 : counted - (isBusinessDay(cal, lo) ? 1 : 0)
+        );
+      }),
+      { ...params, numRuns: LONG_RUNS }
+    );
+  });
+
+  it("counts businessDaysBetween with the start excluded, negative backwards", () => {
+    fc.assert(
+      fc.property(calendarArb, pairArb, (cal, [a, b]) => {
         const expected =
           a === b
             ? 0
