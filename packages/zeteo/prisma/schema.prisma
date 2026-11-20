@@ -263,18 +263,21 @@ enum RunOutcome {
 
 // What a user or group may query of one table. The principal is a tereo id, so
 // it has no foreign key. A table or column with a grant cannot be deleted.
-// CHECK constraint in the migration: row_filter IS NULL (reserved).
+// CHECK constraints in the migration: row_rule is set exactly when row_access is "rule".
 model Grant {
-  id            String        @id @default(uuid(7)) @db.Uuid
-  principalType PrincipalType @map("principal_type")
-  principalId   String        @map("principal_id") @db.Uuid
-  tableId       String        @map("table_id") @db.Uuid
-  allColumns    Boolean       @map("all_columns")
-  rowFilter     Json?         @map("row_filter")
-  ownerGrant    Boolean       @default(false) @map("owner_grant")
-  createdBy     String        @map("created_by") @db.Uuid
-  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
-  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamp(3)
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  principalType      PrincipalType @map("principal_type")
+  principalId        String        @map("principal_id") @db.Uuid
+  tableId            String        @map("table_id") @db.Uuid
+  allColumns         Boolean       @map("all_columns")
+  rowAccess          RowAccess     @default(unlimited_default) @map("row_access")
+  rowRule            Json?         @map("row_rule")
+  rowRuleDescription String?       @map("row_rule_description") @db.VarChar(200)
+  identityKeyIds     String[]      @default([]) @map("identity_key_ids") @db.Uuid
+  ownerGrant         Boolean       @default(false) @map("owner_grant")
+  createdBy          String        @map("created_by") @db.Uuid
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamp(3)
 
   table   SourceTable   @relation(fields: [tableId], references: [id], onDelete: Restrict)
   columns GrantColumn[]
@@ -282,6 +285,51 @@ model Grant {
   @@unique([principalType, principalId, tableId])
   @@index([tableId])
   @@map("grants")
+  @@schema("zeteo")
+}
+
+// Which rows a grant lets through: `unlimited_default` (nothing set; the
+// default), `all` (an admin chose every row) or `rule` (see `row_rule`).
+enum RowAccess {
+  unlimited_default
+  all
+  rule
+
+  @@map("row_access")
+  @@schema("zeteo")
+}
+
+// A named identity attribute (for example `region`) that users hold values for;
+// row rules refer to it by name.
+model IdentityKey {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @unique @db.VarChar(64)
+  label       String   @db.VarChar(100)
+  description String?  @db.VarChar(500)
+  createdBy   String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamp(3)
+
+  values IdentityValue[]
+
+  @@map("identity_keys")
+  @@schema("zeteo")
+}
+
+// One value of a key held by one user; a value belongs to at most one user per key.
+model IdentityValue {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  keyId     String   @map("key_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  value     String   @db.VarChar(500)
+  createdBy String   @map("created_by") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+
+  key IdentityKey @relation(fields: [keyId], references: [id], onDelete: Restrict)
+
+  @@unique([keyId, value])
+  @@index([userId])
+  @@map("identity_values")
   @@schema("zeteo")
 }
 
