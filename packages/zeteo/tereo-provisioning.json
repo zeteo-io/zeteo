@@ -247,6 +247,31 @@
         "readPermission": "zeteo.grants.read"
       },
       {
+        "eventType": "zeteo.identity_key.created",
+        "description": "An identity key was created",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.identity_key.updated",
+        "description": "An identity key's label or description was changed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.identity_key.removed",
+        "description": "An identity key was removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.identity_value.added",
+        "description": "Values of an identity key were added for users",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
+        "eventType": "zeteo.identity_value.removed",
+        "description": "A value of an identity key was removed",
+        "readPermission": "zeteo.grants.read"
+      },
+      {
         "eventType": "zeteo.saved_query.created",
         "description": "A saved query was created",
         "readPermission": "zeteo.saved_queries.read"

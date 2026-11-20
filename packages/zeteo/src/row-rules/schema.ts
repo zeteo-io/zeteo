@@ -9,4 +9,6 @@ export const RowRuleInputSchema = makeFilterSchema({ identity: true });
 
 export const IdentityRefSchema = identityRefSchema;
 
+export { IDENTITY_KEY_NAME } from "../adapters/sql/language.js";
+
 export const RowAccessSchema = z.enum(["unlimited_default", "all", "rule"]);

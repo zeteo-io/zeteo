@@ -896,3 +896,29 @@ export class GoogleSignInFailedError extends AppError {
     this.name = "GoogleSignInFailedError";
   }
 }
+
+/** A key a grant still lists cannot be removed; `grant_ids` says which. */
+export class IdentityKeyInUseError extends AppError {
+  constructor(grantIds: string[]) {
+    super(
+      409,
+      "identity_key_in_use",
+      "A grant still uses this identity key; remove it from those grants first",
+      { details: { grant_ids: grantIds } }
+    );
+    this.name = "IdentityKeyInUseError";
+  }
+}
+
+/** A value of a key is held by one user only. */
+export class IdentityValueTakenError extends AppError {
+  constructor(value: string) {
+    super(
+      409,
+      "identity_value_taken",
+      "A value is already held by another user of this identity key",
+      { details: { value } }
+    );
+    this.name = "IdentityValueTakenError";
+  }
+}
