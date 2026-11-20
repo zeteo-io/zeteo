@@ -7942,7 +7942,7 @@ components:
           description: The caller's grants show them only some of the table's rows
         rows_limited_reason:
           type: string
-          description: 'Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads "some rows only") and identity keys by label, never the caller''s values; a grant''s `row_rule_description` replaces its generated sentence; "no rows" when no rule keeps any'
+          description: 'Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads "some rows only") and identity keys by label, never the caller''s values; a grant''s `row_rule_description` replaces its generated sentence; "no rows" when no rule keeps any, and "no rows right now; ask an admin" when the caller''s rule cannot be applied as written (a query reading the table is refused with `row_rule_unavailable`)'
         columns:
           type: array
           description: Only the granted columns, in the table's order

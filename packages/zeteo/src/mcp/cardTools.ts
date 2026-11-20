@@ -44,7 +44,7 @@ export const defineCardTools = (mcp: TereoMcp): void => {
     name: "card_panel_rows",
     ui: { resourceUri: PANEL_CARD_URI, visibility: ["app"] },
     title: "A panel's rows for the preview card",
-    description: `${CARD_ONLY} Give saved_panel_id alone, or saved_query_id or query (not saved) with chart, and optionally time_column with time_range. Returns { title, chart, columns, rows, truncated, problems }.`,
+    description: `${CARD_ONLY} Give saved_panel_id alone, or saved_query_id or query (not saved) with chart, and optionally time_column with time_range. Returns { title, chart, columns, rows, truncated, rows_limited, problems }.`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
@@ -115,6 +115,7 @@ export const defineCardTools = (mcp: TereoMcp): void => {
           columns: result.columns,
           rows: result.rows,
           truncated: result.truncated,
+          rows_limited: result.rows_limited,
           problems: chartProblems(chart, result.columns, run.body),
         };
       }),

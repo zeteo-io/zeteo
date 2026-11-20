@@ -100,4 +100,16 @@ describe("MCP tools: rows limited", () => {
     expect(run.isError, run.text).toBe(false);
     expect(run.json.rows_limited).toBe(true);
   });
+
+  it("preview_panel and card_panel_rows carry rows_limited", async () => {
+    const args = {
+      query: { source: source.slug, from: "orders", select: ["id", "total"] },
+      chart: { type: "table", version: 1 },
+    };
+    for (const tool of ["preview_panel", "card_panel_rows"]) {
+      const call = await callTool(session.client, tool, args);
+      expect(call.isError, call.text).toBe(false);
+      expect(call.json.rows_limited, tool).toBe(true);
+    }
+  });
 });

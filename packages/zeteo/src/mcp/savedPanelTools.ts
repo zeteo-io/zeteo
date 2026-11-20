@@ -227,7 +227,7 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
     description: withCardNote(
       cards,
       "panel",
-      `Check a chart against a query's result: give saved_query_id or query (the query tool's JSON, not saved), never both. To show the user a chart, preview it with query; save it only when they want to keep it. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for the language, chart and placement rules.`
+      `Check a chart against a query's result: give saved_query_id or query (the query tool's JSON, not saved), never both. To show the user a chart, preview it with query; save it only when they want to keep it. ${CHART_SUMMARY} Give time_range with time_column to see it filtered as a dashboard would. Returns { columns, row_count, truncated, rows_limited, rows (the first ${PREVIEW_ROWS}), problems }; each problem names the chart setting at fault (for example y.0) and is missing_column, wrong_type or needs_order. Empty problems means the chart fits. A query without its own limit reads at most ${LIMIT_PROFILES.mcp.defaultRows} rows here, so row_count stops at ${LIMIT_PROFILES.mcp.defaultRows} and truncated is true when there are more. That is the preview's limit, not the saved query's or the dashboard's: on a dashboard the same panel reads up to ${LIMIT_PROFILES.dashboard.defaultRows.toLocaleString("en-US")} rows, or the saved query's own limit up to ${LIMIT_PROFILES.dashboard.maxRows.toLocaleString("en-US")}. Call query_guide for the language, chart and placement rules.`
     ),
     permission: MCP_USE,
     readOnly: true,
@@ -264,6 +264,7 @@ export const defineSavedPanelTools = (mcp: TereoMcp, cards: boolean): void => {
           columns: result.columns,
           row_count: result.rows.length,
           truncated: result.truncated,
+          rows_limited: result.rows_limited,
           rows: result.rows.slice(0, PREVIEW_ROWS),
           problems: [
             ...(run.wrongTimeColumn
