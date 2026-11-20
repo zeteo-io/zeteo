@@ -6,8 +6,13 @@ import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
+import { TABLE } from "../support/dashboards.js";
 import { prisma } from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
+import {
+  dashboardWith,
+  removeDashboardsOf,
+} from "../support/panelDecisions.js";
 import {
   grantTo,
   newQueryUser,
@@ -177,6 +182,7 @@ describeEachEngine("row rules", (engine) => {
     });
   });
   afterAll(async () => {
+    await removeDashboardsOf([missing.id]);
     await removeRunsOf(users.map((u) => u.id));
     await removeSources([source.id]);
     await prisma.identityValue.deleteMany({ where: { keyId: { in: keyIds } } });
@@ -359,6 +365,15 @@ describeEachEngine("row rules", (engine) => {
   it("refuses a table whose rule's column has gone missing with 409, never unfiltered", async () => {
     const before = await ok(missing.token, { from: "orders", select: ["id"] });
     expect(ids(before)).toEqual([1, 3, 5, 7, 9, 11]);
+    const created = await savedQueriesCall("POST", "", missing.token, {
+      name: `orders ${randomUUID().slice(0, 8)}`,
+      query: { source: source.slug, from: "orders", select: ["id"] },
+    });
+    expect(created.status).toBe(201);
+    const savedId = created.body.id as string;
+    const dashboard = await dashboardWith(missing.id, [
+      { kind: "own", savedQueryId: savedId, chart: TABLE },
+    ]);
     const notes = source.tables.orders!.columns.notes!;
     await prisma.sourceColumn.update({
       where: { id: notes },
@@ -372,6 +387,36 @@ describeEachEngine("row rules", (engine) => {
       });
       expect(res.status).toBe(409);
       expect(res.body.error).toBe("row_rule_unavailable");
+
+      // A saved query stays the caller's to use: only its run is refused.
+      const got = await savedQueriesCall("GET", `/${savedId}`, missing.token);
+      expect(got.status).toBe(200);
+      expect(got.body.accessible).toBe(true);
+      const run = await savedQueriesCall(
+        "POST",
+        `/${savedId}/run`,
+        missing.token,
+        {}
+      );
+      expect(run.status).toBe(409);
+      expect(run.body.error).toBe("row_rule_unavailable");
+
+      // So does a dashboard panel on it: its line carries the run's error.
+      const panels = await postExport({
+        token: missing.token,
+        body: {},
+        path: `/v1/dashboards/${dashboard.id}/run`,
+      });
+      expect(panels.status).toBe(200);
+      const [line] = ndjsonLines(panels.text) as Array<{
+        state: string;
+        error?: { error: string };
+      }>;
+      expect(line).toMatchObject({
+        panel_id: dashboard.panels[0]!.id,
+        state: "ok",
+        error: { error: "row_rule_unavailable" },
+      });
     } finally {
       await prisma.sourceColumn.update({
         where: { id: notes },

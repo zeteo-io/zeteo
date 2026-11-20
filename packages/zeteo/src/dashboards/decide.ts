@@ -15,6 +15,7 @@ import type {
 } from "../../prisma/generated/client/index.js";
 import {
   loadSourceVisibleCatalog,
+  withoutRowRules,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
 import {
@@ -140,10 +141,11 @@ const planColumns = (
   catalog: VisibleCatalog
 ): OutputColumn[] | null => {
   try {
+    // Row rules decide no panel's state: an unavailable one refuses the run.
     return planSavedAgainst(
       access,
       { sourceId, query: query as SavedQuery["query"] },
-      catalog,
+      withoutRowRules(catalog),
       { sourceId: null, unrecorded: false }
     ).plan.columns;
   } catch (err) {

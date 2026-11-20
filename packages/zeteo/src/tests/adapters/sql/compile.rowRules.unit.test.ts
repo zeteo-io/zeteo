@@ -239,6 +239,65 @@ describe("compileSql: row rules on SQL Server", () => {
   });
 });
 
+describe("compileSql: a long in list", () => {
+  const values = Array.from({ length: 150 }, (_, i) => i + 6);
+  const inCase = {
+    from: "orders",
+    select: [
+      "status",
+      {
+        sum: {
+          case: {
+            when: [{ if: { id: { in: values } }, then: "total" }],
+            else: 0,
+          },
+        },
+        as: "s",
+      },
+    ],
+    groupBy: ["status"],
+  };
+
+  it("binds one list in where on both engines", () => {
+    const where = {
+      from: "orders",
+      select: ["id"],
+      where: { id: { in: values } },
+    };
+    expect(pg(where).parameters).toHaveLength(3);
+    expect(ms(where).sql).toContain("openjson(@1)");
+    expect(ms(where).parameters).toHaveLength(3);
+  });
+
+  it("keeps a value per parameter inside an aggregated case on SQL Server, which takes no subquery there", () => {
+    const { sql, parameters } = ms(inCase);
+    expect(sql).not.toContain("openjson");
+    expect(sql).toContain("sum(case when [t0].[id] in (@1, @2,");
+    expect(parameters.length).toBeGreaterThan(150);
+  });
+
+  it("binds one array inside an aggregated case on Postgres", () => {
+    const { sql } = pg(inCase);
+    expect(sql).toContain('sum(case when "t0"."id" = any($1)');
+  });
+
+  it("keeps a value per parameter in a measure's where on SQL Server", () => {
+    const { sql } = ms(
+      { from: "orders", select: [{ measure: "picked" }] },
+      {
+        measures: [
+          measure(
+            "picked",
+            { sum: "total" },
+            { where: { id: { in: values } } }
+          ),
+        ],
+      }
+    );
+    expect(sql).not.toContain("openjson");
+  });
+});
+
 describe("compile.ts", () => {
   it("names a table in SQL only inside tableSource", () => {
     const text = readFileSync(

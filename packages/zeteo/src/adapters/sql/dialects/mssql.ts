@@ -239,8 +239,11 @@ const numberListType = (texts: readonly string[]): Expression<unknown> => {
 /**
  * `value`'s rules for a whole list, bound as one nvarchar parameter holding a
  * JSON array of text and read back with `openjson`, so a list of thousands
- * takes one of the request's 2,100 parameters. Text is cast to nvarchar,
- * which takes the database's default collation, as a bound value has.
+ * takes one of the request's 2,100 parameters. `openjson`'s value keeps the
+ * parameter's collation (the database's default, as any bound nvarchar
+ * has), and the cast to nvarchar(max) keeps its input's, so text compares
+ * as a single bound value would. A subquery: never inside an aggregate or a
+ * GROUP BY expression, which SQL Server refuses.
  */
 const inSet = (
   expression: Expression<unknown>,

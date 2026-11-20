@@ -238,6 +238,16 @@ export const buildVisibleCatalog = (
   };
 };
 
+/**
+ * `catalog` with no row rule: for deciding whether a caller may use a query
+ * (a saved query's \`accessible\`, a panel's state), which rules never change.
+ * A plan made from it is never run.
+ */
+export const withoutRowRules = (catalog: VisibleCatalog): VisibleCatalog => ({
+  ...catalog,
+  tables: catalog.tables.map(({ rowRule: _rows, ...table }) => table),
+});
+
 /** What a catalogue carries besides the source's own rows: the stored calendar and the source's measures and metrics. */
 const loadExtras = async (
   sourceId: string

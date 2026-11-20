@@ -60,7 +60,7 @@ const OR = sql` or `;
 const column = (c: ColumnRef, dialect: SqlDialect) =>
   dialect.column(sql.id(c.alias, c.name), c.nativeType);
 
-/** More values than this in one `in` are bound as one list (`inSet`). */
+/** More values than this in one `in` of a clause are bound as one list (`inSet`). */
 const IN_LIST_MAX = 100;
 
 const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
@@ -358,7 +358,15 @@ export const compileExpr = (
     case "case": {
       const whens = expr.branches.map(
         (b) =>
-          sql`when ${compileFilter(b.when, dialect, columnSubject(dialect), ctx)} then ${inner(b.then)}`
+          sql`when ${compileFilter(
+            b.when,
+            dialect,
+            columnSubject(dialect),
+            ctx,
+            // A case may be grouped by or aggregated (a measure's where is
+            // one), where SQL Server takes no subquery: no `inSet` there.
+            dialect.subqueryInAggregate ? "set" : "literal"
+          )} then ${inner(b.then)}`
       );
       const otherwise = expr.otherwise
         ? sql` else ${inner(expr.otherwise)}`
@@ -457,11 +465,19 @@ const selectExpression = (
 
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
 
+/**
+ * A filter as SQL. `lists` says how an `in` of more than `IN_LIST_MAX` values
+ * binds: `set`, as one parameter (`inSet`, a subquery on SQL Server), where
+ * the filter is a clause of its own (where, having, a row rule); `literal`,
+ * one parameter per value, inside an expression that may be aggregated or
+ * grouped by.
+ */
 const compileFilter = <S>(
   filter: ResolvedFilter<S>,
   dialect: SqlDialect,
   subject: (s: S) => ValueSubject & { expression: Expression<unknown> },
-  ctx: ExprContext
+  ctx: ExprContext,
+  lists: "set" | "literal" = "set"
 ): Expression<SqlBool> => {
   /** A value bound for the subject, or a fixed measure's value. */
   const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
@@ -490,7 +506,7 @@ const compileFilter = <S>(
       }
       case "in": {
         const s = subject(f.subject);
-        if (f.values.length > IN_LIST_MAX) {
+        if (lists === "set" && f.values.length > IN_LIST_MAX) {
           return dialect.inSet(s.expression, f.values, s, f.op === "notIn");
         }
         const values = sql.join(

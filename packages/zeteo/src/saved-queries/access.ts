@@ -1,19 +1,27 @@
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
+import type { SavedQueryToPlan } from "../engine/savedPlan.js";
 import type { Access } from "../grants/access.js";
+import { planFor } from "../engine/plan.js";
 import {
   loadSourceVisibleCatalog,
+  withoutRowRules,
   type VisibleCatalog,
 } from "../grants/visibleCatalog.js";
-import {
-  planSavedAgainst,
-  type SavedQueryToPlan,
-} from "../engine/savedPlan.js";
+
+/** Whether the saved query's source is the catalogue's and visible to the caller. */
+export const isVisible = (
+  access: Access,
+  saved: SavedQueryToPlan,
+  catalog: VisibleCatalog
+): boolean =>
+  catalog.source.id === saved.sourceId && access.sourceIds.has(saved.sourceId);
 
 /**
  * Whether the caller may use the saved query: its source is visible to them
- * and not archived, and its JSON plans against what they are granted.
- * `catalog` is the saved query's source from `loadSourceVisibleCatalog`. Any
- * failure is false, and none says why.
+ * and not archived, and its JSON plans against what they are granted. Row
+ * rules play no part: they limit the rows a run reads, not whether the
+ * caller may run it. `catalog` is the saved query's source from
+ * `loadSourceVisibleCatalog`. Any failure is false, and none says why.
  */
 export const canUse = (
   access: Access,
@@ -21,14 +29,14 @@ export const canUse = (
   catalog: VisibleCatalog
 ): boolean => {
   try {
-    planSavedAgainst(access, saved, catalog, {
+    planFor(saved.query, access, withoutRowRules(catalog), {
       sourceId: null,
       unrecorded: false,
     });
-    return true;
   } catch {
     return false;
   }
+  return isVisible(access, saved, catalog);
 };
 
 /**

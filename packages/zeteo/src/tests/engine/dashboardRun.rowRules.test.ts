@@ -98,6 +98,18 @@ describe("a dashboard panel under row rules", () => {
     expect(second.rows.every((r) => r[1] === "shipped")).toBe(true);
   });
 
+  it("runs viewers with different rules apart when they run at the same time", async () => {
+    const [paid, ship] = await Promise.all([
+      runOnDashboard(paidA.id, seeded),
+      runOnDashboard(shipped.id, seeded),
+    ]);
+    expect(opened.count).toBe(2);
+    expect(paid.rows.length).toBeGreaterThan(0);
+    expect(ship.rows.length).toBeGreaterThan(0);
+    expect(paid.rows.every((r) => r[1] === "paid")).toBe(true);
+    expect(ship.rows.every((r) => r[1] === "shipped")).toBe(true);
+  });
+
   it("serves no viewer with a rule from an unlimited viewer's cached result", async () => {
     const all = await runOnDashboard(owner.id, seeded);
     const limited = await runOnDashboard(paidA.id, seeded);
