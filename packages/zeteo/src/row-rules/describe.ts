@@ -1,4 +1,4 @@
-import type { RuleColumn, RuleDescriptionPart } from "./resolve.js";
+import type { RowRule, RuleColumn, RuleDescriptionPart } from "./resolve.js";
 import type { RelativeDate } from "../adapters/sql/relative.js";
 import { isRelativeDate } from "../adapters/sql/relative.js";
 import type { RuleCondition, RuleFilter } from "./types.js";
@@ -172,3 +172,33 @@ export const describeRowRule = (
         : describeFilter(part.stored, granted, columns, keyLabels).text
     )
     .join("; or ");
+
+/** Why a caller sees no row of a table: no rule of theirs keeps any. */
+export const NO_ROWS = "no rows";
+
+/** Why a caller sees no row of a table whose rule cannot be applied as written. */
+export const NO_ROWS_UNAVAILABLE = "no rows right now; ask an admin";
+
+/**
+ * A caller's own resolved rule on a table, in words: the rule described
+ * with only `granted` columns named, or why they see no row.
+ */
+export const rowsLimitedReason = (
+  rule: RowRule,
+  granted: ReadonlySet<string>,
+  keyLabels: Map<string, string>
+): string => {
+  switch (rule.kind) {
+    case "filter":
+      return describeRowRule(
+        rule.descriptions,
+        granted,
+        rule.columns,
+        keyLabels
+      );
+    case "never":
+      return NO_ROWS;
+    case "unavailable":
+      return NO_ROWS_UNAVAILABLE;
+  }
+};

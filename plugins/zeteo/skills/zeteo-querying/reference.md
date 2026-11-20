@@ -120,7 +120,8 @@ The source's measure editors (people an admin listed, holding `zeteo.measures.wr
 - Write descriptions in plain language (what it means, in which unit) and leave out column names and filter values: an editor who is not granted everything a measure reads still sees its name and description, though never its formula.
 
 ## Results
-`{ columns, rows, truncated, truncated_by?, warnings, run_id }`: `rows` are arrays in `columns` order. 64-bit integers, decimals, counts and sums of integers or decimals arrive as strings, to keep their precision. A `join_multiplies_rows` warning means an aggregate may count a row more than once.
+`{ columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }`: `rows` are arrays in `columns` order. 64-bit integers, decimals, counts and sums of integers or decimals arrive as strings, to keep their precision. A `join_multiplies_rows` warning means an aggregate may count a row more than once.
+`rows_limited: true` means your access shows you only some rows of a table the query read (`describe_table` gives `rows_limited_reason`): call the figures "your" orders, sales and so on, never totals.
 
 ## Limits
 A query returns 100 rows unless its `limit` asks for more, and at most 5,000 rows or 1 MB of rows. When rows were left out, `truncated` is true and `truncated_by` says why (`rows` or `bytes`): narrow the query (filter, aggregate, fewer columns) rather than paging through everything. Each source has a time limit (`query_timeout`), and only a few queries may run at once (`too_many_queries`, `source_busy`: wait and retry).

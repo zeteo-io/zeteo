@@ -8,7 +8,7 @@ routes is `openapi/openapi.yaml`.
 | Route | Permission | Result |
 |-------|------------|--------|
 | `GET /v1/catalog` (`source`) | `zeteo.data.read` | `{ sources }`: what the caller may query, and the language schema |
-| `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }` |
 | `POST /v1/export` (`format`) | `zeteo.data.export` | a stream of NDJSON or CSV ([export.md](export.md)) |
 | `GET /v1/runs` (`user_id`, `source_id`, `outcome`, `limit`, `cursor`) | `zeteo.runs.read` | `{ data, next_cursor }`, newest first |
 
@@ -560,6 +560,16 @@ once.
 - When rows were left out the response has `truncated: true` and `truncated_by`: `rows` when
   more rows existed than the limit, `bytes` when the next row would have passed the size limit.
   A result that ends exactly at the limit is not truncated.
+- `rows_limited` is true when a row rule of the caller's limited the rows of any table the query
+  read (fixed measures' and metric parts' tables included): the figures are theirs, not totals.
+  A saved query's run, a saved panel's preview and a dashboard panel's line (`rows_limited` beside
+  `result`) say the same; an export says it in `X-Zeteo-Rows-Limited`. In `GET /v1/catalog` each
+  table has `rows_limited` and, when true, `rows_limited_reason`: the caller's rows in words,
+  naming only columns they are granted ("some rows only" for a condition on another) and identity
+  keys by label, never their values; a grant's `row_rule_description` replaces its sentence, and
+  "no rows" means no rule of theirs keeps any; "no rows right now; ask an admin" means their rule
+  cannot be applied as written (a column it reads is gone, or it resolves to too many values), and
+  a query reading the table is refused with `409 row_rule_unavailable`.
 - A query past its time limit is stopped on the source: `504 query_timeout`. The time limit is
   counted from just before the concurrency check, so time spent waiting for a connection to the
   source counts against it; a query with no time left once it has a connection is not sent.

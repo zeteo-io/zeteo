@@ -40,6 +40,9 @@
           X-Zeteo-Run-Id:
             description: The run's id in the run log
             schema: { type: string, format: uuid }
+          X-Zeteo-Rows-Limited:
+            description: "`true` when a row rule of the caller's limited the rows of a table the query reads; absent otherwise"
+            schema: { type: string, enum: ['true'] }
           Vary:
             description: '`Accept-Encoding`'
             schema: { type: string }

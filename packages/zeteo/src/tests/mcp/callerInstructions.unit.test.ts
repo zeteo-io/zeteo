@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   DATA_NOTE,
   instructionsWith,
+  ROWS_LIMITED_NOTE,
   sourcesSection,
   type ListedSource,
 } from "../../mcp/callerInstructions.js";
@@ -119,6 +120,34 @@ describe("sourcesSection", () => {
     expect(Number(more![1])).toBe(40 - listed);
   });
 
+  it("says some tables show only some rows, last, only when a source has a limited table", () => {
+    expect(ROWS_LIMITED_NOTE).toBe(
+      'Some tables show you only some rows; describe_table says which. Say "your" figures, not totals, for those.'
+    );
+    const limited = sourcesSection([
+      source(1),
+      source(2, { rowsLimited: true }),
+    ]);
+    expect(limited.split("\n").at(-1)).toBe(ROWS_LIMITED_NOTE);
+    expect(sourcesSection([source(1), source(2)])).not.toContain(
+      ROWS_LIMITED_NOTE
+    );
+    expect(sourcesSection([source(1, { rowsLimited: false })])).not.toContain(
+      ROWS_LIMITED_NOTE
+    );
+  });
+
+  it("keeps the rows note within 1,000 characters for 40 sources, even when the limited one is not listed", () => {
+    const sources = Array.from({ length: 40 }, (_, i) =>
+      source(i + 1, { rowsLimited: i === 39 })
+    );
+    const section = sourcesSection(sources);
+    expect(section.length).toBeLessThanOrEqual(1000);
+    expect(section).not.toContain("`source-40`");
+    expect(section.split("\n").at(-1)).toBe(ROWS_LIMITED_NOTE);
+    expect(section.split("\n").at(-2)).toMatch(MORE);
+  });
+
   it("cuts a 600-character description at a word boundary with an ellipsis", () => {
     const words = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
     const description = words.slice(0, 600);
@@ -168,6 +197,8 @@ describe("instructionsWith", () => {
         description: "word ".repeat(100).trim(),
         tables: 1000,
         measures: 1000,
+        metrics: 1000,
+        rowsLimited: true,
       })
     );
     expect(

@@ -44,6 +44,8 @@ export interface ExportSink {
   start(head: {
     columns: { name: string; type: ColumnType }[];
     warnings: QueryWarning[];
+    /** A row rule of the caller's limited the rows of a table the query reads. */
+    rowsLimited: boolean;
     runId: string;
   }): Promise<void>;
   /** Resolves when the sink can take more. */
@@ -387,6 +389,7 @@ export const runExport = async (
           const head = {
             columns: stream.columns,
             warnings: plan.warnings,
+            rowsLimited: plan.rowsLimited,
             runId,
           };
           await toSink(() => sink.start(head));

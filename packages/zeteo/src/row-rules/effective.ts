@@ -1,6 +1,5 @@
 import type { RuleColumn, RuleDescriptionPart } from "./resolve.js";
 import { keysById, valuesOfUser } from "../identity/service.js";
-import { isIdentityRef, mapRule, opOf } from "./store.js";
 import type { RowAccess, RuleFilter } from "./types.js";
 import { loadAccessAs } from "../grants/access.js";
 import { NotFoundError } from "../utils/errors.js";
@@ -8,6 +7,7 @@ import { combineRowAccess } from "./resolve.js";
 import { originOf } from "../uploads/origin.js";
 import { describeRowRule } from "./describe.js";
 import { prisma } from "../utils/db/prisma.js";
+import { identityKeysOf } from "./store.js";
 
 // What one user gets of one table, for an admin: the columns, the rows, the
 // grants that give them, and what an admin should look at. The admin sees
@@ -31,19 +31,6 @@ export interface EffectiveAccess {
   }>;
   warnings: EffectiveWarning[];
 }
-
-/** The identity key ids the rules use. */
-const keysOf = (rules: RuleFilter[]): Set<string> => {
-  const keys = new Set<string>();
-  for (const rule of rules) {
-    mapRule(rule, [], (id, condition) => {
-      const [, raw] = opOf(condition);
-      if (isIdentityRef(raw)) keys.add(raw.identity);
-      return [id, condition];
-    });
-  }
-  return keys;
-};
 
 /**
  * `userId`'s access to `tableId` as if signed in to `organizationId` (null:
@@ -145,7 +132,7 @@ export const effectiveAccess = async (
 
   let ruleSummary: string | null = null;
   if (held !== undefined && combined.kind === "rules") {
-    const keyIds = keysOf(combined.grants.map((g) => g.rule));
+    const keyIds = identityKeysOf(combined.grants.map((g) => g.rule));
     const [keys, values] = await Promise.all([
       keyIds.size === 0 ? new Map() : keysById([...keyIds]),
       valuesOfUser(userId, [...keyIds]),

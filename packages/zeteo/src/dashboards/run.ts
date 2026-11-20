@@ -33,6 +33,8 @@ export interface PanelLine {
     /** When rows were left out for the row cap: what the viewer is told. */
     notice?: string;
   };
+  /** Only with `result`: a row rule of the viewer's limited the rows it read. */
+  rows_limited?: boolean;
   /** When the result came from the cache. */
   cached_at?: string;
   /** An `ok` panel whose run failed. */
@@ -152,6 +154,7 @@ export const runDashboard = async (
       line = {
         state: "ok",
         result: resultOf(result),
+        rows_limited: result.rows_limited,
         ...(result.cached_at && { cached_at: result.cached_at }),
       };
     } catch (err) {

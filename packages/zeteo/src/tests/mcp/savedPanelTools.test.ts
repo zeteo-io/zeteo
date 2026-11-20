@@ -178,6 +178,7 @@ describe("MCP saved panel tools", () => {
       "problems",
       "row_count",
       "rows",
+      "rows_limited",
       "truncated",
     ]);
     expect(whole.json.columns.map((c: { name: string }) => c.name)).toEqual([
