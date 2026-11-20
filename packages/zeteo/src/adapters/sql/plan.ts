@@ -47,6 +47,7 @@ import type {
   Scalar,
   SelectItem,
   SqlQuery,
+  DateDiffUnit,
 } from "./language.js";
 import type {
   OutputColumn,
@@ -1152,7 +1153,7 @@ export class Planner {
         ...common,
         resolved: {
           kind: "dateDiff",
-          unit: operand[0] as DateAddUnit,
+          unit: operand[0] as DateDiffUnit,
           start: first.resolved,
           end: operands[1]!.resolved,
           operand: operands.some((o) => o.type === "timestamp")

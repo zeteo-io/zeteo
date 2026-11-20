@@ -224,6 +224,14 @@ export const DATE_ADD_UNITS = [
   "year",
 ] as const;
 export type DateAddUnit = (typeof DATE_ADD_UNITS)[number];
+/** `dateDiff` also counts within a day: whole hours, minutes or seconds. */
+export const DATE_DIFF_UNITS = [
+  "second",
+  "minute",
+  "hour",
+  ...DATE_ADD_UNITS,
+] as const;
+export type DateDiffUnit = (typeof DATE_DIFF_UNITS)[number];
 export const DATE_PARTS = [
   "year",
   "quarter",
@@ -256,7 +264,7 @@ export type CalcExpr =
   | { timestamp: string }
   | RelativeDate
   | { dateAdd: [CalcExpr, number, DateAddUnit] }
-  | { dateDiff: [DateAddUnit, CalcExpr, CalcExpr] }
+  | { dateDiff: [DateDiffUnit, CalcExpr, CalcExpr] }
   | { datePart: [DatePart, CalcExpr] }
   | { businessDays: [CalcExpr, CalcExpr] }
   | { businessDaysInMonth: CalcExpr }
@@ -400,7 +408,7 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
             .optional()
         : tooDeepCalc.optional(),
       dateDiff: deeper
-        ? z.tuple([z.enum(DATE_ADD_UNITS), inner, inner]).optional()
+        ? z.tuple([z.enum(DATE_DIFF_UNITS), inner, inner]).optional()
         : tooDeepCalc.optional(),
       datePart: deeper
         ? z.tuple([z.enum(DATE_PARTS), inner]).optional()
@@ -693,7 +701,7 @@ const CALC_JSON_SCHEMA_DEFS = {
         "dateDiff",
         {
           type: "array",
-          prefixItems: [{ enum: [...DATE_ADD_UNITS] }, calcRef, calcRef],
+          prefixItems: [{ enum: [...DATE_DIFF_UNITS] }, calcRef, calcRef],
           minItems: 3,
           maxItems: 3,
         },

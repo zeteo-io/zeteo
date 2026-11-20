@@ -356,7 +356,7 @@ Dates and timestamps are allowed in expressions:
 | `{ "date": "2026-01-01" }`, `{ "timestamp": "...Z" }` | a literal | date, timestamp |
 | `{ "relative": {...} }` | the relative date shape, also with units `fiscal_quarter` and `fiscal_year` | date |
 | `dateAdd` | `[expression, amount, unit]`, `amount` an integer from -10,000 to 10,000, unit `day` to `year` | the operand's type |
-| `dateDiff` | `[unit, start, end]`, unit `day`, `week`, `month`, `quarter` or `year` | number: whole units completed from start to end, the same on both engines |
+| `dateDiff` | `[unit, start, end]`, unit `second`, `minute`, `hour`, `day`, `week`, `month`, `quarter` or `year` | number: whole units completed from start to end, truncated toward zero, the same on both engines (seconds, minutes and hours as a big integer, so in text on the wire; a date counts from midnight) |
 | `datePart` | `[part, expression]`, part `year`, `quarter`, `month`, `day`, `weekday` (1 = Monday), `fiscal_year` or `fiscal_quarter` | number |
 
 `min`, `max`, `case` and `coalesce` also take dates. **Calendar functions** count with the admin's

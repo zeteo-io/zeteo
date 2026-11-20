@@ -10222,13 +10222,16 @@ components:
                 - quarter
                 - year
         dateDiff:
-          description: '`[unit, start, end]`: whole units completed from start to end, negative when end is before start'
+          description: '`[unit, start, end]`: whole units completed from start to end, truncated toward zero (negative when end is before start); `second`, `minute` and `hour` count within a day (a date counts from midnight)'
           type: array
           minItems: 3
           maxItems: 3
           prefixItems:
             - type: string
               enum:
+                - second
+                - minute
+                - hour
                 - day
                 - week
                 - month

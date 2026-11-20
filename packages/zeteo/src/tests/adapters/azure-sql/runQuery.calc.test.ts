@@ -185,6 +185,29 @@ describe("azure-sql runQuery: calculations", () => {
     ).toBe(-2);
   });
 
+  it("counts whole hours, minutes and seconds, truncated toward zero, the same on both engines", async () => {
+    const stamp = (t: string) => ({ timestamp: t });
+    const diff = (unit: string, a: unknown, b: unknown) =>
+      over({ dateDiff: [unit, a, b] });
+    const start = stamp("2026-09-11T08:26:20Z");
+    const end = stamp("2026-09-11T08:28:12.900Z");
+    expect(await diff("second", start, end)).toBe("112");
+    expect(await diff("minute", start, end)).toBe("1");
+    expect(await diff("hour", start, end)).toBe("0");
+    expect(await diff("second", end, start)).toBe("-112");
+    expect(
+      await diff(
+        "hour",
+        stamp("2026-01-01T00:00:00Z"),
+        stamp("2026-01-03T05:59:59Z")
+      )
+    ).toBe("53");
+    // Dates count from midnight: whole days of them.
+    expect(await diff("minute", day("2026-01-01"), day("2026-01-02"))).toBe(
+      "1440"
+    );
+  });
+
   it("adds to a date and clamps at the end of a month", async () => {
     expect(await over({ dateAdd: [day("2026-01-31"), 1, "month"] })).toBe(
       "2026-02-28"

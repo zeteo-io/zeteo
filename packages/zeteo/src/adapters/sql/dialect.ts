@@ -1,5 +1,5 @@
 import type { Expression, Kysely, SelectQueryBuilder, SqlBool } from "kysely";
-import type { DateAddUnit, DatePart } from "./language.js";
+import type { DateAddUnit, DateDiffUnit, DatePart } from "./language.js";
 import type {
   AggregateFn,
   BucketUnit,
@@ -9,6 +9,9 @@ import type {
   ResolvedExpr,
   ResolvedSelect,
 } from "./types.js";
+
+/** The `dateDiff` units within a day, in seconds. */
+export const SECONDS_IN = { second: 1, minute: 60, hour: 3600 } as const;
 
 // The compile-only instance has no schema, so its tables and columns are untyped.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -142,7 +145,7 @@ export interface SqlDialect {
    * is not past `end`. Both are read as `type`, the wider of their own.
    */
   dateDiff(
-    unit: DateAddUnit,
+    unit: DateDiffUnit,
     start: Expression<unknown>,
     end: Expression<unknown>,
     type: "date" | "timestamp"

@@ -1,7 +1,7 @@
+import { fiscalShift, SECONDS_IN, truncUnit } from "../dialect.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { postgresBaseType } from "../../postgres/types.js";
 import { invalidValue } from "../../../engine/errors.js";
-import { fiscalShift, truncUnit } from "../dialect.js";
 import type { DateAddUnit } from "../language.js";
 import type { PlanValue } from "../types.js";
 import {
@@ -235,6 +235,12 @@ export const postgresDialect: SqlDialect = {
       type === "date"
         ? sql`(${e} - ${s})`
         : sql`cast(trunc(extract(epoch from (${e} - ${s})) / 86400) as integer)`;
+    if (unit in SECONDS_IN) {
+      const per = SECONDS_IN[unit as keyof typeof SECONDS_IN];
+      return type === "date"
+        ? sql`(cast(${e} - ${s} as bigint) * ${sql.lit(86400 / per)})`
+        : sql`cast(trunc(extract(epoch from (${e} - ${s})) / ${sql.lit(per)}) as bigint)`;
+    }
     if (unit === "day") return days;
     if (unit === "week") return sql`(${days} / 7)`;
     const field = (part: "year" | "month", x: Expression<unknown>) =>

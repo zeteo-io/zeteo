@@ -1,6 +1,6 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import type { SqlDialect, ValueSubject } from "../dialect.js";
-import { fiscalShift } from "../dialect.js";
+import { fiscalShift, SECONDS_IN } from "../dialect.js";
 import { plainNumber } from "../values.js";
 import {
   DummyDriver,
@@ -422,6 +422,13 @@ export const mssqlDialect: SqlDialect = {
       type === "date"
         ? sql`datediff(day, ${s}, ${e})`
         : sql`cast(datediff_big(microsecond, ${s}, ${e}) / cast(86400000000 as bigint) as int)`;
+    if (unit in SECONDS_IN) {
+      const per = SECONDS_IN[unit as keyof typeof SECONDS_IN];
+      // Integer division truncates toward zero, as Postgres's trunc does.
+      return type === "date"
+        ? sql`(cast(datediff(day, ${s}, ${e}) as bigint) * ${sql.lit(86400 / per)})`
+        : sql`(datediff_big(microsecond, ${s}, ${e}) / cast(${sql.lit(per * 1_000_000)} as bigint))`;
+    }
     if (unit === "day") return days;
     if (unit === "week") return sql`(${days} / 7)`;
     const boundaries = sql`datediff(month, ${s}, ${e})`;

@@ -27,6 +27,9 @@ export interface TimestampLiteral {
 /** The unit of `dateAdd` and `dateDiff`. */
 export type DateUnit = "day" | "week" | "month" | "quarter" | "year";
 
+/** The unit of `dateDiff`: also whole seconds, minutes or hours. */
+export type DateDiffUnit = "second" | "minute" | "hour" | DateUnit;
+
 /** What `datePart` takes out of a date; `weekday` is 1 for Monday to 7 for Sunday. */
 export type DatePart =
   | "year"
@@ -78,7 +81,7 @@ export type CalcExpr =
   /** `[date or timestamp, amount (-10,000 to 10,000), unit]`; a month, quarter or year step clamps to the month's last day. */
   | { dateAdd: [CalcExpr, number, DateUnit] }
   /** `[unit, start, end]`: whole units completed, negative when end is before start. */
-  | { dateDiff: [DateUnit, CalcExpr, CalcExpr] }
+  | { dateDiff: [DateDiffUnit, CalcExpr, CalcExpr] }
   /** `[part, date or timestamp]`: a number; fiscal parts follow the calendar. */
   | { datePart: [DatePart, CalcExpr] }
   /** The calendar's business days from start to end, both inclusive. Arguments are date, timestamp or relative date literals, not columns. */

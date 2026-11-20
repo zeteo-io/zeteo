@@ -1,5 +1,10 @@
-import type { CalcOp, DateAddUnit, DatePart } from "./language.js";
 import type { ColumnType, QueryPlan } from "../types.js";
+import type {
+  CalcOp,
+  DateAddUnit,
+  DateDiffUnit,
+  DatePart,
+} from "./language.js";
 
 // The plan the SQL compiler consumes. It is complete: the compiler never reads
 // the catalogue or the query. Every name in it is a real catalogue name, every
@@ -108,7 +113,7 @@ export type ResolvedExpr =
     }
   | {
       kind: "dateDiff";
-      unit: DateAddUnit;
+      unit: DateDiffUnit;
       start: ResolvedExpr;
       end: ResolvedExpr;
       /** `timestamp` when either operand is one: both are read as that. */
