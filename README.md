@@ -115,7 +115,7 @@ and changes write audit entries to tereo's outbox.
   functions over columns at any grain (counts between dates, per period, elapsed and remaining,
   `addBusinessDays`, the `isBusinessDay` filter), and fiscal buckets and relative units. One
   calendar for the install (`/v1/calendar`, `zeteo.calendar.write`) keeps working days, holidays,
-  the fiscal year start and the time zone that relative dates and business days follow. A measure can be **fixed** (one value that ignores the query's filters, usable from any
+  the fiscal year start and the time zone that relative dates, buckets and business days follow. A measure can be **fixed** (one value that ignores the query's filters, usable from any
   table and as a comparison value in filters) and can name a date column; a **metric** is a named
   formula over measures of different tables (`roas`), asked for by name in a metric query
   (`{ "metrics": [...], "bucket"?, "range"? }`) that lines each measure up per period by its own
