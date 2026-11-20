@@ -12,6 +12,7 @@ import {
   clearDashboardKeys,
   removeDashboardsOf,
   runOnDashboard,
+  type SeededDashboardQuery,
 } from "../../support/dashboardRuns.js";
 import {
   grantTo,
@@ -321,7 +322,7 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
       savedQuery: { id: saved.id, sourceId: source.id },
       dashboardId: dashboard.id,
       query,
-    };
+    } as unknown as SeededDashboardQuery;
     await clearDashboardKeys();
     const a = await runOnDashboard(paid.id, seeded);
     const b = await runOnDashboard(shipped.id, seeded);
