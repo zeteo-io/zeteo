@@ -72,9 +72,12 @@ describe("compileSql: business days", () => {
       calc({ businessDays: ["ordered_on", "ordered_on"] }),
       { holidays: HOLIDAYS }
     );
+    // WIDTH_BUCKET binary-searches the sorted array: no per-row subquery
+    // reading every holiday.
     expect(sql).toContain(
-      "(select count(*) from unnest(cast($1 as int[])) as h(v) where h.v <= "
+      'width_bucket("bd4"."wa", cast($1 as int[])) as "ca"'
     );
+    expect(sql).not.toContain("unnest");
     expect(parameters.slice(0, 2)).toEqual([
       [ordinal("2026-11-26"), ordinal("2026-12-25")],
       [ordinal("2026-11-26"), ordinal("2026-12-25")],
@@ -83,7 +86,7 @@ describe("compileSql: business days", () => {
 
   it("writes no holiday lookup for a calendar without holidays", () => {
     const { sql } = pg(calc({ businessDays: ["ordered_on", "ordered_on"] }));
-    expect(sql).not.toContain("unnest");
+    expect(sql).not.toContain("width_bucket");
   });
 
   it("applies a per-row count to every row on SQL Server, the holidays a CASE search of ordinals", () => {

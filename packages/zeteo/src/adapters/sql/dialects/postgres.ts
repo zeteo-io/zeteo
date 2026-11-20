@@ -273,8 +273,17 @@ export const postgresDialect: SqlDialect = {
   subqueryInAggregate: true,
   anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
   truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
-  countWhere: (values, op, bound) =>
-    sql`(select count(*) from unnest(cast(${[...values]} as int[])) as h(v) where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
+  // WIDTH_BUCKET binary-searches the sorted array (bound as one parameter):
+  // the count of values at most the bound. Equality is the difference of
+  // two such counts.
+  countWhere: (values, op, bound) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const atMost = (x: Expression<unknown>) =>
+      sql`width_bucket(${x}, cast(${sorted} as int[]))`;
+    return op === "<="
+      ? atMost(bound)
+      : sql`(${atMost(bound)} - ${atMost(sql`${bound} - 1`)})`;
+  },
   // Native conversion, the zone name bound: the calendar takes only `UTC`
   // and region names (with a "/"), which Postgres reads by their rules, never
   // as fixed-offset abbreviations. The session runs in UTC, so a timestamp
