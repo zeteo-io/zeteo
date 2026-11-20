@@ -117,6 +117,14 @@ The same without a bucket, one row for all time:
 {"source":"sales-db","metrics":["roas","revenue","spend"]}
 \`\`\`
 
+### Creating and changing measures and metrics
+The source's measure editors (people an admin listed, holding \`zeteo.measures.write\`) can create, change and delete them over MCP; anyone else is refused (\`forbidden\`). Do so only when the user asks: everyone who queries the source shares them, and saved queries and dashboards may use them.
+- \`list_measures\` and \`list_metrics\` (by source slug) show the full definitions, \`used_by\` (saved queries and panels) and \`can_edit\`. Tell the user what uses one before renaming or deleting it: those stop working.
+- Try a draft with \`preview_measure\` (optionally \`bucket: { "unit": "month", "column": "created_at" }\`) or \`preview_metric\` (optionally \`bucket\` and \`range\`, as a metric query) before saving it.
+- \`create_measure\`: \`source\`, \`name\` (lower case, digits, underscores; unique across the source's measures and metrics), \`description\`, \`table\`, \`formula\` (group-level, as a select item would be), and optionally \`where\`, \`fixed\`, \`date_column\`. \`create_metric\`: \`source\`, \`name\`, \`description\`, \`formula\` over \`{ "measure": name }\`, numbers and arithmetic.
+- \`update_measure\` / \`update_metric\` find one by its current name (\`measure\` / \`metric\`) and change only the fields given; \`where: null\` and \`date_column: null\` remove those. \`delete_measure\` / \`delete_metric\` remove one for good; a measure other measures or metrics use cannot be deleted (\`measure_in_use\`, with the \`dependents\`).
+- Everything is checked against your own grants, as a query is: a column or measure you cannot see is \`not_found_or_not_accessible\`.
+
 ## Results
 \`{ columns, rows, truncated, truncated_by?, warnings, run_id }\`: \`rows\` are arrays in \`columns\` order. 64-bit integers, decimals, counts and sums of integers or decimals arrive as strings, to keep their precision. A \`join_multiplies_rows\` warning means an aggregate may count a row more than once.
 

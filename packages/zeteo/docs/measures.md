@@ -163,7 +163,8 @@ measures too) and every relation it joins are in the caller's visible catalogue.
 absent from every listing and using it is `not_found_or_not_accessible`. `GET /v1/catalog` and the
 MCP `describe_table` list each table's visible measures with description, formula and filter;
 `list_tables` and `list_sources` carry counts, and the per-caller MCP instructions say when a source
-has measures.
+has measures. A source's editors can also list, preview, create, change and delete measures and
+metrics through MCP tools, under the same rules as the API ([mcp.md](mcp.md#measures-over-mcp)).
 
 ## Changing measures
 
@@ -240,5 +241,4 @@ and `max` the end of the scale. A null value or `max` shows "No data"; a null ta
 - Elapsed and remaining business days over columns: `businessDaysInMonth` takes a column, the other
   calendar functions a date or relative date only ([calendar.md](calendar.md)).
 - Using a non-fixed measure from a query whose `from` is not its home table, row-level reusable
-  calculations, authoring measures or metrics through MCP, and a text formula syntax: they are
-  written as JSON.
+  calculations, and a text formula syntax: they are written as JSON.
