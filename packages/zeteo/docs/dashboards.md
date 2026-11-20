@@ -98,7 +98,8 @@ A panel over a **metric query** ([measures.md](measures.md#metric-queries)) uses
 `"range"`: the time range then replaces the query's `range` (each measure is cut on its own date
 column), instead of adding a `where`. Any other time column on a metric query is a `wrong_type`
 problem at `time_column` (`needs_update` for a viewer); a panel without a time column keeps the
-query's own `range`.
+query's own `range`. Only a metric query reads `"range"` so: on a table query it is an ordinary
+column path, so a table with a date column named `range` can follow the time range by it.
 
 ## Running a dashboard
 

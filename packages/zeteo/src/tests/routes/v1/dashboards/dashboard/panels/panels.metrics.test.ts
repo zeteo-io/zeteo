@@ -24,6 +24,10 @@ import {
   seedMeasures,
 } from "../../../../../support/measures.js";
 import {
+  removeUploadSourcesOf,
+  seedUploadSource,
+} from "../../../../../support/uploads.js";
+import {
   grantTo,
   newQueryUser,
   removeRunsOf,
@@ -32,7 +36,8 @@ import {
 } from "../../../../../support/queries.js";
 
 // A panel over a metric query follows the dashboard's time range through
-// time_column "range", and through no other; a table query never takes it.
+// time_column "range", and through no other; for a table query "range" is an
+// ordinary column path.
 
 const LINE = { type: "line", version: 1, x: "period", y: ["roas", "revenue"] };
 const TABLE = { type: "table", version: 1 };
@@ -91,6 +96,7 @@ describe("panels over metric queries", () => {
     await removeDashboardsOf([owner.id]);
     await removeRunsOf([owner.id]);
     await removeSources([source.id]);
+    await removeUploadSourcesOf([owner.id]);
   });
 
   it("accepts time_column range on a panel of a metric query", async () => {
@@ -120,7 +126,7 @@ describe("panels over metric queries", () => {
     }
   });
 
-  it("refuses time_column range on a table query, as any other wrong time column", async () => {
+  it("reads time_column range on a table query as a column, missing when the table has none", async () => {
     const id = await dashboardOf(owner.token, { time_range: "last_year" });
     const res = await addPanel(
       owner.token,
@@ -130,8 +136,53 @@ describe("panels over metric queries", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("invalid_panel");
     expect(res.body.problems).toEqual([
-      { setting: "time_column", problem: "wrong_type" },
+      { setting: "time_column", problem: "missing_column" },
     ]);
+  });
+
+  it("filters a table query on its own column named range", async () => {
+    const day = (daysAgo: number) =>
+      new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+    const upload = await seedUploadSource({
+      ownerId: owner.id,
+      tables: [
+        {
+          name: "bookings",
+          columns: [
+            { name: "id", type: "number" },
+            { name: "range", type: "date" },
+          ],
+          rows: [
+            ["1", day(3)],
+            ["2", "2001-01-01"],
+          ],
+        },
+      ],
+    });
+    const rangeQuery = await savedQueryOf(owner.token, upload, {
+      query: { source: upload.slug, from: "bookings", select: ["id", "range"] },
+    });
+    const id = await dashboardOf(owner.token, { time_range: "last_30_days" });
+    const panel = await addPanel(
+      owner.token,
+      id,
+      ownPanel(rangeQuery, { chart: TABLE, time_column: "range" })
+    );
+    expect(panel.status, JSON.stringify(panel.body)).toBe(201);
+    expect(panel.body).toMatchObject({ state: "ok", time_column: "range" });
+    const res = await postExport({
+      token: owner.token,
+      body: {},
+      baseUrl: BASE_URL,
+      path: `/v1/dashboards/${id}/run`,
+    });
+    expect(res.status, res.text).toBe(200);
+    const [line] = ndjsonLines(res.text) as Array<{
+      state: string;
+      result?: { rows: unknown[][] };
+    }>;
+    expect(line!.state).toBe("ok");
+    expect(line!.result!.rows.map((r) => Number(r[0]))).toEqual([1]);
   });
 
   it("holds the same rules for a saved panel", async () => {
@@ -158,7 +209,7 @@ describe("panels over metric queries", () => {
     });
     expect(table.status).toBe(400);
     expect(table.body.problems).toEqual([
-      { setting: "time_column", problem: "wrong_type" },
+      { setting: "time_column", problem: "missing_column" },
     ]);
   });
 

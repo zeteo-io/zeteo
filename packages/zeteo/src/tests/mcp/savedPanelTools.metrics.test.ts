@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { removeUploadSourcesOf, seedUploadSource } from "../support/uploads.js";
 import { measureBody, metricBody, seedMeasures } from "../support/measures.js";
 import { DATA_READ, MCP_USE } from "../../definitions/tereoDeclaration.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -23,7 +24,8 @@ import {
 
 const postgres = ENGINES.find((e) => e.type === "postgres")!;
 
-// preview_panel over a metric query: time_column "range" replaces its range.
+// preview_panel over a metric query: time_column "range" replaces its range;
+// over a table query, "range" is a column like any other.
 describe("MCP preview_panel over a metric query", () => {
   let source: SeededSource;
   let session: McpSession;
@@ -50,6 +52,7 @@ describe("MCP preview_panel over a metric query", () => {
     await removeDashboardsOf([userId]);
     await removeRunsOf([userId]);
     await removeSources([source.id]);
+    await removeUploadSourcesOf([userId]);
   });
 
   it("cuts the metrics to the time range with time_column range, and refuses any other column", async () => {
@@ -91,21 +94,33 @@ describe("MCP preview_panel over a metric query", () => {
     });
   });
 
-  it("refuses time_column range on a table query", async () => {
-    const wrong = await callTool(session.client, "preview_panel", {
-      query: {
-        source: source.slug,
-        from: "orders",
-        select: ["id"],
-        limit: 5,
-      },
+  it("reads time_column range on a table query as its own column named range", async () => {
+    const day = (daysAgo: number) =>
+      new Date(Date.now() - daysAgo * 86_400_000).toISOString().slice(0, 10);
+    const upload = await seedUploadSource({
+      ownerId: userId,
+      tables: [
+        {
+          name: "bookings",
+          columns: [
+            { name: "id", type: "number" },
+            { name: "range", type: "date" },
+          ],
+          rows: [
+            ["1", day(3)],
+            ["2", "2001-01-01"],
+          ],
+        },
+      ],
+    });
+    const preview = await callTool(session.client, "preview_panel", {
+      query: { source: upload.slug, from: "bookings", select: ["id", "range"] },
       chart: { type: "table", version: 1 },
       time_column: "range",
-      time_range: "previous_month",
+      time_range: "last_30_days",
     });
-    expect(wrong.isError, wrong.text).toBe(false);
-    expect(wrong.json).toMatchObject({
-      problems: [{ setting: "time_column", problem: "wrong_type" }],
-    });
+    expect(preview.isError, preview.text).toBe(false);
+    expect(preview.json).toMatchObject({ row_count: 1, problems: [] });
+    expect(Number(preview.json.rows[0][0])).toBe(1);
   });
 });

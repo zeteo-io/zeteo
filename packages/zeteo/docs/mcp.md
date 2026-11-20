@@ -163,7 +163,7 @@ metrics the caller may use (name, description, formula), and `list_sources` coun
 metrics per source. `query` also takes a metric query (`{ "source", "metrics": [...], "bucket"?,
 "range"? }`), and `preview_panel` and `add_panel` take `time_column: "range"` for one (a
 `preview_panel` with another time column over a metric query reports a `wrong_type` problem at
-`time_column`). `query`
+`time_column`; over a table query `"range"` is an ordinary column). `query`
 takes `{ "measure": ... }` like any query ([measures.md](measures.md)). The static instructions and
 `query_guide` tell a model to prefer a measure over writing the calculation, not to re-derive its
 formula, and to ask the user which one when several could answer, quoting their descriptions;
