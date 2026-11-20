@@ -67,3 +67,56 @@
   justify-content: space-between;
   gap: 0.5rem;
 }
+
+/* Name and table side by side on a measure's page. */
+.z-measure-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+
+@media (max-width: 40rem) {
+  .z-measure-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.z-measure-form .k-form {
+  display: grid;
+  gap: 1rem;
+}
+
+/* Fields inside a section of a measure's or metric's page. */
+.z-measure-form [data-field] + [data-field]:not(.z-measure-pair > *),
+.z-measure-pair + [data-field] {
+  margin-top: 1rem;
+}
+
+.z-measure-note {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+/* A measure's or metric's page: the details on the left, the JSON on the right. */
+.z-form-page.z-measure-page {
+  max-width: 80rem;
+}
+
+.z-measure-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.z-measure-column {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (max-width: 60rem) {
+  .z-measure-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

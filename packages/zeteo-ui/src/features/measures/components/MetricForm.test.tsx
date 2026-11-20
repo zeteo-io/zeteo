@@ -3,8 +3,8 @@ import { SOURCE_ID } from "@/features/sources/testFixtures";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { MetricDialog } from "./MetricDialog";
 import { makeMetric } from "../testFixtures";
+import { MetricForm } from "./MetricForm";
 
 const post = vi.hoisted(() => vi.fn());
 const patch = vi.hoisted(() => vi.fn());
@@ -23,7 +23,7 @@ const fill = async (user: User) => {
   await user.paste('{"div":[{"measure":"a"},{"measure":"b"}]}');
 };
 
-describe("MetricDialog", () => {
+describe("MetricForm", () => {
   beforeEach(() => {
     post.mockReset();
     patch.mockReset();
@@ -31,14 +31,12 @@ describe("MetricDialog", () => {
 
   it("creates a metric", async () => {
     post.mockResolvedValue({ data: makeMetric() });
-    const onClose = vi.fn();
+    const onDone = vi.fn();
     const user = userEvent.setup();
-    renderWithProviders(
-      <MetricDialog sourceId={SOURCE_ID} onClose={onClose} />
-    );
+    renderWithProviders(<MetricForm sourceId={SOURCE_ID} onDone={onDone} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(post).toHaveBeenCalledWith(`/v1/sources/${SOURCE_ID}/metrics`, {
       name: "margin_pct",
       description: "Margin share",
@@ -54,9 +52,7 @@ describe("MetricDialog", () => {
       path: ["formula", "div", 0],
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MetricDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MetricForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Save" }));
     const error = await screen.findByText(/Measure a was not found/);
@@ -79,9 +75,7 @@ describe("MetricDialog", () => {
       },
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MetricDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MetricForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByText("2026-11-01")).toBeInTheDocument();
@@ -97,11 +91,7 @@ describe("MetricDialog", () => {
     patch.mockResolvedValue({ data: makeMetric() });
     const user = userEvent.setup();
     renderWithProviders(
-      <MetricDialog
-        sourceId={SOURCE_ID}
-        metric={makeMetric()}
-        onClose={vi.fn()}
-      />
+      <MetricForm sourceId={SOURCE_ID} metric={makeMetric()} onDone={vi.fn()} />
     );
     await user.type(field("Description"), "!");
     await user.click(screen.getByRole("button", { name: "Save" }));

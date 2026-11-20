@@ -4,6 +4,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useDateColumns } from "../api/useDateColumns";
 import { useSaveMeasure } from "../api/useSaveMeasure";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { PageHeader } from "@/components/PageHeader";
 import { useAllTables } from "@/features/tables";
 import { PreviewResult } from "./PreviewResult";
 import type { ApiError } from "@/lib/api";
@@ -13,7 +14,6 @@ import {
   Button,
   Form,
   Input,
-  Modal,
   SearchSelect,
   Switch,
   TextArea,
@@ -59,19 +59,20 @@ const Field = ({
   </div>
 );
 
-interface MeasureDialogProps {
+interface MeasureFormProps {
   sourceId: string;
   /** The measure to change; absent to create one. */
   measure?: Measure;
-  onClose: () => void;
+  /** Leaves the form: after a save, or on Cancel. */
+  onDone: () => void;
 }
 
 /** Creating or changing a measure: its definition as JSON, checked by the server, and a preview that runs the draft. */
-export const MeasureDialog = ({
+export const MeasureForm = ({
   sourceId,
   measure,
-  onClose,
-}: MeasureDialogProps) => {
+  onDone,
+}: MeasureFormProps) => {
   const save = useSaveMeasure(sourceId);
   const preview = usePreviewMeasure(sourceId);
   const {
@@ -178,7 +179,7 @@ export const MeasureDialog = ({
     setLocal({});
     const input = d.input;
     if (!measure) {
-      save.mutate({ body: input }, { onSuccess: onClose, onError: setFailure });
+      save.mutate({ body: input }, { onSuccess: onDone, onError: setFailure });
       return;
     }
     const body: Partial<MeasureInput> = {};
@@ -198,10 +199,10 @@ export const MeasureDialog = ({
       body.fixed = input.fixed ?? false;
     if ((input.date_column ?? null) !== measure.date_column)
       body.date_column = input.date_column ?? null;
-    if (Object.keys(body).length === 0) return onClose();
+    if (Object.keys(body).length === 0) return onDone();
     save.mutate(
       { id: measure.id, body },
-      { onSuccess: onClose, onError: setFailure }
+      { onSuccess: onDone, onError: setFailure }
     );
   };
 
@@ -226,137 +227,156 @@ export const MeasureDialog = ({
     (used.saved_queries > 0 || used.panels > 0);
 
   return (
-    <Modal
-      show
-      size="lg"
-      title={measure ? "Edit measure" : "New measure"}
-      onClose={onClose}
-      dismissible={!busy}
-      footerButtons={[
-        <Button
-          key="cancel"
-          variant="secondary"
-          fullWidth={false}
-          disabled={busy}
-          onClick={onClose}
-        >
-          Cancel
-        </Button>,
-        <Button
-          key="preview"
-          variant="secondary"
-          fullWidth={false}
-          isLoading={preview.isPending}
-          disabled={busy || preview.isPending}
-          onClick={runPreview}
-        >
-          Preview
-        </Button>,
-        <Button
-          key="save"
-          type="submit"
-          form={FORM_ID}
-          fullWidth={false}
-          isLoading={busy}
-          disabled={busy}
-        >
-          Save
-        </Button>,
-      ]}
-    >
+    <div className="z-form-page z-measure-page">
+      <PageHeader
+        title={measure ? "Edit measure" : "New measure"}
+        divider={false}
+        actions={
+          <div className="z-header-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              disabled={busy}
+              onClick={onDone}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              isLoading={preview.isPending}
+              disabled={busy || preview.isPending}
+              onClick={runPreview}
+            >
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              type="submit"
+              form={FORM_ID}
+              fullWidth={false}
+              isLoading={busy}
+              disabled={busy}
+            >
+              Save
+            </Button>
+          </div>
+        }
+      />
       <div className="z-measure-form">
         <Form id={FORM_ID} onSubmit={submit}>
-          <Field name="name" error={err("name")}>
-            <Input
-              label="Name"
-              required
-              value={name}
-              helperText="Unique in the source; queries refer to it as { measure: name }."
-              onChange={(e) => setName(e.target.value)}
-            />
-            {renaming && used && (
-              <p className="z-muted" role="status">
-                {measure.name} is used by {used.saved_queries}{" "}
-                {used.saved_queries === 1 ? "saved query" : "saved queries"} and{" "}
-                {used.panels} {used.panels === 1 ? "panel" : "panels"}; they
-                will stop working under the new name.
-              </p>
-            )}
-          </Field>
-          <Field name="table" error={err("table")}>
-            <SearchSelect<string>
-              label="Table"
-              required
-              placeholder="Search tables"
-              value={table || null}
-              options={options}
-              getOptionLabel={(t) => t}
-              getOptionKey={(t) => t}
-              disabled={tablesLoading}
-              longDropDown
-              onSelect={setTable}
-            />
-            <ErrorNotice error={tablesError} />
-          </Field>
-          <Field name="description" error={err("description")}>
-            <TextArea
-              label="Description"
-              required
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Field>
-          <Field name="formula" error={err("formula")}>
-            <div className="z-measure-json">
-              <TextArea
-                label="Formula (JSON)"
-                required
-                rows={6}
-                value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-              />
+          <div className="z-measure-columns">
+            <div className="z-measure-column">
+              <BorderedSection title="About" as="h2">
+                <div className="z-measure-pair">
+                  <Field name="name" error={err("name")}>
+                    <Input
+                      label="Name"
+                      required
+                      value={name}
+                      helperText="Queries use it as { measure: name }."
+                      onChange={(e) => setName(e.target.value)}
+                    />
+                    {renaming && used && (
+                      <p className="z-muted" role="status">
+                        {measure.name} is used by {used.saved_queries}{" "}
+                        {used.saved_queries === 1
+                          ? "saved query"
+                          : "saved queries"}{" "}
+                        and {used.panels}{" "}
+                        {used.panels === 1 ? "panel" : "panels"}; they will stop
+                        working under the new name.
+                      </p>
+                    )}
+                  </Field>
+                  <Field name="table" error={err("table")}>
+                    <SearchSelect<string>
+                      label="Table"
+                      required
+                      placeholder="Search tables"
+                      value={table || null}
+                      options={options}
+                      getOptionLabel={(t) => t}
+                      getOptionKey={(t) => t}
+                      disabled={tablesLoading}
+                      longDropDown
+                      onSelect={setTable}
+                    />
+                    <ErrorNotice error={tablesError} />
+                  </Field>
+                </div>
+                <Field name="description" error={err("description")}>
+                  <TextArea
+                    label="Description"
+                    required
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </Field>
+              </BorderedSection>
+              <BorderedSection title="Dates and scope" as="h2">
+                <Field name="fixed" error={err("fixed")}>
+                  <Switch
+                    size="sm"
+                    label="Fixed"
+                    labelLocation="left"
+                    checked={fixed}
+                    onChange={(e) => setFixed(e.target.checked)}
+                  />
+                  <small className="z-muted z-measure-note">
+                    Ignores the query's filters; one value over the whole table
+                    — usable from any table.
+                  </small>
+                </Field>
+                <Field name="date_column" error={err("date_column")}>
+                  <SearchSelect<string>
+                    label="Date column (optional)"
+                    placeholder="Search date columns"
+                    value={dateColumn || null}
+                    options={dateChoicesWithNone}
+                    getOptionLabel={(c) => c}
+                    getOptionKey={(c) => c}
+                    disabled={!table}
+                    longDropDown
+                    onSelect={(c) =>
+                      setDateColumn(c === NO_DATE_COLUMN ? "" : c)
+                    }
+                  />
+                </Field>
+              </BorderedSection>
             </div>
-          </Field>
-          <Field name="where" error={err("where")}>
-            <div className="z-measure-json">
-              <TextArea
-                label="Where (JSON, optional)"
-                rows={3}
-                value={where}
-                onChange={(e) => setWhere(e.target.value)}
-              />
+            <div className="z-measure-column">
+              <BorderedSection title="Calculation" as="h2">
+                <Field name="formula" error={err("formula")}>
+                  <div className="z-measure-json">
+                    <TextArea
+                      label="Formula (JSON)"
+                      required
+                      rows={14}
+                      value={formula}
+                      onChange={(e) => setFormula(e.target.value)}
+                    />
+                  </div>
+                </Field>
+                <Field name="where" error={err("where")}>
+                  <div className="z-measure-json">
+                    <TextArea
+                      label="Where (JSON, optional)"
+                      rows={6}
+                      value={where}
+                      onChange={(e) => setWhere(e.target.value)}
+                    />
+                  </div>
+                </Field>
+              </BorderedSection>
             </div>
-          </Field>
-          <Field name="fixed" error={err("fixed")}>
-            <Switch
-              size="sm"
-              label="Fixed"
-              labelLocation="left"
-              checked={fixed}
-              onChange={(e) => setFixed(e.target.checked)}
-            />
-            <small className="z-muted">
-              Ignores the query's filters; one value over the whole table —
-              usable from any table.
-            </small>
-          </Field>
-          <Field name="date_column" error={err("date_column")}>
-            <SearchSelect<string>
-              label="Date column (optional)"
-              placeholder="Search date columns"
-              value={dateColumn || null}
-              options={dateChoicesWithNone}
-              getOptionLabel={(c) => c}
-              getOptionKey={(c) => c}
-              disabled={!table}
-              longDropDown
-              onSelect={(c) => setDateColumn(c === NO_DATE_COLUMN ? "" : c)}
-            />
-          </Field>
+          </div>
           {(preview.data ||
             (preview.error && Object.keys(previewed).length === 0)) && (
-            <BorderedSection title="Preview" as="h3">
+            <BorderedSection title="Preview" as="h2">
               {preview.data && <PreviewResult result={preview.data} />}
               <ErrorNotice error={preview.error} />
             </BorderedSection>
@@ -364,6 +384,6 @@ export const MeasureDialog = ({
           {Object.keys(server).length === 0 && <ErrorNotice error={failure} />}
         </Form>
       </div>
-    </Modal>
+    </div>
   );
 };

@@ -40,6 +40,20 @@ const MeasuresPage = lazy(() =>
     default: m.SourceMeasuresPage,
   }))
 );
+const MetricsPage = lazy(() =>
+  import("./components/SourceTabs").then((m) => ({
+    default: m.SourceMetricsPage,
+  }))
+);
+const measurePage = (
+  name:
+    "MeasureNewPage" | "MeasureEditPage" | "MetricNewPage" | "MetricEditPage"
+) =>
+  lazy(() => import("@/features/measures").then((m) => ({ default: m[name] })));
+const MeasureNewPage = measurePage("MeasureNewPage");
+const MeasureEditPage = measurePage("MeasureEditPage");
+const MetricNewPage = measurePage("MetricNewPage");
+const MetricEditPage = measurePage("MetricEditPage");
 const UploadsPage = lazy(() =>
   import("./components/SourceTabs").then((m) => ({
     default: m.SourceUploadsPage,
@@ -148,9 +162,22 @@ export const sourceRoutes = [
       { path: "uploads", element: loading(<UploadsPage />) },
       { path: "relations", element: loading(<RelationsPage />) },
       { path: "measures", element: loading(<MeasuresPage />) },
+      { path: "metrics", element: loading(<MetricsPage />) },
       { path: "sharing", element: loading(<SharingPage />) },
     ],
   },
+  // Creating and changing a measure or metric: pages of their own, without the source's tabs.
+  ...(
+    [
+      ["measures/new", <MeasureNewPage />],
+      ["measures/:measureId/edit", <MeasureEditPage />],
+      ["metrics/new", <MetricNewPage />],
+      ["metrics/:metricId/edit", <MetricEditPage />],
+    ] as const
+  ).map(([path, page]) => ({
+    path: `/sources/:sourceId/${path}`,
+    element: <SourceGuard admin={[READ]}>{page}</SourceGuard>,
+  })),
   {
     path: "/sources/:sourceId/add",
     element: (

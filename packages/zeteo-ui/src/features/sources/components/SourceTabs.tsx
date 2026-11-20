@@ -1,9 +1,9 @@
 import { TableView, TablesList, useAllTables } from "@/features/tables";
 import { UploadOriginsPage } from "../upload/components/UploadOrigins";
 import { NoAccessSection } from "@/components/NoAccessSection";
+import { MeasuresTab, MetricsTab } from "@/features/measures";
 import { isUploadType, sourceHref } from "./sourceLabels";
 import { RelationsList } from "@/features/relations";
-import { MeasuresTab } from "@/features/measures";
 import { useUuidParam } from "@/lib/useUuidParam";
 import { SourceGrants } from "@/features/grants";
 import { NotFound } from "@/components/NotFound";
@@ -116,6 +116,18 @@ export const SourceMeasuresPage = () => {
   const { source, access } = useSourceContext();
   return (
     <MeasuresTab
+      sourceId={source.id}
+      canWrite={access.canWriteMeasures}
+      canManageEditors={access.canManageMeasureEditors}
+    />
+  );
+};
+
+/** Metrics: formulas over measures; the same editors and permissions as measures. */
+export const SourceMetricsPage = () => {
+  const { source, access } = useSourceContext();
+  return (
+    <MetricsTab
       sourceId={source.id}
       canWrite={access.canWriteMeasures}
       canManageEditors={access.canManageMeasureEditors}

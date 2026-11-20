@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SOURCE_ID } from "@/features/sources/testFixtures";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { MetricsSection } from "./MetricsSection";
 import { screen } from "@testing-library/react";
+import { MetricsTab } from "./MetricsTab";
 
 const get = vi.hoisted(() => vi.fn());
 const del = vi.hoisted(() => vi.fn());
@@ -25,14 +25,16 @@ const respond = (can_edit: boolean, can_manage_editors = false) =>
     return { data: { data: [makeMeasure()], can_edit, next_cursor: null } };
   });
 
-describe("MetricsSection", () => {
+describe("MetricsTab", () => {
   beforeEach(() => {
     del.mockReset().mockResolvedValue({});
     respond(true);
   });
 
   it("lists metrics with the measures they use and marks a redacted one", async () => {
-    renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
     const row = (await screen.findByText("margin_pct")).closest("tr")!;
     expect(row).toHaveTextContent("Margin as a share of revenue");
     expect(row).toHaveTextContent("paid_revenue");
@@ -45,7 +47,9 @@ describe("MetricsSection", () => {
 
   it("deletes after confirming with the used-by counts", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
     const row = (await screen.findByText("margin_pct")).closest("tr")!;
     await user.click(row.querySelector("button[aria-label='Delete']")!);
     expect(
@@ -65,7 +69,9 @@ describe("MetricsSection", () => {
       dependents: [{ kind: "metric", name: "roas_v2" }],
     });
     const user = userEvent.setup();
-    renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
     const row = (await screen.findByText("margin_pct")).closest("tr")!;
     await user.click(row.querySelector("button[aria-label='Delete']")!);
     await user.click(screen.getByRole("button", { name: "Delete metric" }));
@@ -77,7 +83,9 @@ describe("MetricsSection", () => {
 
   it("hides the actions from one who is not an editor", async () => {
     respond(false, true);
-    renderWithProviders(<MetricsSection sourceId={SOURCE_ID} canWrite />);
+    renderWithProviders(
+      <MetricsTab sourceId={SOURCE_ID} canWrite canManageEditors />
+    );
     await screen.findByText("margin_pct");
     expect(screen.queryByRole("button", { name: "New metric" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();

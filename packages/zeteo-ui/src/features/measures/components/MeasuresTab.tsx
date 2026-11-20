@@ -5,9 +5,8 @@ import { useDeleteMeasure } from "../api/useDeleteMeasure";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { EditButton } from "@/components/EditButton";
-import { MetricsSection } from "./MetricsSection";
 import { useMeasures } from "../api/useMeasures";
-import { MeasureDialog } from "./MeasureDialog";
+import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -46,7 +45,7 @@ interface MeasuresTabProps {
 
 const nameOf = (m: MeasureListItem) => m.name;
 
-/** A source's Measures tab. */
+/** A source's Measures tab; creating and changing a measure are pages of their own. */
 export const MeasuresTab = ({
   sourceId,
   canWrite,
@@ -60,7 +59,8 @@ export const MeasuresTab = ({
     canWrite && !!list && !list.can_edit && list.can_manage_editors;
   const del = useDeleteMeasure(sourceId);
   const [params, setParams] = useState<Record<string, string>>({});
-  const [editing, setEditing] = useState<Measure | "new" | null>(null);
+  const navigate = useNavigate();
+  const base = `/sources/${sourceId}/measures`;
   const [managing, setManaging] = useState(false);
 
   const q = params["filter[q]"]?.toLowerCase();
@@ -94,7 +94,7 @@ export const MeasuresTab = ({
               <Button
                 size="sm"
                 fullWidth={false}
-                onClick={() => setEditing("new")}
+                onClick={() => navigate(`${base}/new`)}
               >
                 New measure
               </Button>
@@ -107,15 +107,6 @@ export const MeasuresTab = ({
           )}
         </div>
       </div>
-      {editing && (
-        <MeasureDialog
-          // A new key per measure so its fields start from it.
-          key={editing === "new" ? "new" : editing.id}
-          sourceId={sourceId}
-          {...(editing !== "new" && { measure: editing })}
-          onClose={() => setEditing(null)}
-        />
-      )}
       {managing && (
         <MeasureEditorsDialog
           sourceId={sourceId}
@@ -180,7 +171,9 @@ export const MeasuresTab = ({
                       cellElement: (m: MeasureListItem) =>
                         isRedacted(m) ? null : (
                           <RowActions align="end">
-                            <EditButton onClick={() => setEditing(m)} />
+                            <EditButton
+                              onClick={() => navigate(`${base}/${m.id}/edit`)}
+                            />
                             <ConfirmButton
                               danger
                               size="sm"
@@ -207,7 +200,6 @@ export const MeasuresTab = ({
           />
         </div>
       )}
-      <MetricsSection sourceId={sourceId} canWrite={canWrite} />
     </>
   );
 };

@@ -2,6 +2,7 @@ import { usePreviewMetric } from "../api/usePreviewMetric";
 import type { Metric, MetricInput } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useSaveMetric } from "../api/useSaveMetric";
+import { PageHeader } from "@/components/PageHeader";
 import { useState, type ReactNode } from "react";
 import { PreviewResult } from "./PreviewResult";
 import type { ApiError } from "@/lib/api";
@@ -11,7 +12,6 @@ import {
   Button,
   Form,
   Input,
-  Modal,
   TextArea,
 } from "@kosmeo-ui/react";
 import {
@@ -53,19 +53,16 @@ export const twelveMonthsBack = (now = new Date()): string => {
   return d.toISOString().slice(0, 10);
 };
 
-interface MetricDialogProps {
+interface MetricFormProps {
   sourceId: string;
   /** The metric to change; absent to create one. */
   metric?: Metric;
-  onClose: () => void;
+  /** Leaves the form: after a save, or on Cancel. */
+  onDone: () => void;
 }
 
 /** Creating or changing a metric: its formula as JSON over measures, checked by the server, and a monthly preview of the last 12 months. */
-export const MetricDialog = ({
-  sourceId,
-  metric,
-  onClose,
-}: MetricDialogProps) => {
+export const MetricForm = ({ sourceId, metric, onDone }: MetricFormProps) => {
   const save = useSaveMetric(sourceId);
   const preview = usePreviewMetric(sourceId);
   const [name, setNameText] = useState(metric?.name ?? "");
@@ -116,7 +113,7 @@ export const MetricDialog = ({
     setLocal({});
     const input = d.input;
     if (!metric) {
-      save.mutate({ body: input }, { onSuccess: onClose, onError: setFailure });
+      save.mutate({ body: input }, { onSuccess: onDone, onError: setFailure });
       return;
     }
     const body: Partial<MetricInput> = {};
@@ -125,10 +122,10 @@ export const MetricDialog = ({
       body.description = input.description;
     if (JSON.stringify(input.formula) !== JSON.stringify(metric.formula))
       body.formula = input.formula;
-    if (Object.keys(body).length === 0) return onClose();
+    if (Object.keys(body).length === 0) return onDone();
     save.mutate(
       { id: metric.id, body },
-      { onSuccess: onClose, onError: setFailure }
+      { onSuccess: onDone, onError: setFailure }
     );
   };
 
@@ -157,86 +154,98 @@ export const MetricDialog = ({
     (used.saved_queries > 0 || used.panels > 0);
 
   return (
-    <Modal
-      show
-      size="lg"
-      title={metric ? "Edit metric" : "New metric"}
-      onClose={onClose}
-      dismissible={!busy}
-      footerButtons={[
-        <Button
-          key="cancel"
-          variant="secondary"
-          fullWidth={false}
-          disabled={busy}
-          onClick={onClose}
-        >
-          Cancel
-        </Button>,
-        <Button
-          key="preview"
-          variant="secondary"
-          fullWidth={false}
-          isLoading={preview.isPending}
-          disabled={busy || preview.isPending}
-          onClick={runPreview}
-        >
-          Preview
-        </Button>,
-        <Button
-          key="save"
-          type="submit"
-          form={FORM_ID}
-          fullWidth={false}
-          isLoading={busy}
-          disabled={busy}
-        >
-          Save
-        </Button>,
-      ]}
-    >
+    <div className="z-form-page z-measure-page">
+      <PageHeader
+        title={metric ? "Edit metric" : "New metric"}
+        divider={false}
+        actions={
+          <div className="z-header-actions">
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              disabled={busy}
+              onClick={onDone}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              fullWidth={false}
+              isLoading={preview.isPending}
+              disabled={busy || preview.isPending}
+              onClick={runPreview}
+            >
+              Preview
+            </Button>
+            <Button
+              size="sm"
+              type="submit"
+              form={FORM_ID}
+              fullWidth={false}
+              isLoading={busy}
+              disabled={busy}
+            >
+              Save
+            </Button>
+          </div>
+        }
+      />
       <div className="z-measure-form">
         <Form id={FORM_ID} onSubmit={submit}>
-          <Slot name="name" error={err("name")}>
-            <Input
-              label="Name"
-              required
-              value={name}
-              helperText="Unique in the source among measures and metrics; queries ask for it in { metrics: [name] }."
-              onChange={(e) => setName(e.target.value)}
-            />
-            {renaming && used && (
-              <p className="z-muted" role="status">
-                {metric.name} is used by {used.saved_queries}{" "}
-                {used.saved_queries === 1 ? "saved query" : "saved queries"} and{" "}
-                {used.panels} {used.panels === 1 ? "panel" : "panels"}; they
-                will stop working under the new name.
-              </p>
-            )}
-          </Slot>
-          <Slot name="description" error={err("description")}>
-            <TextArea
-              label="Description"
-              required
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </Slot>
-          <Slot name="formula" error={err("formula")}>
-            <div className="z-measure-json">
-              <TextArea
-                label="Formula (JSON)"
-                required
-                rows={6}
-                value={formula}
-                onChange={(e) => setFormula(e.target.value)}
-              />
+          <div className="z-measure-columns">
+            <div className="z-measure-column">
+              <BorderedSection title="About" as="h2">
+                <Slot name="name" error={err("name")}>
+                  <Input
+                    label="Name"
+                    required
+                    value={name}
+                    helperText="Unique in the source among measures and metrics; queries ask for it in { metrics: [name] }."
+                    onChange={(e) => setName(e.target.value)}
+                  />
+                  {renaming && used && (
+                    <p className="z-muted" role="status">
+                      {metric.name} is used by {used.saved_queries}{" "}
+                      {used.saved_queries === 1
+                        ? "saved query"
+                        : "saved queries"}{" "}
+                      and {used.panels} {used.panels === 1 ? "panel" : "panels"}
+                      ; they will stop working under the new name.
+                    </p>
+                  )}
+                </Slot>
+                <Slot name="description" error={err("description")}>
+                  <TextArea
+                    label="Description"
+                    required
+                    rows={2}
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                  />
+                </Slot>
+              </BorderedSection>
             </div>
-          </Slot>
+            <div className="z-measure-column">
+              <BorderedSection title="Formula" as="h2">
+                <Slot name="formula" error={err("formula")}>
+                  <div className="z-measure-json">
+                    <TextArea
+                      label="Formula (JSON)"
+                      required
+                      rows={10}
+                      value={formula}
+                      onChange={(e) => setFormula(e.target.value)}
+                    />
+                  </div>
+                </Slot>
+              </BorderedSection>
+            </div>
+          </div>
           {(preview.data ||
             (preview.error && Object.keys(previewed).length === 0)) && (
-            <BorderedSection title="Preview: by month, last 12 months" as="h3">
+            <BorderedSection title="Preview: by month, last 12 months" as="h2">
               {preview.data && <PreviewResult result={preview.data} />}
               <ErrorNotice error={preview.error} />
             </BorderedSection>
@@ -244,6 +253,6 @@ export const MetricDialog = ({
           {Object.keys(server).length === 0 && <ErrorNotice error={failure} />}
         </Form>
       </div>
-    </Modal>
+    </div>
   );
 };

@@ -5,8 +5,8 @@ import { SOURCE_ID } from "@/features/sources/testFixtures";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
-import { MeasureDialog } from "./MeasureDialog";
 import { makeMeasure } from "../testFixtures";
+import { MeasureForm } from "./MeasureForm";
 import {
   CUSTOMERS_ID,
   ORDERS_ID,
@@ -35,7 +35,7 @@ const fill = async (user: User) => {
   await user.paste('{"sum":"amt"}');
 };
 
-describe("MeasureDialog", () => {
+describe("MeasureForm", () => {
   beforeEach(() => {
     post.mockReset();
     get.mockReset().mockResolvedValue({
@@ -51,9 +51,7 @@ describe("MeasureDialog", () => {
       path: ["formula", "sum"],
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Save" }));
     const error = await screen.findByText(/Column amt was not found/);
@@ -69,9 +67,7 @@ describe("MeasureDialog", () => {
 
   it("refuses formula text that is not JSON without asking the server", async () => {
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await user.type(field("Name"), "paid_revenue");
     await pickOption(user, field("Table"), "orders");
     await user.type(field("Description"), "x");
@@ -90,9 +86,7 @@ describe("MeasureDialog", () => {
       },
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await waitFor(() =>
@@ -122,9 +116,7 @@ describe("MeasureDialog", () => {
       },
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Preview" }));
     await screen.findByTestId("measure-preview-value");
@@ -140,9 +132,7 @@ describe("MeasureDialog", () => {
       path: ["formula", "sum"],
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Preview" }));
     const error = await screen.findByText(/Column amt was not found/);
@@ -157,9 +147,7 @@ describe("MeasureDialog", () => {
       message: "The source could not be reached",
     });
     const user = userEvent.setup();
-    renderWithProviders(
-      <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
-    );
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
     await fill(user);
     await user.click(screen.getByRole("button", { name: "Preview" }));
     const error = await screen.findByText("The source could not be reached");
@@ -169,10 +157,10 @@ describe("MeasureDialog", () => {
   it("warns that a rename stops the saved queries and panels using it", async () => {
     const user = userEvent.setup();
     renderWithProviders(
-      <MeasureDialog
+      <MeasureForm
         sourceId={SOURCE_ID}
         measure={makeMeasure()}
-        onClose={vi.fn()}
+        onDone={vi.fn()}
       />
     );
     expect(screen.queryByText(/will stop working/)).toBeNull();
@@ -214,7 +202,7 @@ describe("MeasureDialog", () => {
       post.mockResolvedValue({ data: makeMeasure() });
       const user = userEvent.setup();
       renderWithProviders(
-        <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
+        <MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />
       );
       await fill(user);
       await user.click(field("Date column \\(optional\\)"));
@@ -246,7 +234,7 @@ describe("MeasureDialog", () => {
       post.mockResolvedValue({ data: makeMeasure() });
       const user = userEvent.setup();
       renderWithProviders(
-        <MeasureDialog sourceId={SOURCE_ID} onClose={vi.fn()} />
+        <MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />
       );
       await fill(user);
       await pickOption(user, field("Date column \\(optional\\)"), "created_at");
@@ -260,10 +248,10 @@ describe("MeasureDialog", () => {
       patch.mockResolvedValue({ data: makeMeasure() });
       const user = userEvent.setup();
       renderWithProviders(
-        <MeasureDialog
+        <MeasureForm
           sourceId={SOURCE_ID}
           measure={makeMeasure({ fixed: false, date_column: "created_at" })}
-          onClose={vi.fn()}
+          onDone={vi.fn()}
         />
       );
       await user.click(screen.getByLabelText(/Fixed/));

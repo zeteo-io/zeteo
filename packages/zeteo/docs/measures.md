@@ -218,11 +218,12 @@ SDK has `zeteo.measures` (`list`, `create`, `get`, `update`, `delete`, `preview`
 ## In the admin UI
 
 A source's page has a **Measures** tab: the list (name, table, description, used-by counts, broken
-flag), a dialog with JSON editors for `formula` and `where` validated live against the server (plan
-errors with their paths shown inline), **Preview**, and the editor list for those who may change it. The dialog has a **Fixed** toggle and a **Date
-column** select (the table's date and timestamp columns and its to-one relations'; changing the
-table clears it). A **Metrics** section lists metrics with the measures they use; its dialog has a
-JSON formula and Preview (a month-bucketed metric query over the last 12 months). A refused delete
+flag) and the editor list for those who may change it. Creating or editing a measure is a page of
+its own, with the details (name, table, description, a **Fixed** toggle and a **Date column** select
+of the table's date and timestamp columns and its to-one relations'; changing the table clears it)
+on the left and JSON editors for `formula` and `where` on the right, validated live against the
+server (plan errors with their paths shown inline), and **Preview**. A **Metrics** tab lists metrics
+with the measures they use; creating or editing one is a page with a JSON formula and Preview (a month-bucketed metric query over the last 12 months). A refused delete
 shows the server's message and what depends on it.
 My Zeteo shows measures with their descriptions under what a person can query.
 

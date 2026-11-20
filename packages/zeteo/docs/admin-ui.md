@@ -173,16 +173,21 @@ page and no sections.
 - **Measures** tab on a source (`/sources/<id>/measures`): name, table, description, used-by counts and a
   Broken pill with the server's message; rows an editor may not use show "Not usable by you" and no
   formula. `zeteo.measures.write`, for an editor of the source (the list's `can_edit`), adds New and
-  Edit (a dialog with JSON editors for `formula` and `where`, the server's plan errors, the
+  Edit (a page of its own, `/sources/<id>/measures/new` and `/sources/<id>/measures/<measureId>/edit`:
+  name, table, description, Fixed and date column on the left, JSON editors for `formula` and `where`
+  on the right, the server's plan errors, the
   preview's included, shown under the field at their path, and Preview, which runs the draft and is
   cleared when the draft changes; renaming a measure that saved queries or panels use warns they
   will stop working) and Delete (confirmed with what uses it; refused with the measures that use
   it). A sources admin or an upload's owner also gets **Editors**, the users and groups who may
   manage the source's measures, and, while not an editor themselves, a hint to add themselves. The
-  measure dialog has a Fixed toggle and a Date column select (the home table's date and timestamp
-  columns and its to-one relations'; changing the table clears it), and a **Metrics** section on
-  the tab lists metrics with the measures they use and their used-by counts; its dialog has a JSON
-  formula, live validation and Preview (a month-bucketed metric query over the last 12 months), and
+  Date column select offers the home table's date and timestamp columns and its to-one relations'
+  (changing the table clears it).
+- **Metrics** tab on a source (`/sources/<id>/metrics`): metrics with the measures they use and
+  their used-by counts, the same editors, Editors button and hint as Measures; New and Edit are
+  pages (`/sources/<id>/metrics/new`, `…/metrics/<metricId>/edit`) with name and description on the
+  left and the JSON formula on the right, live validation and Preview (a month-bucketed metric query
+  over the last 12 months), and
   Delete is confirmed with what uses it and, when refused, shows the server's message and the
   measures or metrics that depend on it.
 - **Calendar** under Admin (`/calendar`): working days, fiscal year start month, time zone, and

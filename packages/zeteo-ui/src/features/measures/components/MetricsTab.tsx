@@ -1,10 +1,11 @@
+import { MeasureEditorsDialog } from "./MeasureEditorsDialog";
 import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { useDeleteMetric } from "../api/useDeleteMetric";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { EditButton } from "@/components/EditButton";
 import { useMetrics } from "../api/useMetrics";
-import { MetricDialog } from "./MetricDialog";
+import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import "./styles.css";
 import {
@@ -14,6 +15,8 @@ import {
   RowActions,
   Spinner,
   Table,
+  TableFilters,
+  type InfiniteScrollMenuFilter,
 } from "@kosmeo-ui/react";
 import {
   isRedactedMetric,
@@ -43,36 +46,70 @@ const measuresUsed = (formula: unknown): string[] => {
   return [...names];
 };
 
-interface MetricsSectionProps {
+const FILTERS: InfiniteScrollMenuFilter[] = [
+  { type: "SEARCH", title: "Search", dataKey: "q" },
+];
+
+interface MetricsTabProps {
   sourceId: string;
   /** May hold `zeteo.measures.write`; the list's `can_edit` decides whether the actions show. */
   canWrite: boolean;
+  /** Replaces the editor list (shared with measures): a sources admin, or an upload's owner. */
+  canManageEditors: boolean;
 }
 
-/** A source's metrics, below its measures: formulas over measures, asked for in a metric query. */
-export const MetricsSection = ({ sourceId, canWrite }: MetricsSectionProps) => {
+/** A source's Metrics tab: formulas over measures, asked for in a metric query; creating and changing one are pages of their own. */
+export const MetricsTab = ({
+  sourceId,
+  canWrite,
+  canManageEditors,
+}: MetricsTabProps) => {
   const { data: list, isLoading, error } = useMetrics(sourceId);
   const data = list?.data ?? [];
   const canEdit = canWrite && !!list?.can_edit;
   const joinHint =
     canWrite && !!list && !list.can_edit && list.can_manage_editors;
   const del = useDeleteMetric(sourceId);
-  const [editing, setEditing] = useState<Metric | "new" | null>(null);
+  const navigate = useNavigate();
+  const base = `/sources/${sourceId}/metrics`;
+  const [params, setParams] = useState<Record<string, string>>({});
+  const [managing, setManaging] = useState(false);
+  const q = params["filter[q]"]?.toLowerCase();
+  const shown = data.filter(
+    (m) =>
+      !q ||
+      m.name.toLowerCase().includes(q) ||
+      m.description.toLowerCase().includes(q)
+  );
 
   return (
-    <section aria-label="Metrics">
+    <>
       <div className="z-list-toolbar">
-        <h3>Metrics</h3>
+        <div className="z-list-toolbar-filters">
+          <TableFilters filters={FILTERS} onChange={setParams} />
+        </div>
         <div className="z-list-toolbar-side">
-          {canEdit && (
-            <Button
-              size="sm"
-              fullWidth={false}
-              onClick={() => setEditing("new")}
-            >
-              New metric
-            </Button>
-          )}
+          <div className="z-measure-name">
+            {canManageEditors && (
+              <Button
+                size="sm"
+                variant="secondary"
+                fullWidth={false}
+                onClick={() => setManaging(true)}
+              >
+                Editors
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                size="sm"
+                fullWidth={false}
+                onClick={() => navigate(`${base}/new`)}
+              >
+                New metric
+              </Button>
+            )}
+          </div>
           {joinHint && (
             <small className="z-muted">
               Add yourself as an editor to create or change metrics.
@@ -80,12 +117,10 @@ export const MetricsSection = ({ sourceId, canWrite }: MetricsSectionProps) => {
           )}
         </div>
       </div>
-      {editing && (
-        <MetricDialog
-          key={editing === "new" ? "new" : editing.id}
+      {managing && (
+        <MeasureEditorsDialog
           sourceId={sourceId}
-          {...(editing !== "new" && { metric: editing })}
-          onClose={() => setEditing(null)}
+          onClose={() => setManaging(false)}
         />
       )}
       <ErrorNotice error={error} />
@@ -96,7 +131,11 @@ export const MetricsSection = ({ sourceId, canWrite }: MetricsSectionProps) => {
           <Table<MetricListItem>
             rowKey={(m) => m.name}
             emptyMessage={
-              error ? undefined : <EmptyState>No metrics yet.</EmptyState>
+              error ? undefined : data.length === 0 ? (
+                <EmptyState>No metrics yet.</EmptyState>
+              ) : (
+                <EmptyState>No metrics match this search.</EmptyState>
+              )
             }
             columns={[
               {
@@ -152,7 +191,9 @@ export const MetricsSection = ({ sourceId, canWrite }: MetricsSectionProps) => {
                       cellElement: (m: MetricListItem) =>
                         isRedactedMetric(m) ? null : (
                           <RowActions align="end">
-                            <EditButton onClick={() => setEditing(m)} />
+                            <EditButton
+                              onClick={() => navigate(`${base}/${m.id}/edit`)}
+                            />
                             <ConfirmButton
                               danger
                               size="sm"
@@ -173,10 +214,10 @@ export const MetricsSection = ({ sourceId, canWrite }: MetricsSectionProps) => {
                   ]
                 : []),
             ]}
-            rows={data}
+            rows={shown}
           />
         </div>
       )}
-    </section>
+    </>
   );
 };
