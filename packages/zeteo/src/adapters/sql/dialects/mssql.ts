@@ -90,6 +90,10 @@ const SEARCH_DEPTH = 7;
  * `at(i)` for the i of the ascending `keys` at most `x`, found by a CASE
  * tree of comparisons, so a row compares `x` with a few keys and not all of
  * them. The keys are the planner's numbers, written as literals by `key`.
+ * `x` must be a plain column (a fenced step's value): an inline expression
+ * holding a CASE would add to the nesting and could pass SQL Server's limit
+ * of 10. A null `x` falls through to the last branch, not 0: callers rely on
+ * their own result being null when `x` is.
  */
 const search = (
   x: Expression<unknown>,

@@ -26,7 +26,11 @@ import {
 // (`stepFence`): on SQL Server through MAX over the step's one row.
 //
 // Identifiers are the compiler's own; the calendar's numbers are bound
-// (holidays) or written as integer literals (weekday offsets).
+// (Postgres's holiday array) or written as integer literals: the weekday
+// offsets, and on SQL Server the holiday ordinals and zone spans, all the
+// planner's own numbers and checked instants. A holiday count of a null
+// bound is null (Postgres) or the list's length (SQL Server), never 0:
+// every function's result is null when its bound is.
 
 type Ref = (name: string) => Expression<unknown>;
 /** One step: names to expressions over the earlier steps' names. */
