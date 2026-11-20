@@ -253,6 +253,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
     allows: (tableId, columnId) =>
       !hidden.has(tableId) && !hidden.has(columnId),
     tableAccess: () => "all",
+    rowRule: () => undefined,
   };
   return buildVisibleCatalog(
     options.maxJoins === undefined

@@ -99,6 +99,7 @@ beforeAll(async () => {
       sourceIds: new Set([sourceId]),
       allows: () => true,
       tableAccess: () => "all",
+      rowRule: () => undefined,
     },
     { calendar: DEFAULT_CALENDAR, measures: [] }
   );

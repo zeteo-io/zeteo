@@ -22,7 +22,7 @@ export interface RuleNames {
 
 const IDENTITY_OPS: ReadonlySet<string> = new Set(["eq", "ne", "in", "notIn"]);
 
-const isIdentityRef = (value: unknown): value is IdentityRef =>
+export const isIdentityRef = (value: unknown): value is IdentityRef =>
   typeof value === "object" && value !== null && "identity" in value;
 
 const isComparison = (
@@ -36,7 +36,7 @@ const isComparison = (
  * The rule with each comparison's key and condition passed through `leaf`;
  * `and`, `or` and `not` kept as they are.
  */
-const mapRule = (
+export const mapRule = (
   rule: RuleFilter,
   path: Path,
   leaf: (
@@ -71,7 +71,7 @@ const mapRule = (
 };
 
 /** The condition's operator and value. */
-const opOf = (condition: RuleCondition): [Operator, unknown] =>
+export const opOf = (condition: RuleCondition): [Operator, unknown] =>
   Object.entries(condition)[0] as [Operator, unknown];
 
 /** Every identity reference in the rule, with where it is. */

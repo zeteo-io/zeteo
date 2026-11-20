@@ -128,6 +128,7 @@ const allAccess = (sourceId: string): Access => ({
   sourceIds: new Set([sourceId]),
   allows: () => true,
   tableAccess: () => "all",
+  rowRule: () => undefined,
 });
 
 export interface Catalogs {

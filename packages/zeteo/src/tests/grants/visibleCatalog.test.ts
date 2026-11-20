@@ -17,6 +17,7 @@ const sourceIds: string[] = [];
 const accessTo = (sourceId: string, tableId: string): Access => ({
   sourceIds: new Set([sourceId]),
   tableAccess: (t) => (t === tableId ? "all" : undefined),
+  rowRule: () => undefined,
   allows: (t) => t === tableId,
 });
 
@@ -131,6 +132,7 @@ describe("loadSourceVisibleCatalog", () => {
   const everything = (sourceId: string): Access => ({
     sourceIds: new Set([sourceId]),
     tableAccess: () => "all",
+    rowRule: () => undefined,
     allows: () => true,
   });
 

@@ -119,6 +119,7 @@ export const salesCatalog = (): VisibleCatalog => {
     sourceIds: new Set([SOURCE.id]),
     allows: () => true,
     tableAccess: () => "all",
+    rowRule: () => undefined,
   };
   return buildVisibleCatalog(SOURCE, tables, columns, relations, access, {
     calendar: DEFAULT_CALENDAR,
