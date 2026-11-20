@@ -1,4 +1,5 @@
 import { relativeDateSchema, type RelativeDate } from "./relative.js";
+import type { RuleFilter } from "../../row-rules/types.js";
 import type { QueryLanguage } from "../types.js";
 import { planSql, queryNameOf } from "./plan.js";
 import { planMetrics } from "./metrics.js";
@@ -87,27 +88,47 @@ export type Operator = (typeof OPERATORS)[number];
 
 const valuesSchema = z.array(scalarSchema).min(1).max(MAX_IN_VALUES);
 
-/** Exactly one operator and its value. */
-const conditionSchema = z.union(
-  [
-    z.strictObject({ eq: comparedSchema }),
-    z.strictObject({ ne: comparedSchema }),
-    z.strictObject({ gt: comparedSchema }),
-    z.strictObject({ gte: comparedSchema }),
-    z.strictObject({ lt: comparedSchema }),
-    z.strictObject({ lte: comparedSchema }),
-    z.strictObject({ between: z.tuple([comparedSchema, comparedSchema]) }),
-    z.strictObject({ in: valuesSchema }),
-    z.strictObject({ notIn: valuesSchema }),
-    z.strictObject({ contains: z.string().refine(noNul) }),
-    z.strictObject({ startsWith: z.string().refine(noNul) }),
-    z.strictObject({ isNull: z.boolean() }),
-    z.strictObject({ isBusinessDay: z.boolean() }),
-  ],
-  {
-    error: `Each path takes exactly one operator: ${OPERATORS.join(", ")}`,
-  }
-);
+/** The name of an identity key; the same shape the database enforces. */
+export const IDENTITY_KEY_NAME = /^[a-z][a-z0-9_]{0,63}$/;
+
+/** A row rule's value taken from the caller's identity; only rules may use it. */
+export const identityRefSchema = z.strictObject({
+  identity: z.string().regex(IDENTITY_KEY_NAME, {
+    error:
+      "An identity key name is a lowercase letter then up to 63 of a-z, 0-9 and _",
+  }),
+  below: z.boolean().optional(),
+});
+
+/** Exactly one operator and its value; `identity` also admits identity references in `eq`, `ne`, `in` and `notIn`. */
+const makeConditionSchema = (identity: boolean) => {
+  const eqNe = identity
+    ? z.union([comparedSchema, identityRefSchema])
+    : comparedSchema;
+  const list = identity
+    ? z.union([valuesSchema, identityRefSchema])
+    : valuesSchema;
+  return z.union(
+    [
+      z.strictObject({ eq: eqNe }),
+      z.strictObject({ ne: eqNe }),
+      z.strictObject({ gt: comparedSchema }),
+      z.strictObject({ gte: comparedSchema }),
+      z.strictObject({ lt: comparedSchema }),
+      z.strictObject({ lte: comparedSchema }),
+      z.strictObject({ between: z.tuple([comparedSchema, comparedSchema]) }),
+      z.strictObject({ in: list }),
+      z.strictObject({ notIn: list }),
+      z.strictObject({ contains: z.string().refine(noNul) }),
+      z.strictObject({ startsWith: z.string().refine(noNul) }),
+      z.strictObject({ isNull: z.boolean() }),
+      z.strictObject({ isBusinessDay: z.boolean() }),
+    ],
+    {
+      error: `Each path takes exactly one operator: ${OPERATORS.join(", ")}`,
+    }
+  );
+};
 
 /** Keys that are always logical operators, never column paths. */
 const LOGICAL_KEYS = new Set(["and", "or", "not"]);
@@ -145,15 +166,19 @@ const tooDeep = z.never({
  * rather than recursive, so parsing stops at the limit however deep the input
  * goes. One object type rather than a union keeps each issue's path exact.
  */
-const filterAt = (depth: number): z.ZodType<Filter> => {
-  const inner = depth < MAX_FILTER_DEPTH ? filterAt(depth + 1) : undefined;
+const filterAt = (
+  depth: number,
+  identity: boolean
+): z.ZodType<Filter | RuleFilter> => {
+  const inner =
+    depth < MAX_FILTER_DEPTH ? filterAt(depth + 1, identity) : undefined;
   const node = z
     .object({
       and: (inner ? z.array(inner).min(1) : tooDeep).optional(),
       or: (inner ? z.array(inner).min(1) : tooDeep).optional(),
       not: (inner ?? tooDeep).optional(),
     })
-    .catchall(conditionSchema)
+    .catchall(makeConditionSchema(identity))
     .superRefine((filter, ctx) => {
       const keys = Object.keys(filter);
       if (keys.length === 0) {
@@ -182,10 +207,17 @@ const filterAt = (depth: number): z.ZodType<Filter> => {
       description:
         "One of { and: [filter] }, { or: [filter] }, { not: filter }, or { path: { operator: value }, ... } where several paths must all hold",
     });
-  return node as unknown as z.ZodType<Filter>;
+  return node as unknown as z.ZodType<Filter | RuleFilter>;
 };
 
-const filterSchema = filterAt(1);
+/** The filter schema; `identity: true` is for row rules, which may compare to the caller's identity. */
+export const makeFilterSchema = (opts: {
+  identity: boolean;
+}): z.ZodType<Filter | RuleFilter> => filterAt(1, opts.identity);
+
+const filterSchema = makeFilterSchema({
+  identity: false,
+}) as z.ZodType<Filter>;
 
 export const BUCKET_UNITS = [
   "day",
