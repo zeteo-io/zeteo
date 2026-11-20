@@ -117,7 +117,7 @@ export const MeasuresTab = ({
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <div className="z-wrap">
+        <div className={canEdit ? "z-wrap z-actions-last" : "z-wrap"}>
           <Table<MeasureListItem>
             rowKey={nameOf}
             emptyMessage={

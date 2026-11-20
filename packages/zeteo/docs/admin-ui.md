@@ -99,8 +99,9 @@ page and no sections.
   of the draft; who may edit measures (users and groups, changed with `zeteo.sources.write` or by an
   upload source's owner). Details: [measures.md](measures.md).
 - **Calendar** (`/calendar`, open to anyone with `zeteo.data.read`, listed in the Admin menu only
-  for `zeteo.calendar.write` or `zeteo.sources.read`, changed with `zeteo.calendar.write`): working days, fiscal year start month, time zone, and holidays by year
-  with add, remove and CSV paste, showing which years have holidays entered. Details:
+  for `zeteo.calendar.write` or `zeteo.sources.read`, changed with `zeteo.calendar.write`): working days, fiscal year start month, time zone on the left, and a
+  table of holidays on the right (Add holidays opens a dialog to add them row by row or paste a list;
+  remove per row), noting this year or next when it has none. Details:
   [calendar.md](calendar.md).
 - **Tables** and **Relations**: the catalogue as zeteo last read it. A table's page shows its
   columns and relations and edits the table's and columns' descriptions; Relations lists the
@@ -190,10 +191,13 @@ page and no sections.
   over the last 12 months), and
   Delete is confirmed with what uses it and, when refused, shows the server's message and the
   measures or metrics that depend on it.
-- **Calendar** under Admin (`/calendar`): working days, fiscal year start month, time zone, and
-  holidays by year (add, remove, paste `date,name` lines; a year with none says so). Anyone who can
-  query may open it, read-only; the menu lists it only to those with `zeteo.calendar.write` or
-  `zeteo.sources.read`. `zeteo.calendar.write` changes it, and Save replaces the whole calendar.
+- **Calendar** under Admin (`/calendar`): working days, fiscal year start month and time zone on
+  the left; on the right a table of holidays (date, weekday, name, remove), with **Add holidays**
+  opening a dialog that takes them one row at a time or as pasted `date,name` lines (a date already
+  listed is replaced); a year with none says so. Anyone who can query may open it, read-only; the
+  menu lists it only to those with `zeteo.calendar.write` or `zeteo.sources.read`.
+  `zeteo.calendar.write` changes it: **Save calendar**, top right, is enabled only while something
+  differs from the saved calendar, and replaces the whole calendar.
 - My Zeteo's catalogue lists each table's measures with their descriptions where the catalogue has them.
 
 The top bar holds **My Zeteo** and **Dashboards** (`zeteo.data.read`), then an **Admin** menu that

@@ -45,12 +45,13 @@ describe("CalendarPage", () => {
     renderWithProviders(<CalendarPage />);
     await screen.findByText("Christmas");
     await user.click(screen.getByLabelText("Saturday"));
-    await user.click(screen.getByRole("button", { name: "Paste holidays" }));
+    await user.click(screen.getByRole("button", { name: "Add holidays" }));
+    await user.click(screen.getByRole("button", { name: "Paste a list" }));
     await user.click(screen.getByLabelText("Holidays, one per line"));
     await user.paste(
       `${year + 1}-01-01,New Year\n${year + 1}-07-04, Independence Day`
     );
-    await user.click(screen.getByRole("button", { name: "Add holidays" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
     await user.click(screen.getByRole("button", { name: "Save calendar" }));
     await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
     expect(put).toHaveBeenCalledWith("/v1/calendar", {
@@ -66,6 +67,44 @@ describe("CalendarPage", () => {
     expect(
       screen.queryByText(`No holidays entered for ${year + 1}`)
     ).toBeNull();
+  });
+
+  it("adds holidays row by row, refusing a half-filled row", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarPage />);
+    await screen.findByText("Christmas");
+    await user.click(screen.getByRole("button", { name: "Add holidays" }));
+    await user.type(screen.getByLabelText("Date 1"), `${year + 1}-01-01`);
+    await user.type(screen.getByLabelText("Name 1"), "New Year");
+    await user.click(screen.getByRole("button", { name: /Another holiday/ }));
+    await user.type(screen.getByLabelText("Name 2"), "No date");
+    const dialogAdd = () => screen.getByRole("button", { name: "Add" });
+    await user.click(dialogAdd());
+    expect(screen.getByText(/Give a date and a name/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove row 2" }));
+    await user.click(dialogAdd());
+    expect(await screen.findByText("New Year")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Date 1")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save calendar" })).toBeEnabled();
+  });
+
+  it("enables Save only on a change, and again only after another", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalendarPage />);
+    await screen.findByText("Christmas");
+    const save = screen.getByRole("button", { name: "Save calendar" });
+    expect(save).toBeDisabled();
+    await user.click(screen.getByLabelText("Saturday"));
+    expect(save).toBeEnabled();
+    // Undoing the change leaves nothing to save.
+    await user.click(screen.getByLabelText("Saturday"));
+    expect(save).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Remove Christmas" }));
+    expect(save).toBeEnabled();
+    await user.click(save);
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(save).toBeDisabled());
+    expect(screen.getByText("Saved")).toBeInTheDocument();
   });
 
   it("is read-only without the calendar permission", async () => {
