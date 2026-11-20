@@ -12,7 +12,6 @@ import {
   fiscalYearOf,
   isBusinessDay,
   localDate,
-  monthCounts,
   zonedMidnight,
   type Calendar,
 } from "../../calendar/calendar.js";
@@ -45,8 +44,8 @@ describe("calendar", () => {
     for (let d = Date.UTC(2026, 0, 1); d < Date.UTC(2027, 0, 1); d += 864e5) {
       const date = new Date(d).toISOString().slice(0, 10);
       expect(
-        businessDaysElapsed(DEFAULT_CALENDAR, date) +
-          businessDaysRemaining(DEFAULT_CALENDAR, date)
+        businessDaysElapsed(DEFAULT_CALENDAR, date)! +
+          businessDaysRemaining(DEFAULT_CALENDAR, date)!
       ).toBe(businessDaysInMonth(DEFAULT_CALENDAR, date));
     }
   });
@@ -98,12 +97,15 @@ describe("calendar", () => {
     );
   });
 
-  it("counts a multi-century range arithmetically", () => {
+  it("counts a multi-century range arithmetically, and nothing before 1900", () => {
     expect(businessDays(DEFAULT_CALENDAR, "2000-01-01", "2099-12-31")).toBe(
       26089
     );
-    expect(businessDays(DEFAULT_CALENDAR, "0001-01-01", "9999-12-31")).toBe(
-      2_608_615
+    expect(businessDays(DEFAULT_CALENDAR, "1900-01-01", "9999-12-31")).toBe(
+      2_113_190
+    );
+    expect(businessDays(DEFAULT_CALENDAR, "1899-12-31", "2000-01-01")).toBe(
+      null
     );
   });
 
@@ -147,40 +149,5 @@ describe("calendar", () => {
       }
       expect(businessDays(cal, a, b)).toBe(n);
     }
-  });
-});
-
-describe("monthCounts", () => {
-  it("covers 25 years either side of now's month, in step with the days of each month", () => {
-    const cal = withCal({
-      holidays: new Map([["2026-11-26", "Thanksgiving"]]),
-    });
-    const { months, counts } = monthCounts(
-      cal,
-      new Date("2026-11-19T15:00:00Z")
-    );
-    expect(months).toHaveLength(601);
-    expect(counts).toHaveLength(601);
-    expect(months[0]).toBe("2001-11-01");
-    expect(months[300]).toBe("2026-11-01");
-    expect(months[600]).toBe("2051-11-01");
-    expect(counts[300]).toBe(20);
-    expect(
-      counts.every((n, i) => n === businessDaysInMonth(cal, months[i]!))
-    ).toBe(true);
-  });
-
-  it("takes now's month in the calendar's time zone", () => {
-    const now = new Date("2026-11-30T23:30:00Z");
-    expect(monthCounts(DEFAULT_CALENDAR, now).months[300]).toBe("2026-11-01");
-    expect(
-      monthCounts(withCal({ timeZone: "Pacific/Auckland" }), now).months[300]
-    ).toBe("2026-12-01");
-  });
-
-  it("takes the window's width", () => {
-    expect(
-      monthCounts(DEFAULT_CALENDAR, new Date("2026-11-19T00:00:00Z"), 1).months
-    ).toHaveLength(25);
   });
 });

@@ -1,5 +1,7 @@
 import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
+import { compileBusiness, compileBusinessDay } from "./businessDays.js";
 import { QueryError } from "../../engine/errors.js";
+import { METRIC_UNION as UNION } from "./types.js";
 import { aggregatesRows } from "./aggregates.js";
 import { plainNumber } from "./values.js";
 import type {
@@ -48,8 +50,6 @@ const COMPARE_SQL: Record<CompareOp, RawBuilder<unknown>> = {
   lte: sql`<=`,
 };
 const AND = sql` and `;
-/** The alias of a metric query's union of parts. */
-const UNION = "u";
 const OR = sql` or `;
 
 const table = (t: TableName) => sql.id(t.schemaName, t.name);
@@ -70,9 +70,9 @@ export interface ExprContext {
   row: boolean;
   fixed: Map<string, ScalarPlan>;
   /**
-   * The calendar lookups of a dialect that cannot aggregate a subquery (SQL
-   * Server), by alias: each is applied to every row, outer, and read as its
-   * column `n`, so an aggregate sees a column.
+   * The business-day subqueries of a dialect that cannot aggregate a
+   * subquery (SQL Server), by alias: each is applied to every row, outer,
+   * and read as its column `n`, so an aggregate (and GROUP BY) sees a column.
    */
   applied: Map<string, Expression<unknown>>;
 }
@@ -122,7 +122,7 @@ const withFixed = (
   return qb;
 };
 
-/** Applies each calendar lookup of `applied` to every row, keeping rows with no month. */
+/** Applies each business-day subquery of `applied` to every row, keeping every row. */
 const withApplied = (
   qb: AnySelect,
   applied: ReadonlyMap<string, Expression<unknown>>
@@ -131,6 +131,22 @@ const withApplied = (
     qb = qb.outerApply(sql`${lookup}`.as(alias));
   }
   return qb;
+};
+
+/**
+ * A business-day subquery where it is used: as it is, or, per row on an
+ * engine that aggregates no subquery, applied to every row and read as a
+ * column. Operands compiled before it were applied first, so it may read them.
+ */
+const applied = (
+  subquery: Expression<unknown>,
+  dialect: SqlDialect,
+  ctx: ExprContext
+): Expression<unknown> => {
+  if (!ctx.row || dialect.subqueryInAggregate) return subquery;
+  const alias = `m${ctx.applied.size}`;
+  ctx.applied.set(alias, subquery);
+  return sql.id(alias, "n");
 };
 
 /** A fixed measure's own query: one row, its value as `v`. */
@@ -154,7 +170,9 @@ const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
     case "dateAdd":
     case "dateDiff":
     case "datePart":
-    case "calendarMonths":
+    case "businessDays":
+    case "businessPeriod":
+    case "addBusinessDays":
       return false;
     case "case":
       return [...expr.branches.map((b) => b.then), expr.otherwise].some(
@@ -242,26 +260,13 @@ export const compileExpr = (
         inner(expr.arg),
         expr.fiscalStartMonth
       );
-    case "calendarMonths": {
-      // The argument is already UTC (`timestampUtc` on a column), so the
-      // bucket's native type is the plain one.
-      const start = dialect.bucket(
-        "month",
-        inner(expr.arg),
-        expr.argType,
-        "datetime2",
-        1
+    case "businessDays":
+    case "businessPeriod":
+      return applied(compileBusiness(expr, dialect, inner), dialect, ctx);
+    case "addBusinessDays":
+      return dialect.anchorPlus(
+        applied(compileBusiness(expr, dialect, inner), dialect, ctx)
       );
-      const lookup = dialect.calendarMonths(
-        expr.months,
-        expr.counts,
-        expr.argType === "date" ? start : sql`cast(${start} as date)`
-      );
-      if (!ctx.row || dialect.subqueryInAggregate) return lookup;
-      const alias = `m${ctx.applied.size}`;
-      ctx.applied.set(alias, lookup);
-      return sql.id(alias, "n");
-    }
     case "case": {
       const whens = expr.branches.map(
         (b) =>
@@ -410,6 +415,25 @@ const compileFilter = <S>(
       }
       case "isNull":
         return sql<SqlBool>`${subject(f.subject).expression} ${f.isNull ? sql`is null` : sql`is not null`}`;
+      case "businessDay": {
+        const s = subject(f.subject);
+        // A timestamp column is read as its UTC instant, as a calculation reads it.
+        const read =
+          s.type === "timestamp" && s.nativeType !== undefined
+            ? dialect.timestampUtc(s.expression, s.nativeType)
+            : s.expression;
+        const flag = applied(
+          compileBusinessDay(
+            read,
+            s.type === "date" ? "date" : "timestamp",
+            f.calendar,
+            dialect
+          ),
+          dialect,
+          ctx
+        );
+        return sql<SqlBool>`${flag} = ${sql.lit(f.is ? 1 : 0)}`;
+      }
     }
   };
   return go(filter);

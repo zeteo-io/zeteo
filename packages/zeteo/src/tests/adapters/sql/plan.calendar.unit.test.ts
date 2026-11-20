@@ -44,20 +44,13 @@ const refusal = (fn: object) => {
 
 const number = (value: number) => ({ kind: "literal", value, type: "number" });
 
-interface MonthsNode {
-  kind: string;
-  arg: { kind: string };
-  argType: string;
-  months: string[];
-  counts: number[];
+interface PlannedItem {
+  level: string;
   type: string;
+  expr: Record<string, unknown> & { kind: string };
 }
 
-const itemOf = (
-  calc: object,
-  catalog = shopCatalog(),
-  at: Date = now
-): { level: string; expr: MonthsNode } =>
+const itemOf = (calc: object, catalog = shopCatalog()): PlannedItem =>
   planSql(
     sqlQuerySchema.parse({
       source: "shop",
@@ -65,67 +58,240 @@ const itemOf = (
       select: [{ calc, as: "n" }],
     }),
     catalog,
-    { now: at }
-  ).select[0] as unknown as { level: string; expr: MonthsNode };
+    { now }
+  ).select[0] as unknown as PlannedItem;
 
-describe("planSql: businessDaysInMonth over a column", () => {
-  const monthly = (catalog = shopCatalog()) =>
-    itemOf({ businessDaysInMonth: "created_at" }, catalog).expr;
-
-  it("plans a timestamp column, with the months 25 years either side of now", () => {
-    const node = monthly();
-    expect(node).toMatchObject({
-      kind: "calendarMonths",
-      argType: "timestamp",
-      type: "number",
+const refusalOf = (query: object, catalog = shopCatalog()) => {
+  try {
+    planSql(sqlQuerySchema.parse({ source: "shop", ...query }), catalog, {
+      now,
     });
-    expect(node.months).toHaveLength(601);
-    expect(node.counts).toHaveLength(601);
-    expect(node.months[0]).toBe("2001-11-01");
-    expect(node.months[300]).toBe("2026-11-01");
-    expect(node.months.at(-1)).toBe("2051-11-01");
-    expect(node.counts[300]).toBe(21);
+  } catch (err) {
+    if (!(err instanceof QueryError)) throw err;
+    return { code: err.code, path: err.path, message: err.message };
+  }
+  throw new Error("the query was planned");
+};
+
+describe("planSql: business days over columns", () => {
+  it("plans each function over a date or timestamp column, row-level, and inside an aggregate, group-level", () => {
+    const cases: [object, object][] = [
+      [
+        { businessDays: ["ordered_on", "created_at"] },
+        { kind: "businessDays", fn: "inclusive" },
+      ],
+      [
+        { businessDaysBetween: ["ordered_on", "created_at"] },
+        { kind: "businessDays", fn: "between" },
+      ],
+      [
+        { businessDaysIn: ["fiscal_quarter", "ordered_on"] },
+        { kind: "businessPeriod", fn: "in", unit: "fiscal_quarter" },
+      ],
+      [
+        { businessDaysInMonth: "created_at" },
+        { kind: "businessPeriod", fn: "in", unit: "month" },
+      ],
+      [
+        { businessDaysElapsed: ["week", "ordered_on"] },
+        { kind: "businessPeriod", fn: "elapsed", unit: "week" },
+      ],
+      [
+        { businessDaysRemaining: "ordered_on" },
+        { kind: "businessPeriod", fn: "remaining", unit: "month" },
+      ],
+      [
+        { datePart: ["business_day", "created_at"] },
+        { kind: "businessPeriod", fn: "elapsed", unit: "month" },
+      ],
+    ];
+    for (const [calc, expected] of cases) {
+      const item = itemOf(calc);
+      expect(item.expr, JSON.stringify(calc)).toMatchObject(expected);
+      expect(item.level).toBe("row");
+      expect(item.type).toBe("number");
+      expect(itemOf({ max: calc }).level).toBe("group");
+    }
+    const added = itemOf({ addBusinessDays: ["created_at", "customer_id"] });
+    expect(added.type).toBe("date");
+    expect(added.expr).toMatchObject({
+      kind: "addBusinessDays",
+      date: { type: "timestamp" },
+      amount: { kind: "column" },
+    });
   });
 
-  it("carries the calendar's holidays in the counts", () => {
-    const node = monthly(
-      withCalendar({ holidays: new Map([["2026-11-26", "Thanksgiving"]]) })
-    );
-    expect(node.counts[300]).toBe(20);
-  });
-
-  it("centres the window on now in the calendar's time zone", () => {
-    const late = new Date("2026-11-30T23:30:00Z");
-    const node = itemOf(
-      { businessDaysInMonth: "created_at" },
-      withCalendar({ timeZone: "Pacific/Auckland" }),
-      late
-    ).expr;
-    expect(node.months[300]).toBe("2026-12-01");
-  });
-
-  it("plans a date operation as the argument", () => {
-    const node = itemOf({
-      businessDaysInMonth: { dateAdd: ["created_at", 1, "month"] },
-    }).expr;
-    expect(node.arg.kind).toBe("dateAdd");
-  });
-
-  it("is row-level over a bare column and group-level inside an aggregate", () => {
-    expect(itemOf({ businessDaysInMonth: "created_at" }).level).toBe("row");
-    expect(itemOf({ max: { businessDaysInMonth: "created_at" } }).level).toBe(
-      "group"
-    );
-  });
-
-  it("still folds a date, a timestamp and a relative date to a literal", () => {
-    expect(literalOf({ businessDaysInMonth: yesterday })).toEqual(number(21));
-    expect(literalOf({ businessDaysInMonth: { date: "2026-11-19" } })).toEqual(
-      number(21)
-    );
+  it("reads a fiscal unit's start month from the calendar, and no other unit's", () => {
+    const april = withCalendar({ fiscalYearStartMonth: 4 });
     expect(
-      literalOf({ businessDaysInMonth: { timestamp: "2026-02-10T00:00:00Z" } })
-    ).toEqual(number(20));
+      itemOf({ businessDaysIn: ["fiscal_year", "ordered_on"] }, april).expr
+        .fiscalStartMonth
+    ).toBe(4);
+    expect(
+      itemOf({ businessDaysIn: ["year", "ordered_on"] }, april).expr
+        .fiscalStartMonth
+    ).toBe(1);
+  });
+
+  it("carries the calendar: working weekdays, holidays as ordinals and their shifts, and the zone", () => {
+    const calendar = itemOf(
+      { businessDaysInMonth: "created_at" },
+      withCalendar({
+        workingDays: [1, 2, 3, 4, 6],
+        holidays: new Map([
+          ["2026-11-26", "Thanksgiving"],
+          ["2026-11-27", "a Friday: not a working day here"],
+          ["2026-11-28", "a Saturday that is"],
+          ["1899-12-25", "before the anchor"],
+        ]),
+        timeZone: "America/New_York",
+      })
+    ).expr.calendar as {
+      weekdays: number[];
+      holidays: number[];
+      shifts: number[];
+      zone: { name: string; from: string; to: string };
+    };
+    expect(calendar.weekdays).toEqual([0, 1, 2, 3, 5]);
+    expect(calendar.holidays).toHaveLength(2);
+    expect(calendar.holidays[1]! - calendar.holidays[0]!).toBe(1);
+    expect(calendar.shifts).toEqual([
+      calendar.holidays[0],
+      calendar.holidays[0],
+    ]);
+    expect(calendar.zone).toMatchObject({
+      name: "America/New_York",
+      from: "2001-01-01T00:00:00.000Z",
+      to: "2052-01-01T00:00:00.000Z",
+    });
+    expect(
+      itemOf({ businessDaysInMonth: "created_at" }).expr.calendar
+    ).not.toHaveProperty("zone");
+  });
+
+  it("plans a different query when the calendar changes", () => {
+    const plan = (catalog: VisibleCatalog) =>
+      JSON.stringify(itemOf({ businessDaysInMonth: "ordered_on" }, catalog));
+    expect(plan(shopCatalog())).not.toBe(
+      plan(withCalendar({ holidays: new Map([["2026-11-26", "x"]]) }))
+    );
+    expect(plan(shopCatalog())).not.toBe(
+      plan(withCalendar({ workingDays: [1, 2, 3, 4] }))
+    );
+  });
+
+  it("refuses a non-date operand and a non-number step at their own paths", () => {
+    expect(
+      refusalOf({
+        from: "orders",
+        select: [{ calc: { businessDaysIn: ["week", "status"] }, as: "n" }],
+      })
+    ).toEqual({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "businessDaysIn", 1],
+      message: 'businessDaysIn needs a date or timestamp; "status" is text',
+    });
+    expect(
+      refusalOf({
+        from: "orders",
+        select: [
+          { calc: { addBusinessDays: ["ordered_on", "status"] }, as: "n" },
+        ],
+      })
+    ).toEqual({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "addBusinessDays", 1],
+      message:
+        'addBusinessDays takes a number of business days; "status" is text',
+    });
+    expect(
+      refusalOf({
+        from: "orders",
+        select: [{ calc: { datePart: ["business_day", "total"] }, as: "n" }],
+      }).path
+    ).toEqual(["select", 0, "calc", "datePart", 1]);
+  });
+
+  it("refuses businessDaysInPeriod outside a metric's formula", () => {
+    expect(
+      refusalOf({
+        from: "orders",
+        select: [
+          {
+            calc: { div: [{ sum: "total" }, { businessDaysInPeriod: true }] },
+            as: "n",
+          },
+        ],
+      })
+    ).toEqual({
+      code: "invalid_operator",
+      path: ["select", 0, "calc", "div", 1, "businessDaysInPeriod"],
+      message:
+        "businessDaysInPeriod is for a metric's formula only; in a query, use businessDaysIn",
+    });
+  });
+});
+
+describe("planSql: the isBusinessDay filter", () => {
+  it("filters a date or timestamp column in where and in a case's if", () => {
+    const plan = planSql(
+      sqlQuerySchema.parse({
+        source: "shop",
+        from: "orders",
+        select: [
+          "id",
+          {
+            calc: {
+              case: {
+                when: [
+                  { if: { ordered_on: { isBusinessDay: false } }, then: 1 },
+                ],
+                else: 0,
+              },
+            },
+            as: "off",
+          },
+        ],
+        where: { created_at: { isBusinessDay: true } },
+      }),
+      shopCatalog(),
+      { now }
+    );
+    expect(plan.where).toMatchObject({ kind: "businessDay", is: true });
+    const off = plan.select[1] as unknown as {
+      expr: { branches: { when: object }[] };
+    };
+    expect(off.expr.branches[0]!.when).toMatchObject({
+      kind: "businessDay",
+      is: false,
+    });
+  });
+
+  it("refuses a column that is not a date or timestamp", () => {
+    expect(
+      refusalOf({
+        from: "orders",
+        select: ["id"],
+        where: { total: { isBusinessDay: true } },
+      })
+    ).toEqual({
+      code: "invalid_operator",
+      path: ["where", "total", "isBusinessDay"],
+      message: 'isBusinessDay does not apply to "total", a number column',
+    });
+  });
+
+  it("refuses it in having, which filters groups", () => {
+    expect(
+      refusalOf({
+        from: "orders",
+        select: [{ max: "ordered_on", as: "last" }],
+        having: { last: { isBusinessDay: true } },
+      })
+    ).toMatchObject({
+      code: "invalid_operator",
+      path: ["having", "last", "isBusinessDay"],
+    });
   });
 });
 
@@ -169,24 +335,44 @@ describe("planSql: calendar functions", () => {
     expect(literalOf(fn)).toEqual(number(1));
   });
 
-  it("refuses a column argument to the other calendar functions", () => {
-    for (const fn of [
-      "businessDaysElapsed",
-      "businessDaysRemaining",
-    ] as const) {
-      expect(refusal({ [fn]: "created_at" })).toEqual({
-        code: "invalid_operator",
-        path: ["select", 0, "calc", "div", 1, fn],
-        message:
-          "calendar functions take a date or a relative date in this version",
-      });
-    }
+  it("folds the new functions over literals to bound values", () => {
+    expect(
+      literalOf({
+        businessDaysBetween: [{ date: "2026-11-20" }, { date: "2026-11-23" }],
+      })
+    ).toEqual(number(1));
+    expect(
+      literalOf({ businessDaysIn: ["quarter", { date: "2026-11-19" }] })
+    ).toEqual(number(66));
+    expect(
+      literalOf({ businessDaysRemaining: ["week", { date: "2026-11-19" }] })
+    ).toEqual(number(1));
+    expect(
+      literalOf({ datePart: ["business_day", { date: "2026-11-19" }] })
+    ).toEqual(number(14));
+    expect(
+      itemOf({
+        dateDiff: [
+          "day",
+          "ordered_on",
+          { addBusinessDays: [{ date: "2026-11-21" }, 1] },
+        ],
+      }).expr.end
+    ).toEqual({ kind: "literal", value: "2026-11-23", type: "date" });
   });
 
-  it("refuses a column inside businessDays at its own position", () => {
+  it("leaves to the compiler, which gives null, what the calendar cannot count", () => {
     expect(
-      refusal({ businessDays: [{ date: "2026-11-02" }, "created_at"] }).path
-    ).toEqual(["select", 0, "calc", "div", 1, "businessDays", 1]);
+      literalOf({
+        businessDays: [{ date: "1899-12-31" }, { date: "2026-11-02" }],
+      })
+    ).toMatchObject({ kind: "businessDays" });
+    expect(
+      literalOf(
+        { businessDaysElapsed: { timestamp: "1990-01-01T00:00:00Z" } },
+        withCalendar({ timeZone: "America/New_York" })
+      )
+    ).toMatchObject({ kind: "businessPeriod" });
   });
 
   it("refuses a non-date argument to businessDaysInMonth", () => {

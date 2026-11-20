@@ -64,6 +64,9 @@ const EXPRESSION_INDEXES: Record<string, readonly number[]> = {
   dateDiff: [1, 2],
   datePart: [1],
   round: [0],
+  businessDaysIn: [1],
+  businessDaysElapsed: [1],
+  businessDaysRemaining: [1],
 };
 const LOGICAL = new Set(["and", "or", "not"]);
 

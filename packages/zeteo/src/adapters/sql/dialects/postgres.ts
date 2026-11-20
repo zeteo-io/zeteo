@@ -278,8 +278,16 @@ export const postgresDialect: SqlDialect = {
   // timestamptz is an instant, and the session runs in UTC.
   timestampUtc: (expression) => expression,
   subqueryInAggregate: true,
-  calendarMonths: (months, counts, monthStartOf) =>
-    sql`(select c.n from unnest(${months}::date[], ${counts}::int[]) as c(m, n) where c.m = ${monthStartOf})`,
+  anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
+  truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
+  countWhere: (values, op, bound) =>
+    sql`(select count(*) from unnest(cast(${[...values]} as int[])) as h(v) where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
+  // The session runs in UTC, so a timestamp without a zone is a UTC instant.
+  // Outside the window SQL Server knows the zone's offsets for, null, as there.
+  zoneDate: (timestamp, zone) => {
+    const instant = sql`cast(${timestamp} as timestamptz)`;
+    return sql`case when ${instant} >= cast(${zone.from} as timestamptz) and ${instant} < cast(${zone.to} as timestamptz) then cast(${instant} at time zone cast(${zone.name} as text) as date) end`;
+  },
   text: asText,
   isFloat: (nativeType) => FLOATS.has(postgresBaseType(nativeType)),
   // The casts match SQL Server's, which keeps only 8 places of this quotient

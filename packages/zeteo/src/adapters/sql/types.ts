@@ -1,5 +1,9 @@
 import type { ColumnType, QueryPlan } from "../types.js";
 import type {
+  BusinessUnit,
+  CompiledCalendar,
+} from "../../calendar/calendar.js";
+import type {
   CalcOp,
   DateAddUnit,
   DateDiffUnit,
@@ -81,6 +85,12 @@ export interface ScalarExpr {
   type: QueryableType;
 }
 
+/** A business-day function's date: a date as it is, a timestamp as its date in the calendar's zone. */
+export interface BusinessDate {
+  expr: ResolvedExpr;
+  type: "date" | "timestamp";
+}
+
 /**
  * A calculation. Aggregates may appear only inside `group`-level calcs, and a
  * calc's `type` is the type its value has.
@@ -122,21 +132,40 @@ export type ResolvedExpr =
     }
   | {
       kind: "datePart";
-      part: DatePart;
+      /** `business_day` is planned as a `businessPeriod`. */
+      part: Exclude<DatePart, "business_day">;
       arg: ResolvedExpr;
       /** The calendar's fiscal year start month (1-12); only a fiscal part reads it. */
       fiscalStartMonth: number;
       type: "number";
     }
   | {
-      kind: "calendarMonths";
-      /** The date or timestamp whose month is looked up. */
-      arg: ResolvedExpr;
-      argType: "date" | "timestamp";
-      /** The calendar's month starts (`YYYY-MM-01`) and their business days, in step; bound as parameters. */
-      months: string[];
-      counts: number[];
+      kind: "businessDays";
+      /** `inclusive`: both ends, 0 when end < start; `between`: start excluded, negative when end < start. */
+      fn: "inclusive" | "between";
+      start: BusinessDate;
+      end: BusinessDate;
+      calendar: CompiledCalendar;
       type: "number";
+    }
+  | {
+      kind: "businessPeriod";
+      /** The period's business days, those through the date, or those after it. */
+      fn: "in" | "elapsed" | "remaining";
+      unit: BusinessUnit;
+      /** The calendar's fiscal year start month (1-12); only a fiscal unit reads it. */
+      fiscalStartMonth: number;
+      date: BusinessDate;
+      calendar: CompiledCalendar;
+      type: "number";
+    }
+  | {
+      kind: "addBusinessDays";
+      date: BusinessDate;
+      /** A number, truncated toward zero. */
+      amount: ResolvedExpr;
+      calendar: CompiledCalendar;
+      type: "date";
     }
   | {
       kind: "case";
@@ -156,6 +185,9 @@ export type ResolvedExpr =
     }
   | ScalarExpr
   | PivotExpr;
+
+/** The alias of a metric query's union of parts, whose `period` column is the bucket's start. */
+export const METRIC_UNION = "u";
 
 /**
  * A measure's value in a metric query, per period: its part's column `v<index>`
@@ -241,7 +273,14 @@ export type ResolvedFilter<S> =
       value: string;
     }
   /** `isNull: false` means IS NOT NULL. */
-  | { kind: "isNull"; subject: S; isNull: boolean };
+  | { kind: "isNull"; subject: S; isNull: boolean }
+  /** A date or timestamp subject read as a date in the calendar's zone; a null date matches neither. */
+  | {
+      kind: "businessDay";
+      subject: S;
+      is: boolean;
+      calendar: CompiledCalendar;
+    };
 
 /** A row-level calculation select item, by index into `select`, and the type it yields. */
 export interface CalcSubject {

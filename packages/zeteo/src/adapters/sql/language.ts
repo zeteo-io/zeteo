@@ -81,6 +81,7 @@ export const OPERATORS = [
   "contains",
   "startsWith",
   "isNull",
+  "isBusinessDay",
 ] as const;
 export type Operator = (typeof OPERATORS)[number];
 
@@ -101,6 +102,7 @@ const conditionSchema = z.union(
     z.strictObject({ contains: z.string().refine(noNul) }),
     z.strictObject({ startsWith: z.string().refine(noNul) }),
     z.strictObject({ isNull: z.boolean() }),
+    z.strictObject({ isBusinessDay: z.boolean() }),
   ],
   {
     error: `Each path takes exactly one operator: ${OPERATORS.join(", ")}`,
@@ -125,7 +127,8 @@ export type Condition =
   | { notIn: Scalar[] }
   | { contains: string }
   | { startsWith: string }
-  | { isNull: boolean };
+  | { isNull: boolean }
+  | { isBusinessDay: boolean };
 /** Paths to conditions; several paths mean all of them. */
 export type Comparison = Record<string, Condition>;
 export type Filter =
@@ -240,17 +243,32 @@ export const DATE_PARTS = [
   "weekday",
   "fiscal_year",
   "fiscal_quarter",
+  "business_day",
 ] as const;
 export type DatePart = (typeof DATE_PARTS)[number];
+/** The periods a business-day count spans: the buckets but `day`. */
+export const PERIOD_UNITS = [
+  "week",
+  "month",
+  "quarter",
+  "year",
+  "fiscal_quarter",
+  "fiscal_year",
+] as const;
+export type PeriodUnit = (typeof PERIOD_UNITS)[number];
 /** The date operations, besides the operations of `CALC_OPS`. */
 export const DATE_OPS = [
   "dateAdd",
   "dateDiff",
   "datePart",
   "businessDays",
+  "businessDaysBetween",
+  "businessDaysIn",
   "businessDaysInMonth",
   "businessDaysElapsed",
   "businessDaysRemaining",
+  "addBusinessDays",
+  "businessDaysInPeriod",
 ] as const;
 const MAX_TEXT_LITERAL_CHARS = 1000;
 const RANGE_BOUND_ERROR_TEXT =
@@ -267,9 +285,14 @@ export type CalcExpr =
   | { dateDiff: [DateDiffUnit, CalcExpr, CalcExpr] }
   | { datePart: [DatePart, CalcExpr] }
   | { businessDays: [CalcExpr, CalcExpr] }
+  | { businessDaysBetween: [CalcExpr, CalcExpr] }
+  | { businessDaysIn: [PeriodUnit, CalcExpr] }
   | { businessDaysInMonth: CalcExpr }
-  | { businessDaysElapsed: CalcExpr }
-  | { businessDaysRemaining: CalcExpr }
+  | { businessDaysElapsed: CalcExpr | [PeriodUnit, CalcExpr] }
+  | { businessDaysRemaining: CalcExpr | [PeriodUnit, CalcExpr] }
+  | { addBusinessDays: [CalcExpr, CalcExpr] }
+  /** In a metric's formula only. */
+  | { businessDaysInPeriod: true }
   | { add: CalcExpr[] }
   | { sub: [CalcExpr, CalcExpr] }
   | { mul: CalcExpr[] }
@@ -375,6 +398,16 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
         "An expression, or [expression, places] with places an integer 0–10"
       ).optional()
     : tooDeepCalc.optional();
+  /** A date, or `[unit, date]`. */
+  const dateInPeriod = deeper
+    ? dispatching<unknown>(
+        (v) =>
+          Array.isArray(v)
+            ? z.tuple([z.enum(PERIOD_UNITS), inner]).safeParse(v)
+            : inner.safeParse(v),
+        `A date, or [unit, date] with unit one of ${PERIOD_UNITS.join(", ")}`
+      ).optional()
+    : tooDeepCalc.optional();
 
   const node = z
     .strictObject({
@@ -414,9 +447,17 @@ const calcAt = (depth: number, aggregates: boolean): z.ZodType<CalcExpr> => {
         ? z.tuple([z.enum(DATE_PARTS), inner]).optional()
         : tooDeepCalc.optional(),
       businessDays: two,
+      businessDaysBetween: two,
+      businessDaysIn: deeper
+        ? z.tuple([z.enum(PERIOD_UNITS), inner]).optional()
+        : tooDeepCalc.optional(),
       businessDaysInMonth: (deeper ? inner : tooDeepCalc).optional(),
-      businessDaysElapsed: (deeper ? inner : tooDeepCalc).optional(),
-      businessDaysRemaining: (deeper ? inner : tooDeepCalc).optional(),
+      businessDaysElapsed: dateInPeriod,
+      businessDaysRemaining: dateInPeriod,
+      addBusinessDays: two,
+      businessDaysInPeriod: z
+        .literal(true, { error: "businessDaysInPeriod is true" })
+        .optional(),
       case: deeper
         ? z
             .strictObject({
@@ -569,6 +610,20 @@ const operation = (key: string, operand: object, description?: string) => ({
   ...(description ? { description } : {}),
 });
 const calcRef = { $ref: "#/$defs/CalcExpr" };
+const twoDates = {
+  type: "array",
+  prefixItems: [calcRef, calcRef],
+  minItems: 2,
+  maxItems: 2,
+};
+const unitAndDate = {
+  type: "array",
+  prefixItems: [{ enum: [...PERIOD_UNITS] }, calcRef],
+  minItems: 2,
+  maxItems: 2,
+};
+const DATES_IN_ZONE =
+  "each date a date, a timestamp (its date in the calendar's time zone) or any date expression; null before 1900-01-01";
 const boundJson = {
   description: RANGE_BOUND_ERROR_TEXT,
   anyOf: [
@@ -715,39 +770,60 @@ const CALC_JSON_SCHEMA_DEFS = {
           minItems: 2,
           maxItems: 2,
         },
-        "[part, date or timestamp]: a number; weekday is 1 for Monday to 7 for Sunday; fiscal parts follow the calendar's fiscal year, named by the year it ends in"
+        "[part, date or timestamp]: a number; weekday is 1 for Monday to 7 for Sunday; fiscal parts follow the calendar's fiscal year, named by the year it ends in; business_day is which business day of its month the date is (0 before the first), a timestamp read in the calendar's time zone"
       ),
       operation(
         "businessDays",
+        twoDates,
+        `[start, end]: the calendar's business days from start to end, both inclusive, 0 when end is before start; ${DATES_IN_ZONE}`
+      ),
+      operation(
+        "businessDaysBetween",
+        twoDates,
+        `[start, end]: the business days after start through end, negative when end is before start (Monday to Tuesday is 1); ${DATES_IN_ZONE}`
+      ),
+      operation(
+        "businessDaysIn",
         {
           type: "array",
-          prefixItems: [calcRef, calcRef],
+          prefixItems: [{ enum: [...PERIOD_UNITS] }, calcRef],
           minItems: 2,
           maxItems: 2,
         },
-        "[start, end]: the calendar's business days from start to end, both inclusive; each a date, timestamp or relative date literal"
+        `[unit, date]: the business days of the period of unit holding the date (a week starts on Monday); ${DATES_IN_ZONE}`
+      ),
+      operation(
+        "businessDaysInMonth",
+        calcRef,
+        `The business days of the date's month, as businessDaysIn ["month", date]; ${DATES_IN_ZONE}`
       ),
       ...(
         [
           [
-            "businessDaysInMonth",
-            "The calendar's business days in the month of the date",
-          ],
-          [
             "businessDaysElapsed",
-            "The calendar's business days from the 1st of the date's month through the date, inclusive",
+            "The business days from the first day of the date's period through the date, inclusive",
           ],
           [
             "businessDaysRemaining",
-            "The calendar's business days after the date through the end of its month",
+            "The business days after the date through the end of its period",
           ],
         ] as const
       ).map(([key, description]) =>
         operation(
           key,
-          calcRef,
-          `${description}; the date is a date, timestamp or relative date literal`
+          { anyOf: [calcRef, unitAndDate] },
+          `A date (its month), or [unit, date]: ${description}; ${DATES_IN_ZONE}`
         )
+      ),
+      operation(
+        "addBusinessDays",
+        twoDates,
+        `[date, n]: the date n business days after the date (before it when n is negative), n a number truncated toward zero; from a day that is not a business day, a step starts at the business day before it, and n = 0 gives the next business day; ${DATES_IN_ZONE}`
+      ),
+      operation(
+        "businessDaysInPeriod",
+        { const: true },
+        "In a metric's formula only: the business days of each period of the query's bucket, or of its range (gte to lt, both needed) without one"
       ),
       operation(
         "coalesce",

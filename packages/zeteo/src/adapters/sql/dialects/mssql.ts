@@ -71,6 +71,21 @@ class BracketQueryCompiler extends MssqlQueryCompiler {
   }
 }
 
+const jsonParams = new WeakMap<object, Expression<unknown>>();
+
+/**
+ * Plan values as one JSON text parameter. The same array gives the same
+ * parameter object, which the compiler binds once however often it appears.
+ */
+const jsonParam = (values: object): Expression<unknown> => {
+  let bound = jsonParams.get(values);
+  if (!bound) {
+    bound = param("nvarchar", JSON.stringify(values));
+    jsonParams.set(values, bound);
+  }
+  return bound;
+};
+
 /** A native type's name without its length, precision or scale. */
 const baseType = (nativeType: string | undefined): string =>
   (nativeType ?? "").replace(/\(.*$/, "").trim().toLowerCase();
@@ -255,8 +270,11 @@ const exprKind = (expr: ResolvedExpr): NumberKind | undefined => {
       return undefined;
     case "dateDiff":
     case "datePart":
-    case "calendarMonths":
+    case "businessDays":
+    case "businessPeriod":
       return "integer";
+    case "addBusinessDays":
+      return undefined;
     case "scalar":
       return exprKind(expr.plan.expr);
     case "pivot":
@@ -460,8 +478,17 @@ export const mssqlDialect: SqlDialect = {
   // A datetimeoffset keeps its own offset; date parts and differences are
   // taken on the UTC wall clock, as a bucket's are.
   subqueryInAggregate: false,
-  calendarMonths: (months, counts, monthStartOf) =>
-    sql`(select c.n from openjson(${param("nvarchar", JSON.stringify(months.map((m, i) => ({ m, n: counts[i] }))))}) with (m date '$.m', n int '$.n') as c where c.m = ${monthStartOf})`,
+  anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
+  // Truncates a float, an integer or a decimal toward zero alike.
+  truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,
+  countWhere: (values, op, bound) =>
+    sql`(select count(*) from openjson(${jsonParam(values)}) with (v int '$') as h where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
+  // SQL Server knows Windows zone names only: the zone's offsets over the
+  // window are bound, and the one in effect at the instant is added to it.
+  zoneDate: (timestamp, zone) => {
+    const at = sql`cast(${timestamp} as datetime2(7))`;
+    return sql`cast(dateadd(second, (select z.o from openjson(${jsonParam(zone.spans)}) with (s datetime2(7) '$.s', e datetime2(7) '$.e', o int '$.o') as z where z.s <= ${at} and ${at} < z.e), ${at}) as date)`;
+  },
   // SQL Server types a union's column over all its branches, and a bare null
   // (an int) takes the type of the others: no cast, so no decimal is resized.
   typedNull: () => sql`null`,

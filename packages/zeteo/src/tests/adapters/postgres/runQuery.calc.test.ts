@@ -1,8 +1,11 @@
 // @module-tag int
 // @module-tag platform
-import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { usePostgresRuns } from "../../support/postgresRuns.js";
 import { describe, expect, it } from "vitest";
+import {
+  businessDaysInMonth,
+  DEFAULT_CALENDAR,
+} from "../../../calendar/calendar.js";
 
 const { run, runWithCalendar } = usePostgresRuns();
 
@@ -375,10 +378,11 @@ describe("postgres runQuery: businessDaysInMonth over a column", () => {
     expect(await days({ dateAdd: ["day", 1, "month"] })).toBe(20);
   });
 
-  it("gives null for a month outside the 25-year window", async () => {
+  it("counts a month however far from now, with no window for a date", async () => {
     const result = await runWithCalendar(DEFAULT_CALENDAR, {
       from: "typed_values",
       select: [
+        { calc: { dateAdd: ["day", 30, "year"] }, as: "later" },
         {
           calc: { businessDaysInMonth: { dateAdd: ["day", 30, "year"] } },
           as: "x",
@@ -386,7 +390,8 @@ describe("postgres runQuery: businessDaysInMonth over a column", () => {
       ],
       where: { id: { eq: 5 } },
     });
-    expect(result.rows).toEqual([[null]]);
+    const [later, days] = result.rows[0] as [string, number];
+    expect(days).toBe(businessDaysInMonth(DEFAULT_CALENDAR, later));
   });
 
   it("filters and orders by the month's business days", async () => {
@@ -411,7 +416,7 @@ describe("postgres runQuery: businessDaysInMonth over a column", () => {
     ]);
   });
 
-  it("reads an offset timestamp as its UTC month", async () => {
+  it("reads an offset timestamp in the calendar's zone, UTC by default", async () => {
     // typed_values row 3: aware is 1999-12-31 23:00 at -05:00, which is
     // 2000-01-01 04:00 UTC; 26 years on it is January 2026 in UTC (22 weekdays
     // less the holiday), and December 2025 (23) read as wall time.

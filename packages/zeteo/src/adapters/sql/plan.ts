@@ -7,13 +7,17 @@ import type {
   VisibleTable,
 } from "../../grants/visibleCatalog.js";
 import {
+  addBusinessDays,
   businessDays,
+  businessDaysBetween,
   businessDaysElapsed,
-  businessDaysInMonth,
+  businessDaysIn,
   businessDaysRemaining,
-  localDate,
-  monthCounts,
+  compiledCalendar,
+  windowedLocalDate,
+  type BusinessUnit,
   type Calendar,
+  type CompiledCalendar,
 } from "../../calendar/calendar.js";
 import {
   QueryError,
@@ -40,6 +44,7 @@ import type {
   Compared,
   DateAddUnit,
   DatePart,
+  PeriodUnit,
   Comparison,
   Condition,
   Filter,
@@ -67,6 +72,7 @@ import type {
   ResolvedJoin,
   ResolvedOrder,
   ResolvedSelect,
+  BusinessDate,
   ScalarExpr,
   TablePlan,
   WhereSubject,
@@ -94,11 +100,12 @@ const ALL_OPERATORS: readonly Operator[] = [
 const NOT_TEXT = ALL_OPERATORS.filter(
   (op) => op !== "contains" && op !== "startsWith"
 );
+const DATES: readonly Operator[] = [...NOT_TEXT, "isBusinessDay"];
 const OPERATORS_BY_TYPE: Record<QueryableType, ReadonlySet<Operator>> = {
   text: new Set(ALL_OPERATORS),
   number: new Set(NOT_TEXT),
-  date: new Set(NOT_TEXT),
-  timestamp: new Set(NOT_TEXT),
+  date: new Set(DATES),
+  timestamp: new Set(DATES),
   boolean: new Set(["eq", "ne", "isNull"]),
   json: new Set(["isNull"]),
 };
@@ -227,12 +234,6 @@ const OP_TYPES: Record<
 export const typeOf = (e: ResolvedExpr): QueryableType =>
   e.kind === "column" ? e.column.type : e.type;
 
-/** A date, timestamp or relative date literal: what a calendar function folds to a constant. */
-const isDateLiteral = (operand: unknown): boolean =>
-  typeof operand === "object" &&
-  operand !== null &&
-  ("date" in operand || "timestamp" in operand || "relative" in operand);
-
 export const referenceKey = (r: Reference) => `${r.tableId}\u0000${r.columnId}`;
 
 /** `customer.account.plan` → relation path `customer.account`, column `plan`. */
@@ -288,9 +289,83 @@ export interface QueryState {
 interface ValueContext {
   now: Date;
   calendar: Calendar;
+  /** The calendar as `isBusinessDay` binds it; absent where rows are not filtered (`having`). */
+  compiled?: () => CompiledCalendar;
   /** `{ measure: name }` at `path`, compared with a subject of `type`. */
   measure: (name: string, path: QueryPath, type: QueryableType) => ScalarExpr;
 }
+
+/** What a business-day function computes, before its operands are resolved. */
+type BusinessShape =
+  | { kind: "businessDays"; fn: "inclusive" | "between" }
+  | {
+      kind: "businessPeriod";
+      fn: "in" | "elapsed" | "remaining";
+      unit: BusinessUnit;
+    }
+  | { kind: "addBusinessDays" };
+
+const BUSINESS_KEYS = new Set([
+  "businessDays",
+  "businessDaysBetween",
+  "businessDaysIn",
+  "businessDaysInMonth",
+  "businessDaysElapsed",
+  "businessDaysRemaining",
+  "addBusinessDays",
+]);
+
+/** A business-day operation's shape, and its date (and amount) operands with their paths. */
+const businessShape = (
+  key: string,
+  operand: unknown,
+  at: QueryPath
+): {
+  shape: BusinessShape;
+  dates: Array<[CalcExpr, QueryPath]>;
+  amount?: [CalcExpr, QueryPath];
+} => {
+  const list = operand as CalcExpr[];
+  const pair = (): Array<[CalcExpr, QueryPath]> => [
+    [list[0]!, [...at, 0]],
+    [list[1]!, [...at, 1]],
+  ];
+  /** A date (its month), or `[unit, date]`. */
+  const inPeriod = (): { unit: BusinessUnit; date: [CalcExpr, QueryPath] } =>
+    Array.isArray(operand)
+      ? { unit: list[0] as unknown as PeriodUnit, date: [list[1]!, [...at, 1]] }
+      : { unit: "month", date: [operand as CalcExpr, at] };
+  switch (key) {
+    case "businessDays":
+    case "businessDaysBetween":
+      return {
+        shape: {
+          kind: "businessDays",
+          fn: key === "businessDays" ? "inclusive" : "between",
+        },
+        dates: pair(),
+      };
+    case "addBusinessDays":
+      return {
+        shape: { kind: "addBusinessDays" },
+        dates: [[list[0]!, [...at, 0]]],
+        amount: [list[1]!, [...at, 1]],
+      };
+    default: {
+      const { unit, date } = inPeriod();
+      const fn =
+        key === "businessDaysElapsed"
+          ? "elapsed"
+          : key === "businessDaysRemaining"
+            ? "remaining"
+            : "in";
+      return {
+        shape: { kind: "businessPeriod", fn, unit },
+        dates: [date],
+      };
+    }
+  }
+};
 
 /** A query's shared state before anything is planned. */
 export const newQueryState = (): QueryState => ({
@@ -335,6 +410,7 @@ export class Planner {
     this.values = {
       now,
       calendar: catalog.calendar,
+      compiled: () => compiledCalendar(catalog.calendar, now),
       measure: (name, path, type) => this.fixedValue(name, path, type),
     };
   }
@@ -634,6 +710,16 @@ export class Planner {
     }
     const [key, operand] = Object.entries(expr)[0] as [string, unknown];
     const keyAt = [...at, key];
+    if (key === "datePart" && (operand as unknown[])[0] === "business_day") {
+      return this.resolveBusiness(
+        { kind: "businessPeriod", fn: "elapsed", unit: "month" },
+        [[(operand as CalcExpr[])[1]!, [...keyAt, 1]]],
+        undefined,
+        key,
+        reads,
+        insideAggregate
+      );
+    }
     if (key === "dateAdd" || key === "dateDiff" || key === "datePart") {
       return this.resolveDateOp(
         key,
@@ -643,21 +729,23 @@ export class Planner {
         insideAggregate
       );
     }
-    if (
-      key === "businessDays" ||
-      key === "businessDaysInMonth" ||
-      key === "businessDaysElapsed" ||
-      key === "businessDaysRemaining"
-    ) {
-      if (key === "businessDaysInMonth" && !isDateLiteral(operand)) {
-        return this.resolveCalendarMonths(
-          operand as CalcExpr,
-          keyAt,
-          reads,
-          insideAggregate
-        );
-      }
-      return this.resolveCalendarFn(key, operand, keyAt);
+    if (key === "businessDaysInPeriod") {
+      throw fail(
+        "invalid_operator",
+        "businessDaysInPeriod is for a metric's formula only; in a query, use businessDaysIn",
+        keyAt
+      );
+    }
+    if (BUSINESS_KEYS.has(key)) {
+      const { shape, dates, amount } = businessShape(key, operand, keyAt);
+      return this.resolveBusiness(
+        shape,
+        dates,
+        amount,
+        key,
+        reads,
+        insideAggregate
+      );
     }
     if (key === "case") {
       return this.resolveCase(
@@ -997,110 +1085,164 @@ export class Planner {
   }
 
   /**
-   * A business-day function: its arguments are date, timestamp or relative
-   * literals, and the planner computes the number from the calendar, so the
-   * result is a bound number literal.
+   * A business-day function. Its dates are any date or timestamp
+   * expressions; when every operand is a literal (a date, timestamp or
+   * relative date, and a number of days) the planner computes the value from
+   * the calendar and binds it, else the compiler computes it per row from the
+   * calendar the plan carries. A value the calendar leaves null (a date before
+   * 1900) is left to the compiler too, which gives null.
    */
-  private resolveCalendarFn(
-    key:
-      | "businessDays"
-      | "businessDaysInMonth"
-      | "businessDaysElapsed"
-      | "businessDaysRemaining",
-    operand: unknown,
-    at: QueryPath
-  ): ResolvedCalc {
-    const calendar = this.catalog.calendar;
-    const args = (key === "businessDays" ? operand : [operand]) as CalcExpr[];
-    const dates = args.map((arg, i) => {
-      const argAt = key === "businessDays" ? [...at, i] : at;
-      if (typeof arg !== "object" || arg === null) {
-        throw fail(
-          "invalid_operator",
-          "calendar functions take a date or a relative date in this version",
-          argAt
-        );
-      }
-      if ("date" in arg) {
-        const value = coerce(arg.date, "date");
-        if (value === undefined) {
-          throw fail("invalid_value", `A date literal is ${VALUE_FORMS.date}`, [
-            ...argAt,
-            "date",
-          ]);
-        }
-        return value as string;
-      }
-      if ("timestamp" in arg) {
-        const value = coerce(arg.timestamp, "timestamp");
-        if (value === undefined) {
-          throw fail(
-            "invalid_value",
-            `A timestamp literal is ${VALUE_FORMS.timestamp}`,
-            [...argAt, "timestamp"]
-          );
-        }
-        return localDate(new Date(value as string), calendar.timeZone);
-      }
-      if ("relative" in arg) {
-        return resolveRelativeDate(arg, this.now, calendar);
-      }
-      throw fail(
-        "invalid_operator",
-        "calendar functions take a date or a relative date in this version",
-        argAt
-      );
-    });
-    const first = dates[0] as string;
-    const value =
-      key === "businessDays"
-        ? businessDays(calendar, first, dates[1] as string)
-        : key === "businessDaysInMonth"
-          ? businessDaysInMonth(calendar, first)
-          : key === "businessDaysElapsed"
-            ? businessDaysElapsed(calendar, first)
-            : businessDaysRemaining(calendar, first);
-    return {
-      resolved: { kind: "literal", value, type: "number" },
-      hasAggregate: false,
-    };
-  }
-
-  /**
-   * `businessDaysInMonth` of a column or a date operation: the calendar's
-   * counts for 25 years either side of now go into the plan as values, and
-   * the compiler looks the argument's month up in them. A date reads as its
-   * month, a timestamp as its UTC month.
-   */
-  private resolveCalendarMonths(
-    operand: CalcExpr,
-    at: QueryPath,
+  private resolveBusiness(
+    shape: BusinessShape,
+    dates: Array<[CalcExpr, QueryPath]>,
+    amount: [CalcExpr, QueryPath] | undefined,
+    key: string,
     reads: Map<string, Reference>,
     insideAggregate: boolean
   ): ResolvedCalc {
-    const arg = this.resolveExpr(operand, at, reads, insideAggregate);
-    const argType = typeOf(arg.resolved);
-    if (argType !== "date" && argType !== "timestamp") {
-      throw fail(
-        "invalid_operator",
-        `businessDaysInMonth needs a date or timestamp; ${typeof operand === "string" ? `"${operand}"` : "the operand"} is ${argType}`,
-        at
-      );
+    const label = (e: CalcExpr) =>
+      typeof e === "string" ? `"${e}"` : "the operand";
+    const resolvedDates = dates.map(([e, p]) => {
+      const calc = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(calc.resolved);
+      if (type !== "date" && type !== "timestamp") {
+        throw fail(
+          "invalid_operator",
+          `${key} needs a date or timestamp; ${label(e)} is ${type}`,
+          p
+        );
+      }
+      return { calc, date: { expr: calc.resolved, type } as BusinessDate };
+    });
+    let resolvedAmount: ResolvedCalc | undefined;
+    if (amount) {
+      const [e, p] = amount;
+      resolvedAmount = this.resolveExpr(e, p, reads, insideAggregate);
+      const type = typeOf(resolvedAmount.resolved);
+      if (type !== "number") {
+        throw fail(
+          "invalid_operator",
+          `${key} takes a number of business days; ${label(e)} is ${type}`,
+          p
+        );
+      }
     }
-    const { months, counts } = monthCounts(this.catalog.calendar, this.now);
-    return {
-      hasAggregate: arg.hasAggregate,
-      hasFixed: arg.hasFixed,
-      bareColumn: arg.bareColumn,
-      resolved: {
-        kind: "calendarMonths",
-        arg: arg.resolved,
-        argType,
-        months,
-        counts,
-        type: "number",
-      },
+    const calendar = compiledCalendar(this.catalog.calendar, this.now);
+    const folded = this.foldBusiness(
+      shape,
+      resolvedDates.map((d) => d.date),
+      resolvedAmount?.resolved,
+      calendar
+    );
+    if (folded !== undefined) return { resolved: folded, hasAggregate: false };
+    const all = [
+      ...resolvedDates.map((d) => d.calc),
+      ...(resolvedAmount ? [resolvedAmount] : []),
+    ];
+    const common = {
+      hasAggregate: all.some((c) => c.hasAggregate),
+      hasFixed: all.some((c) => c.hasFixed),
+      bareColumn: all.find((c) => c.bareColumn)?.bareColumn,
     };
+    const [first, second] = resolvedDates.map((d) => d.date) as [
+      BusinessDate,
+      BusinessDate | undefined,
+    ];
+    switch (shape.kind) {
+      case "businessDays":
+        return {
+          ...common,
+          resolved: {
+            kind: "businessDays",
+            fn: shape.fn,
+            start: first,
+            end: second!,
+            calendar,
+            type: "number",
+          },
+        };
+      case "businessPeriod":
+        return {
+          ...common,
+          resolved: {
+            kind: "businessPeriod",
+            fn: shape.fn,
+            unit: shape.unit,
+            // Read only by a fiscal unit: a calendar change leaves other plans alone.
+            fiscalStartMonth: shape.unit.startsWith("fiscal_")
+              ? this.catalog.calendar.fiscalYearStartMonth
+              : 1,
+            date: first,
+            calendar,
+            type: "number",
+          },
+        };
+      case "addBusinessDays":
+        return {
+          ...common,
+          resolved: {
+            kind: "addBusinessDays",
+            date: first,
+            amount: resolvedAmount!.resolved,
+            calendar,
+            type: "date",
+          },
+        };
+    }
+  }
+
+  /**
+   * The value of a business-day function whose operands are all literals,
+   * from the calendar; undefined when one is not a literal or the calendar
+   * gives null, for the compiler to compute.
+   */
+  private foldBusiness(
+    shape: BusinessShape,
+    dates: BusinessDate[],
+    amount: ResolvedExpr | undefined,
+    calendar: CompiledCalendar
+  ): ResolvedExpr | undefined {
+    const cal = this.catalog.calendar;
+    const locals: string[] = [];
+    for (const { expr } of dates) {
+      if (expr.kind !== "literal") return undefined;
+      const local =
+        expr.type === "timestamp"
+          ? windowedLocalDate(
+              new Date(expr.value as string),
+              cal.timeZone,
+              calendar.zone
+            )
+          : (expr.value as string);
+      if (local === null) return undefined;
+      locals.push(local);
+    }
+    if (amount && amount.kind !== "literal") return undefined;
+    const [a, b] = locals as [string, string];
+    let value: number | string | null;
+    switch (shape.kind) {
+      case "businessDays":
+        value =
+          shape.fn === "inclusive"
+            ? businessDays(cal, a, b)
+            : businessDaysBetween(cal, a, b);
+        break;
+      case "businessPeriod":
+        value =
+          shape.fn === "in"
+            ? businessDaysIn(cal, shape.unit, a)
+            : shape.fn === "elapsed"
+              ? businessDaysElapsed(cal, a, shape.unit)
+              : businessDaysRemaining(cal, a, shape.unit);
+        break;
+      case "addBusinessDays":
+        value = addBusinessDays(cal, a, Number(amount!.value));
+        break;
+    }
+    if (value === null) return undefined;
+    return typeof value === "number"
+      ? { kind: "literal", value, type: "number" }
+      : { kind: "literal", value, type: "date" };
   }
 
   /**
@@ -1163,7 +1305,7 @@ export class Planner {
         },
       };
     }
-    const part = operand[0] as DatePart;
+    const part = operand[0] as Exclude<DatePart, "business_day">;
     return {
       ...common,
       resolved: {
@@ -1343,6 +1485,20 @@ const resolveCondition = <S>(
   switch (op) {
     case "isNull":
       return { kind: "isNull", subject, isNull: raw as boolean };
+    case "isBusinessDay":
+      if (!values.compiled) {
+        throw fail(
+          "invalid_operator",
+          "isBusinessDay filters rows, in where or a case's if; having filters groups",
+          at
+        );
+      }
+      return {
+        kind: "businessDay",
+        subject,
+        is: raw as boolean,
+        calendar: values.compiled(),
+      };
     case "contains":
     case "startsWith":
       return { kind: "match", op, subject, value: raw as string };
@@ -1733,7 +1889,7 @@ export const planSql = (
           type: select[index].type,
         };
       },
-      planner.values
+      { ...planner.values, compiled: undefined }
     );
 
   const orderBy: ResolvedOrder[] = query.orderBy

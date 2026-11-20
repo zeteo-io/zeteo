@@ -1,5 +1,6 @@
 import type { Expression, Kysely, SelectQueryBuilder, SqlBool } from "kysely";
 import type { DateAddUnit, DateDiffUnit, DatePart } from "./language.js";
+import type { ZoneWindow } from "../../calendar/calendar.js";
 import type {
   AggregateFn,
   BucketUnit,
@@ -156,7 +157,7 @@ export interface SqlDialect {
    * year starting in `fiscalStartMonth` (1-12) and named by the year it ends in.
    */
   datePart(
-    part: DatePart,
+    part: Exclude<DatePart, "business_day">,
     expression: Expression<unknown>,
     fiscalStartMonth: number
   ): Expression<unknown>;
@@ -179,19 +180,30 @@ export interface SqlDialect {
   ): Expression<unknown>;
   /**
    * Whether an aggregate may take a scalar subquery (Postgres); where it may
-   * not (SQL Server), a row-level calendar lookup is applied to the rows
-   * instead and read as a column.
+   * not (SQL Server), a row-level business-day computation is applied to the
+   * rows instead and read as a column.
    */
   subqueryInAggregate: boolean;
+  /** The date `days` (an integer expression) days after 1900-01-01. */
+  anchorPlus(days: Expression<unknown>): Expression<unknown>;
+  /** A number truncated toward zero to an integer; the caller keeps it within ±3,000,000. */
+  truncate(n: Expression<unknown>): Expression<unknown>;
   /**
-   * The business days of the month a date starts, looked up in the calendar's
-   * month starts (`months`, `YYYY-MM-01`) and counts, bound as parameters; null
-   * for a month the arrays lack. `monthStartOf` is the date of the month's first day.
+   * `(select count(*) …)`: how many of `values` (integers from the plan's
+   * calendar, bound as one parameter) are `op` `bound`.
    */
-  calendarMonths(
-    months: string[],
-    counts: number[],
-    monthStartOf: Expression<unknown>
+  countWhere(
+    values: readonly number[],
+    op: "<=" | "=",
+    bound: Expression<unknown>
+  ): Expression<unknown>;
+  /**
+   * A UTC timestamp's date in `zone`, null outside the zone's window. The
+   * timestamp is the instant as a calculation reads it (`timestampUtc`).
+   */
+  zoneDate(
+    timestamp: Expression<unknown>,
+    zone: ZoneWindow
   ): Expression<unknown>;
   /** A text column as a calculation's text functions take it (a uuid as its text). */
   text(

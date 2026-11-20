@@ -1,8 +1,11 @@
 // @module-tag int
 // @module-tag platform
-import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { useMssqlRuns } from "../../support/mssqlRuns.js";
 import { describe, expect, it } from "vitest";
+import {
+  businessDaysInMonth,
+  DEFAULT_CALENDAR,
+} from "../../../calendar/calendar.js";
 
 const { run, runWithCalendar } = useMssqlRuns();
 
@@ -386,10 +389,11 @@ describe("azure-sql runQuery: businessDaysInMonth over a column", () => {
     expect(await days({ dateAdd: ["day", 1, "month"] })).toBe(22);
   });
 
-  it("gives null for a month outside the 25-year window", async () => {
+  it("counts a month however far from now, with no window for a date", async () => {
     const result = await runWithCalendar(DEFAULT_CALENDAR, {
       from: "typed_values",
       select: [
+        { calc: { dateAdd: ["day", 30, "year"] }, as: "later" },
         {
           calc: { businessDaysInMonth: { dateAdd: ["day", 30, "year"] } },
           as: "x",
@@ -397,10 +401,11 @@ describe("azure-sql runQuery: businessDaysInMonth over a column", () => {
       ],
       where: { id: { eq: 1 } },
     });
-    expect(result.rows).toEqual([[null]]);
+    const [later, days] = result.rows[0] as [string, number];
+    expect(days).toBe(businessDaysInMonth(DEFAULT_CALENDAR, later));
   });
 
-  it("filters and orders by the month's business days, not as a subquery in an aggregate", async () => {
+  it("filters and orders by the month's business days, applied per row", async () => {
     const result = await runWithCalendar(holiday, {
       from: "orders",
       select: [
@@ -422,7 +427,7 @@ describe("azure-sql runQuery: businessDaysInMonth over a column", () => {
     ]);
   });
 
-  it("reads an offset timestamp column as its UTC month", async () => {
+  it("reads an offset timestamp column in the calendar's zone, UTC by default", async () => {
     // probe/typed_values row 1: aware is 2026-03-31 23:59:59.99 at +02:00,
     // 21:59:59 UTC on the 31st: March, 22 weekdays.
     const result = await runWithCalendar(holiday, {
