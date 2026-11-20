@@ -166,4 +166,30 @@ describe("PanelEditor", () => {
       "x"
     );
   });
+
+  it("shows the Rows limited pill beside a preview of limited rows, with the reason", async () => {
+    post.mockImplementation(async (url: string) => {
+      if (url === `/v1/saved-queries/${SAVED_ID}/run`)
+        return {
+          data: {
+            ...result,
+            rows_limited: true,
+            rows_limited_reason: "region is one of your regions",
+          },
+        };
+      throw new Error(`unexpected POST ${url}`);
+    });
+    await open();
+    const pill = await screen.findByText("Rows limited");
+    expect(pill.closest("[title]")).toHaveAttribute(
+      "title",
+      "region is one of your regions"
+    );
+  });
+
+  it("shows no pill when the rows are not limited", async () => {
+    await open();
+    await screen.findByTestId("chart");
+    expect(screen.queryByText("Rows limited")).toBeNull();
+  });
 });

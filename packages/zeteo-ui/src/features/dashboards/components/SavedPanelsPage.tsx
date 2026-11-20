@@ -1,5 +1,6 @@
 import { ShareDialog, TransferDialog } from "@/features/saved-queries";
 import { IconAction } from "@/features/my/components/IconAction";
+import { RowsLimitedPill } from "@/components/RowsLimitedPill";
 import { PanelEditor, type EditorValue } from "./PanelEditor";
 import { ConfirmButton } from "@/components/ConfirmButton";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -55,6 +56,9 @@ const PreviewDialog = ({
         <ErrorNotice error={preview.error} />
       ) : preview.data && panel.chart ? (
         <div className="z-db-preview-dialog">
+          {preview.data.rows_limited && (
+            <RowsLimitedPill reason={preview.data.rows_limited_reason} />
+          )}
           <Chart chart={panel.chart} result={preview.data} />
         </div>
       ) : null}

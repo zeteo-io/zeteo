@@ -3,6 +3,9 @@ export interface RunResult {
   columns: { name: string; type: string }[];
   rows: unknown[][];
   truncated: boolean;
+  /** The caller's rows are limited by a row rule. */
+  rows_limited?: boolean;
+  rows_limited_reason?: string;
 }
 
 interface ChartBase {
@@ -185,6 +188,8 @@ export interface PanelLine {
   state: PanelState;
   message?: string;
   result?: PanelResult;
+  /** The viewer's rows were limited by a row rule. */
+  rows_limited?: boolean;
   cached_at?: string;
   error?: { error: string; error_description: string };
 }

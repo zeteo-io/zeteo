@@ -1,12 +1,14 @@
 import { PeoplePicker } from "@/features/saved-queries/components/PeoplePicker";
+import type { Grant, ReplaceGrant, ReplaceRows, RowAccess } from "../api/types";
 import { faUser, faUserGroup } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useAllSources, type Source } from "@/features/sources";
 import { ExistingGrantNotice } from "./ExistingGrantNotice";
 import { useReplaceGrant } from "../api/useReplaceGrant";
-import type { Grant, ReplaceGrant } from "../api/types";
 import { useCreateGrant } from "../api/useCreateGrant";
 import { ErrorNotice } from "@/components/ErrorNotice";
+import { useIdentityKeys } from "@/features/identity";
+import { RowRuleBuilder } from "./RowRuleBuilder";
 import { useAuth } from "@tereo-io/react";
 import { useState } from "react";
 import "./styles.css";
@@ -26,7 +28,9 @@ import {
   BorderedSection,
   Button,
   FormGrid,
+  Input,
   Modal,
+  RadioGroup,
   SearchSelect,
   Switch,
 } from "@kosmeo-ui/react";
@@ -36,6 +40,15 @@ import {
   type ChooserColumn,
   type ColumnChoice,
 } from "./ColumnChooser";
+import {
+  emptyRule,
+  isComplete,
+  locate,
+  parseRule,
+  toRule,
+  type Group,
+  type RuleColumn,
+} from "../rowRuleModel";
 
 const NEEDS_SOURCES = "Choosing a table needs the Read sources permission.";
 const NO_COLUMN_LIST =
@@ -58,10 +71,20 @@ export interface FixedSource {
 /** The person or group being granted, with what a search told of them. */
 type Chosen = PrincipalRef & { name?: string | null; email?: string | null };
 
-const toRequest = ({ allColumns, selected }: ColumnChoice): ReplaceGrant =>
+const toRequest = (
+  { allColumns, selected }: ColumnChoice,
+  rows: ReplaceRows
+): ReplaceGrant =>
   allColumns
-    ? { all_columns: true }
-    : { all_columns: false, column_ids: selected };
+    ? { all_columns: true, ...rows }
+    : { all_columns: false, column_ids: selected, ...rows };
+
+const MAX_RULE_DESCRIPTION = 200;
+const ROW_OPTIONS: { value: RowAccess; label: string }[] = [
+  { value: "unlimited_default", label: "Doesn't limit rows" },
+  { value: "all", label: "All rows (overrides other limits)" },
+  { value: "rule", label: "Only rows where…" },
+];
 
 interface GrantDialogProps {
   /** Present when changing a grant: its person and table stay. */
@@ -119,6 +142,22 @@ const GrantDialogBody = ({
     selected: grant?.columns.map((c) => c.id) ?? [],
   });
 
+  const rowGrant = grant?.row_access === "rule" ? grant : undefined;
+  // A rule the builder cannot show is kept as it is, and shown as JSON.
+  const [initialRule] = useState(() =>
+    rowGrant ? parseRule(rowGrant.row_rule) : null
+  );
+  const lockedRule = rowGrant && !initialRule ? rowGrant.row_rule : undefined;
+  const ownerLocked = !!grant?.owner_grant;
+  const [access, setAccess] = useState<RowAccess>(
+    grant?.row_access ?? "unlimited_default"
+  );
+  const [draft, setDraft] = useState<Group>(initialRule ?? emptyRule());
+  const [ruleDescription, setRuleDescription] = useState(
+    grant?.row_rule_description ?? ""
+  );
+  const identity = useIdentityKeys(access === "rule" && !lockedRule);
+
   const activeSourceId = grant?.source.id ?? fixed?.id ?? sourceId;
   const activeTableId = grant?.table.id ?? tableId;
   // From a source's page, its tables are given; otherwise they are read.
@@ -145,6 +184,34 @@ const GrantDialogBody = ({
     ),
   ];
 
+  const ruleColumns: RuleColumn[] = (table.data?.columns ?? [])
+    .filter((c) => !c.missing_since)
+    .map((c) => ({
+      name: c.name,
+      type: c.type,
+      inGrant: choice.allColumns || choice.selected.includes(c.id),
+    }));
+  const showsRule = access === "rule";
+  const rule =
+    lockedRule !== undefined ? lockedRule : toRule(draft, ruleColumns);
+  const ruleReady =
+    !showsRule ||
+    lockedRule !== undefined ||
+    (canListColumns && isComplete(draft));
+  const rows: ReplaceRows = showsRule
+    ? {
+        row_access: "rule",
+        row_rule: rule,
+        ...(ruleDescription.trim()
+          ? { row_rule_description: ruleDescription.trim() }
+          : {}),
+      }
+    : { row_access: access };
+  const invalidRule =
+    mutation.error?.code === "invalid_row_rule" && lockedRule === undefined
+      ? locate(draft, mutation.error.path)
+      : null;
+
   const choosePrincipal = (p: Chosen | null) => {
     create.reset();
     setPrincipal(p);
@@ -153,29 +220,32 @@ const GrantDialogBody = ({
     create.reset();
     setSourceId(id);
     setTableId("");
+    setDraft(emptyRule());
     setChoice((c) => ({ ...c, selected: [] }));
   };
   const chooseTable = (id: string) => {
     create.reset();
     setTableId(id);
+    setDraft(emptyRule());
     setChoice((c) => ({ ...c, selected: [] }));
   };
 
   const ready = grant ? true : !!principal && !!tableId;
-  const canSubmit = ready && isValidChoice(choice) && !mutation.isPending;
+  const canSubmit =
+    ready && isValidChoice(choice) && ruleReady && !mutation.isPending;
 
   const submit = () => {
     if (!canSubmit) return;
     // Waits on the request itself: callbacks given to mutate are dropped if
     // the mutation is reset meanwhile, and the dialog would never close.
     const saved = grant
-      ? replace.mutateAsync(toRequest(choice))
+      ? replace.mutateAsync(toRequest(choice, rows))
       : principal &&
         create.mutateAsync({
           principal_type: principal.type,
           principal_id: principal.id,
           table_id: tableId,
-          ...toRequest(choice),
+          ...toRequest(choice, rows),
         });
     if (!saved) return;
     // The mutation's own error state shows a failure.
@@ -368,6 +438,57 @@ const GrantDialogBody = ({
             )}
           </BorderedSection>
         )}
+        {(grant || tableId) && (
+          <BorderedSection title="Rows" as="h2">
+            <div className="z-rule-section">
+              <RadioGroup<RowAccess>
+                name="grant-rows"
+                value={access}
+                disabled={ownerLocked}
+                onChange={(v) => {
+                  mutation.reset();
+                  setAccess(v);
+                }}
+                options={ROW_OPTIONS}
+              />
+              {showsRule &&
+                (lockedRule !== undefined || ownerLocked ? (
+                  <pre className="z-rule-readonly" aria-label="Row rule">
+                    {JSON.stringify(grant?.row_rule, null, 2)}
+                  </pre>
+                ) : !canListColumns ? (
+                  <Alert variant="warning">{NO_COLUMN_LIST}</Alert>
+                ) : (
+                  <RowRuleBuilder
+                    columns={ruleColumns}
+                    identityKeys={identity.keys}
+                    value={draft}
+                    onChange={(g) => {
+                      mutation.reset();
+                      setDraft(g);
+                    }}
+                    invalidId={invalidRule}
+                    invalidMessage={
+                      invalidRule ? mutation.error?.message : undefined
+                    }
+                  />
+                ))}
+              {showsRule && !ownerLocked && (
+                <Input
+                  label="Describe this limit for people who have it"
+                  value={ruleDescription}
+                  maxLength={MAX_RULE_DESCRIPTION}
+                  onChange={(e) => setRuleDescription(e.target.value)}
+                />
+              )}
+              {showsRule && grant && grant.row_rule_problems.length > 0 && (
+                <Alert variant="warning">
+                  {grant.row_rule_problems.join(" ")}
+                </Alert>
+              )}
+            </div>
+          </BorderedSection>
+        )}
         {!grant && mutation.error?.code === "grant_exists" && principal ? (
           <ExistingGrantNotice
             principal={principal}
@@ -376,7 +497,7 @@ const GrantDialogBody = ({
             error={mutation.error}
             onEdit={onEditExisting}
           />
-        ) : (
+        ) : invalidRule ? null : (
           <ErrorNotice error={mutation.error} />
         )}
       </div>

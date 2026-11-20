@@ -197,6 +197,7 @@ describe("an upload source's page: flows", () => {
         principal_id: NEW_ID,
         table_id: TABLE_ID,
         all_columns: false,
+        row_access: "unlimited_default",
         column_ids: [REGION_ID],
       })
     );
@@ -214,6 +215,7 @@ describe("an upload source's page: flows", () => {
     await waitFor(() =>
       expect(put).toHaveBeenCalledWith(`/v1/grants/${shared.id}`, {
         all_columns: true,
+        row_access: "unlimited_default",
       })
     );
   });

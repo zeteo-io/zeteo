@@ -1,0 +1,22 @@
+.z-identity-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-identity-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.z-identity-rows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.z-identity-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+}

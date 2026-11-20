@@ -1,5 +1,6 @@
 import { faRotateRight } from "@fortawesome/free-solid-svg-icons";
 import { IconAction } from "@/features/my/components/IconAction";
+import { RowsLimitedPill } from "@/components/RowsLimitedPill";
 import { formatRelative } from "@/utils/formatRelative";
 import type { PanelRun } from "../api/useRunDashboard";
 import { formatDate } from "@/utils/formatDate";
@@ -73,6 +74,7 @@ export const PanelFrame = ({
               </time>
             )
           )}
+          {state === "ok" && run?.rowsLimited && <RowsLimitedPill />}
           {run?.loading && <Spinner size="sm" />}
           {onRefresh && state === "ok" && (
             <IconAction
