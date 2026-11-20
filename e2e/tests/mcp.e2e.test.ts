@@ -76,7 +76,7 @@ describe("MCP through Tereo's sign-in", () => {
     expect(res.status).toBe(401);
   });
 
-  it("a user signed in through the login client lists four tools and runs query", async () => {
+  it("a user signed in through the login client lists the tools and runs query", async () => {
     const token = await signInAsMcpClient(e2e.alice.email);
     const client = new Client({ name: "zeteo-e2e", version: "0.0.0" });
     await client.connect(
@@ -86,12 +86,19 @@ describe("MCP through Tereo's sign-in", () => {
     );
     try {
       const { tools } = await client.listTools();
-      expect(tools.map((t) => t.name).sort()).toEqual([
-        "describe_table",
-        "list_sources",
-        "list_tables",
-        "query",
-      ]);
+      // The full list is pinned by the int suite (tests/mcp/index.test.ts).
+      expect(tools.map((t) => t.name)).toEqual(
+        expect.arrayContaining([
+          "describe_table",
+          "list_sources",
+          "list_tables",
+          "query",
+          "query_guide",
+          "list_measures",
+          "create_measure",
+          "list_metrics",
+        ])
+      );
 
       const result = await client.callTool({
         name: "query",

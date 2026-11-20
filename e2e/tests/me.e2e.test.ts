@@ -35,7 +35,7 @@ describe("GET /v1/me", () => {
     ).toBe(true);
   });
 
-  it("a person with only zeteo.data.read gets exactly that permission", async () => {
+  it("a zeteo_user gets exactly the role's permissions", async () => {
     const res = await requestJson("GET", `${stack.zeteoUrl}/v1/me`, {
       token: e2e.bob.token,
     });
@@ -46,7 +46,7 @@ describe("GET /v1/me", () => {
       type: "user",
       name: "bob",
       email: e2e.bob.email,
-      permissions: ["zeteo.data.read"],
+      permissions: ["zeteo.data.read", "zeteo.measures.write"],
     });
   });
 

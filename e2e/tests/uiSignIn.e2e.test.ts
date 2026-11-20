@@ -99,6 +99,8 @@ describe("zeteo with the admin UI configured", () => {
     expect(res.body).toEqual({
       tereo_url: stack.tereoUrl.replace(/\/+$/, ""),
       client_id: "e2e-ui",
+      // The stack sets UPLOADS_READER_URL.
+      uploads: true,
     });
   });
 
