@@ -31,6 +31,8 @@ test("a CSV is uploaded, previewed, created as an upload source and queried", as
   await page.getByRole("button", { name: "Sign in" }).click();
   await submitTereoSignIn(page, ADMIN_EMAIL);
   await expect(page.getByRole("heading", { name: "Add data" })).toBeVisible();
+  // Add data asks first whether the data is a file or a Google Sheet.
+  await page.getByRole("button", { name: /Upload a file/ }).click();
 
   await page.locator('input[type="file"]').setInputFiles({
     name: "regional sales.csv",

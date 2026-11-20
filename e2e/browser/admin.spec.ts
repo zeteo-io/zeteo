@@ -68,11 +68,15 @@ test("an admin administers zeteo through the UI", async ({
   const description = `Orders, described in the browser at ${new Date().toISOString()}`;
   let sourceId = "";
 
-  await test.step("sign in through Tereo and land on the sources", async () => {
+  await test.step("sign in through Tereo, land on My Zeteo, open Sources from Admin", async () => {
     await page.goto("/");
     await expect(page).toHaveURL(`${zeteoOrigin()}/signed-out`);
     await page.getByRole("button", { name: "Sign in" }).click();
     await submitTereoSignIn(page, ADMIN_EMAIL);
+    // Everyone who may query lands on My Zeteo, admins included.
+    await expect(page).toHaveURL(`${zeteoOrigin()}/my`);
+    await openAdmin(page);
+    await page.getByRole("link", { name: "Sources" }).click();
     await expect(page).toHaveURL(`${zeteoOrigin()}/sources`);
     await expect(
       page.getByRole("heading", { name: "Sources", level: 1 })
@@ -87,7 +91,10 @@ test("an admin administers zeteo through the UI", async ({
     await field("Name").fill(`UI ${slug}`);
     await field("Slug").fill(slug);
     await field("Host").fill("source-pg");
-    await field("Port").fill("5432");
+    // A number field: a spinbutton, not a textbox.
+    await page
+      .getByRole("spinbutton", { name: "Port", exact: true })
+      .fill("5432");
     await field("Database").fill("source");
     await field("User").fill("zeteo_ro");
     await field("Password").fill(stack.sourceReaderPassword);
@@ -108,9 +115,10 @@ test("an admin administers zeteo through the UI", async ({
     await openAdmin(page);
     await page.getByRole("link", { name: "Sources" }).click();
     const row = page.getByRole("row").filter({ hasText: slug });
-    // Name (with the slug under it), Database, Status, Last refreshed.
+    // Name (with the slug beside it), Kind, Owner, Status, Size, Shared with,
+    // Last refreshed, Added.
     await expect(row.getByRole("cell").nth(1)).toHaveText("PostgreSQL");
-    await expect(row.getByRole("cell").nth(2)).toHaveText("Active");
+    await expect(row.getByRole("cell").nth(3)).toHaveText("Active");
     await row.getByRole("link", { name: `UI ${slug}` }).click();
     await expect(page).toHaveURL(`${zeteoOrigin()}/sources/${sourceId}`);
 
@@ -168,11 +176,14 @@ test("an admin administers zeteo through the UI", async ({
       .getByRole("combobox", { name: "Search by name or email" })
       .fill("alice@e2e");
     await page.getByRole("option", { name: /alice@e2e\.example\.com/ }).click();
-    // Source and Table are searchable fields: type, then pick from the list.
+    // Source and Table are searchable fields: type, then pick from the list
+    // (an option is a list item; the page's filter bar names sources too).
+    const option = (text: string) =>
+      page.getByRole("listitem").getByText(text, { exact: true });
     await page.getByRole("textbox", { name: "Source" }).fill(`UI ${slug}`);
-    await page.getByText(`UI ${slug}`, { exact: true }).click();
+    await option(`UI ${slug}`).click();
     await page.getByRole("textbox", { name: "Table" }).fill("sales.orders");
-    await page.getByText("sales.orders", { exact: true }).click();
+    await option("sales.orders").click();
     await expect(
       page.getByRole("checkbox", { name: "All columns" })
     ).toBeChecked();
@@ -196,7 +207,7 @@ test("an admin administers zeteo through the UI", async ({
       .fill("alice@e2e");
     // The list opens in a portal outside the dialog.
     await page.getByRole("option", { name: /alice@e2e\.example\.com/ }).click();
-    await dialog.getByRole("textbox", { name: "Queries at once" }).fill("2");
+    await dialog.getByRole("spinbutton", { name: "Queries at once" }).fill("2");
     await dialog.getByRole("button", { name: "Create limit" }).click();
     await expect(dialog).toBeHidden();
 
@@ -223,8 +234,8 @@ test("an admin administers zeteo through the UI", async ({
       .filter({ hasText: "alice" })
       .filter({ hasText: `UI ${slug}` });
     await expect(row).toHaveCount(1);
-    // When, Person, Source, Entry point, Outcome, ...
-    await expect(row.getByRole("cell").nth(4)).toHaveText("OK");
+    // When, Person, Source, Saved query, Entry point, Outcome, ...
+    await expect(row.getByRole("cell").nth(5)).toHaveText("OK");
     await row.getByRole("button", { name: "Details" }).click();
     const detail = page.getByTestId("run-query");
     await expect(detail).toContainText('"from": "orders"');
@@ -303,7 +314,7 @@ test("an admin administers zeteo through the UI", async ({
   expectCleanRun(seen);
 });
 
-test("a user without admin permissions sees no sections", async ({
+test("a user without admin permissions lands on My Zeteo, with no Admin menu", async ({
   browser,
   baseURL,
 }) => {
@@ -314,7 +325,12 @@ test("a user without admin permissions sees no sections", async ({
   await page.goto("/");
   await page.getByRole("button", { name: "Sign in" }).click();
   await submitTereoSignIn(page, bob.email);
-  await expect(page.getByRole("heading", { name: "No access" })).toBeVisible();
+  // bob may query (zeteo_user), so he lands on My Zeteo; nothing he holds
+  // lists an admin section.
+  await expect(page).toHaveURL(`${zeteoOrigin()}/my`);
+  await expect(
+    page.getByRole("heading", { name: "My Zeteo", level: 1 })
+  ).toBeVisible();
   await expect(page.getByRole("button", { name: "Admin" })).toHaveCount(0);
 
   await context.close();
@@ -370,8 +386,13 @@ test("a role removed in Tereo hides its sections without a reload", async ({
   await submitTereoSignIn(page, email);
   const nav = page.getByRole("navigation", { name: "Sections" });
   await openAdmin(page);
-  await expect(nav.getByRole("link", { name: "Sources" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Runs" })).toBeVisible();
+  // Open Sources: the page the role change is then seen on.
+  await nav.getByRole("link", { name: "Sources" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Sources", level: 1 })
+  ).toBeVisible();
+  await openAdmin(page);
 
   // Survives only while the page is not reloaded.
   await page.evaluate(() => {
