@@ -179,6 +179,7 @@ describe("/v1/grants (upload sources)", () => {
     const made = await grant(admin, own.tables.orders!.id);
     const columns = await columnsOf(own.tables.orders!.id);
     const changed = await call("PUT", `/${made.body.id}`, owner, {
+      row_access: "unlimited_default",
       all_columns: false,
       column_ids: [columns[1]!.id],
     });
@@ -205,7 +206,7 @@ describe("/v1/grants (upload sources)", () => {
       const path = `/${made.body.id}`;
       for (const [method, payload] of [
         ["GET", undefined],
-        ["PUT", { all_columns: true }],
+        ["PUT", { row_access: "unlimited_default", all_columns: true }],
         ["DELETE", undefined],
       ] as const) {
         const res = await call(method, path, owner, payload);
@@ -245,7 +246,11 @@ describe("/v1/grants (upload sources)", () => {
     expect(ownerGrant.owner_grant).toBe(true);
     const path = `/${ownerGrant.id}`;
     const columns = await columnsOf(own.tables.customers!.id);
-    const narrow = { all_columns: false, column_ids: [columns[0]!.id] };
+    const narrow = {
+      row_access: "unlimited_default",
+      all_columns: false,
+      column_ids: [columns[0]!.id],
+    };
 
     for (const token of [owner, admin]) {
       const removed = await call("DELETE", path, token);
@@ -255,7 +260,10 @@ describe("/v1/grants (upload sources)", () => {
       expect(narrowed.status).toBe(409);
       expect(narrowed.body.error).toBe("owner_grant_locked");
     }
-    const same = await call("PUT", path, owner, { all_columns: true });
+    const same = await call("PUT", path, owner, {
+      row_access: "unlimited_default",
+      all_columns: true,
+    });
     expect(same.status).toBe(200);
     expect(same.body).toMatchObject({ all_columns: true, owner_grant: true });
   });

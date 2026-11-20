@@ -199,7 +199,7 @@ export const toStoredRule = async (
       if (keyId === undefined) {
         throw new InvalidRowRuleError(
           `There is no identity key named "${raw.identity}"`,
-          at
+          [...at, "identity"]
         );
       }
       used.add(keyId);

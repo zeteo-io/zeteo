@@ -197,14 +197,23 @@ const freeSlug = async (name: string): Promise<string> => {
 
 /**
  * An owner grant of `tableId` to `ownerId`: their row becomes `all_columns`,
- * without row access of its own, and flagged, or is created so.
+ * without row access of its own, and flagged, or is created so. Returns the
+ * grant's id when it had row access of its own (`all` or a rule) that this
+ * reset, else null; the row is locked first, so what it says is what was reset.
  */
 export const giveOwnerGrant = async (
   tx: Prisma.TransactionClient,
   tableId: string,
   ownerId: string,
   actorId: string
-) => {
+): Promise<string | null> => {
+  const [before] = await tx.$queryRaw<
+    Array<{ id: string; row_access: string }>
+  >`
+    SELECT "id", "row_access"::text AS "row_access" FROM "zeteo"."grants"
+    WHERE "principal_type" = 'user' AND "principal_id" = ${ownerId}::uuid
+      AND "table_id" = ${tableId}::uuid
+    FOR UPDATE`;
   const grant = await tx.grant.upsert({
     where: {
       principalType_principalId_tableId: {
@@ -231,6 +240,7 @@ export const giveOwnerGrant = async (
     },
   });
   await tx.grantColumn.deleteMany({ where: { grantId: grant.id } });
+  return before && before.row_access !== "unlimited_default" ? before.id : null;
 };
 
 type Staged = Awaited<ReturnType<typeof getStaging>>;
@@ -1318,8 +1328,10 @@ export const transferUploadSource = async (
       await tx.grant.deleteMany({
         where: { id: { in: removed.map((g) => g.id) } },
       });
+      const rowAccessReset: string[] = [];
       for (const tableId of tableIds) {
-        await giveOwnerGrant(tx, tableId, userId, caller.userId);
+        const reset = await giveOwnerGrant(tx, tableId, userId, caller.userId);
+        if (reset) rowAccessReset.push(reset);
       }
       await tx.source.update({ where: { id }, data: { ownerId: userId } });
       // The source now counts against the new owner's quota.
@@ -1337,6 +1349,8 @@ export const transferUploadSource = async (
           keep_access: keepAccess,
           owner_grant: { user_id: userId, table_ids: tableIds },
           grants_removed: removed.map((g) => g.id),
+          // The recipient's own grants whose row access (all or a rule) became the owner grant's default.
+          row_access_reset: rowAccessReset,
         },
       });
     });

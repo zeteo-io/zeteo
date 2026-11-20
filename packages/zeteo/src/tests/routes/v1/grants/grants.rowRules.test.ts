@@ -147,7 +147,7 @@ describe("/v1/grants row access", () => {
     [
       "an unknown identity key",
       { and: [{ status: { in: { identity: "no_such_key_xyz" } } }] },
-      ["row_rule", "and", 0, "status", "in"],
+      ["row_rule", "and", 0, "status", "in", "identity"],
     ],
     [
       "an operator that does not suit the type",
@@ -238,6 +238,16 @@ describe("/v1/grants row access", () => {
     });
     expect(row.rowRule).toBeNull();
     expect(row.identityKeyIds).toEqual([]);
+  });
+
+  it("requires row_access on a replace, leaving the rule as it was", async () => {
+    const made = await create({ row_access: "rule", row_rule: RULE });
+    expect(made.status).toBe(201);
+    const res = await call("PUT", `/${made.body.id}`, { all_columns: true });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe("invalid_request");
+    const got = await call("GET", `/${made.body.id}`);
+    expect(got.body).toMatchObject({ row_access: "rule", row_rule: RULE });
   });
 
   it("validates a replaced rule against the grant's own table", async () => {

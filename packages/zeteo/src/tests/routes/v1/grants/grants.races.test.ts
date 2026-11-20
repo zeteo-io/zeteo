@@ -55,7 +55,11 @@ describe("PUT /v1/grants/:id", () => {
 
       const answers = await Promise.all(
         lists.map((column_ids) =>
-          call("PUT", `/${made.body.id}`, { all_columns: false, column_ids })
+          call("PUT", `/${made.body.id}`, {
+            row_access: "unlimited_default",
+            all_columns: false,
+            column_ids,
+          })
         )
       );
       expect(answers.map((a) => a.status)).toEqual(lists.map(() => 200));
