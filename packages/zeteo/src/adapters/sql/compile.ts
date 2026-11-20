@@ -154,8 +154,9 @@ const applied = (
 /**
  * A timestamp's date (the timestamp as a calculation reads it, its UTC
  * instant): in `zone` when given, converted once per row, else its UTC date.
- * Postgres converts natively, in place; SQL Server's conversion is a lookup
- * subquery, applied to the row where it is row-level (and read as a column,
+ * Postgres converts natively, in place; SQL Server's conversion is a
+ * subquery (a search of the zone's offsets), applied to the row where it is
+ * row-level (and read as a column,
  * which GROUP BY and an aggregate take), as a business-day subquery is.
  */
 const localDate = (

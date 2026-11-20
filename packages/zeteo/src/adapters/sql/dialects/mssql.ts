@@ -79,6 +79,43 @@ const instantLit = (instant: string): Expression<unknown> => {
   return sql.lit(instant);
 };
 
+/**
+ * How deep a search's CASE tree splits before a ladder takes over: SQL
+ * Server nests CASE at most 10 deep, and a search is one or two levels more
+ * than this (the ladder, an equality or a guard around it).
+ */
+const SEARCH_DEPTH = 7;
+
+/**
+ * `at(i)` for the i of the ascending `keys` at most `x`, found by a CASE
+ * tree of comparisons, so a row compares `x` with a few keys and not all of
+ * them. The keys are the planner's numbers, written as literals by `key`.
+ */
+const search = (
+  x: Expression<unknown>,
+  keys: readonly Expression<unknown>[],
+  at: (i: number) => Expression<unknown>
+): Expression<unknown> => {
+  // Between lo and hi of the keys are at most x.
+  const within = (
+    lo: number,
+    hi: number,
+    depth: number
+  ): Expression<unknown> => {
+    if (lo === hi) return at(lo);
+    if (depth === SEARCH_DEPTH) {
+      const steps = [];
+      for (let i = lo; i < hi; i++) {
+        steps.push(sql`when ${x} < ${keys[i]!} then ${at(i)}`);
+      }
+      return sql`case ${sql.join(steps, sql` `)} else ${at(hi)} end`;
+    }
+    const mid = (lo + hi + 1) >> 1;
+    return sql`case when ${x} < ${keys[mid - 1]!} then ${within(lo, mid - 1, depth + 1)} else ${within(mid, hi, depth + 1)} end`;
+  };
+  return within(0, keys.length, 0);
+};
+
 /** A native type's name without its length, precision or scale. */
 const baseType = (nativeType: string | undefined): string =>
   (nativeType ?? "").replace(/\(.*$/, "").trim().toLowerCase();
@@ -470,23 +507,39 @@ export const mssqlDialect: SqlDialect = {
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.
   truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,
-  // A VALUES list of the calendar's ordinals (integers the planner computed
-  // from the admin's calendar, never query input), so SQL Server reads no
-  // JSON per row: OPENJSON in a correlated subquery parses it on every row.
-  countWhere: (values, op, bound) =>
-    sql`(select count(*) from (values ${sql.join(values.map((v) => sql`(${sql.lit(v)})`))}) as h(v) where h.v ${sql.raw(op === "=" ? "=" : "<=")} ${bound})`,
-  // SQL Server knows Windows zone names only: the zone's offsets over the
-  // window are written as a VALUES table and the one in effect is added to
-  // the instant. Not OPENJSON, which parses its text on every row, and not a
-  // CASE, which the optimizer copies into every step that reads the date.
-  // The spans are the planner's, computed from the zone's rules, in a fixed
-  // form checked here, never query input.
+  // A CASE tree over the calendar's ordinals (integers the planner computed
+  // from the admin's calendar, never query input): a row compares the bound
+  // with a few of them, where a VALUES list or OPENJSON (which parses its
+  // text on every row) reads them all.
+  countWhere: (values, op, bound) => {
+    const sorted = [...values].sort((a, b) => a - b);
+    const keys = sorted.map((v) => sql.lit(v));
+    return op === "<="
+      ? search(bound, keys, (i) => sql.lit(i))
+      : search(bound, keys, (i) =>
+          i === 0
+            ? sql.lit(0)
+            : sql`case when ${bound} = ${keys[i - 1]!} then 1 else 0 end`
+        );
+  },
+  // SQL Server knows Windows zone names only: the offset in effect is found
+  // among the zone's spans over the window by a CASE tree on their starts,
+  // and added to the instant; null outside the window. The instant passes
+  // through MAX over its one row first, so the tree compares a value: SQL
+  // Server would otherwise repeat its expression in every comparison. The
+  // spans are the planner's, computed from the zone's rules, in a fixed form
+  // checked here, never query input.
   zoneDate: (timestamp, zone) => {
-    const rows = zone.spans.map(
-      ({ s, e, o }) =>
-        sql`(cast(${instantLit(s)} as datetime2(7)), cast(${instantLit(e)} as datetime2(7)), ${sql.lit(o)})`
+    const instant = (at: string) =>
+      sql`cast(${instantLit(at)} as datetime2(7))`;
+    const { spans } = zone;
+    const t = sql.id("zt", "t");
+    const offset = search(
+      t,
+      spans.slice(1).map(({ s }) => instant(s)),
+      (i) => sql.lit(spans[i]!.o)
     );
-    return sql`cast(dateadd(second, (select z.o from (values ${sql.join(rows)}) as z(s, e, o) where z.s <= ${timestamp} and ${timestamp} < z.e), ${timestamp}) as date)`;
+    return sql`(select cast(dateadd(second, case when ${t} >= ${instant(spans[0]!.s)} and ${t} < ${instant(spans.at(-1)!.e)} then ${offset} end, ${t}) as date) from (select max(${sql.id("zr", "t")}) as ${sql.id("t")} from (select ${timestamp} as ${sql.id("t")}) as ${sql.id("zr")}) as ${sql.id("zt")})`;
   },
   // SQL Server types a union's column over all its branches, and a bare null
   // (an int) takes the type of the others: no cast, so no decimal is resized.

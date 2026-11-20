@@ -51,6 +51,12 @@ const ms = compileOn(mssqlDialect);
 
 const calc = (expr: unknown) => ({ select: [{ calc: expr, as: "x" }] });
 
+// 2026-11-26 is the anchor's day 46,349: 6,621 weeks and 2 days in, a Thursday.
+const ordinal = (date: string) => {
+  const n = dayNumber(date);
+  return Math.floor(n / 7) * 5 + Math.min((n % 7) + 1, 5);
+};
+
 describe("compileSql: business days", () => {
   it("computes a count in one scalar subquery whose steps are derived tables", () => {
     const { sql } = pg(
@@ -69,11 +75,6 @@ describe("compileSql: business days", () => {
     expect(sql).toContain(
       "(select count(*) from unnest(cast($1 as int[])) as h(v) where h.v <= "
     );
-    // 2026-11-26 is the anchor's day 46,349: 6,621 weeks and 2 days in, a Thursday.
-    const ordinal = (date: string) => {
-      const n = dayNumber(date);
-      return Math.floor(n / 7) * 5 + Math.min((n % 7) + 1, 5);
-    };
     expect(parameters.slice(0, 2)).toEqual([
       [ordinal("2026-11-26"), ordinal("2026-12-25")],
       [ordinal("2026-11-26"), ordinal("2026-12-25")],
@@ -85,7 +86,7 @@ describe("compileSql: business days", () => {
     expect(sql).not.toContain("unnest");
   });
 
-  it("applies a per-row count to every row on SQL Server, the holidays a VALUES list of ordinals", () => {
+  it("applies a per-row count to every row on SQL Server, the holidays a CASE search of ordinals", () => {
     const { sql, parameters } = ms(
       calc({ businessDays: ["ordered_on", "ordered_on"] }),
       { holidays: HOLIDAYS }
@@ -93,11 +94,38 @@ describe("compileSql: business days", () => {
     expect(sql).toMatch(
       /^select \[m0\]\.\[n\] as \[c0\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(.*\) as \[n\] from .*\) as \[m0\]/
     );
-    // Not OPENJSON, which SQL Server parses again on every row.
+    // Not OPENJSON, which SQL Server parses again on every row, nor a VALUES
+    // list, which a row reads whole: a row compares its ordinal with a few.
     expect(sql).not.toContain("openjson");
-    expect(sql.match(/\(values \(\d+\), \(\d+\)\) as h\(v\)/g)).toHaveLength(2);
+    expect(sql).not.toContain("(values ");
+    const [first, second] = [ordinal("2026-11-26"), ordinal("2026-12-25")];
+    for (const w of ["[bd4].[wa]", "[bd4].[wb]"]) {
+      expect(sql).toContain(
+        `case when ${w} < ${first} then 0 else case when ${w} < ${second} then 1 else 2 end end as [c`
+      );
+    }
     // Only the page is bound.
     expect(parameters).toHaveLength(2);
+  });
+
+  it("keeps a long holiday search within SQL Server's ten levels of CASE", () => {
+    const holidays = new Map(
+      Array.from({ length: 5000 }, (_, i) => [
+        new Date(Date.UTC(1990, 0, 1 + i * 2)).toISOString().slice(0, 10),
+        "a holiday",
+      ])
+    );
+    const { sql } = ms(calc({ addBusinessDays: ["ordered_on", 3] }), {
+      holidays,
+    });
+    let depth = 0;
+    let deepest = 0;
+    for (const word of sql.split(/[\s()]+/)) {
+      if (word === "case") deepest = Math.max(deepest, ++depth);
+      if (word === "end") depth--;
+    }
+    expect(depth).toBe(0);
+    expect(deepest).toBeLessThanOrEqual(10);
   });
 
   it("keeps a group-level count inline on SQL Server", () => {
@@ -128,13 +156,15 @@ describe("compileSql: business days", () => {
       "America/Los_Angeles",
     ]);
     const mssql = ms(query, zoned);
-    // No JSON read per row: the spans as a VALUES table of the planner's instants.
+    // No JSON read per row, nor a VALUES table of spans: the offset by a CASE
+    // search of the spans' starts, over the instant fenced by MAX.
     expect(mssql.sql).not.toContain("openjson");
+    expect(mssql.sql).not.toContain("(values ");
     expect(mssql.sql).toContain(
-      "cast(dateadd(second, (select z.o from (values (cast('2001-01-01T00:00:00' as datetime2(7)), cast('2001-04-01T10:00:00' as datetime2(7)), -28800), "
+      "(select cast(dateadd(second, case when [zt].[t] >= cast('2001-01-01T00:00:00' as datetime2(7)) and [zt].[t] < cast('2052-01-01T00:00:00' as datetime2(7)) then case when [zt].[t] < cast("
     );
     expect(mssql.sql).toContain(
-      ") as z(s, e, o) where z.s <= [bd0].[dx] and [bd0].[dx] < z.e), [bd0].[dx]) as date) as [d0]"
+      " end, [zt].[t]) as date) from (select max([zr].[t]) as [t] from (select [bd0].[dx] as [t]) as [zr]) as [zt]) as [d0]"
     );
   });
 
@@ -160,7 +190,7 @@ describe("compileSql: business days", () => {
       // reference, `top 1` or not: each step's values pass through MAX over
       // its one row instead, whose output it reads as a column.
       const msSql = ms(calc(expr), zoned).sql;
-      const steps = count(msSql, "(select max(");
+      const steps = count(msSql, "(select max([bd");
       expect(steps).toBeGreaterThan(3);
       expect(count(msSql, "r]) as [bd")).toBe(steps);
       expect(msSql).not.toContain("top 1");
@@ -225,7 +255,7 @@ describe("compileSql: buckets and date parts in the calendar's zone", () => {
   it("applies the conversion to each row on SQL Server and groups by its column", () => {
     const { sql } = ms(byWeek, zoned);
     expect(sql).toMatch(
-      /^select cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\) as \[c0\], count_big\(\*\) as \[c1\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(dateadd\(second, \(select z\.o from \(values .*\) as z\(s, e, o\) where z\.s <= (cast\(switchoffset\(\[t0\]\.\[created_at\], '\+00:00'\) as datetime2\(7\)\)) and \1 < z\.e\), \1\) as date\) as \[n\]\) as \[m0\] group by cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\)/
+      /^select cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\) as \[c0\], count_big\(\*\) as \[c1\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select \(select cast\(dateadd\(second, case when \[zt\]\.\[t\] >= .* end, \[zt\]\.\[t\]\) as date\) from \(select max\(\[zr\]\.\[t\]\) as \[t\] from \(select cast\(switchoffset\(\[t0\]\.\[created_at\], '\+00:00'\) as datetime2\(7\)\) as \[t\]\) as \[zr\]\) as \[zt\]\) as \[n\]\) as \[m0\] group by cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\)/
     );
   });
 
@@ -244,7 +274,7 @@ describe("compileSql: buckets and date parts in the calendar's zone", () => {
       'cast(extract(isodow from case when cast("t0"."created_at" as timestamptz) >= '
     );
     expect(ms(query, zoned).sql).toMatch(
-      /^select \(\(datepart\(weekday, \[m0\]\.\[n\]\) \+ @@datefirst \+ 5\) % 7 \+ 1\) as \[c0\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(dateadd\(second, /
+      /^select \(\(datepart\(weekday, \[m0\]\.\[n\]\) \+ @@datefirst \+ 5\) % 7 \+ 1\) as \[c0\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select \(select cast\(dateadd\(second, case when \[zt\]\.\[t\] >= /
     );
     // UTC: no conversion at all.
     expect(pg(query).sql).toContain(

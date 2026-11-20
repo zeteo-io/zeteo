@@ -195,8 +195,8 @@ export interface SqlDialect {
   /** A number truncated toward zero to an integer; the caller keeps it within ±3,000,000. */
   truncate(n: Expression<unknown>): Expression<unknown>;
   /**
-   * `(select count(*) …)`: how many of `values` (integers from the plan's
-   * calendar, bound as one parameter) are `op` `bound`.
+   * How many of `values` (integers from the plan's calendar) are `op`
+   * `bound`: with `=`, 1 or 0, as the values are distinct.
    */
   countWhere(
     values: readonly number[],
