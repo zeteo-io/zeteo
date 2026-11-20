@@ -2,12 +2,14 @@ import { GRANTS_WRITE } from "../../../../definitions/tereoDeclaration.js";
 import { deleteIdentityKey, updateIdentityKey } from "./controllers.js";
 import { requirePermission } from "../../../../middleware/auth.js";
 import identityValuesRouter from "./values/index.js";
+import missingValuesRouter from "./missing/index.js";
 import express, { Router } from "express";
 
 const identityKeyRouter = Router({ mergeParams: true });
 
 const json64k = express.json({ limit: "64kb" });
 
+identityKeyRouter.use("/missing", missingValuesRouter);
 identityKeyRouter.use("/values", identityValuesRouter);
 
 identityKeyRouter.patch(

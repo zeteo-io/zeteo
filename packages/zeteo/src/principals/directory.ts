@@ -715,3 +715,56 @@ export const isServiceAccountUser = async (id: string): Promise<boolean> => {
   const entry = await seamEntry({ type: "user", id });
   return entry?.user_type === "service_account";
 };
+
+/** Test mode's members of a group: a Redis JSON array of user ids. */
+export const testGroupMembersKey = (groupId: string) =>
+  `zeteo:test:group-members:${groupId}`;
+
+/** Tereo's largest page of a group's members. */
+const MEMBERS_PAGE = 100;
+
+/** `groupMemberIds` against tereo itself. */
+export const groupMemberIdsFromTereo = async (
+  id: string
+): Promise<string[]> => {
+  if (!UUID.test(id)) return [];
+  assertNoTransaction("tereo listGroupMembers()");
+  try {
+    return await withinBudget(async (signal) => {
+      try {
+        const { items, truncated } = await readPages(
+          (cursor) =>
+            requests.auth.listGroupMembers(id, {
+              limit: MEMBERS_PAGE,
+              ...(cursor !== undefined && { cursor }),
+            }),
+          MAX_DIRECTORY,
+          signal
+        );
+        if (truncated) {
+          logger.warn(
+            { group_id: id, cap: MAX_DIRECTORY },
+            "a group has more members than are read; the rest are left out"
+          );
+        }
+        return items.map((m) => m.userId);
+      } catch (err) {
+        if (statusOf(err) === 404) return [];
+        throw err;
+      }
+    }, DIRECTORY_LIST_BUDGET_MS);
+  } catch (err) {
+    throw unreachable("listing a group's members", err, { refs: 1 });
+  }
+};
+
+/**
+ * The ids of a group's members, at most `MAX_DIRECTORY`; none when there is
+ * no such group. An unreachable tereo is a `TereoUnreachableError`. Not to
+ * be called inside a transaction.
+ */
+export const groupMemberIds = async (id: string): Promise<string[]> => {
+  if (!env.TEREO_TEST_MODE) return groupMemberIdsFromTereo(id);
+  const raw = await readSeam(redis.get(testGroupMembersKey(id)), 1);
+  return raw === null ? [] : (JSON.parse(raw) as string[]);
+};
