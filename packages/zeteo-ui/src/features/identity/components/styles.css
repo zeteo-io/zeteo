@@ -1,0 +1,10 @@
+.z-identity-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.z-identity-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 1rem;
+}

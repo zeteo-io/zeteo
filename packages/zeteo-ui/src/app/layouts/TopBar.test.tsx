@@ -38,7 +38,7 @@ describe("TopBar", () => {
     ]);
   });
 
-  it("lists the nine admin sections under Admin", async () => {
+  it("lists the ten admin sections under Admin", async () => {
     renderAt("/my");
     const button = adminButton();
     expect(button).toHaveAttribute("aria-haspopup", "menu");
@@ -55,6 +55,7 @@ describe("TopBar", () => {
       "Connections",
       "Grants",
       "Limits",
+      "Identities",
       "Calendar",
       "Runs",
       "Saved queries",
@@ -67,6 +68,7 @@ describe("TopBar", () => {
       "/connections",
       "/grants",
       "/limits",
+      "/identities",
       "/calendar",
       "/runs",
       "/saved-queries",

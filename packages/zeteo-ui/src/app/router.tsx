@@ -32,6 +32,11 @@ const pages = {
   "/limits": lazy(() =>
     import("@/features/limits").then((m) => ({ default: m.LimitsPage }))
   ),
+  "/identities": lazy(() =>
+    import("@/features/identity").then((m) => ({
+      default: m.IdentityKeysPage,
+    }))
+  ),
   "/calendar": lazy(() =>
     import("@/features/calendar").then((m) => ({ default: m.CalendarPage }))
   ),
@@ -115,6 +120,26 @@ const dashboardRoutes = [
   },
 ];
 
+const identityValuesPage = lazy(() =>
+  import("@/features/identity").then((m) => ({
+    default: m.IdentityValuesPage,
+  }))
+);
+
+/** One identity key's values, for those who read grants. */
+const identityRoutes = [
+  {
+    path: "identities/:keyId",
+    element: (
+      <RequirePermission permission="zeteo.grants.read">
+        <Suspense fallback={<Spinner size="lg" />}>
+          {createElement(identityValuesPage)}
+        </Suspense>
+      </RequirePermission>
+    ),
+  },
+];
+
 const displayPage = lazy(() =>
   import("@/features/dashboards").then((m) => ({ default: m.DisplayPage }))
 );
@@ -169,6 +194,7 @@ export const routes = [
       ...sourceRoutes,
       ...savedQueryRoutes,
       ...dashboardRoutes,
+      ...identityRoutes,
       { path: "*", element: <NotFound /> },
     ],
   },

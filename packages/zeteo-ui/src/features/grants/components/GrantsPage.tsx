@@ -1,5 +1,7 @@
+import { faTrash, faUserCheck } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { EffectiveAccessDialog } from "./EffectiveAccessDialog";
 import { tableLabel, useAllTables } from "@/features/tables";
-import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { GrantDeleteButton } from "./GrantDeleteButton";
 import type { Grant, GrantFilters } from "../api/types";
 import { ErrorNotice } from "@/components/ErrorNotice";
@@ -119,6 +121,7 @@ export const GrantsPage = () => {
   const selectsUnavailable = !canReadSources || sources.error?.status === 403;
   const canWrite = hasPermission("zeteo.grants.write");
   const [dialog, setDialog] = useState<{ grant?: Grant } | null>(null);
+  const [effective, setEffective] = useState<Grant | null>(null);
 
   // A filter the selects cannot show (no Read sources, or a table from the
   // address without its source) is a chip, named from what is known.
@@ -288,7 +291,7 @@ export const GrantsPage = () => {
       {isLoading ? (
         <Spinner size="lg" />
       ) : (
-        <div className={canWrite ? "z-actions-last" : undefined}>
+        <div className="z-actions-last">
           <Table<Grant>
             rowKey={(grant) => grant.id}
             emptyMessage={
@@ -349,25 +352,35 @@ export const GrantsPage = () => {
               },
               { title: "Columns", cellElement: columnsText },
               { title: "Rows", cellElement: rowsCell, width: "1%" },
-              ...(canWrite
-                ? [
-                    {
-                      title: "",
-                      cellElement: (grant: Grant) => (
-                        <RowActions align="end">
-                          <EditButton onClick={() => setDialog({ grant })} />
-                          <GrantDeleteButton
-                            grant={grant}
-                            size="sm"
-                            icon={faTrash}
-                            label="Delete"
-                            confirmLabel="Delete grant"
-                          />
-                        </RowActions>
-                      ),
-                    },
-                  ]
-                : []),
+              {
+                title: "",
+                cellElement: (grant: Grant) => (
+                  <RowActions align="end">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      fullWidth={false}
+                      aria-label="Effective access"
+                      title="Effective access"
+                      onClick={() => setEffective(grant)}
+                    >
+                      <FontAwesomeIcon icon={faUserCheck} />
+                    </Button>
+                    {canWrite && (
+                      <>
+                        <EditButton onClick={() => setDialog({ grant })} />
+                        <GrantDeleteButton
+                          grant={grant}
+                          size="sm"
+                          icon={faTrash}
+                          label="Delete"
+                          confirmLabel="Delete grant"
+                        />
+                      </>
+                    )}
+                  </RowActions>
+                ),
+              },
             ]}
             rows={items}
           />
@@ -388,6 +401,12 @@ export const GrantsPage = () => {
             Load more
           </Button>
         </div>
+      )}
+      {effective && (
+        <EffectiveAccessDialog
+          grant={effective}
+          onClose={() => setEffective(null)}
+        />
       )}
       {dialog && (
         <GrantDialog grant={dialog.grant} onClose={() => setDialog(null)} />

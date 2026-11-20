@@ -11,6 +11,9 @@ export interface CatalogTable {
   schema_name?: string;
   kind: string;
   description?: string | null;
+  /** The caller sees only some of this table's rows. */
+  rows_limited?: boolean;
+  rows_limited_reason?: string;
   /** Measures usable on this table; absent where the server does not list them. */
   measures?: { name: string; description: string }[];
 }

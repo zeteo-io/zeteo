@@ -12,3 +12,19 @@ export interface IdentityKey {
   created_at?: string;
   updated_at?: string;
 }
+
+/** The OpenAPI `IdentityValue`: what a person's key stands for in rules. */
+export interface IdentityValue {
+  id: string;
+  key_id: string;
+  user_id: string;
+  value: string;
+  created_by: string;
+  created_at: string;
+}
+
+/** `GET /v1/identity-keys/:id/missing`: a granted person holding no value. */
+export interface MissingUser {
+  user_id: string;
+  via_grant_ids: string[];
+}

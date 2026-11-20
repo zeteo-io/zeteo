@@ -43,4 +43,33 @@ describe("CatalogList metrics", () => {
     await user.click(await screen.findByRole("button", { name: /Sales/ }));
     expect(screen.queryByRole("list", { name: /Metrics in/ })).toBeNull();
   });
+
+  it("marks a table whose rows are limited, with the reason as its tooltip", async () => {
+    get.mockResolvedValue({
+      data: {
+        sources: [
+          source({
+            tables: [
+              {
+                name: "orders",
+                kind: "table",
+                rows_limited: true,
+                rows_limited_reason: "region is one of your regions",
+              },
+              { name: "items", kind: "table", rows_limited: false },
+            ],
+          }),
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<CatalogList />);
+    await user.click(await screen.findByRole("button", { name: /Sales/ }));
+    const pills = screen.getAllByText("Rows limited");
+    expect(pills).toHaveLength(1);
+    expect(pills[0].closest("[title]")).toHaveAttribute(
+      "title",
+      "region is one of your regions"
+    );
+  });
 });

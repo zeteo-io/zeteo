@@ -46,6 +46,12 @@ export const SECTIONS: Section[] = [
     group: "admin",
   },
   {
+    path: "/identities",
+    label: "Identities",
+    permission: "zeteo.grants.read",
+    group: "admin",
+  },
+  {
     // Read by anyone who can query (the route), changed with
     // `zeteo.calendar.write`; listed only to those who may change it or
     // administer sources, so a query-only user gets no Admin menu.

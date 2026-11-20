@@ -185,6 +185,8 @@ export interface PanelLine {
   state: PanelState;
   message?: string;
   result?: PanelResult;
+  /** The viewer's rows were limited by a row rule. */
+  rows_limited?: boolean;
   cached_at?: string;
   error?: { error: string; error_description: string };
 }

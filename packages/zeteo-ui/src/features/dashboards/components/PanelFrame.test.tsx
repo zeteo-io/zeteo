@@ -39,4 +39,28 @@ describe("PanelFrame", () => {
     );
     expect(screen.getByTestId("chart")).toBeInTheDocument();
   });
+
+  it("shows a Rows limited pill only when the viewer's rows are limited", () => {
+    const { rerender } = render(
+      <PanelFrame
+        panel={makePanel()}
+        run={{
+          state: "ok",
+          result: makeResult(),
+          rowsLimited: true,
+          loading: false,
+        }}
+        now={Date.now()}
+      />
+    );
+    expect(screen.getByText("Rows limited")).toBeInTheDocument();
+    rerender(
+      <PanelFrame
+        panel={makePanel()}
+        run={{ state: "ok", result: makeResult(), loading: false }}
+        now={Date.now()}
+      />
+    );
+    expect(screen.queryByText("Rows limited")).toBeNull();
+  });
 });
