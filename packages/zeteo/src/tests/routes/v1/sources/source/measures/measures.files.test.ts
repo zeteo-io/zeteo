@@ -1,10 +1,10 @@
 // @module-tag int
 // @module-tag platform
-import { measureBody, sourcesApi } from "../../../../../support/measures.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { removeRunsOf } from "../../../../../support/queries.js";
 import { startV1Routes } from "../../../../../support/v1App.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
+import { auditRows } from "../../../../../support/sources.js";
 import { tokenFor } from "../../../../../support/tokens.js";
 import { fetchJson } from "../../../../../support/http.js";
 import { randomUUID } from "crypto";
@@ -13,6 +13,13 @@ import {
   MEASURES_WRITE,
   UPLOADS_WRITE,
 } from "../../../../../../definitions/tereoDeclaration.js";
+import {
+  createMeasures,
+  createMetrics,
+  measureBody,
+  metricBody,
+  sourcesApi,
+} from "../../../../../support/measures.js";
 import {
   removeUploadSourcesOf,
   seedUploadSource,
@@ -37,6 +44,14 @@ const TABLES = [
       { name: "amount", type: "number" as const },
     ],
     rows: [["1", "4"]],
+  },
+  {
+    name: "rates",
+    columns: [
+      { name: "id", type: "number" as const },
+      { name: "rate", type: "number" as const },
+    ],
+    rows: [["1", "2"]],
   },
 ];
 
@@ -80,6 +95,120 @@ describe("/v1/sources/:sourceId/measures: upload sources", () => {
       where: { sourceId: source.id },
     });
     expect(left.map((m) => m.name)).toEqual(["returned"]);
+  });
+
+  /**
+   * The reviewer's case: a fixed fx_rate on rates, revenue_eur on sales using
+   * it, the metric roas on revenue_eur, and rate_x2 on rates' own measure.
+   */
+  const seedCrossTable = async () => {
+    const source = await seed();
+    const measures = await createMeasures(app.url, source.id, token, [
+      {
+        ...measureBody("fx_rate", { avg: "rate" }),
+        table: "rates",
+        fixed: true,
+      },
+      {
+        ...measureBody("revenue_eur", {
+          mul: [{ sum: "amount" }, { measure: "fx_rate" }],
+        }),
+        table: "sales",
+      },
+    ]);
+    const metrics = await createMetrics(app.url, source.id, token, [
+      metricBody("roas", { div: [{ measure: "revenue_eur" }, 2] }),
+      metricBody("rate_x2", { mul: [{ measure: "fx_rate" }, 2] }),
+    ]);
+    return { source, measures, metrics };
+  };
+  const namesOf = async (sourceId: string) => ({
+    measures: (
+      await prisma.measure.findMany({
+        where: { sourceId },
+        orderBy: { name: "asc" },
+      })
+    ).map((m) => m.name),
+    metrics: (
+      await prisma.metric.findMany({
+        where: { sourceId },
+        orderBy: { name: "asc" },
+      })
+    ).map((m) => m.name),
+  });
+
+  it("refuses to remove a table whose measure another table's measure uses, and changes nothing", async () => {
+    const { source } = await seedCrossTable();
+    const before = await namesOf(source.id);
+    const refused = await api(
+      "DELETE",
+      `/${source.id}/tables/${source.tables.rates!.id}`,
+      token
+    );
+    expect(refused.status, JSON.stringify(refused.body)).toBe(409);
+    expect(refused.body.error).toBe("measure_in_use");
+    expect(refused.body.dependents).toEqual([
+      { kind: "measure", name: "revenue_eur" },
+      { kind: "metric", name: "roas" },
+    ]);
+    expect(await namesOf(source.id)).toEqual(before);
+    const table = await prisma.sourceTable.findUniqueOrThrow({
+      where: { id: source.tables.rates!.id },
+    });
+    expect(table.missingSince).toBeNull();
+    const ran = await fetchJson("POST", `${app.url}/v1/query`, token, {
+      source: source.slug,
+      from: "rates",
+      select: ["rate"],
+    });
+    expect(ran.status, JSON.stringify(ran.body)).toBe(200);
+  });
+
+  it("removes the table, its measures and the metrics using them once nothing elsewhere uses them", async () => {
+    const { source, measures, metrics } = await seedCrossTable();
+    for (const path of [
+      `/${source.id}/metrics/${metrics.roas}`,
+      `/${source.id}/measures/${measures.revenue_eur}`,
+    ]) {
+      expect((await api("DELETE", path, token)).status).toBe(204);
+    }
+    const removed = await api(
+      "DELETE",
+      `/${source.id}/tables/${source.tables.rates!.id}`,
+      token
+    );
+    expect(removed.status, JSON.stringify(removed.body)).toBe(204);
+    expect(await namesOf(source.id)).toEqual({ measures: [], metrics: [] });
+
+    const withTable = {
+      source_id: source.id,
+      removed_with_table: { id: source.tables.rates!.id, name: "rates" },
+    };
+    const [measureEntry] = (await auditRows(measures.fx_rate!)).filter(
+      (e) => e.payload.metadata.event === "zeteo.measure.deleted"
+    );
+    expect(measureEntry?.payload).toMatchObject({
+      action: "DELETE",
+      entityType: "measure",
+      userId: ownerId,
+      metadata: { ...withTable, name: "fx_rate" },
+    });
+    const [metricEntry] = (await auditRows(metrics.rate_x2!)).filter(
+      (e) => e.payload.metadata.event === "zeteo.metric.deleted"
+    );
+    expect(metricEntry?.payload).toMatchObject({
+      action: "DELETE",
+      entityType: "metric",
+      userId: ownerId,
+      metadata: { ...withTable, name: "rate_x2" },
+    });
+    const sourceEntry = (await auditRows(source.id)).find(
+      (e) => e.payload.metadata.event === "zeteo.source.table_removed"
+    );
+    expect(sourceEntry?.payload.metadata).toMatchObject({
+      measures_removed: [{ id: measures.fx_rate, name: "fx_rate" }],
+      metrics_removed: [{ id: metrics.rate_x2, name: "rate_x2" }],
+    });
   });
 
   it("deletes the measures and their editors with the source", async () => {

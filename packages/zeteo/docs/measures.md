@@ -209,8 +209,13 @@ editor knows before changing it. Once a measure they use is renamed or deleted, 
 fail with `saved_query_not_accessible`, like any saved query the caller cannot run, and their panels
 show a state other than `ok`; a direct query naming it fails with `not_found_or_not_accessible`.
 
-Removing an upload table deletes the measures on it and, directly, the metrics that use any of
-them; deleting the source deletes all its measures and metrics.
+Removing an upload table deletes the measures on it and the metrics that use any of them, each
+recorded as its own `zeteo.measure.deleted` or `zeteo.metric.deleted` entry with
+`removed_with_table: { id, name }` in its metadata. As with deleting a measure, a dependent elsewhere
+blocks it: a measure of another table that uses one of the table's (a fixed measure is usable from
+any table), directly or through others, refuses the removal with `409 measure_in_use`, its
+`dependents` naming those measures and the metrics that use them, and nothing changes. Deleting the
+source deletes all its measures and metrics without a check.
 
 An upload source's owner retyping, renaming or re-uploading a table, or a column, is not checked
 against the measures that read it: a measure it breaks is kept and shows `broken` (and stops being

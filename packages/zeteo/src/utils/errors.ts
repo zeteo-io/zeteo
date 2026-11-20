@@ -518,14 +518,15 @@ export interface MeasureDependent {
 
 /**
  * A change, rename or delete of a measure other measures or metrics use and
- * would break: they are named, measures first, each kind by name.
+ * would break, or the removal of a table whose measures they use: they are
+ * named, measures first, each kind by name.
  */
 export class MeasureInUseError extends AppError {
-  constructor(dependents: MeasureDependent[]) {
+  constructor(dependents: MeasureDependent[], subject = "this one") {
     super(
       409,
       "measure_in_use",
-      `Other measures or metrics use this one and would break: ${dependents
+      `Other measures or metrics use ${subject} and would break: ${dependents
         .map((d) => `${d.kind} ${d.name}`)
         .join(", ")}`,
       { details: { dependents } }

@@ -144,6 +144,54 @@ export const metricsUsing = (
     .filter((m) => metricFormulaMeasures(m.formula).some((n) => names.has(n)))
     .sort((a, b) => (a.name < b.name ? -1 : 1));
 
+/** What removing a table does to the source's measures and metrics. */
+export interface TableRemoval {
+  /** The table's own measures, which go with it, by name. */
+  measures: MeasureRow[];
+  /** The metrics using any of them, which go too, by name. */
+  metrics: MetricRow[];
+  /**
+   * The measures of other tables that use one of the table's measures,
+   * directly or through others, then the metrics using those: while any is
+   * listed the table is not removed (`measure_in_use`).
+   */
+  blocking: { kind: "measure" | "metric"; name: string }[];
+}
+
+/**
+ * The measures and metrics of a source that go when its table `tableId` is
+ * removed, and those that would be left broken and so refuse it: a fixed
+ * measure is usable from any table, so a measure elsewhere may use one.
+ */
+export const tableRemoval = (
+  tableId: string,
+  rows: readonly MeasureRow[],
+  metrics: readonly MetricRow[]
+): TableRemoval => {
+  const own = rows
+    .filter((r) => r.tableId === tableId)
+    .sort((a, b) => (a.name < b.name ? -1 : 1));
+  const gone = new Set(own.map((r) => r.name));
+  const elsewhere = new Map<string, MeasureRow>();
+  for (const r of own) {
+    for (const d of dependentsOf(r.name, rows)) {
+      if (!gone.has(d.name)) elsewhere.set(d.name, d);
+    }
+  }
+  const blockingMeasures = [...elsewhere.keys()].sort();
+  return {
+    measures: own,
+    metrics: metricsUsing(gone, metrics),
+    blocking: [
+      ...blockingMeasures.map((name) => ({ kind: "measure" as const, name })),
+      ...metricsUsing(new Set(blockingMeasures), metrics).map((m) => ({
+        kind: "metric" as const,
+        name: m.name,
+      })),
+    ],
+  };
+};
+
 /** How a metric plans against the source's whole catalogue: alone, and bucketed by month. */
 export interface MetricCheck {
   name: string;

@@ -29,7 +29,7 @@ Error:
             type: string
     dependents:
       type: array
-      description: On `measure_in_use`, the measures and metrics that use the one changed and would break
+      description: On `measure_in_use`, the measures and metrics that use the one changed (or a removed table's) and would break
       items:
         type: object
         required: [kind, name]

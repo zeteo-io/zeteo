@@ -1089,6 +1089,14 @@ paths:
         table of the source reads is `409 table_in_merged_table` (`merged_table` names it): edit or
         remove the merged table first.
 
+        The table's measures are deleted with it, as are the metrics that use any of them; each is
+        recorded as a `zeteo.measure.deleted` or `zeteo.metric.deleted` entry whose metadata names
+        the table (`removed_with_table`), and the `table_removed` entry lists them
+        (`measures_removed`, `metrics_removed`). A measure of another table that uses one of them (a
+        fixed measure is usable from any table), directly or through others, would be left broken:
+        the removal is then refused with `409 measure_in_use`, `dependents` naming those measures
+        and the metrics using them, and nothing changes. Delete or change them first.
+
         **Required permissions:** `zeteo.sources.write`, or the source's owner (holding
         `zeteo.uploads.write` and `zeteo.data.read`); anyone else, whether the source exists or
         not, gets the same `403 forbidden`.
@@ -1116,7 +1124,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `not_an_upload_source`, `source_archived`, or `table_in_merged_table` (a live merged table reads it; `merged_table` names it)
+          description: Conflict - `not_an_upload_source`, `source_archived`, `table_in_merged_table` (a live merged table reads it; `merged_table` names it), or `measure_in_use` (a measure of another table uses one of this table's; `dependents` names them)
           content:
             application/json:
               schema:
@@ -6137,7 +6145,7 @@ components:
                 type: string
         dependents:
           type: array
-          description: On `measure_in_use`, the measures and metrics that use the one changed and would break
+          description: On `measure_in_use`, the measures and metrics that use the one changed (or a removed table's) and would break
           items:
             type: object
             required:

@@ -1,12 +1,13 @@
 import { alreadyOwnerError, checkTransferTarget } from "../sharing/shares.js";
 import { withAudit, type Audit } from "../utils/transaction.js";
+import { toRow as toMeasureRow } from "../utils/db/measures.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { isUploadSource, typeOf } from "../sources/types.js";
 import { prisma, type Prisma } from "../utils/db/prisma.js";
 import { discardStaging, getStaging } from "./staging.js";
 import { presentSourceById } from "../sources/present.js";
 import { lockSourceMeasures } from "../measures/lock.js";
-import { metricsUsing } from "../measures/dependents.js";
+import { tableRemoval } from "../measures/dependents.js";
 import { hasPermission } from "../utils/permissions.js";
 import { closeSourcePool } from "../sources/pools.js";
 import { toMetricRow } from "../utils/db/metrics.js";
@@ -33,6 +34,7 @@ import {
   UploadSourceBusyError,
   UploadsNotConfiguredError,
   isDatabaseBusy,
+  MeasureInUseError,
   NotAFileUploadError,
   NotAnUploadSourceError,
   NotFoundError,
@@ -956,7 +958,8 @@ const removable = (table: { missingSince: Date | null; origin: unknown }) => {
  * claim of its spreadsheet is released when no other table uses it; a Sheets
  * table a sync marked missing can be removed so too. A merged table's view
  * is dropped. A table a live merged table reads is 409
- * `table_in_merged_table`.
+ * `table_in_merged_table`. Its measures, and the metrics using them, go with
+ * it; one of another table using its measures is 409 `measure_in_use`.
  */
 export const removeTable = async (
   caller: Caller,
@@ -979,6 +982,21 @@ export const removeTable = async (
         throw new NotFoundError("Table not found");
       }
       await assertNotMerged(tx, id, tableId);
+      // A measure lives on its home table: it goes with it, as does a metric
+      // using one. A measure of another table using one (a fixed measure is
+      // usable from any table) would be left broken: as for a measure's
+      // delete, that refuses the removal before anything changes.
+      await lockSourceMeasures(tx, id);
+      const removal = tableRemoval(
+        tableId,
+        (await tx.measure.findMany({ where: { sourceId: id } })).map(
+          toMeasureRow
+        ),
+        (await tx.metric.findMany({ where: { sourceId: id } })).map(toMetricRow)
+      );
+      if (removal.blocking.length > 0) {
+        throw new MeasureInUseError(removal.blocking, "this table's measures");
+      }
       const now = new Date();
       const origin = originOf(table);
       // A merged table's view is already dropped (`inDrop`) and is not
@@ -1004,23 +1022,46 @@ export const removeTable = async (
       if (origin?.kind === "google-sheets") {
         await releaseUnusedClaims(tx, id);
       }
-      // A measure lives on its home table: it goes with it.
-      await lockSourceMeasures(tx, id);
-      const measuresRemoved = await tx.measure.findMany({
-        where: { tableId },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
-      });
-      await tx.measure.deleteMany({ where: { tableId } });
-      // So does a metric using one of those measures.
-      const gone = new Set(measuresRemoved.map((m) => m.name));
-      const metricsRemoved = metricsUsing(
-        gone,
-        (await tx.metric.findMany({ where: { sourceId: id } })).map(toMetricRow)
-      ).map((m) => ({ id: m.id, name: m.name }));
+      const measuresRemoved = removal.measures.map((m) => ({
+        id: m.id,
+        name: m.name,
+      }));
+      const metricsRemoved = removal.metrics.map((m) => ({
+        id: m.id,
+        name: m.name,
+      }));
+      if (measuresRemoved.length > 0) {
+        await tx.measure.deleteMany({
+          where: { id: { in: measuresRemoved.map((m) => m.id) } },
+        });
+      }
       if (metricsRemoved.length > 0) {
         await tx.metric.deleteMany({
           where: { id: { in: metricsRemoved.map((m) => m.id) } },
+        });
+      }
+      // Each one gone is recorded as its own delete would be, saying why.
+      const withTable = {
+        source_id: id,
+        slug: row.slug,
+        removed_with_table: { id: tableId, name: table.name },
+      };
+      for (const m of measuresRemoved) {
+        audit({
+          action: AUDIT_EVENTS.measureDeleted,
+          resourceType: "measure",
+          resourceId: m.id,
+          actorId: caller.userId,
+          metadata: { ...withTable, name: m.name },
+        });
+      }
+      for (const m of metricsRemoved) {
+        audit({
+          action: AUDIT_EVENTS.metricDeleted,
+          resourceType: "metric",
+          resourceId: m.id,
+          actorId: caller.userId,
+          metadata: { ...withTable, name: m.name },
         });
       }
       audit({
