@@ -224,6 +224,11 @@ export const MetricForm = ({ sourceId, metric, onDone }: MetricFormProps) => {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
+                  <small className="z-muted z-measure-note">
+                    What it means, in plain words. Leave out column names and
+                    values: editors without access to them still see the
+                    description.
+                  </small>
                 </Slot>
               </BorderedSection>
             </div>

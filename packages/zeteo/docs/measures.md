@@ -163,7 +163,10 @@ measures too) and every relation it joins are in the caller's visible catalogue.
 absent from every listing and using it is `not_found_or_not_accessible`. `GET /v1/catalog` and the
 MCP `describe_table` list each table's visible measures with description, formula and filter;
 `list_tables` and `list_sources` carry counts, and the per-caller MCP instructions say when a source
-has measures. A source's editors can also list, preview, create, change and delete measures and
+has measures. A measure's name and description show to every editor of the source, even one not
+granted everything it reads (its formula and filter never do), so descriptions should say what it
+means in plain words and leave out column names and filter values; the forms, the MCP tools and
+`query_guide` say so. A source's editors can also list, preview, create, change and delete measures and
 metrics through MCP tools, under the same rules as the API ([mcp.md](mcp.md#measures-over-mcp)).
 
 ## Changing measures

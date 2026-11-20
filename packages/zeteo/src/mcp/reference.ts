@@ -124,6 +124,7 @@ The source's measure editors (people an admin listed, holding \`zeteo.measures.w
 - \`create_measure\`: \`source\`, \`name\` (lower case, digits, underscores; unique across the source's measures and metrics), \`description\`, \`table\`, \`formula\` (group-level, as a select item would be), and optionally \`where\`, \`fixed\`, \`date_column\`. \`create_metric\`: \`source\`, \`name\`, \`description\`, \`formula\` over \`{ "measure": name }\`, numbers and arithmetic.
 - \`update_measure\` / \`update_metric\` find one by its current name (\`measure\` / \`metric\`) and change only the fields given; \`where: null\` and \`date_column: null\` remove those. \`delete_measure\` / \`delete_metric\` remove one for good; a measure other measures or metrics use cannot be deleted (\`measure_in_use\`, with the \`dependents\`).
 - Everything is checked against your own grants, as a query is: a column or measure you cannot see is \`not_found_or_not_accessible\`.
+- Write descriptions in plain language (what it means, in which unit) and leave out column names and filter values: an editor who is not granted everything a measure reads still sees its name and description, though never its formula.
 
 ## Results
 \`{ columns, rows, truncated, truncated_by?, warnings, run_id }\`: \`rows\` are arrays in \`columns\` order. 64-bit integers, decimals, counts and sums of integers or decimals arrive as strings, to keep their precision. A \`join_multiplies_rows\` warning means an aggregate may count a row more than once.

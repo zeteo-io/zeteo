@@ -92,7 +92,9 @@ const withoutId = <T extends object>(view: T): Omit<T, "id"> => {
 const MeasureFields = {
   description: z
     .string()
-    .describe("What the measure means, for people and for Claude"),
+    .describe(
+      "What the measure means, for people and for Claude. Plain language, without column names or values: editors who are not granted everything it reads still see its name and description."
+    ),
   table: z
     .string()
     .describe(
@@ -118,7 +120,11 @@ const MeasureFields = {
 };
 
 const MetricFields = {
-  description: z.string().describe("What the metric means"),
+  description: z
+    .string()
+    .describe(
+      "What the metric means. Plain language, without column names or values: editors who are not granted everything its measures read still see its name and description."
+    ),
   formula: Json.describe(
     'Arithmetic over measures of any tables of the source, such as { "div": [{ "measure": "revenue" }, { "measure": "spend" }] }'
   ),

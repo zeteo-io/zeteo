@@ -315,6 +315,11 @@ export const MeasureForm = ({
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                   />
+                  <small className="z-muted z-measure-note">
+                    What it means, in plain words. Leave out column names and
+                    values: editors without access to them still see the
+                    description.
+                  </small>
                 </Field>
               </BorderedSection>
               <BorderedSection title="Dates and scope" as="h2">
