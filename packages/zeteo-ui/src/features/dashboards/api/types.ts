@@ -3,6 +3,9 @@ export interface RunResult {
   columns: { name: string; type: string }[];
   rows: unknown[][];
   truncated: boolean;
+  /** The caller's rows are limited by a row rule. */
+  rows_limited?: boolean;
+  rows_limited_reason?: string;
 }
 
 interface ChartBase {

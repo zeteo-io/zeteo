@@ -4,7 +4,7 @@ import { useIdentityKeys } from "../api/useIdentityKeys";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { PrincipalCell } from "@/features/principals";
 import { PageHeader } from "@/components/PageHeader";
-import { BulkPasteDialog } from "./BulkPasteDialog";
+import { AddValuesDialog } from "./AddValuesDialog";
 import { Link, useParams } from "react-router-dom";
 import type { IdentityValue } from "../api/types";
 import { NotFound } from "@/components/NotFound";
@@ -76,7 +76,7 @@ export const IdentityValuesPage = () => {
         )}
         <Switch
           size="sm"
-          label="Missing"
+          label="Show missing"
           checked={missingOnly}
           onChange={(e) => setMissingOnly(e.target.checked)}
         />
@@ -177,7 +177,7 @@ export const IdentityValuesPage = () => {
         </>
       )}
       {canWrite && adding && (
-        <BulkPasteDialog
+        <AddValuesDialog
           keyId={keyId}
           keyLabel={key.label}
           onClose={() => setAdding(false)}

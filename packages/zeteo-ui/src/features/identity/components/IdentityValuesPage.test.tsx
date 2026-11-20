@@ -4,6 +4,7 @@ import { IdentityValuesPage } from "./IdentityValuesPage";
 import { renderWithProviders } from "@/test/render";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router-dom";
+import { pickOption } from "@/test/searchSelect";
 import { parsePasted } from "../bulkPaste";
 
 const get = vi.hoisted(() => vi.fn());
@@ -139,6 +140,7 @@ describe("IdentityValuesPage", () => {
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/v1/principals/all", expect.anything())
     );
+    await user.click(screen.getByRole("button", { name: "Paste a list" }));
     await user.click(screen.getByLabelText("One person per line"));
     await user.paste(
       "ada@example.com, Northwest\nalan@example.com\tSoutheast\nghost@example.com, East"
@@ -167,9 +169,132 @@ describe("IdentityValuesPage", () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText("Northwest");
-    await user.click(screen.getByLabelText("Missing"));
+    await user.click(screen.getByLabelText("Show missing"));
     expect(await screen.findByText("Nina Nobody")).toBeInTheDocument();
     expect(screen.queryByText("Northwest")).toBeNull();
     expect(get).toHaveBeenCalledWith(`/v1/identity-keys/${KEY_ID}/missing`);
+  });
+
+  it("adds values one person at a time in one call", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Add values" }));
+    const dialog = screen.getByRole("dialog");
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith("/v1/principals/all", expect.anything())
+    );
+    await pickOption(
+      user,
+      within(dialog).getAllByPlaceholderText("Search people")[0],
+      "Alan Turing (Alan@Example.com)"
+    );
+    await user.type(within(dialog).getByLabelText("Value 1"), " Southeast ");
+    await user.click(
+      within(dialog).getByRole("button", { name: /Another person/ })
+    );
+    await pickOption(
+      user,
+      within(dialog).getAllByPlaceholderText("Search people")[1],
+      "Nina Nobody (nina@example.com)"
+    );
+    await user.type(within(dialog).getByLabelText("Value 2"), "East");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add values" })
+    );
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(`/v1/identity-keys/${KEY_ID}/values`, {
+        values: [
+          { user_id: ALAN, value: "Southeast" },
+          { user_id: NINA, value: "East" },
+        ],
+      })
+    );
+  });
+
+  const openPaste = async (text: string) => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole("button", { name: "Add values" }));
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith("/v1/principals/all", expect.anything())
+    );
+    await user.click(screen.getByRole("button", { name: "Paste a list" }));
+    await user.click(screen.getByLabelText("One person per line"));
+    await user.paste(text);
+    const dialog = screen.getByRole("dialog");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Add values" })
+    );
+    return dialog;
+  };
+
+  it("names the value another person holds, and keeps its line", async () => {
+    post.mockImplementation(async (url: string) => {
+      if (url.endsWith("/values"))
+        throw {
+          status: 409,
+          code: "identity_value_taken",
+          message: "A value is already held",
+          taken_value: "Northwest",
+        };
+      return { data: { data: [] } };
+    });
+    const dialog = await openPaste("ada@example.com, Northwest");
+    expect(
+      await within(dialog).findByText(/already held by another person/)
+    ).toHaveTextContent("Northwest");
+    expect(
+      within(dialog).getByText("ada@example.com, Northwest", {
+        selector: "code",
+      })
+    ).toBeInTheDocument();
+    expect(within(dialog).getByLabelText("One person per line")).toHaveValue(
+      "ada@example.com, Northwest"
+    );
+  });
+
+  it("never guesses between emails that differ only in case", async () => {
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/principals/all"
+        ? {
+            data: {
+              data: [
+                ...users,
+                {
+                  type: "user",
+                  id: "b4444444-1c7a-4a53-9d0e-6a3b1f2c4d04",
+                  name: "Ada Two",
+                  email: "ADA@example.com",
+                  status: "active",
+                },
+              ],
+              truncated: false,
+            },
+          }
+        : answer(url)
+    );
+    const dialog = await openPaste(
+      "ada@example.com, West\nnina@example.com, East"
+    );
+    expect(
+      await within(dialog).findByText(/match more than one person/)
+    ).toBeInTheDocument();
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(`/v1/identity-keys/${KEY_ID}/values`, {
+        values: [{ user_id: NINA, value: "East" }],
+      })
+    );
+  });
+
+  it("says some people could not be looked up when the directory is truncated", async () => {
+    get.mockImplementation(async (url: string) =>
+      url === "/v1/principals/all"
+        ? { data: { data: users, truncated: true } }
+        : answer(url)
+    );
+    const dialog = await openPaste("ghost@example.com, East");
+    expect(
+      await within(dialog).findByText(/Some people could not be looked up/)
+    ).toBeInTheDocument();
   });
 });
