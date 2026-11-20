@@ -6,6 +6,7 @@ import { planSql, queryNameOf } from "../adapters/sql/plan.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { loadAccess, type Access } from "../grants/access.js";
 import { MeasureError } from "../adapters/sql/measures.js";
+import type { PreviewProfile } from "../engine/limits.js";
 import { diffPrincipals } from "../sharing/principals.js";
 import { hasPermission } from "../utils/permissions.js";
 import { loadCalendar } from "../calendar/service.js";
@@ -804,14 +805,16 @@ export const deleteMeasure = async (
  * Runs a draft measure, not saved, as its editor: checked as a save would
  * check it against the editor's catalogue, then queried from its home table,
  * alone or by `bucket`, with entry point `measure_preview` and the draft in
- * place of the stored measure of its name.
+ * place of the stored measure of its name, under `profile`'s limits (MCP's
+ * for the MCP tool).
  */
 export const previewMeasure = async (
   caller: Caller,
   sourceId: string,
   input: MeasureInput,
   bucket: { unit: BucketUnit; column: string } | undefined,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  profile: PreviewProfile = "api"
 ): Promise<RunQueryResult> => {
   const source = await editableSource(caller, sourceId, "Source not found");
   const catalogs = await loadCatalogs(source, await loadAccess(caller));
@@ -840,6 +843,7 @@ export const previewMeasure = async (
     body,
     draftMeasure: draft,
     signal,
+    limitProfile: profile,
   });
 };
 

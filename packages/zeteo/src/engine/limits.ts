@@ -15,9 +15,16 @@ export const LIMIT_PROFILES = {
   api: API_PROFILE,
   mcp: { defaultRows: 100, maxRows: 5000, maxBytes: 1024 * 1024 },
   dashboard: { defaultRows: 1000, maxRows: 5000, maxBytes: 2 * 1024 * 1024 },
-  /** An editor's run of a draft measure: a query over the API like any other. */
+  /**
+   * An editor's run of a draft measure or metric from the API: a query over
+   * the API like any other. One from MCP runs under MCP's profile
+   * (`RunQueryInput.limitProfile`), recorded as `measure_preview` still.
+   */
   measure_preview: API_PROFILE,
 } as const;
+
+/** The profiles a measure's or metric's preview runs under: its caller's, the API's or MCP's. */
+export type PreviewProfile = "api" | "mcp";
 
 /** Where a run came from: a query over the API or MCP, an export, a dashboard's panel or a measure's preview. */
 export type EntryPoint =

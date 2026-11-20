@@ -9,6 +9,7 @@ import { ForbiddenError, NotFoundError } from "../utils/errors.js";
 import { invalidRequest } from "../utils/validateReq.js";
 import { hasPermission } from "../utils/permissions.js";
 import { QUERY_TOOL_TIMEOUT_MS } from "./queryTool.js";
+import { LIMIT_PROFILES } from "../engine/limits.js";
 import type { Caller } from "../middleware/auth.js";
 import type { AuthContext } from "@tereo-io/sdk";
 import type { TereoMcp } from "@tereo-io/mcp";
@@ -236,8 +237,7 @@ export const defineMeasureTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "preview_measure",
     title: "Preview a measure",
-    description:
-      'Run a draft measure without saving it: checked as create_measure would check it, then computed over its table, alone or by a date bucket ({ unit: "month", column: "created_at" }). A draft with a stored measure\'s name stands in for it. Returns { columns, rows, truncated, warnings, run_id }. Needs what create_measure needs.',
+    description: `Run a draft measure without saving it: checked as create_measure would check it, then computed over its table, alone or by a date bucket ({ unit: "month", column: "created_at" }). A draft with a stored measure's name stands in for it. Returns { columns, rows, truncated, warnings, run_id }, at most ${LIMIT_PROFILES.mcp.defaultRows} rows (truncated when there are more), as the query tool. Needs what create_measure needs.`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
@@ -263,7 +263,8 @@ export const defineMeasureTools = (mcp: TereoMcp): void => {
           await sourceIdOf(source),
           body.measure,
           body.bucket,
-          ctx.signal
+          ctx.signal,
+          "mcp"
         );
       }),
   });
@@ -362,8 +363,7 @@ export const defineMeasureTools = (mcp: TereoMcp): void => {
   mcp.define({
     name: "preview_metric",
     title: "Preview a metric",
-    description:
-      'Run a draft metric without saving it, as a metric query: optionally by bucket ("month") and over a range ({ gte, lt } of dates or relative dates) on each measure\'s date column. Returns { columns, rows, truncated, warnings, run_id }. Needs what create_metric needs.',
+    description: `Run a draft metric without saving it, as a metric query: optionally by bucket ("month") and over a range ({ gte, lt } of dates or relative dates) on each measure's date column. Returns { columns, rows, truncated, warnings, run_id }, at most ${LIMIT_PROFILES.mcp.defaultRows} rows (truncated when there are more), as the query tool. Needs what create_metric needs.`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,
@@ -390,7 +390,8 @@ export const defineMeasureTools = (mcp: TereoMcp): void => {
             ...(body.bucket && { bucket: body.bucket }),
             ...(body.range && { range: body.range }),
           },
-          ctx.signal
+          ctx.signal,
+          "mcp"
         );
       }),
   });

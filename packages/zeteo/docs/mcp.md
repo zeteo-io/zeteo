@@ -145,7 +145,7 @@ are run by the tests.
 | `list_saved_panels`, `get_saved_panel`, `create_saved_panel`, `update_saved_panel`, `delete_saved_panel` | as the saved query tools, with a chart | the saved panel (a saved query with its chart) |
 | `link_saved_panel`, `detach_panel` | a dashboard and a saved panel, or a linked panel | the panel |
 | `list_measures`, `list_metrics` | `{ source }` (slug) | `{ measures \| metrics: [view], can_edit }`: the views of `GET /v1/sources/:id/measures` and `/metrics` without `id`, redacted ones included for editors |
-| `preview_measure`, `preview_metric` | `{ source }` and a draft's fields; a measure optionally with `bucket: { unit, column }`, a metric with `bucket` and `range` | as `query`; the draft is not saved (entry point `measure_preview`) |
+| `preview_measure`, `preview_metric` | `{ source }` and a draft's fields; a measure optionally with `bucket: { unit, column }`, a metric with `bucket` and `range` | as `query`, under MCP's limits (at most 100 rows, `truncated` when there are more, and MCP's byte cap); the draft is not saved (recorded with entry point `measure_preview`) |
 | `create_measure`, `update_measure`, `delete_measure`; `create_metric`, `update_metric`, `delete_metric` | `{ source }` and the fields of `POST`/`PATCH` on the API; update and delete name the current one (`measure`, `metric`) | the view without `id`, or `{ deleted: true }` |
 
 Sharing and transferring a saved query, a dashboard or a saved panel are not tools: they are done in the UI or the API

@@ -6,6 +6,7 @@ import { notFoundMessage, QueryError } from "../engine/errors.js";
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { MeasureError } from "../adapters/sql/measures.js";
+import type { PreviewProfile } from "../engine/limits.js";
 import { checkMetricSet, usedBy } from "./dependents.js";
 import { toMetricRow } from "../utils/db/metrics.js";
 import type { Caller } from "../middleware/auth.js";
@@ -386,14 +387,15 @@ export const deleteMetric = async (
  * Runs a draft metric, not saved, as its editor: checked as a save would
  * check it, then asked for in a metric query, alone or by `bucket` and within
  * `range`, with entry point `measure_preview` and the draft in place of the
- * stored metric of its name.
+ * stored metric of its name, under `profile`'s limits (MCP's for the MCP tool).
  */
 export const previewMetric = async (
   caller: Caller,
   sourceId: string,
   input: MetricInput,
   options: { bucket?: BucketUnit; range?: MetricQuery["range"] },
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  profile: PreviewProfile = "api"
 ): Promise<RunQueryResult> => {
   const source = await editableSource(caller, sourceId, "Source not found");
   const catalogs = await loadCatalogs(source, await loadAccess(caller));
@@ -421,5 +423,6 @@ export const previewMetric = async (
     body,
     draftMetric: draft,
     signal,
+    limitProfile: profile,
   });
 };

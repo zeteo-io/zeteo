@@ -228,7 +228,7 @@ usable) until an editor fixes it.
 | `GET /v1/sources/{id}/measures` | `zeteo.data.read`, `zeteo.sources.read` or `zeteo.measures.write` | the measures the caller sees: visible ones in full, others (for editors and admins) flagged `usable: false`, with `used_by` and `broken` where the caller may see them; `can_edit` and `can_manage_editors`, whether the caller may change the measures and the editor list (both false once the source is archived) |
 | `POST /v1/sources/{id}/measures` | `zeteo.measures.write`, an editor | the created measure |
 | `GET`, `PATCH`, `DELETE /v1/sources/{id}/measures/{measureId}` | read as above; changes `zeteo.measures.write`, an editor | the measure; `409 measure_in_use` when a dependent would break |
-| `POST /v1/sources/{id}/measures/preview` | `zeteo.measures.write`, an editor | runs an unsaved draft grouped by nothing or by an optional bucket, as a normal query (limits, run log with entry point `measure_preview`) |
+| `POST /v1/sources/{id}/measures/preview` | `zeteo.measures.write`, an editor | runs an unsaved draft grouped by nothing or by an optional bucket, as a normal query (the API's limits, run log with entry point `measure_preview`); the MCP tools `preview_measure` and `preview_metric` run under MCP's limits instead, recorded the same way |
 | `GET`, `POST /v1/sources/{id}/metrics`; `GET`, `PATCH`, `DELETE .../metrics/{metricId}`; `POST .../metrics/preview` | as measures | see [Metrics](#metrics) |
 | `GET`, `PUT /v1/sources/{id}/measure-editors` | read as above; `PUT` as described above | the editors, users and groups |
 

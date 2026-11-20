@@ -1,6 +1,7 @@
 import { withDraftMeasure, withDraftMetric } from "../measures/draft.js";
 import { loadAccess, type CallerAccess } from "../grants/access.js";
 import { claim, failureWindowOf, release } from "./recordWindow.js";
+import type { PreviewProfile, QueryEntryPoint } from "./limits.js";
 import { planSaved, type SavedQueryToPlan } from "./savedPlan.js";
 import { loadVisibleCatalog } from "../grants/visibleCatalog.js";
 import { stampSavedQueryRun } from "../saved-queries/stamps.js";
@@ -11,7 +12,6 @@ import { loadUserLimits } from "../limits/resolve.js";
 import type { CachedResult } from "./resultCache.js";
 import type { Caller } from "../middleware/auth.js";
 import { planFor, type Progress } from "./plan.js";
-import type { QueryEntryPoint } from "./limits.js";
 import * as resultCache from "./resultCache.js";
 import { performance } from "node:perf_hooks";
 import { logger } from "../utils/logger.js";
@@ -94,6 +94,12 @@ export interface RunQueryInput {
    * metric of its id or name. Never with `savedQuery` or `draftMeasure`.
    */
   draftMetric?: MetricRow;
+  /**
+   * Set only by src/measures/ for a preview from MCP: the run takes this
+   * profile's limits in place of its entry point's, and is still recorded
+   * under its entry point.
+   */
+  limitProfile?: PreviewProfile;
 }
 
 /** A dashboard's run of one panel's query. */
@@ -357,13 +363,24 @@ const execute = async (
  * entry point's limits and one deadline, and checked against the plan.
  */
 const runPlanned = async (
-  { caller, entryPoint, signal, userLimits, dashboard }: RunQueryInput,
+  {
+    caller,
+    entryPoint,
+    signal,
+    userLimits,
+    dashboard,
+    limitProfile,
+  }: RunQueryInput,
   { access, catalog, adapter, plan }: Planned
 ): Promise<QueryResult> => {
   const sourceId = catalog.source.id;
   const ownLimits = userLimits ?? (await loadUserLimits(access));
 
-  const limits = runLimits(entryPoint, plan.limit, catalog.source);
+  const limits = runLimits(
+    limitProfile ?? entryPoint,
+    plan.limit,
+    catalog.source
+  );
   // Compiled before any lease is taken, so a query the source cannot take is
   // refused as such, never as busy.
   const prepared = adapter.prepare(plan, {
