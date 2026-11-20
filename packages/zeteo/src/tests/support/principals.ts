@@ -2,6 +2,7 @@ import type { GroupRef } from "../../grants/principals.js";
 import { redis } from "../../utils/redis.js";
 import {
   TEST_DIRECTORY_KEY,
+  testGroupMembersKey,
   type Principal,
   type TestDirectoryEntry,
 } from "../../principals/directory.js";
@@ -18,6 +19,23 @@ export const setTestGroups = async (userId: string, groups: GroupRef[]) => {
 
 export const clearTestGroups = async (userId: string) => {
   await redis.del(testGroupsKey(userId), groupsKey(userId));
+};
+
+/** Sets the members `groupMemberIds` gives for the group (test mode only). */
+export const setTestGroupMembers = async (
+  groupId: string,
+  userIds: string[]
+) => {
+  await redis.set(
+    testGroupMembersKey(groupId),
+    JSON.stringify(userIds),
+    "EX",
+    600
+  );
+};
+
+export const clearTestGroupMembers = async (groupId: string) => {
+  await redis.del(testGroupMembersKey(groupId));
 };
 
 /** Makes `principalStatus` answer `orphaned` for the id. */

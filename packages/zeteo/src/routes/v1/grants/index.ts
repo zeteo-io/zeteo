@@ -1,6 +1,7 @@
 import { sourceOfBodyTable, sourceOfListQuery } from "./middleware.js";
 import { allowOwnerOr } from "../../../middleware/uploadOwner.js";
 import { createGrant, listGrants } from "./controllers.js";
+import effectiveRouter from "./effective/index.js";
 import grantRouter from "./grant/index.js";
 import express, { Router } from "express";
 import {
@@ -12,6 +13,7 @@ const grantsRouter = Router();
 
 const json64k = express.json({ limit: "64kb" });
 
+grantsRouter.use("/effective", effectiveRouter);
 grantsRouter.use("/:grantId", grantRouter);
 
 // An upload source's owner may list and create grants on its tables.
