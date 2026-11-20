@@ -70,6 +70,7 @@ describe("httpSink", () => {
           { name: "filler", type: "text" },
         ],
         warnings: [],
+        rowsLimited: false,
         runId: "run",
       });
       const narrow = Array.from({ length: 2000 }, (_, i) => [

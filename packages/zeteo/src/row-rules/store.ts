@@ -74,6 +74,19 @@ export const mapRule = (
 export const opOf = (condition: RuleCondition): [Operator, unknown] =>
   Object.entries(condition)[0] as [Operator, unknown];
 
+/** The identity key ids the rules use. */
+export const identityKeysOf = (rules: RuleFilter[]): Set<string> => {
+  const keys = new Set<string>();
+  for (const rule of rules) {
+    mapRule(rule, [], (id, condition) => {
+      const [, raw] = opOf(condition);
+      if (isIdentityRef(raw)) keys.add(raw.identity);
+      return [id, condition];
+    });
+  }
+  return keys;
+};
+
 /** Every identity reference in the rule, with where it is. */
 const identityRefs = (rule: RuleFilter): Array<[IdentityRef, Path]> => {
   const found: Array<[IdentityRef, Path]> = [];

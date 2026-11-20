@@ -1,9 +1,13 @@
 // @module-tag unit
 // @module-tag platform
-import { describeRowRule } from "../../row-rules/describe.js";
 import type { RuleFilter } from "../../row-rules/types.js";
 import { describe, expect, it } from "vitest";
+import {
+  describeRowRule,
+  rowsLimitedReason,
+} from "../../row-rules/describe.js";
 import type {
+  RowRule,
   RuleColumn,
   RuleDescriptionPart,
 } from "../../row-rules/resolve.js";
@@ -162,5 +166,35 @@ describe("describeRowRule", () => {
     expect(say(part({ c_date: { isBusinessDay: true } }))).toBe(
       "sale_date is a business day"
     );
+  });
+});
+
+describe("rowsLimitedReason", () => {
+  it("describes a filter from its grants' parts, naming only granted columns", () => {
+    const rule: RowRule = {
+      kind: "filter",
+      filter: { c_secret: { in: ["A"] } },
+      columns,
+      descriptions: [
+        part({ c_channel: { eq: "Retail" } }),
+        part({ c_secret: { eq: "A" } }, null, "g2"),
+      ],
+    };
+    expect(rowsLimitedReason(rule, granted, keyLabels)).toBe(
+      "channel is Retail; or some rows only"
+    );
+  });
+
+  it("says no rows for a rule that keeps none, and asks for an admin for one that cannot apply", () => {
+    expect(rowsLimitedReason({ kind: "never" }, granted, keyLabels)).toBe(
+      "no rows"
+    );
+    expect(
+      rowsLimitedReason(
+        { kind: "unavailable", reason: "column_missing" },
+        granted,
+        keyLabels
+      )
+    ).toBe("no rows right now; ask an admin");
   });
 });

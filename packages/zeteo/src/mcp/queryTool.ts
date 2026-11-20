@@ -78,7 +78,7 @@ export const defineQueryTool = (mcp: TereoMcp): void => {
   mcp.define({
     name: "query",
     title: "Query a source",
-    description: `Run a read-only query on a source. Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }. ${QUERY_LANGUAGE_SUMMARY}`,
+    description: `Run a read-only query on a source. Find the source, its tables, columns and relations with list_sources, list_tables and describe_table first. Returns { columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }. ${QUERY_LANGUAGE_SUMMARY}`,
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,

@@ -3340,6 +3340,12 @@ paths:
               schema:
                 type: string
                 format: uuid
+            X-Zeteo-Rows-Limited:
+              description: '`true` when a row rule of the caller''s limited the rows of a table the query reads; absent otherwise'
+              schema:
+                type: string
+                enum:
+                  - 'true'
             Vary:
               description: '`Accept-Encoding`'
               schema:
@@ -4428,6 +4434,12 @@ paths:
               schema:
                 type: string
                 format: uuid
+            X-Zeteo-Rows-Limited:
+              description: '`true` when a row rule of the caller''s limited the rows of a table the query reads; absent otherwise'
+              schema:
+                type: string
+                enum:
+                  - 'true'
             Vary:
               description: '`Accept-Encoding`'
               schema:
@@ -7629,6 +7641,7 @@ components:
         - rows
         - truncated
         - warnings
+        - rows_limited
         - run_id
       properties:
         columns:
@@ -7669,6 +7682,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QueryWarning'
+        rows_limited:
+          type: boolean
+          description: 'A row rule of the caller''s limited the rows of a table the query read: the figures are the caller''s own, not totals'
         run_id:
           type: string
           format: uuid
@@ -7893,6 +7909,7 @@ components:
         - description
         - missing
         - last_loaded_at
+        - rows_limited
         - columns
         - relations
         - measures
@@ -7920,6 +7937,12 @@ components:
             - 'null'
           format: date-time
           description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table'
+        rows_limited:
+          type: boolean
+          description: The caller's grants show them only some of the table's rows
+        rows_limited_reason:
+          type: string
+          description: 'Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads "some rows only") and identity keys by label, never the caller''s values; a grant''s `row_rule_description` replaces its generated sentence; "no rows" when no rule keeps any'
         columns:
           type: array
           description: Only the granted columns, in the table's order
@@ -9730,6 +9753,9 @@ components:
             notice:
               type: string
               description: 'Present when rows were left out for the row cap: what the viewer is told'
+        rows_limited:
+          type: boolean
+          description: 'Present with `result`: a row rule of the viewer''s limited the rows it read'
         cached_at:
           type: string
           format: date-time

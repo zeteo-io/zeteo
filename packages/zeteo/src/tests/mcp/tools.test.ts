@@ -176,6 +176,7 @@ describe("MCP discovery tools", () => {
           last_loaded_at: null,
           columns: 2,
           measures: 1,
+          rows_limited: false,
         },
         {
           name: "orders",
@@ -186,6 +187,7 @@ describe("MCP discovery tools", () => {
           last_loaded_at: null,
           columns: 3,
           measures: 2,
+          rows_limited: false,
         },
       ],
       metrics: [
@@ -216,6 +218,7 @@ describe("MCP discovery tools", () => {
         description: null,
         missing: false,
         last_loaded_at: null,
+        rows_limited: false,
         columns: [
           {
             name: "id",

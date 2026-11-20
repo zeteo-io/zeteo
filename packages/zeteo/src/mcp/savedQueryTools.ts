@@ -82,7 +82,7 @@ export const defineSavedQueryTools = (mcp: TereoMcp): void => {
     name: "run_saved_query",
     title: "Run a saved query",
     description:
-      "Run a saved query you can see, as the query tool would run its query. limit and offset replace the saved ones. Returns { columns, rows, truncated, truncated_by?, warnings, run_id }.",
+      "Run a saved query you can see, as the query tool would run its query. limit and offset replace the saved ones. Returns { columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }.",
     permission: MCP_USE,
     readOnly: true,
     timeoutMs: QUERY_TOOL_TIMEOUT_MS,

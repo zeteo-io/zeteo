@@ -65,6 +65,7 @@ Headers, for both formats:
 | `Content-Type` | `application/x-ndjson` or `text/csv; charset=utf-8` |
 | `Content-Disposition` | `attachment; filename="zeteo-export-<run id>.ndjson"` (or `.csv`) |
 | `X-Zeteo-Run-Id` | the run's id in the run log |
+| `X-Zeteo-Rows-Limited` | `true` when a row rule of the caller's limits the rows of a table the query reads; absent otherwise |
 | `Cache-Control` | `no-store` |
 | `Vary` | `Accept-Encoding` |
 | `Content-Encoding` | `gzip` when the request's `Accept-Encoding` accepts gzip (`gzip`, or `*`, with a q above 0); absent otherwise |

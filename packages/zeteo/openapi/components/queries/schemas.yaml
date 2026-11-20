@@ -475,7 +475,7 @@ QueryWarning:
 
 QueryResult:
   type: object
-  required: [columns, rows, truncated, warnings, run_id]
+  required: [columns, rows, truncated, warnings, rows_limited, run_id]
   properties:
     columns:
       type: array
@@ -507,6 +507,7 @@ QueryResult:
     warnings:
       type: array
       items: { $ref: '#/QueryWarning' }
+    rows_limited: { type: boolean, description: "A row rule of the caller's limited the rows of a table the query read: the figures are the caller's own, not totals" }
     run_id: { type: string, format: uuid, description: The run's id in the run log }
 
 QueryError:
@@ -600,7 +601,7 @@ DiscoveredRelation:
 DiscoveredTable:
   type: object
   description: A table the caller may query
-  required: [name, schema_name, kind, description, missing, last_loaded_at, columns, relations, measures]
+  required: [name, schema_name, kind, description, missing, last_loaded_at, rows_limited, columns, relations, measures]
   properties:
     name: { type: string, description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`' }
     schema_name: { type: string }
@@ -608,6 +609,8 @@ DiscoveredTable:
     description: { type: [string, 'null'] }
     missing: { type: boolean, description: The last refresh did not find the table }
     last_loaded_at: { type: [string, 'null'], format: date-time, description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table' }
+    rows_limited: { type: boolean, description: "The caller's grants show them only some of the table's rows" }
+    rows_limited_reason: { type: string, description: "Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads \"some rows only\") and identity keys by label, never the caller's values; a grant's `row_rule_description` replaces its generated sentence; \"no rows\" when no rule keeps any" }
     columns:
       type: array
       description: Only the granted columns, in the table's order

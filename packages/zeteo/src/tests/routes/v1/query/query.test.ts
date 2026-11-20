@@ -73,6 +73,7 @@ describeEachEngine("POST /v1/query", (engine) => {
       ],
       truncated: false,
       warnings: [],
+      rows_limited: false,
       run_id: expect.any(String),
     });
   });

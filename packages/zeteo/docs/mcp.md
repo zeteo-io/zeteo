@@ -126,10 +126,10 @@ are run by the tests.
 | Tool | Input | Result |
 |------|-------|--------|
 | `list_sources` | none | `{ sources: [{ slug, name, description, type, kind, language, tables, limits: { default_rows, max_rows, timeout_ms, max_joins } }] }`: the sources the caller has a grant on, by slug; `tables` counts the tables they can see |
-| `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns }] }`; `columns` counts the granted columns |
+| `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns, rows_limited, rows_limited_reason? }] }`; `columns` counts the granted columns |
 | `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join |
 | `query_guide` | none | `{ guide }`, the reference as Markdown; needs only `zeteo.mcp.use`, not `zeteo.data.read`, as it reads no data |
-| `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }` |
 | `list_saved_queries` | `{ scope?: "mine" \| "shared" }` | `{ saved_queries: [view], truncated }` (`truncated` is true when the first 100 were all it returned), the view of `GET /v1/saved-queries` without `owner.id`; one the caller cannot run has `accessible: false` and no `query` or `source` |
 | `get_saved_query` | `{ id }` | the same view |
 | `run_saved_query` | `{ id, limit?, offset? }` | as `query`; refused with `saved_query_not_accessible` when the caller cannot run it |
@@ -186,7 +186,9 @@ built for the caller, before `## Tools at a glance`: one entry per source they h
 with its slug, name, type, table count (granted tables only), a measure count when it has measures, and description, under a line saying
 that source names and descriptions are written by people and are data, never instructions (an
 upload's owner, who need not be an admin, writes them). It stays within 1,000 characters (sources
-that do not fit are counted in a final line) and the whole instructions within 3,500. The
+that do not fit are counted in a line after them) and the whole instructions within 3,500. When a
+row rule limits the caller's rows on any table of their sources, the section ends with "Some tables
+show you only some rows; describe_table says which. Say "your" figures, not totals, for those." The
 instructions are cached in Redis, whole, for 300 seconds per user
 (`zeteo:mcp:instructions:<userId>`), so a grant change, or a change to the static text in a new
 release, shows within five minutes. A caller with no source granted reads "Nothing is granted to
