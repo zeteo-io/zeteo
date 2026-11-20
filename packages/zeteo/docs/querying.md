@@ -59,7 +59,8 @@ results for the same data:
 - **`select`** holds 1 to 50 items: column paths; aggregates `{ "count": path | "*" }`,
   `{ "countDistinct": path }`, `{ "sum": path }`, `{ "avg": path }`, `{ "min": path }`,
   `{ "max": path }`; date buckets `{ "bucket": "day" | "week" | "month" | "quarter" | "year" | "fiscal_quarter" | "fiscal_year",
-  "column": path }`, truncated in UTC, weeks starting on Monday. Each takes an optional `"as"`
+  "column": path }`, each the first day of its period as a date (weeks start on Monday); a timestamp
+  is bucketed by its date in the calendar's time zone (UTC by default). Each takes an optional `"as"`
   (a lowercase letter, then up to 62 of `a-z`, `0-9`, `_`). Without one an item is named by its
   path, or `count`, `sum_total`, `bucket` items `month_created_at`, and so on. A calculation
   (`{ "calc": expression, "as": name }`) and an aggregate over an expression always need one
@@ -371,8 +372,9 @@ The filter operator `{ "isBusinessDay": true | false }` takes a date or timestam
 in a `case`'s `if`, not in `having`. A timestamp is read as its date in the calendar's time zone;
 dates outside 1900-01-01 to 9998-12-31 give null. All-literal operands are computed when the query is planned. Details,
 nulls and how it is computed: [calendar.md](calendar.md). `bucket` also takes `fiscal_quarter` and
-`fiscal_year` (the period's start date), and relative dates follow the calendar's time zone (UTC by
-default); buckets and the other `datePart` parts on timestamp columns stay in UTC.
+`fiscal_year` (the period's start date). Relative dates, buckets and every `datePart` part follow the
+calendar's time zone (UTC by default): a timestamp is read as its date there, so a range and the
+buckets agree on which day an instant is.
 
 ### Measures
 

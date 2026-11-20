@@ -143,11 +143,13 @@ source per period:
   the local date, a timestamp column the instant. A date bound against a timestamp column is local
   midnight in the calendar's zone; a timestamp bound against a date column is its local date.
 - Result: `period` (the bucket start, when bucketed) then one column per name, in order. `period`
-  is a date when every date column is a date, else a timestamp (date buckets read as UTC
-  midnight). Periods are those any measure has; a measure with no rows in a period gives null.
+  is a date: a timestamp date column's local date in the calendar's zone is bucketed, so timestamp
+  and date measures line up by local period. Periods are those any measure has; a measure with no rows in a period gives null.
   Without `bucket` there is one row. Arithmetic on a missing period's null is null (a metric's
   `coalesce` gives a default); it is never 0.
-- The `range` follows the calendar's time zone while `bucket` stays in UTC, as in table queries.
+- The `range` and `bucket` both follow the calendar's time zone, as in table queries: a range
+  ending on a Monday leaves no instant of that local Monday in an earlier week's period, nor one of
+  the Sunday before in a later one.
 - Rows whose date column is null form a null `period` when bucketed, and have no place in a `range`.
 - A Postgres `real` measure is read as `float8` in metric queries, so periods of different
   measures line up in one column type.

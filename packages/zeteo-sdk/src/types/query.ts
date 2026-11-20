@@ -32,7 +32,8 @@ export type DateDiffUnit = "second" | "minute" | "hour" | DateUnit;
 
 /**
  * What `datePart` takes out of a date; `weekday` is 1 for Monday to 7 for
- * Sunday; `business_day` is which business day of its month the date is.
+ * Sunday; `business_day` is which business day of its month the date is. A
+ * timestamp is read as its date in the calendar's time zone.
  */
 export type DatePart =
   | "year"
@@ -136,8 +137,10 @@ export type SelectItem =
   | ExpressionAggregate<"max">
   | {
       /**
-       * Truncated in UTC; weeks start on Monday. A fiscal bucket gives the
-       * start of the fiscal quarter or year, which follows the calendar.
+       * The first day of the period, a date; weeks start on Monday. A
+       * timestamp is bucketed by its date in the calendar's time zone. A
+       * fiscal bucket gives the start of the fiscal quarter or year, which
+       * follows the calendar.
        */
       bucket: BucketUnit;
       column: Path;
@@ -267,7 +270,8 @@ export type MetricRange =
 /**
  * Measures and metrics of different tables of one source, combined per
  * period; told apart from a table query by its `metrics` key. The result is
- * `period` (when `bucket` is given) then one column per name, in order.
+ * `period` (the bucket's first day, a date, when `bucket` is given) then one
+ * column per name, in order.
  * `bucket` and `range` apply to each non-fixed measure's own `date_column`.
  * There is no `where`, `join`, `groupBy` or `having`.
  */

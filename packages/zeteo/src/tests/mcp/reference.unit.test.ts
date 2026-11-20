@@ -110,7 +110,7 @@ describe("the MCP reference", () => {
       "businessDaysInPeriod",
       "fiscal_quarter",
       "calendar's time zone",
-      "Buckets on timestamp columns stay in UTC",
+      "a timestamp is bucketed by its local date there",
     ]) {
       expect(text).toContain(word);
     }
@@ -150,7 +150,7 @@ describe("the MCP reference", () => {
       '"metrics": [names]',
       "`period`",
       "null for the other",
-      "calendar's time zone; buckets stay in UTC",
+      "Relative bounds and buckets follow the calendar's time zone",
       "over any date or timestamp: a column",
       '`{ "businessDaysInPeriod": true }`',
     ]) {

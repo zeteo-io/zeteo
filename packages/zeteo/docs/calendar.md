@@ -40,7 +40,9 @@ behaves as it did before the calendar existed.
   midnight, sent as a UTC instant for timestamp columns and as a calendar date for date columns.
   Every business-day function and `isBusinessDay` read a timestamp as its date in the calendar's
   time zone (a pick at 23:00 on a Thursday in Los Angeles is Thursday); a date is used as it is.
-  Buckets and the other `datePart` parts on timestamp columns stay in UTC.
+  So do buckets and every `datePart` part: a bucket of a timestamp is the first day of the period
+  holding its local date, a date, and a metric query's `period` is the same for timestamp and date
+  measures. With the calendar in `UTC`, a bucket is the UTC day it always was, typed `date`.
 
 The calendar's values are folded into the plan as bound values, so changing the calendar changes
 plans and with them the dashboard cache's identity: nothing else is invalidated.
@@ -77,12 +79,12 @@ subquery, a per-row one is applied to every row (`OUTER APPLY`) and read as a co
 counts, however far from now.
 
 A timestamp's date in the calendar's zone, the same answers on both engines, each converted once
-per row and function: Postgres converts natively (`AT TIME ZONE`, the zone name bound; the
+per row and function (or bucket, or `datePart`): Postgres converts natively (`AT TIME ZONE`, the zone name bound; the
 calendar takes only region names, which Postgres reads by their rules). SQL Server knows only
 Windows zone names, so Zeteo writes the zone's UTC offsets, computed from the IANA rules, as a
 small table in the query and adds the one in effect. Both cover January 1st 25 years before the
-current year to January 1st 26 years after it; outside that window a timestamp's business days
-are null on both engines. A calendar in `UTC` (or any zone at UTC throughout) converts nothing and
+current year to January 1st 26 years after it; outside that window a timestamp's business days,
+buckets and date parts are null on both engines. A calendar in `UTC` (or any zone at UTC throughout) converts nothing and
 has no window. On a 300,000-row table, an `isBusinessDay` filter on a timestamp in
 `America/Los_Angeles` takes about 1.2 times its UTC time on Postgres and 2 times on SQL Server.
 

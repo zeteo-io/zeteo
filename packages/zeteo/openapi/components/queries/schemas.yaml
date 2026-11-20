@@ -98,9 +98,10 @@ SelectItem:
           type: string
           enum: [day, week, month, quarter, year, fiscal_quarter, fiscal_year]
           description: |
-            Truncated in UTC (buckets on timestamp columns do not follow the calendar's time zone);
-            weeks start on Monday. A fiscal bucket gives the start date of the fiscal quarter or
-            year, which begins in the calendar's `fiscal_year_start_month`.
+            The first day of the period, a date; weeks start on Monday. A timestamp is bucketed by
+            its date in the calendar's time zone (UTC by default), a date as it is. A fiscal bucket
+            gives the start date of the fiscal quarter or year, which begins in the calendar's
+            `fiscal_year_start_month`.
         column: { $ref: '#/Path' }
         as: { $ref: '#/Alias' }
     - type: object
@@ -246,7 +247,8 @@ CalcOperation:
         `[part, date or timestamp]`: a number. `weekday` is 1 for Monday to 7 for Sunday. The
         fiscal parts follow the calendar's `fiscal_year_start_month`, a fiscal year named by the
         calendar year in which it ends. `business_day` is which business day of its month the date
-        is (0 before the month's first), a timestamp read in the calendar's time zone.
+        is (0 before the month's first). Every part reads a timestamp as its date in the calendar's
+        time zone.
       type: array
       minItems: 2
       maxItems: 2
@@ -354,7 +356,7 @@ MetricQuery:
   required: [source, metrics]
   description: |
     Combines measures (and metrics) of different tables of one source, per period. The result
-    is `period` (the bucket start, when `bucket` is given) then one column per name, in order;
+    is `period` (the bucket's first day, a date, when `bucket` is given) then one column per name, in order;
     without `bucket` there is one row. `bucket` and `range` apply to each non-fixed measure's own
     `date_column`; a measure without one, or whose date column the caller cannot read, is
     `measure_has_no_date` at its name (when `bucket` or `range` is given). A fixed measure reads
@@ -376,7 +378,7 @@ MetricQuery:
       type: object
       additionalProperties: false
       minProperties: 1
-      description: Half-open bounds on each measure's date column, `gte`, `lt` or both; relative dates resolve in the calendar's time zone
+      description: Half-open bounds on each measure's date column, `gte`, `lt` or both; relative dates resolve in the calendar's time zone, as buckets do
       properties:
         gte: { $ref: '#/RangeBound' }
         lt: { $ref: '#/RangeBound' }

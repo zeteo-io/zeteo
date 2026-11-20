@@ -12,7 +12,8 @@
       the fiscal year; and "now" for every relative date (in `where`, a measure's filter, the
       calendar functions and a dashboard's time range) is evaluated in the time zone, so
       `{ "unit": "day", "offset": -1, "startOf": true }` is the start of yesterday there. Buckets
-      on timestamp columns stay in UTC. The calendar's values are folded into each plan as bound
+      and `datePart` read a timestamp as its date in that zone too, so ranges and buckets agree.
+      The calendar's values are folded into each plan as bound
       literals, so a change reaches dashboard results without any invalidation.
 
       **Required permissions:** `zeteo.data.read` (`403 forbidden` without).
