@@ -465,7 +465,7 @@ export const mssqlDialect: SqlDialect = {
   },
   // A datetimeoffset keeps its own offset; date parts and differences are
   // taken on the UTC wall clock, or on the calendar zone's, read first.
-  stepFence: "top",
+  stepFence: "aggregate",
   subqueryInAggregate: false,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.

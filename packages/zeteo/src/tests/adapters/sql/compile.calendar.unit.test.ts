@@ -156,7 +156,14 @@ describe("compileSql: business days", () => {
       // Each step is fenced, so neither optimizer pulls it up and repeats it.
       const pgSql = pg(calc(expr), zoned).sql;
       expect(count(pgSql, " offset 0)")).toBe(count(pgSql, "(select ") - 1);
-      expect(ms(calc(expr), zoned).sql).toContain("(select top 1 [bd0].*, ");
+      // SQL Server substitutes a derived table's expressions into every
+      // reference, `top 1` or not: each step's values pass through MAX over
+      // its one row instead, whose output it reads as a column.
+      const msSql = ms(calc(expr), zoned).sql;
+      const steps = count(msSql, "(select max(");
+      expect(steps).toBeGreaterThan(3);
+      expect(count(msSql, "r]) as [bd")).toBe(steps);
+      expect(msSql).not.toContain("top 1");
     }
   });
 

@@ -22,6 +22,9 @@ import {
 //
 //   (select <final> as n from (select bd1.*, … from (select … ) as bd0) as bd1)
 //
+// and computed once per row, each step fenced as the dialect says
+// (`stepFence`): on SQL Server through MAX over the step's one row.
+//
 // Identifiers are the compiler's own; the calendar's numbers are bound
 // (holidays) or written as integer literals (weekday offsets).
 
@@ -38,22 +41,30 @@ const stepped = (
   final: (ref: Ref) => Expression<unknown>,
   dialect: SqlDialect
 ): Expression<unknown> => {
-  // Each step is one row: `top 1` or `offset 0` changes nothing but keeps it a step.
-  const top = dialect.stepFence === "top" ? sql`top 1 ` : sql``;
-  const fence = dialect.stepFence === "offset" ? sql` offset 0` : sql``;
   let from: Expression<unknown> | undefined;
   let alias = "";
+  const names: string[] = [];
   steps.forEach((step, i) => {
     const prev = alias;
     const ref: Ref = (name) => sql.id(prev, name);
     const items = Object.entries(step).map(
       ([name, f]) => sql`${f(ref)} as ${sql.id(name)}`
     );
-    from =
+    const select =
       from === undefined
-        ? sql`(select ${top}${sql.join(items)}${fence})`
-        : sql`(select ${top}${sql.id(prev)}.*, ${sql.join(items)} from ${from} as ${sql.id(prev)}${fence})`;
+        ? sql`select ${sql.join(items)}`
+        : sql`select ${sql.id(prev)}.*, ${sql.join(items)} from ${from} as ${sql.id(prev)}`;
     alias = `bd${i}`;
+    names.push(...Object.keys(step));
+    if (dialect.stepFence === "offset") {
+      from = sql`(${select} offset 0)`;
+    } else {
+      // The step's one row, each value through MAX: the aggregate's output
+      // is computed once, where a plain column would be substituted into
+      // every later reference.
+      const row = sql.id(`${alias}r`);
+      from = sql`(select ${sql.join(names.map((name) => sql`max(${row}.${sql.id(name)}) as ${sql.id(name)}`))} from (${select}) as ${row})`;
+    }
   });
   const last = alias;
   return sql`(select cast(${final((name) => sql.id(last, name))} as int) as ${sql.id("n")} from ${from!} as ${sql.id(last)})`;

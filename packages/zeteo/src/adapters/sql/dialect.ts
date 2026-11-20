@@ -181,12 +181,15 @@ export interface SqlDialect {
    */
   subqueryInAggregate: boolean;
   /**
-   * How each one-row step of a business-day subquery is fenced so the
-   * optimizer keeps it a step (`offset 0` after it, or `top 1` in it): it
-   * would otherwise pull the steps up and repeat each one's expression (a
-   * timestamp's conversion among them) wherever a later step reads it.
+   * How each one-row step of a business-day subquery is fenced so its values
+   * are computed once per row: `offset 0` after it (Postgres keeps such a
+   * subquery a step), or each value through MAX over the step's one row (SQL
+   * Server substitutes a derived table's expressions into every reference,
+   * `top 1` or not, but reads an aggregate's output as a column). Unfenced,
+   * a step's expression (a timestamp's conversion among them) would be
+   * repeated wherever a later step reads it.
    */
-  stepFence: "offset" | "top";
+  stepFence: "offset" | "aggregate";
   /** The date `days` (an integer expression) days after 1900-01-01. */
   anchorPlus(days: Expression<unknown>): Expression<unknown>;
   /** A number truncated toward zero to an integer; the caller keeps it within ±3,000,000. */
