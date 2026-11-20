@@ -1,9 +1,12 @@
+import { Prisma as PrismaRuntime } from "../../prisma/generated/client/index.js";
 import { GRANTS_WRITE, AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import type { PrincipalType } from "../../prisma/generated/client/index.js";
 import { detailInclude, type GrantDetail } from "../utils/db/grants.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { assertOwnsInTx } from "../uploads/ownership.js";
+import type { RuleFilter } from "../row-rules/types.js";
 import { db, type Prisma } from "../utils/db/index.js";
+import { toStoredRule } from "../row-rules/store.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Caller } from "../middleware/auth.js";
 import {
@@ -18,11 +21,24 @@ import {
 export type GrantColumns =
   { allColumns: true } | { allColumns: false; columnIds: string[] };
 
-export interface CreateGrantInput {
+/**
+ * What a grant lets its principal read of the table's rows: no limit of its
+ * own (`unlimited_default`), every row (`all`), or the rows a rule matches.
+ */
+export type GrantRows =
+  | { access: "unlimited_default" | "all" }
+  | { access: "rule"; rule: RuleFilter; description?: string };
+
+/** A grant's columns and rows: what a create sets and a replace replaces. */
+export interface GrantAccess {
+  columns: GrantColumns;
+  rows: GrantRows;
+}
+
+export interface CreateGrantInput extends GrantAccess {
   principalType: PrincipalType;
   principalId: string;
   tableId: string;
-  columns: GrantColumns;
 }
 
 /**
@@ -72,11 +88,11 @@ const lockGrant = async (
 
 const grantExists = () =>
   new ConflictError(
-    "This principal already has a grant on the table; replace its columns instead",
+    "This principal already has a grant on the table; replace it instead",
     "grant_exists"
   );
 
-/** The audit metadata of a grant as it stands (or stood, for a removal). */
+/** The audit metadata of a grant as it stands (or stood, for a removal); the rule in its stored form. */
 const auditMetadata = (grant: {
   principalType: PrincipalType;
   principalId: string;
@@ -84,6 +100,9 @@ const auditMetadata = (grant: {
   allColumns: boolean;
   sourceId: string;
   columnIds: string[];
+  rowAccess: string;
+  rowRule: Prisma.JsonValue;
+  rowRuleDescription: string | null;
 }) => ({
   source_id: grant.sourceId,
   table_id: grant.tableId,
@@ -91,7 +110,46 @@ const auditMetadata = (grant: {
   principal_id: grant.principalId,
   all_columns: grant.allColumns,
   column_ids: grant.columnIds,
+  row_access: grant.rowAccess,
+  row_rule: grant.rowRule,
+  row_rule_description: grant.rowRuleDescription,
 });
+
+/**
+ * The grant's row columns for `rows`: the rule checked against the table and
+ * stored by id (its identity keys locked, see `toStoredRule`), or cleared.
+ */
+const rowData = async (
+  tx: Prisma.TransactionClient,
+  tableId: string,
+  rows: GrantRows
+) => {
+  if (rows.access !== "rule") {
+    return {
+      rowAccess: rows.access,
+      rowRule: PrismaRuntime.DbNull,
+      rowRuleDescription: null,
+      identityKeyIds: [],
+    };
+  }
+  const { stored, identityKeyIds } = await toStoredRule(tx, tableId, rows.rule);
+  return {
+    rowAccess: rows.access,
+    rowRule: stored as Prisma.InputJsonValue,
+    rowRuleDescription: rows.description ?? null,
+    identityKeyIds,
+  };
+};
+
+/** An owner grant shows every column and does not limit rows (`owner_grant_locked`). */
+const checkOwnerGrant = (ownerGrant: boolean, access: GrantAccess) => {
+  if (
+    ownerGrant &&
+    (!access.columns.allColumns || access.rows.access !== "unlimited_default")
+  ) {
+    throw new OwnerGrantLockedError();
+  }
+};
 
 /** The ids of `columns` when it is a list of columns that all belong to `tableId`. */
 const checkedColumnIds = async (
@@ -130,6 +188,7 @@ export const createGrant = async (
     await checkOwner(tx, { actorId, ...actor }, table.sourceId);
     if (table.source.archivedAt) throw new SourceArchivedError();
     const columnIds = await checkedColumnIds(tx, table.id, input.columns);
+    const rows = await rowData(tx, table.id, input.rows);
 
     const taken = await tx.grant.findFirst({
       where: {
@@ -148,6 +207,7 @@ export const createGrant = async (
             principalId: input.principalId,
             tableId: table.id,
             allColumns: input.columns.allColumns,
+            ...rows,
             createdBy: actorId,
             columns: {
               create: columnIds.map((columnId) => ({ columnId })),
@@ -172,12 +232,13 @@ export const createGrant = async (
   });
 
 /**
- * Replaces the grant's columns: all of them, or exactly this list. An owner
- * grant may not be narrowed (`owner_grant_locked`), whoever asks.
+ * Replaces the grant's columns and rows, all of them: an owner grant may not
+ * be narrowed nor given row access of its own (`owner_grant_locked`), whoever
+ * asks.
  */
-export const replaceGrantColumns = async (
+export const replaceGrant = async (
   id: string,
-  columns: GrantColumns,
+  { columns, rows: wanted }: GrantAccess,
   { actorId, ...actor }: GrantActor
 ): Promise<GrantDetail> =>
   withAudit(async (tx, audit) => {
@@ -189,10 +250,9 @@ export const replaceGrantColumns = async (
     });
     if (!grant) throw new NotFoundError("Grant not found");
     if (grant.table.source.archivedAt) throw new SourceArchivedError();
-    if (grant.ownerGrant && !columns.allColumns) {
-      throw new OwnerGrantLockedError();
-    }
+    checkOwnerGrant(grant.ownerGrant, { columns, rows: wanted });
     const columnIds = await checkedColumnIds(tx, grant.tableId, columns);
+    const rows = await rowData(tx, grant.tableId, wanted);
 
     await tx.grantColumn.deleteMany({ where: { grantId: id } });
     await tx.grantColumn.createMany({
@@ -200,7 +260,7 @@ export const replaceGrantColumns = async (
     });
     const updated = await tx.grant.update({
       where: { id },
-      data: { allColumns: columns.allColumns },
+      data: { allColumns: columns.allColumns, ...rows },
     });
     audit({
       action: AUDIT_EVENTS.grantUpdated,

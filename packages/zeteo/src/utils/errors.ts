@@ -475,6 +475,17 @@ export class InvalidGrantError extends AppError {
   }
 }
 
+/**
+ * A grant's row rule that cannot be saved as written: `path` points into the
+ * request body, starting at `"row_rule"`.
+ */
+export class InvalidRowRuleError extends AppError {
+  constructor(message: string, path: (string | number)[]) {
+    super(400, "invalid_row_rule", message, { details: { path } });
+    this.name = "InvalidRowRuleError";
+  }
+}
+
 /** A group an upload source's owner may not grant to: not global and not of their signed-in organization, or unknown. */
 export class GroupNotAllowedError extends AppError {
   constructor() {

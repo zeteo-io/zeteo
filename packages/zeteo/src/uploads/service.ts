@@ -20,9 +20,10 @@ import { logger } from "../utils/logger.js";
 import { lacking } from "./ownership.js";
 import { randomUUID } from "crypto";
 import env from "../env.js";
-import type {
-  Source,
-  SourceColumn,
+import {
+  Prisma as PrismaRuntime,
+  type Source,
+  type SourceColumn,
 } from "../../prisma/generated/client/index.js";
 import {
   AUDIT_EVENTS,
@@ -194,7 +195,10 @@ const freeSlug = async (name: string): Promise<string> => {
   return `${base}-${randomUUID().slice(0, 8)}`;
 };
 
-/** An owner grant of `tableId` to `ownerId`: their row becomes `all_columns` and flagged, or is created so. */
+/**
+ * An owner grant of `tableId` to `ownerId`: their row becomes `all_columns`,
+ * without row access of its own, and flagged, or is created so.
+ */
 export const giveOwnerGrant = async (
   tx: Prisma.TransactionClient,
   tableId: string,
@@ -217,7 +221,14 @@ export const giveOwnerGrant = async (
       ownerGrant: true,
       createdBy: actorId,
     },
-    update: { allColumns: true, ownerGrant: true },
+    update: {
+      allColumns: true,
+      ownerGrant: true,
+      rowAccess: "unlimited_default",
+      rowRule: PrismaRuntime.DbNull,
+      rowRuleDescription: null,
+      identityKeyIds: [],
+    },
   });
   await tx.grantColumn.deleteMany({ where: { grantId: grant.id } });
 };

@@ -111,6 +111,10 @@ const OPERATORS_BY_TYPE: Record<QueryableType, ReadonlySet<Operator>> = {
   json: new Set(["isNull"]),
 };
 
+/** Whether `op` applies to a subject of `type`: the planner's check, shared with row rules. */
+export const operatorApplies = (type: QueryableType, op: Operator): boolean =>
+  OPERATORS_BY_TYPE[type].has(op);
+
 const AGGREGATE_FNS: readonly AggregateFn[] = [
   "count",
   "countDistinct",
@@ -156,7 +160,7 @@ export const VALUE_FORMS: Record<QueryableType, string> = {
 };
 
 /** `value` as a value for a subject of `type`, or undefined when it is not one. */
-export const coerce = (
+export const coerceValue = (
   value: Scalar,
   type: QueryableType
 ): PlanValue | undefined => {
@@ -678,7 +682,7 @@ export class Planner {
     if ("date" in expr || "timestamp" in expr) {
       const type = "date" in expr ? "date" : "timestamp";
       const given = "date" in expr ? expr.date : expr.timestamp;
-      const value = coerce(given, type);
+      const value = coerceValue(given, type);
       if (value === undefined) {
         throw fail(
           "invalid_value",
@@ -1450,7 +1454,7 @@ const resolveCondition = <S>(
   const { now, calendar } = values;
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
-  if (!OPERATORS_BY_TYPE[type].has(op)) {
+  if (!operatorApplies(type, op)) {
     throw fail(
       "invalid_operator",
       `${op} does not apply to "${label}", a ${type} column`,
@@ -1475,7 +1479,7 @@ const resolveCondition = <S>(
         valuePath
       );
     }
-    const coerced = coerce(v, type);
+    const coerced = coerceValue(v, type);
     if (coerced === undefined) {
       throw fail(
         "invalid_value",

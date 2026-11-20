@@ -1,3 +1,4 @@
+import type { RowAccess, RuleFilter } from "../../row-rules/types.js";
 import { BASE_URL, fetchJson, type JsonResponse } from "./http.js";
 import { DATA_READ } from "../../definitions/tereoDeclaration.js";
 import { sourceBody, uniqueSlug, writeToken } from "./sources.js";
@@ -71,10 +72,12 @@ export const seedQuerySource = async (
 };
 
 /** Grants `table` to `principal` through the API: every column, or these by name. Returns the grant's id. */
+/** `rows`: the grant's row access, its rule by column names and its description; by default none of its own. */
 export const grantTo = async (
   principal: Principal,
   table: SeededTable,
-  columns: string[] | "all"
+  columns: string[] | "all",
+  rows?: { access: RowAccess; rule?: RuleFilter; description?: string }
 ): Promise<string> => {
   const res = await fetchJson(
     "POST",
@@ -94,6 +97,13 @@ export const grantTo = async (
               return id;
             }),
           }),
+      ...(rows && {
+        row_access: rows.access,
+        ...(rows.rule !== undefined && { row_rule: rows.rule }),
+        ...(rows.description !== undefined && {
+          row_rule_description: rows.description,
+        }),
+      }),
     }
   );
   if (res.status !== 201) {

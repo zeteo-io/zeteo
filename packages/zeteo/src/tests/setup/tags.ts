@@ -27,6 +27,7 @@ export const ASPECTS = [
   "measures",
   "fixed",
   "metrics",
+  "rowRules",
 ] as const;
 export const METHODS = ["get", "post", "put", "patch", "delete"] as const;
 

@@ -36,7 +36,7 @@ import type {
 import {
   Planner,
   VALUE_FORMS,
-  coerce,
+  coerceValue,
   fail,
   newQueryState,
   referenceKey,
@@ -229,7 +229,7 @@ const checkRange = (range: MetricQuery["range"]): void => {
     if (bound === undefined || "relative" in bound) continue;
     const type = "date" in bound ? "date" : "timestamp";
     const given = "date" in bound ? bound.date : bound.timestamp;
-    if (coerce(given, type) === undefined) {
+    if (coerceValue(given, type) === undefined) {
       throw fail("invalid_value", `A ${type} bound is ${VALUE_FORMS[type]}`, [
         "range",
         key,
