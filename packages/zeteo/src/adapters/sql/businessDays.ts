@@ -239,8 +239,6 @@ export const compileBusiness = (
         dialect.bucket(
           unit as Exclude<BusinessUnit, "day">,
           ref("d"),
-          "date",
-          "date",
           expr.fiscalStartMonth
         );
       const bounds: Step =

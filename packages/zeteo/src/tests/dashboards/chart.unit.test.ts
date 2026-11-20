@@ -12,7 +12,9 @@ import {
 const col = (name: string, type: ColumnType) => ({ name, type });
 
 const columns = [
-  col("month", "timestamp"),
+  // A bucket, a date in any calendar zone.
+  col("month", "date"),
+  col("at", "timestamp"),
   col("day", "date"),
   col("revenue", "number"),
   col("orders", "number"),
@@ -149,6 +151,11 @@ describe("chartProblems", () => {
     expect(
       problems({ type: "area", version: 1, x: "revenue", y: ["orders"] })
     ).toEqual([]);
+    for (const x of ["month", "at"]) {
+      expect(problems({ type: "line", version: 1, x, y: ["orders"] })).toEqual(
+        []
+      );
+    }
     expect(
       problems({ type: "bar", version: 1, x: "paid", y: ["revenue"] })
     ).toEqual([]);

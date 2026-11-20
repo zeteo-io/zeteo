@@ -70,11 +70,11 @@ describe("postgres runQuery: calculations", () => {
     [
       2,
       [
-        ["2025-02-01T00:00:00.000Z", "2"],
-        ["2026-02-01T00:00:00.000Z", "10"],
+        ["2025-02-01", "2"],
+        ["2026-02-01", "10"],
       ],
     ],
-    [1, [["2026-01-01T00:00:00.000Z", "12"]]],
+    [1, [["2026-01-01", "12"]]],
   ])("buckets a fiscal year starting in month %s", async (month, expected) => {
     const result = await runWithCalendar(
       { ...DEFAULT_CALENDAR, fiscalYearStartMonth: month },
@@ -104,9 +104,9 @@ describe("postgres runQuery: calculations", () => {
     );
     // Quarters start in February, May, August and November.
     expect(result.rows).toEqual([
-      ["2025-11-01T00:00:00.000Z", "2"],
-      ["2026-02-01T00:00:00.000Z", "6"],
-      ["2026-05-01T00:00:00.000Z", "4"],
+      ["2025-11-01", "2"],
+      ["2026-02-01", "6"],
+      ["2026-05-01", "4"],
     ]);
   });
 

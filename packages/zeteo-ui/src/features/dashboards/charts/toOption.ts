@@ -451,6 +451,11 @@ export function toOption(
 
   return {
     ...base,
+    // A date (a bucket's first day) is a day, not an instant: its axis and
+    // tooltip labels are read at its UTC midnight, never shifted into the
+    // viewer's zone (a Los Angeles viewer would see the day before).
+    ...(axis === "time" &&
+      result.columns[xi].type === "date" && { useUTC: true }),
     grid: { left: 12, right: 16, top: 16, bottom: 36, containLabel: true },
     legend: {
       show: chart.legend !== "none" && series.length > 1,

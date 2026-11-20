@@ -147,12 +147,12 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
     );
   });
 
-  it("truncates a timestamp bucket with the unit as a parameter", () => {
+  it("truncates a timestamp's UTC date in a UTC calendar, with the unit as a parameter", () => {
     expect(
       compile({ select: [{ bucket: "month", column: "created_at", as: "m" }] })
     ).toEqual({
       sql:
-        'select date_trunc($1, "t0"."created_at") as "c0" from "shop"."orders" as "t0"' +
+        'select date_trunc($1, cast("t0"."created_at" as date))::date as "c0" from "shop"."orders" as "t0"' +
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["month", 1001, 0],
     });
@@ -177,7 +177,7 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
       );
     expect(fiscal("fiscal_year", 2, "created_at")).toEqual({
       sql:
-        `select date_trunc($1, "t0"."created_at" - interval '1 months') + interval '1 months' as "c0" from "shop"."orders" as "t0"` +
+        `select (date_trunc($1, cast("t0"."created_at" as date) - interval '1 months') + interval '1 months')::date as "c0" from "shop"."orders" as "t0"` +
         ` order by "c0" asc nulls last limit $2 offset $3`,
       parameters: ["year", 1001, 0],
     });
@@ -185,7 +185,7 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
       `(date_trunc($1, "t0"."ordered_on" - interval '1 months') + interval '1 months')::date`
     );
     expect(fiscal("fiscal_year", 1, "created_at").sql).toContain(
-      `date_trunc($1, "t0"."created_at") as "c0"`
+      `date_trunc($1, cast("t0"."created_at" as date))::date as "c0"`
     );
   });
 
@@ -214,7 +214,7 @@ describe("compileSql on Postgres: aggregates and buckets", () => {
       })
     ).toEqual({
       sql:
-        'select "t0"."status" as "c0", date_trunc($1, "t0"."created_at") as "c1",' +
+        'select "t0"."status" as "c0", date_trunc($1, cast("t0"."created_at" as date))::date as "c1",' +
         ' sum("t0"."total") as "c2", count(*) as "c3" from "shop"."orders" as "t0"' +
         ' group by 1, 2 having (sum("t0"."total") > $2 and count(*) >= $3)' +
         ' order by "c2" desc nulls first limit $4 offset $5',
@@ -579,7 +579,7 @@ describe("compileSql on Postgres: without the default order", () => {
       })
     ).toEqual({
       sql:
-        'select "t0"."status" as "c0", date_trunc($1, "t0"."created_at") as "c1",' +
+        'select "t0"."status" as "c0", date_trunc($1, cast("t0"."created_at" as date))::date as "c1",' +
         ' count(*) as "c2" from "shop"."orders" as "t0"' +
         " group by 1, 2 limit $2 offset $3",
       parameters: ["month", 1001, 0],

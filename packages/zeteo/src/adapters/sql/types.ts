@@ -2,6 +2,7 @@ import type { ColumnType, QueryPlan } from "../types.js";
 import type {
   BusinessUnit,
   CompiledCalendar,
+  ZoneWindow,
 } from "../../calendar/calendar.js";
 import type {
   CalcOp,
@@ -21,7 +22,7 @@ export type QueryableType = Exclude<ColumnType, "other">;
 export type JoinType = "inner" | "left";
 export type AggregateFn =
   "count" | "countDistinct" | "sum" | "avg" | "min" | "max";
-/** Buckets truncate in UTC. */
+/** Buckets truncate a date, a timestamp's in the calendar's zone. */
 export type BucketUnit =
   | "day"
   | "week"
@@ -137,6 +138,8 @@ export type ResolvedExpr =
       arg: ResolvedExpr;
       /** The calendar's fiscal year start month (1-12); only a fiscal part reads it. */
       fiscalStartMonth: number;
+      /** For a timestamp `arg` in a calendar that is not UTC: the zone its date is read in. */
+      zone?: ZoneWindow;
       type: "number";
     }
   | {
@@ -222,10 +225,12 @@ export type ResolvedSelect =
       unit: BucketUnit;
       /** The calendar's fiscal year start month (1-12); only a fiscal unit reads it. */
       fiscalStartMonth: number;
-      /** A `date` or `timestamp` column; the bucket keeps its type. */
+      /** A `date` or `timestamp` column; the bucket is the first day of the period, a date. */
       column: ColumnRef;
+      /** For a timestamp column in a calendar that is not UTC: the zone its date is read in. */
+      zone?: ZoneWindow;
       output: string;
-      type: QueryableType;
+      type: "date";
     }
   | {
       kind: "calc";
@@ -380,8 +385,8 @@ export interface MetricPlan extends QueryPlan {
         unit: BucketUnit;
         /** Read only by a fiscal unit. */
         fiscalStartMonth: number;
-        /** `timestamp` when any part's date column is one: date buckets are then read as UTC midnight. */
-        type: "date" | "timestamp";
+        /** For a calendar that is not UTC: the zone a timestamp date column's date is read in. */
+        zone?: ZoneWindow;
       }
     | undefined;
   /** In the order of `columns`, after `period` when bucketed. */

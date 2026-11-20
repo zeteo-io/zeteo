@@ -1,6 +1,7 @@
 // @module-tag unit
 // @module-tag platform
 import { sqlQuerySchema } from "../../adapters/sql/language.js";
+import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import { shopCatalog } from "../support/pure/shopCatalog.js";
 import { fingerprintOf } from "../../engine/fingerprint.js";
 import type { QueryPlan } from "../../adapters/types.js";
@@ -93,6 +94,36 @@ describe("fingerprintOf", () => {
     });
     expect(fingerprintOf(SOURCE, plan(since(-7)), rows)).not.toBe(
       fingerprintOf(SOURCE, plan(since(-30)), rows)
+    );
+  });
+
+  it("changes with the calendar's zone for a bucket of a timestamp, not of a date", () => {
+    const bucketed = (column: string, timeZone: string) =>
+      planSql(
+        sqlQuerySchema.parse({
+          source: "shop",
+          from: "orders",
+          select: [
+            { bucket: "week", column, as: "w" },
+            { count: "*", as: "n" },
+          ],
+          groupBy: ["w"],
+        }),
+        { ...shopCatalog(), calendar: { ...DEFAULT_CALENDAR, timeZone } },
+        { now }
+      );
+    const of = (column: string, timeZone: string) =>
+      fingerprintOf(SOURCE, bucketed(column, timeZone), rows);
+    // A cached result never outlives a change of zone.
+    expect(of("created_at", "America/Los_Angeles")).not.toBe(
+      of("created_at", "UTC")
+    );
+    expect(of("created_at", "America/Los_Angeles")).not.toBe(
+      of("created_at", "Europe/Paris")
+    );
+    // A date is bucketed as it is in any zone: the same result.
+    expect(of("ordered_on", "America/Los_Angeles")).toBe(
+      of("ordered_on", "UTC")
     );
   });
 });

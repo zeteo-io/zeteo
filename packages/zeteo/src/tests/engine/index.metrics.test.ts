@@ -443,7 +443,7 @@ describeEachEngine("runQuery: metric queries", (engine) => {
     });
     expect(shape(ran.rows)).toEqual(expected);
     expect(ran.columns).toEqual([
-      { name: "period", type: "timestamp" },
+      { name: "period", type: "date" },
       { name: "roas", type: "number" },
     ]);
 

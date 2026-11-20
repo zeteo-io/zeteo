@@ -309,9 +309,9 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
     ["quarter", "quarter"],
     ["year", "year"],
   ])(
-    "truncates a datetimeoffset to the %s in UTC, with the unit written as a keyword",
+    "truncates a datetimeoffset's UTC date to the %s, with the unit written as a keyword",
     (unit, part) => {
-      const bucket = `cast(datetrunc(${part}, switchoffset([t0].[created_at], '+00:00')) as datetime2(3))`;
+      const bucket = `cast(datetrunc(${part}, cast(cast(switchoffset([t0].[created_at], '+00:00') as datetime2(7)) as date)) as date)`;
       expect(
         compile({ select: [{ bucket: unit, column: "created_at", as: "b" }] })
       ).toEqual({
@@ -322,7 +322,7 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
   );
 
   it.each(["datetime2(3)", "datetime", "smalldatetime"])(
-    "truncates a naive %s column as UTC as it is",
+    "truncates a naive %s column's date, read as UTC as it is",
     (nativeType) => {
       const planned = plan({
         select: [{ bucket: "month", column: "created_at", as: "m" }],
@@ -333,8 +333,8 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
       expect(
         compileSql(planned, mssqlDialect, { limit: 1001, offset: 0 }).sql
       ).toBe(
-        "select cast(datetrunc(month, [t0].[created_at]) as datetime2(3)) as [c0] from [shop].[orders] as [t0]" +
-          ` order by ${by("cast(datetrunc(month, [t0].[created_at]) as datetime2(3))")}${tail()}`
+        "select cast(datetrunc(month, cast([t0].[created_at] as date)) as date) as [c0] from [shop].[orders] as [t0]" +
+          ` order by ${by("cast(datetrunc(month, cast([t0].[created_at] as date)) as date)")}${tail()}`
       );
     }
   );
@@ -350,7 +350,7 @@ describe("compileSql on SQL Server: aggregates and buckets", () => {
   });
 
   it("groups by the repeated expressions, which hold no parameter, and filters groups with having", () => {
-    const month = `cast(datetrunc(month, switchoffset([t0].[created_at], '+00:00')) as datetime2(3))`;
+    const month = `cast(datetrunc(month, cast(cast(switchoffset([t0].[created_at], '+00:00') as datetime2(7)) as date)) as date)`;
     expect(
       compile({
         select: [

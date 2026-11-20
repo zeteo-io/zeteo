@@ -161,17 +161,11 @@ export const postgresDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type, _nativeType, fiscalStartMonth) => {
+  bucket: (unit, date, fiscalStartMonth) => {
     const shift = fiscalShift(unit, fiscalStartMonth);
-    const truncated =
-      shift === 0
-        ? sql`date_trunc(${truncUnit(unit)}, ${column})`
-        : sql`date_trunc(${truncUnit(unit)}, ${column} - ${months(shift)}) + ${months(shift)}`;
-    return type === "date"
-      ? shift === 0
-        ? sql`${truncated}::date`
-        : sql`(${truncated})::date`
-      : truncated;
+    return shift === 0
+      ? sql`date_trunc(${truncUnit(unit)}, ${date})::date`
+      : sql`(date_trunc(${truncUnit(unit)}, ${date} - ${months(shift)}) + ${months(shift)})::date`;
   },
   like: (expression, pattern, nativeType): Expression<SqlBool> =>
     sql<SqlBool>`${asText(expression, nativeType)} ilike ${pattern} escape ${sql.lit(ESCAPE)}`,
@@ -273,8 +267,6 @@ export const postgresDialect: SqlDialect = {
   // Unconstrained numeric keeps each value's own scale.
   typedNull: (approximate) =>
     approximate ? sql`cast(null as float8)` : sql`cast(null as numeric)`,
-  // Midnight, read as UTC beside a timestamptz: the session runs in UTC.
-  asTimestamp: (expression) => sql`cast(${expression} as timestamp)`,
   // timestamptz is an instant, and the session runs in UTC.
   timestampUtc: (expression) => expression,
   stepFence: "offset",

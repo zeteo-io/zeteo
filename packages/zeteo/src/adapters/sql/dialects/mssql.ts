@@ -333,20 +333,15 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
-  bucket: (unit, column, type, nativeType, fiscalStartMonth) => {
+  bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
     const shift = fiscalShift(unit, fiscalStartMonth);
     // The shift is the planner's integer, so it is written as a literal.
-    const truncated = (input: Expression<unknown>) =>
+    const truncated =
       shift === 0
-        ? sql`datetrunc(${part}, ${input})`
-        : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${input})))`;
-    if (type === "date") return sql`cast(${truncated(column)} as date)`;
-    const utc =
-      baseType(nativeType) === "datetimeoffset"
-        ? sql`switchoffset(${column}, '+00:00')`
-        : column;
-    return sql`cast(${truncated(utc)} as datetime2(3))`;
+        ? sql`datetrunc(${part}, ${date})`
+        : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${date})))`;
+    return sql`cast(${truncated} as date)`;
   },
   // LOWER on both sides makes the match case-insensitive whatever the
   // column's collation; `[` opens a character class in SQL Server's LIKE.
@@ -469,7 +464,7 @@ export const mssqlDialect: SqlDialect = {
     }
   },
   // A datetimeoffset keeps its own offset; date parts and differences are
-  // taken on the UTC wall clock, as a bucket's are.
+  // taken on the UTC wall clock, or on the calendar zone's, read first.
   stepFence: "top",
   subqueryInAggregate: false,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
@@ -496,7 +491,6 @@ export const mssqlDialect: SqlDialect = {
   // SQL Server types a union's column over all its branches, and a bare null
   // (an int) takes the type of the others: no cast, so no decimal is resized.
   typedNull: () => sql`null`,
-  asTimestamp: (expression) => sql`cast(${expression} as datetime2(3))`,
   timestampUtc: (expression, nativeType) =>
     baseType(nativeType) === "datetimeoffset"
       ? sql`cast(switchoffset(${expression}, '+00:00') as datetime2(7))`

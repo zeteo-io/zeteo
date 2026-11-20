@@ -201,6 +201,8 @@ describe("toOption", () => {
         toOption({ version: 1, type: "line", x: "day", y: ["n"] }, r, theme)
       );
       expect(o.xAxis.type).toBe("time");
+      // A date is a day: labelled at its UTC midnight, whatever the viewer's zone.
+      expect(o.useUTC).toBe(type === "date" ? true : undefined);
     }
   });
 

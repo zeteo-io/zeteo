@@ -69,11 +69,7 @@ describe("planMetrics: parts and columns", () => {
       ["orders", "ordered_on"],
       ["products", "launched_on"],
     ]);
-    expect(p.bucket).toEqual({
-      unit: "month",
-      fiscalStartMonth: 1,
-      type: "date",
-    });
+    expect(p.bucket).toEqual({ unit: "month", fiscalStartMonth: 1 });
     expect(p.columns.map((c) => [c.name, c.type])).toEqual([
       ["period", "date"],
       ["roas", "number"],
@@ -163,13 +159,23 @@ describe("planMetrics: parts and columns", () => {
     });
   });
 
-  it("reads periods as timestamps when date and timestamp columns mix", () => {
+  it("gives periods as dates, a timestamp's read in the calendar's zone", () => {
     const p = plan({ metrics: ["revenue", "revenue_at"], bucket: "month" });
-    expect(p.bucket!.type).toBe("timestamp");
-    expect(p.columns[0]!.type).toBe("timestamp");
+    expect(p.columns[0]!.type).toBe("date");
+    // UTC: nothing to convert.
+    expect(p.bucket!.zone).toBeUndefined();
+    const catalog = metricsCatalog();
+    const zoned = {
+      ...catalog,
+      calendar: { ...catalog.calendar, timeZone: "America/Los_Angeles" },
+    };
+    const at = plan({ metrics: ["revenue_at"], bucket: "month" }, zoned);
+    expect(at.columns[0]!.type).toBe("date");
+    expect(at.bucket!.zone?.name).toBe("America/Los_Angeles");
+    // Date columns only: nothing is converted, so the zone is not planned.
     expect(
-      plan({ metrics: ["revenue_at"], bucket: "month" }).bucket!.type
-    ).toBe("timestamp");
+      plan({ metrics: ["revenue"], bucket: "month" }, zoned).bucket!.zone
+    ).toBeUndefined();
   });
 
   it("takes fiscal buckets with the calendar's start month", () => {

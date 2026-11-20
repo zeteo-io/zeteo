@@ -10,6 +10,9 @@
 --   probe.legacy_text   text, ntext and xml, which SQL Server cannot sort;
 --   probe.trickle    a view of 100 rows of 8,000 characters, the first at once
 --                    and each later one 200 ms after the one before.
+--   probe.zoned_events  instants either side of local midnight in Los
+--                    Angeles, as Postgres's: `at` a datetimeoffset written at
+--                    the instant's offset there, `naive` its UTC datetime2.
 -- zeteo_ro reads it as a member of db_datareader.
 
 CREATE SCHEMA probe;
@@ -126,4 +129,26 @@ CREATE VIEW probe.trickle AS
         FROM (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) a (d)
        CROSS JOIN (VALUES (0), (1), (2), (3), (4), (5), (6), (7), (8), (9)) b (d)
     ) g;
+GO
+
+CREATE TABLE probe.zoned_events (
+  id int NOT NULL PRIMARY KEY,
+  at datetimeoffset(3) NOT NULL,
+  naive datetime2(3) NOT NULL,
+  day date NOT NULL,
+  amount decimal(10,2) NOT NULL
+);
+GO
+
+INSERT INTO probe.zoned_events VALUES
+  (1,  '2026-07-12T20:00:00-07:00', '2026-07-13T03:00:00', '2026-07-12', 10.00),
+  (2,  '2026-07-12T23:59:59-07:00', '2026-07-13T06:59:59', '2026-07-12', 20.00),
+  (3,  '2026-07-13T00:00:00-07:00', '2026-07-13T07:00:00', '2026-07-13', 40.00),
+  (4,  '2026-07-10T05:00:00-07:00', '2026-07-10T12:00:00', '2026-07-10', 80.00),
+  (5,  '2026-07-31T22:00:00-07:00', '2026-08-01T05:00:00', '2026-07-31', 1.00),
+  (6,  '2026-03-09T00:30:00-07:00', '2026-03-09T07:30:00', '2026-03-09', 2.00),
+  (7,  '2026-03-07T23:30:00-08:00', '2026-03-08T07:30:00', '2026-03-07', 4.00),
+  (8,  '2026-11-01T23:30:00-08:00', '2026-11-02T07:30:00', '2026-11-01', 8.00),
+  (9,  '2026-03-31T20:00:00-07:00', '2026-04-01T03:00:00', '2026-03-31', 16.00),
+  (10, '2025-12-31T23:59:59-08:00', '2026-01-01T07:59:59', '2025-12-31', 32.00);
 GO

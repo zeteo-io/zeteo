@@ -190,3 +190,58 @@ describe("compileSql: business days", () => {
     );
   });
 });
+
+describe("compileSql: buckets and date parts in the calendar's zone", () => {
+  const zoned = { timeZone: "America/Los_Angeles" };
+  const byWeek = {
+    select: [
+      { bucket: "week", column: "created_at", as: "w" },
+      { count: "*", as: "n" },
+    ],
+    groupBy: ["w"],
+  };
+
+  it("buckets a timestamp's local date natively on Postgres, the zone bound", () => {
+    const { sql, parameters } = pg(byWeek, zoned);
+    expect(sql).toBe(
+      'select date_trunc($1, case when cast("t0"."created_at" as timestamptz) >= cast($2 as timestamptz) and cast("t0"."created_at" as timestamptz) < cast($3 as timestamptz) then cast(cast("t0"."created_at" as timestamptz) at time zone cast($4 as text) as date) end)::date as "c0",' +
+        ' count(*) as "c1" from "shop"."orders" as "t0" group by 1 limit $5 offset $6'
+    );
+    expect(parameters.slice(0, 4)).toEqual([
+      "week",
+      "2001-01-01T00:00:00.000Z",
+      "2052-01-01T00:00:00.000Z",
+      "America/Los_Angeles",
+    ]);
+  });
+
+  it("applies the conversion to each row on SQL Server and groups by its column", () => {
+    const { sql } = ms(byWeek, zoned);
+    expect(sql).toMatch(
+      /^select cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\) as \[c0\], count_big\(\*\) as \[c1\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(dateadd\(second, \(select z\.o from \(values .*\) as z\(s, e, o\) where z\.s <= (cast\(switchoffset\(\[t0\]\.\[created_at\], '\+00:00'\) as datetime2\(7\)\)) and \1 < z\.e\), \1\) as date\) as \[n\]\) as \[m0\] group by cast\(datetrunc\(iso_week, \[m0\]\.\[n\]\) as date\)/
+    );
+  });
+
+  it("leaves a date column as it is, with nothing bound for the zone", () => {
+    const { sql, parameters } = pg(
+      { select: [{ bucket: "month", column: "ordered_on", as: "m" }] },
+      zoned
+    );
+    expect(sql).toContain('date_trunc($1, "t0"."ordered_on")::date as "c0"');
+    expect(parameters).toEqual(["month", 1001, 0]);
+  });
+
+  it("reads a date part of a timestamp in the zone, per row on SQL Server", () => {
+    const query = calc({ datePart: ["weekday", "created_at"] });
+    expect(pg(query, zoned).sql).toContain(
+      'cast(extract(isodow from case when cast("t0"."created_at" as timestamptz) >= '
+    );
+    expect(ms(query, zoned).sql).toMatch(
+      /^select \(\(datepart\(weekday, \[m0\]\.\[n\]\) \+ @@datefirst \+ 5\) % 7 \+ 1\) as \[c0\] from \[shop\]\.\[orders\] as \[t0\] outer apply \(select cast\(dateadd\(second, /
+    );
+    // UTC: no conversion at all.
+    expect(pg(query).sql).toContain(
+      'cast(extract(isodow from "t0"."created_at") as integer)'
+    );
+  });
+});

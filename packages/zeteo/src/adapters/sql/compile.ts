@@ -1,10 +1,12 @@
 import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
 import { compileBusiness, compileBusinessDay } from "./businessDays.js";
+import type { ZoneWindow } from "../../calendar/calendar.js";
 import { QueryError } from "../../engine/errors.js";
 import { METRIC_UNION as UNION } from "./types.js";
 import { aggregatesRows } from "./aggregates.js";
 import { plainNumber } from "./values.js";
 import type {
+  BucketUnit,
   ColumnRef,
   CompareOp,
   MetricPart,
@@ -149,6 +151,49 @@ const applied = (
   return sql.id(alias, "n");
 };
 
+/**
+ * A timestamp's date (the timestamp as a calculation reads it, its UTC
+ * instant): in `zone` when given, converted once per row, else its UTC date.
+ * Postgres converts natively, in place; SQL Server's conversion is a lookup
+ * subquery, applied to the row where it is row-level (and read as a column,
+ * which GROUP BY and an aggregate take), as a business-day subquery is.
+ */
+const localDate = (
+  timestamp: Expression<unknown>,
+  zone: ZoneWindow | undefined,
+  dialect: SqlDialect,
+  ctx: ExprContext
+): Expression<unknown> => {
+  if (!zone) return sql`cast(${timestamp} as date)`;
+  const converted = dialect.zoneDate(timestamp, zone);
+  return dialect.subqueryInAggregate
+    ? converted
+    : applied(sql`(select ${converted} as ${sql.id("n")})`, dialect, ctx);
+};
+
+/** A bucket of a date or timestamp column: its period's first day, a timestamp's in `zone`. */
+const bucketOf = (
+  unit: BucketUnit,
+  c: ColumnRef,
+  fiscalStartMonth: number,
+  zone: ZoneWindow | undefined,
+  dialect: SqlDialect,
+  ctx: ExprContext
+): Expression<unknown> => {
+  const read = column(c, dialect);
+  const date =
+    c.type === "date"
+      ? read
+      : localDate(
+          dialect.timestampUtc(read, c.nativeType),
+          zone,
+          dialect,
+          // A bucket is row-level wherever it is: it is grouped by.
+          { ...ctx, row: true }
+        );
+  return dialect.bucket(unit, date, fiscalStartMonth);
+};
+
 /** A fixed measure's own query: one row, its value as `v`. */
 const scalarQuery = (plan: ScalarPlan, dialect: SqlDialect): AnySelect => {
   const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
@@ -257,7 +302,9 @@ export const compileExpr = (
     case "datePart":
       return dialect.datePart(
         expr.part,
-        inner(expr.arg),
+        expr.zone
+          ? localDate(inner(expr.arg), expr.zone, dialect, ctx)
+          : inner(expr.arg),
         expr.fiscalStartMonth
       );
     case "businessDays":
@@ -350,12 +397,13 @@ const selectExpression = (
             item.column.nativeType
           );
     case "bucket":
-      return dialect.bucket(
+      return bucketOf(
         item.unit,
-        column(item.column, dialect),
-        item.column.type === "date" ? "date" : "timestamp",
-        item.column.nativeType,
-        item.fiscalStartMonth
+        item.column,
+        item.fiscalStartMonth,
+        item.zone,
+        dialect,
+        { row: true, fixed, applied }
       );
     case "calc":
       return compileExpr(item.expr, dialect, {
@@ -494,18 +542,14 @@ const partQuery = (
   const named: { expression: Expression<unknown>; alias: string }[] = [];
   let period: Expression<unknown> | undefined;
   if (plan.bucket) {
-    const date = part.date!;
-    const type = date.type === "date" ? "date" : "timestamp";
-    period = dialect.bucket(
+    period = bucketOf(
       plan.bucket.unit,
-      column(date, dialect),
-      type,
-      date.nativeType,
-      plan.bucket.fiscalStartMonth
+      part.date!,
+      plan.bucket.fiscalStartMonth,
+      plan.bucket.zone,
+      dialect,
+      ctx
     );
-    if (plan.bucket.type === "timestamp" && type === "date") {
-      period = dialect.asTimestamp(period);
-    }
     named.push({ expression: period, alias: "period" });
   }
   const value = compileExpr(part.expr, dialect, ctx);
@@ -573,8 +617,8 @@ const compileMetrics = (
     const ref: ColumnRef = {
       alias: UNION,
       name: "period",
-      type: plan.bucket.type,
-      nativeType: plan.bucket.type,
+      type: "date",
+      nativeType: "date",
     };
     selected.push(sql.id(UNION, "period"));
     outputs.push({
@@ -583,7 +627,7 @@ const compileMetrics = (
       fiscalStartMonth: plan.bucket.fiscalStartMonth,
       column: ref,
       output: "period",
-      type: plan.bucket.type,
+      type: "date",
     });
   }
   for (const item of plan.select) {

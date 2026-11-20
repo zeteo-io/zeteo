@@ -116,7 +116,7 @@ describe("planSql: the spec's example", () => {
           fiscalStartMonth: 1,
           column: createdAt,
           output: "month",
-          type: "timestamp",
+          type: "date",
         },
         {
           kind: "aggregate",
@@ -160,7 +160,7 @@ describe("planSql: the spec's example", () => {
         },
         {
           name: "month",
-          type: "timestamp",
+          type: "date",
           references: [ref("orders", "created_at")],
         },
         {

@@ -326,7 +326,7 @@ describe("postgres runQuery", () => {
     ]);
   });
 
-  it("joins, buckets in UTC and groups", async () => {
+  it("joins, buckets by the UTC date in a UTC calendar and groups", async () => {
     const result = await run({
       from: "orders",
       join: ["customers"],
@@ -339,10 +339,10 @@ describe("postgres runQuery", () => {
       groupBy: ["customers.region", "quarter"],
     });
     expect(result.rows).toEqual([
-      ["EU", "2026-01-01T00:00:00.000Z", "1535.50", "4"],
-      ["EU", "2026-04-01T00:00:00.000Z", "1461.72", "4"],
-      ["US", "2026-01-01T00:00:00.000Z", "105.24", "2"],
-      ["US", "2026-04-01T00:00:00.000Z", "652.10", "2"],
+      ["EU", "2026-01-01", "1535.50", "4"],
+      ["EU", "2026-04-01", "1461.72", "4"],
+      ["US", "2026-01-01", "105.24", "2"],
+      ["US", "2026-04-01", "652.10", "2"],
     ]);
   });
 

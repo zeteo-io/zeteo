@@ -90,13 +90,13 @@ describe("compileSql: a metric query on Postgres", () => {
     );
   });
 
-  it("reads date buckets as timestamps beside timestamp ones, and joins a part's date column", () => {
+  it("buckets a timestamp column by its date beside a date column, and joins a part's date column", () => {
     const mixed = pg({ metrics: ["revenue", "revenue_at"], bucket: "month" });
     expect(mixed.sql).toContain(
-      'select cast(date_trunc($1, "t0"."ordered_on")::date as timestamp) as "period"'
+      'select date_trunc($1, "t0"."ordered_on")::date as "period"'
     );
     expect(mixed.sql).toContain(
-      'select date_trunc($2, "t0"."created_at") as "period"'
+      'select date_trunc($2, cast("t0"."created_at" as date))::date as "period"'
     );
     expect(pg({ metrics: ["line_value"], bucket: "day" }).sql).toContain(
       'from "shop"."order_lines" as "t0" left join "shop"."products" as "t1" on "t0"."product_id" = "t1"."id" group by 1'
@@ -212,16 +212,16 @@ describe("compileSql: a metric query on SQL Server", () => {
     );
   });
 
-  it("reads date buckets as datetime2 beside a datetimeoffset's UTC bucket", () => {
+  it("buckets a datetimeoffset by its UTC date beside a date column", () => {
     const { sql } = ms({
       metrics: ["revenue", "revenue_at"],
       bucket: "quarter",
     });
     expect(sql).toContain(
-      "select cast(cast(datetrunc(quarter, [t0].[ordered_on]) as date) as datetime2(3)) as [period]"
+      "select cast(datetrunc(quarter, [t0].[ordered_on]) as date) as [period]"
     );
     expect(sql).toContain(
-      "select cast(datetrunc(quarter, switchoffset([t0].[created_at], '+00:00')) as datetime2(3)) as [period]"
+      "select cast(datetrunc(quarter, cast(cast(switchoffset([t0].[created_at], '+00:00') as datetime2(7)) as date)) as date) as [period]"
     );
   });
 

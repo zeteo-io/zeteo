@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { describeZonedGrouping } from "../../support/zonedGrouping.js";
 import { describeBusinessDays } from "../../support/businessDays.js";
 import { usePostgresRuns } from "../../support/postgresRuns.js";
 import { describe, expect, it } from "vitest";
@@ -12,6 +13,7 @@ import {
 const { runWithCalendar } = usePostgresRuns();
 
 describeBusinessDays("postgres", runWithCalendar);
+describeZonedGrouping("postgres", runWithCalendar);
 
 describe("postgres runQuery: business days of infinite and BC dates", () => {
   // sales.typed_values: row 2 holds infinity (day, aware) and -infinity

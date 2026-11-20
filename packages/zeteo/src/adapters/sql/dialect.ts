@@ -75,16 +75,13 @@ export interface SqlDialect {
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
-   * Truncates a `date` or `timestamp` column to the start of its UTC bucket,
-   * keeping its type. `nativeType` is the column's own type name. A fiscal
-   * unit starts its year at `fiscalStartMonth` (1-12) and returns the
-   * period's first day.
+   * The first day of the period holding `date` (a date expression), as a
+   * date. A fiscal unit starts its year at `fiscalStartMonth` (1-12). A
+   * timestamp is bucketed by its date, which the compiler reads first.
    */
   bucket(
     unit: BucketUnit,
-    column: Expression<unknown>,
-    type: "date" | "timestamp",
-    nativeType: string,
+    date: Expression<unknown>,
     fiscalStartMonth: number
   ): Expression<unknown>;
   /**
@@ -152,7 +149,8 @@ export interface SqlDialect {
     type: "date" | "timestamp"
   ): Expression<unknown>;
   /**
-   * A part of a date or timestamp (a timestamp in UTC) as an integer;
+   * A part of a date or timestamp (a timestamp's UTC wall clock: the compiler
+   * reads a timestamp's date in a calendar's zone first) as an integer;
    * `weekday` is 1 for Monday to 7 for Sunday, a fiscal part follows a fiscal
    * year starting in `fiscalStartMonth` (1-12) and named by the year it ends in.
    */
@@ -167,8 +165,6 @@ export interface SqlDialect {
    * value of the column keeps its digits in).
    */
   typedNull(approximate: boolean): Expression<unknown>;
-  /** A date bucket as a timestamp at its UTC midnight, beside timestamp buckets. */
-  asTimestamp(expression: Expression<unknown>): Expression<unknown>;
   /**
    * A timestamp column as a calculation reads it: the instant in UTC, so a
    * column with an offset (SQL Server's datetimeoffset) is not read as its

@@ -18,6 +18,7 @@ import {
   type BusinessUnit,
   type Calendar,
   type CompiledCalendar,
+  type ZoneWindow,
 } from "../../calendar/calendar.js";
 import {
   QueryError,
@@ -1316,6 +1317,8 @@ export class Planner {
         fiscalStartMonth: part.startsWith("fiscal_")
           ? this.catalog.calendar.fiscalYearStartMonth
           : 1,
+        // A timestamp's date is read in the calendar's zone (none for UTC).
+        ...zoneFor(first.type, this.catalog, this.now),
         type: "number",
       },
     };
@@ -1595,6 +1598,20 @@ const refuseJson = (
   }
 };
 
+/**
+ * `{ zone }` for a timestamp in a calendar whose zone is not UTC, so the plan
+ * (and a run's fingerprint) changes with the zone; else nothing.
+ */
+export const zoneFor = (
+  type: QueryableType,
+  catalog: VisibleCatalog,
+  now: Date
+): { zone?: ZoneWindow } => {
+  if (type !== "timestamp") return {};
+  const { zone } = compiledCalendar(catalog.calendar, now);
+  return zone ? { zone } : {};
+};
+
 /** Evaluated per group rather than per row: an aggregate or a group-level calc. */
 const perGroup = (s: ResolvedSelect): boolean =>
   s.kind === "aggregate" || (s.kind === "calc" && s.level === "group");
@@ -1674,8 +1691,10 @@ export const planSql = (
           ? catalog.calendar.fiscalYearStartMonth
           : 1,
         column: ref,
+        // A timestamp's date is read in the calendar's zone (none for UTC).
+        ...zoneFor(ref.type, catalog, now),
         output: item.as ?? `${item.bucket}_${item.column.replaceAll(".", "_")}`,
-        type: ref.type,
+        type: "date",
       };
       references = [reference];
       columnPath = item.column;

@@ -41,6 +41,7 @@ import {
   newQueryState,
   referenceKey,
   typeOf,
+  zoneFor,
   type QueryState,
 } from "./plan.js";
 
@@ -364,9 +365,9 @@ class MetricPlanner {
 
   /**
    * `businessDaysInPeriod`: the business days of each period of the bucket,
-   * read from the union's `period` (the bucket's first day, in UTC as buckets
-   * are); without a bucket, those of each local day (in the calendar's zone)
-   * with an instant in the range.
+   * read from the union's `period` (the bucket's first day, a local date in
+   * the calendar's zone as every bucket is); without a bucket, those of each
+   * local day (in the calendar's zone) with an instant in the range.
    */
   private businessDaysInPeriod(at: QueryPath): ResolvedExpr {
     const { calendar } = this.catalog;
@@ -380,7 +381,6 @@ class MetricPlanner {
           ? calendar.fiscalYearStartMonth
           : 1,
         date: {
-          // A timestamp period is read as its date: the bucket starts at UTC midnight.
           expr: {
             kind: "column",
             column: {
@@ -592,20 +592,20 @@ export const planMetrics = (
         ["bucket"]
       );
     }
-    const type = parts.some((p) => p.date!.type === "timestamp")
-      ? "timestamp"
-      : "date";
     bucket = {
       unit: query.bucket,
       // Read only by a fiscal unit: a calendar change leaves other plans alone.
       fiscalStartMonth: query.bucket.startsWith("fiscal_")
         ? catalog.calendar.fiscalYearStartMonth
         : 1,
-      type,
+      // A timestamp date column's date is read in the calendar's zone.
+      ...(parts.some((p) => p.date!.type === "timestamp")
+        ? zoneFor("timestamp", catalog, now)
+        : {}),
     };
     columns.push({
       name: "period",
-      type,
+      type: "date",
       references: [...planner.dates.values()],
     });
   }
