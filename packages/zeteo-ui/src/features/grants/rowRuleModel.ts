@@ -50,6 +50,8 @@ export interface Condition {
   unit: RelativeUnitChoice;
   /** A number the rule held for a column whose type is not known here. */
   numeric?: boolean;
+  /** A boolean the rule held for a column whose type is not known here. */
+  boolean?: boolean;
 }
 
 export interface Group {
@@ -111,6 +113,7 @@ const isNumeric = (c: Condition, columns: RuleColumn[]) =>
   columnKind(columns.find((x) => x.name === c.column)?.type) === "number";
 
 const isBoolean = (c: Condition, columns: RuleColumn[]) =>
+  c.boolean ||
   columnKind(columns.find((x) => x.name === c.column)?.type) === "boolean";
 
 const scalar = (
@@ -226,13 +229,20 @@ const identityOf = (v: unknown): string | null =>
     ? v.identity
     : null;
 
+const hintOf = (v: unknown): { numeric?: true; boolean?: true } =>
+  typeof v === "number"
+    ? { numeric: true }
+    : typeof v === "boolean"
+      ? { boolean: true }
+      : {};
+
 const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
   if (!isRecord(body)) return NOT_PARSED;
   const ops = Object.keys(body);
   if (ops.length !== 1) return NOT_PARSED;
   const op = ops[0]!;
   const v = body[op];
-  const hint = typeof v === "number" ? { numeric: true } : {};
+  const hint = hintOf(v);
   switch (op) {
     case "eq":
     case "ne":
@@ -271,7 +281,7 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
             op: "between",
             text: String(v[0]),
             text2: String(v[1]),
-            ...(typeof v[0] === "number" ? { numeric: true } : {}),
+            ...hintOf(v[0]),
           })
         : NOT_PARSED;
     case "in":
@@ -289,7 +299,7 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
             column,
             op,
             list: v.map(String),
-            ...(typeof v[0] === "number" ? { numeric: true } : {}),
+            ...hintOf(v[0]),
           })
         : NOT_PARSED;
     }

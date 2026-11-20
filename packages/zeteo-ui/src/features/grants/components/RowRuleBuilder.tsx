@@ -91,6 +91,25 @@ const opsFor = (kind: ColumnKind, keys: IdentityKey[]): OpChoice[] => {
   ];
 };
 
+const OP_NAMES: Record<Op, string> = {
+  eq: "is",
+  ne: "is not",
+  gt: "is greater than",
+  gte: "is at least",
+  lt: "is less than",
+  lte: "is at most",
+  between: "is between",
+  in: "is one of",
+  notIn: "is none of",
+  contains: "contains",
+  startsWith: "starts with",
+  empty: "is empty",
+  notEmpty: "is not empty",
+  last: "is in the last",
+  mineIn: "is one of my",
+  mineNotIn: "is none of my",
+};
+
 const UNIT_LABEL: Record<RelativeUnitChoice, string> = {
   day: "days",
   week: "weeks",
@@ -189,7 +208,7 @@ const ConditionRow = ({
           op: c.op,
           key: c.key,
         }
-      : null);
+      : { id: c.op, label: OP_NAMES[c.op], op: c.op, key: "" });
   const options =
     current && !choices.includes(current) ? [current, ...choices] : choices;
   const type = inputType(kind);
@@ -202,7 +221,7 @@ const ConditionRow = ({
     );
     onChange(
       stillThere
-        ? { ...c, column: name }
+        ? { ...c, column: name, numeric: undefined, boolean: undefined }
         : newCondition({ id: c.id, column: name })
     );
   };
@@ -402,7 +421,15 @@ const GroupView = ({
   const removeItem = (index: number) =>
     onChange({ ...group, items: group.items.filter((_, i) => i !== index) });
   return (
-    <div className={nested ? "z-rule-group z-rule-nested" : "z-rule-group"}>
+    <div
+      className={`z-rule-group${nested ? " z-rule-nested" : ""}${invalidId === group.id ? " z-rule-invalid" : ""}`}
+      data-invalid={invalidId === group.id ? "true" : undefined}
+    >
+      {invalidId === group.id && invalidMessage && (
+        <p role="alert" className="z-rule-error">
+          {invalidMessage}
+        </p>
+      )}
       <div className="z-rule-group-head">
         <ModeToggle
           group={group}

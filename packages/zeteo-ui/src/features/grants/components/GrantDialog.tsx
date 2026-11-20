@@ -220,11 +220,13 @@ const GrantDialogBody = ({
     create.reset();
     setSourceId(id);
     setTableId("");
+    setDraft(emptyRule());
     setChoice((c) => ({ ...c, selected: [] }));
   };
   const chooseTable = (id: string) => {
     create.reset();
     setTableId(id);
+    setDraft(emptyRule());
     setChoice((c) => ({ ...c, selected: [] }));
   };
 

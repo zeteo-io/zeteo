@@ -735,6 +735,52 @@ describe("GrantDialog", () => {
       expect(rows[1]).toContainElement(alert);
     });
 
+    it("shows an invalid_row_rule that points at a group", async () => {
+      const user = userEvent.setup();
+      put.mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          status: 400,
+          data: {
+            error: "invalid_row_rule",
+            error_description: "the rule is too broad",
+            path: ["row_rule"],
+          },
+        },
+      });
+      renderForm(
+        makeGrant({
+          row_access: "rule",
+          row_rule: { and: [{ id: { eq: 1 } }, { note: { eq: "a" } }] },
+        })
+      );
+      await screen.findAllByLabelText("Column");
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      const alert = await screen.findByText("the rule is too broad");
+      expect(alert.closest(".z-rule-group")).toHaveAttribute(
+        "data-invalid",
+        "true"
+      );
+    });
+
+    it("keeps a boolean as a boolean when saved untouched", async () => {
+      const user = userEvent.setup();
+      renderForm(
+        makeGrant({ row_access: "rule", row_rule: { flag: { eq: true } } })
+      );
+      await screen.findAllByLabelText("Column");
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      await waitFor(() => expect(put).toHaveBeenCalled());
+      expect(put.mock.calls[0][1].row_rule).toEqual({ flag: { eq: true } });
+    });
+
+    it("labels an operator the column type does not offer", async () => {
+      renderForm(
+        makeGrant({ row_access: "rule", row_rule: { id: { contains: "x" } } })
+      );
+      expect(await screen.findByLabelText("Operator")).toHaveValue("contains");
+    });
+
     it("shows a rule it cannot build as read-only JSON and keeps it", async () => {
       const user = userEvent.setup();
       const rule = { not: { id: { eq: 1 } } };
