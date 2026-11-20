@@ -40,6 +40,41 @@ const columnsText = (grant: Grant) =>
     ? "All columns"
     : `${grant.columns.length} ${grant.columns.length === 1 ? "column" : "columns"}`;
 
+/** What a grant does to the table's rows: a pill when it limits or lifts them. */
+const rowsCell = (grant: Grant) => {
+  const problems = grant.row_rule_problems ?? [];
+  const warn = problems.length > 0 && (
+    <>
+      {" "}
+      <span title={problems.join(" ")}>
+        <Badge variant="warning" size="sm">
+          Needs attention
+        </Badge>
+      </span>
+    </>
+  );
+  if (grant.row_access === "all") {
+    return (
+      <Badge variant="secondary" size="sm">
+        All rows
+      </Badge>
+    );
+  }
+  if (grant.row_access === "rule") {
+    return (
+      <>
+        <span title={grant.row_rule_description ?? undefined}>
+          <Badge variant="secondary" size="sm">
+            Row rule
+          </Badge>
+        </span>
+        {warn}
+      </>
+    );
+  }
+  return <span className="z-muted">—</span>;
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const uuidParam = (params: URLSearchParams, key: string) => {
   const value = params.get(key);
@@ -313,6 +348,7 @@ export const GrantsPage = () => {
                 ),
               },
               { title: "Columns", cellElement: columnsText },
+              { title: "Rows", cellElement: rowsCell, width: "1%" },
               ...(canWrite
                 ? [
                     {

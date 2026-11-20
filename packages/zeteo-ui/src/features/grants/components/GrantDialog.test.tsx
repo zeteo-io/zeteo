@@ -158,6 +158,21 @@ describe("GrantDialog", () => {
           if (url === `/v1/sources/${SOURCE_ID}/tables/${ORDERS_ID}`) {
             return { data: detail };
           }
+          if (url === "/v1/identity-keys") {
+            return {
+              data: {
+                data: [
+                  {
+                    id: "f1111111-1c7a-4a53-9d0e-6a3b1f2c4d01",
+                    name: "netsuite_employee_id",
+                    label: "NetSuite employees",
+                    description: null,
+                    value_count: 3,
+                  },
+                ],
+              },
+            };
+          }
           if (url === "/v1/grants")
             return { data: { data: [], next_cursor: null, ...cfg } };
           throw new Error(`unexpected ${url}`);
@@ -202,6 +217,7 @@ describe("GrantDialog", () => {
       principal_id: USER_ID,
       table_id: ORDERS_ID,
       all_columns: true,
+      row_access: "unlimited_default",
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
@@ -235,6 +251,7 @@ describe("GrantDialog", () => {
       principal_id: USER_ID,
       table_id: ORDERS_ID,
       all_columns: false,
+      row_access: "unlimited_default",
       column_ids: [COL(1), COL(3)],
     });
   });
@@ -462,6 +479,7 @@ describe("GrantDialog", () => {
     await waitFor(() => expect(put).toHaveBeenCalled());
     expect(put.mock.calls[0][1]).toEqual({
       all_columns: false,
+      row_access: "unlimited_default",
       column_ids: [COL(1), COL(9)],
     });
   });
@@ -490,6 +508,7 @@ describe("GrantDialog", () => {
       await waitFor(() => expect(put).toHaveBeenCalled());
       expect(put).toHaveBeenCalledWith(`/v1/grants/${GRANT_ID}`, {
         all_columns: false,
+        row_access: "unlimited_default",
         column_ids: [COL(1), COL(3), COL(9)],
       });
     });
@@ -502,17 +521,21 @@ describe("GrantDialog", () => {
       await waitFor(() => expect(put).toHaveBeenCalled());
       expect(put.mock.calls[0][1]).toEqual({
         all_columns: false,
+        row_access: "unlimited_default",
         column_ids: [COL(1)],
       });
     });
 
-    it("sends only all_columns true for a grant of every column", async () => {
+    it("sends all_columns true for a grant of every column", async () => {
       const user = userEvent.setup();
       renderForm(makeGrant());
       expect(screen.getByLabelText("All columns")).toBeChecked();
       await user.click(screen.getByRole("button", { name: "Save grant" }));
       await waitFor(() => expect(put).toHaveBeenCalled());
-      expect(put.mock.calls[0][1]).toEqual({ all_columns: true });
+      expect(put.mock.calls[0][1]).toEqual({
+        all_columns: true,
+        row_access: "unlimited_default",
+      });
     });
   });
 
@@ -554,6 +577,7 @@ describe("GrantDialog", () => {
           principal_id: USER_ID,
           table_id: ORDERS_ID,
           all_columns: true,
+          row_access: "unlimited_default",
         })
       );
       await waitFor(() => expect(onClose).toHaveBeenCalled());
@@ -581,6 +605,154 @@ describe("GrantDialog", () => {
       expect(
         await screen.findByRole("button", { name: "Save" })
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("rows", () => {
+    const chooseRule = async (user: User) => {
+      await chooseTable(user);
+      await user.click(screen.getByLabelText("Only rows where…"));
+    };
+    const setCondition = async (user: User, column: string, op: string) => {
+      await pick(user, "Column", column);
+      await pick(user, "Operator", op);
+    };
+
+    it("defaults to not limiting rows", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseTable(user);
+      expect(screen.getByLabelText("Doesn't limit rows")).toBeChecked();
+      expect(screen.queryByLabelText("Column")).not.toBeInTheDocument();
+    });
+
+    it("sends all rows without a rule", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseTable(user);
+      await user.click(
+        screen.getByLabelText("All rows (overrides other limits)")
+      );
+      await user.click(screen.getByRole("button", { name: "Create grant" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1]).toEqual({
+        principal_type: "user",
+        principal_id: USER_ID,
+        table_id: ORDERS_ID,
+        all_columns: true,
+        row_access: "all",
+      });
+    });
+
+    it("sends a rule of status is one of paid", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseRule(user);
+      await setCondition(user, "note", "is one of");
+      expect(
+        screen.getByRole("button", { name: "Create grant" })
+      ).toBeDisabled();
+      await user.type(screen.getByLabelText("Values"), "paid{Enter}");
+      await user.type(
+        screen.getByLabelText("Describe this limit for people who have it"),
+        "Paid orders"
+      );
+      await user.click(screen.getByRole("button", { name: "Create grant" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1]).toEqual({
+        principal_type: "user",
+        principal_id: USER_ID,
+        table_id: ORDERS_ID,
+        all_columns: true,
+        row_access: "rule",
+        row_rule: { note: { in: ["paid"] } },
+        row_rule_description: "Paid orders",
+      });
+    });
+
+    it("sends an identity condition", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseRule(user);
+      await setCondition(
+        user,
+        "customer_id",
+        "is one of my NetSuite employees"
+      );
+      await user.click(screen.getByRole("button", { name: "Create grant" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1].row_rule).toEqual({
+        customer_id: { in: { identity: "netsuite_employee_id" } },
+      });
+      expect(
+        screen.getByLabelText(/Include people who report to me/)
+      ).toBeDisabled();
+    });
+
+    it("marks columns that are not in the grant", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseRule(user);
+      await user.click(allColumns());
+      await user.click(await screen.findByLabelText("id"));
+      await user.click(screen.getByLabelText("Column"));
+      await waitFor(() =>
+        expect(options()).toEqual([
+          "id",
+          "customer_id (not in this grant)",
+          "note (not in this grant)",
+        ])
+      );
+    });
+
+    it("highlights the condition an invalid_row_rule points at", async () => {
+      const user = userEvent.setup();
+      put.mockRejectedValue({
+        isAxiosError: true,
+        response: {
+          status: 400,
+          data: {
+            error: "invalid_row_rule",
+            error_description: "note takes text values",
+            path: ["row_rule", "and", 1, "note"],
+          },
+        },
+      });
+      renderForm(
+        makeGrant({
+          row_access: "rule",
+          row_rule: {
+            and: [{ id: { eq: 1 } }, { note: { eq: 2 } }],
+          },
+        })
+      );
+      await screen.findAllByLabelText("Column");
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      const alert = await screen.findByText("note takes text values");
+      const rows = document.querySelectorAll(".z-rule-condition");
+      expect(rows[0]).not.toHaveAttribute("data-invalid");
+      expect(rows[1]).toHaveAttribute("data-invalid", "true");
+      expect(rows[1]).toContainElement(alert);
+    });
+
+    it("shows a rule it cannot build as read-only JSON and keeps it", async () => {
+      const user = userEvent.setup();
+      const rule = { not: { id: { eq: 1 } } };
+      renderForm(makeGrant({ row_access: "rule", row_rule: rule }));
+      expect(screen.getByLabelText("Row rule")).toHaveTextContent('"not"');
+      expect(screen.queryByLabelText("Column")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      await waitFor(() => expect(put).toHaveBeenCalled());
+      expect(put.mock.calls[0][1]).toMatchObject({
+        row_access: "rule",
+        row_rule: rule,
+      });
+    });
+
+    it("shows an owner grant's rows read-only", async () => {
+      renderForm(makeGrant({ owner_grant: true }));
+      expect(screen.getByLabelText("Doesn't limit rows")).toBeDisabled();
+      expect(screen.getByLabelText("Only rows where…")).toBeDisabled();
     });
   });
 });
