@@ -723,4 +723,20 @@ describe("sqlLanguage.describe, calculations", () => {
       expect(operationNamed(key)).toBeDefined();
     }
   });
+
+  it("refuses an identity reference in a query's where or having", () => {
+    for (const clause of ["where", "having"]) {
+      const r = sqlQuerySchema.safeParse({
+        ...base,
+        [clause]: { rep: { eq: { identity: "k" } } },
+      });
+      expect(r.success).toBe(false);
+    }
+    expect(
+      sqlQuerySchema.safeParse({
+        ...base,
+        where: { rep: { in: { identity: "k" } } },
+      }).success
+    ).toBe(false);
+  });
 });
