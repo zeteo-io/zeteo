@@ -1,11 +1,18 @@
 import { QueryError, notFound, type QueryPath } from "../../engine/errors.js";
 import type { OutputColumn, PlanContext, Reference } from "../types.js";
-import { localDate, zonedMidnight } from "../../calendar/calendar.js";
 import { MeasureError } from "./measures.js";
+import { METRIC_UNION } from "./types.js";
 import type {
   VisibleCatalog,
   VisibleMeasure,
 } from "../../grants/visibleCatalog.js";
+import {
+  compiledCalendar,
+  dateOfDayNumber,
+  dayNumber,
+  localDate,
+  zonedMidnight,
+} from "../../calendar/calendar.js";
 import {
   floorToMinute,
   resolveRelative,
@@ -52,10 +59,29 @@ const ARITHMETIC = new Set(["add", "sub", "mul", "div", "abs", "coalesce"]);
 /** The calendar functions a metric's formula may use, each over literal dates only. */
 const CALENDAR = new Set([
   "businessDays",
+  "businessDaysBetween",
+  "businessDaysIn",
   "businessDaysInMonth",
   "businessDaysElapsed",
   "businessDaysRemaining",
 ]);
+
+/** A calendar function's date operands with their paths from `at`. */
+const calendarDates = (
+  key: string,
+  operand: unknown,
+  at: QueryPath
+): Array<[unknown, QueryPath]> => {
+  if (key === "businessDays" || key === "businessDaysBetween") {
+    const [a, b] = operand as unknown[];
+    return [
+      [a, [...at, 0]],
+      [b, [...at, 1]],
+    ];
+  }
+  // businessDaysIn always, elapsed and remaining when given a unit: [unit, date].
+  return Array.isArray(operand) ? [[operand[1], [...at, 1]]] : [[operand, at]];
+};
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -64,7 +90,7 @@ const isDateLiteral = (v: unknown): boolean =>
   isObject(v) && ("date" in v || "timestamp" in v || "relative" in v);
 
 const FORMULA_FORMS =
-  "a metric's formula takes numbers, { measure }, add, sub, mul, div, abs, round, coalesce and calendar functions of literal dates";
+  "a metric's formula takes numbers, { measure }, add, sub, mul, div, abs, round, coalesce, calendar functions of literal dates and businessDaysInPeriod";
 
 /** Where a metric's formula breaks its grammar, and how. */
 export interface FormulaProblem {
@@ -103,12 +129,14 @@ export const metricFormulaProblem = (
     if (key === "measure") return undefined;
     if (key === undefined) return { path, message: FORMULA_FORMS };
     const at = [...path, key];
+    if (key === "businessDaysInPeriod") return undefined;
     if (CALENDAR.has(key)) {
-      const args = key === "businessDays" ? (operand as unknown[]) : [operand];
-      const bad = args.findIndex((a) => !isDateLiteral(a));
-      if (bad < 0) return undefined;
+      const bad = calendarDates(key, operand, at).find(
+        ([a]) => !isDateLiteral(a)
+      );
+      if (!bad) return undefined;
       return {
-        path: key === "businessDays" ? [...at, bad] : at,
+        path: bad[1],
         message:
           "In a metric, a calendar function takes a date, timestamp or relative date literal",
       };
@@ -320,6 +348,62 @@ class MetricPlanner {
   }
 
   /**
+   * `businessDaysInPeriod`: the business days of each period of the bucket,
+   * read from the union's `period` (the bucket's first day, in UTC as buckets
+   * are); without a bucket, those of the range, from `gte`'s date up to, not
+   * including, `lt`'s, each bound's date in the calendar's zone.
+   */
+  private businessDaysInPeriod(at: QueryPath): ResolvedExpr {
+    const { calendar } = this.catalog;
+    const unit = this.query.bucket;
+    if (unit !== undefined) {
+      return {
+        kind: "businessPeriod",
+        fn: "in",
+        unit,
+        fiscalStartMonth: unit.startsWith("fiscal_")
+          ? calendar.fiscalYearStartMonth
+          : 1,
+        date: {
+          // A timestamp period is read as its date: the bucket starts at UTC midnight.
+          expr: {
+            kind: "column",
+            column: {
+              alias: METRIC_UNION,
+              name: "period",
+              type: "date",
+              nativeType: "date",
+            },
+          },
+          type: "date",
+        },
+        calendar: compiledCalendar(calendar, this.now),
+        type: "number",
+      };
+    }
+    const { gte, lt } = this.query.range ?? {};
+    if (gte === undefined || lt === undefined) {
+      throw fail(
+        "invalid_operator",
+        "businessDaysInPeriod needs the query's bucket, or a range with both gte and lt",
+        at
+      );
+    }
+    const dateOf = (bound: RangeBound): string =>
+      "date" in bound
+        ? bound.date
+        : "timestamp" in bound
+          ? localDate(new Date(bound.timestamp), calendar.timeZone)
+          : resolveRelativeDate(bound, this.now, calendar);
+    const last = dateOfDayNumber(dayNumber(dateOf(lt)) - 1);
+    return this.outer.resolveExpr(
+      { businessDays: [{ date: dateOf(gte) }, { date: last }] },
+      at,
+      new Map()
+    ).resolved;
+  }
+
+  /**
    * A requested name's formula: `{ measure }` is the part's value per period,
    * or a fixed measure's scalar subquery; numbers, arithmetic and calendar
    * constants as in a table query's calc. `formula` is a metric's own (its
@@ -357,6 +441,7 @@ class MetricPlanner {
     if (CALENDAR.has(key)) {
       return this.outer.resolveExpr(formula, at, reads).resolved;
     }
+    if (key === "businessDaysInPeriod") return this.businessDaysInPeriod(at);
     if (!ARITHMETIC.has(key) && key !== "round") {
       throw fail("invalid_operator", FORMULA_FORMS, at);
     }

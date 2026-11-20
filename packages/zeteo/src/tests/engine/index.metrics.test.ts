@@ -11,6 +11,7 @@ import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
 import { BASE_URL, fetchJson } from "../support/http.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
+import { ORDER_TIMES } from "../support/businessDays.js";
 import { uniqueName } from "../support/savedQueries.js";
 import type { Caller } from "../../middleware/auth.js";
 import { removeSources } from "../support/sources.js";
@@ -18,6 +19,12 @@ import { runExport } from "../../engine/export.js";
 import { prisma } from "../../utils/db/index.js";
 import { runQuery } from "../../engine/index.js";
 import { randomUUID } from "node:crypto";
+import {
+  businessDays,
+  businessDaysElapsed,
+  businessDaysIn,
+  DEFAULT_CALENDAR,
+} from "../../calendar/calendar.js";
 import {
   grantTo,
   newQueryUser,
@@ -121,6 +128,9 @@ describeEachEngine("runQuery: metric queries", (engine) => {
           ],
         },
       ],
+    }),
+    metric("per_business_day", {
+      div: [{ measure: "revenue" }, { businessDaysInPeriod: true }],
     }),
     metric("secret_roas", {
       div: [{ measure: "revenue" }, { measure: "secret_spend" }],
@@ -227,6 +237,14 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       "order_lines",
       { count: "*" },
       { dateColumn: "orders.created_at" }
+    );
+    // A measure over the new calendar functions: each order's business day
+    // of its month, summed.
+    await addMeasure(
+      "business_day_sum",
+      "orders",
+      { sum: { businessDaysElapsed: ["month", "created_at"] } },
+      { dateColumn: "created_at" }
     );
     await addMeasure(
       "secret_spend",
@@ -521,5 +539,73 @@ describeEachEngine("runQuery: metric queries", (engine) => {
       ["2026-05-01T00:00:00.000Z", 21, "447.33", null],
       ["2026-06-01T00:00:00.000Z", 22, "1015.99", null],
     ]);
+  });
+
+  it("divides by each period's business days, by month, week and day", async () => {
+    const quotient = (revenue: unknown, days: number) =>
+      (Math.round((Number(revenue) / days) * 1e6) / 1e6).toFixed(6);
+    for (const bucket of ["month", "week", "day"] as const) {
+      const rows = await run({
+        metrics: ["per_business_day", "revenue"],
+        bucket,
+      });
+      expect(rows.length).toBeGreaterThan(0);
+      for (const [period, perDay, revenue] of rows) {
+        const days = businessDaysIn(
+          DEFAULT_CALENDAR,
+          bucket,
+          iso(period).slice(0, 10)
+        )!;
+        // A day that is not a business day divides by 0: null.
+        expect(perDay, `${bucket} ${iso(period)}`).toBe(
+          days === 0 ? null : quotient(revenue, days)
+        );
+      }
+    }
+  });
+
+  it("divides by the range's business days without a bucket, and needs one or the other", async () => {
+    expect(
+      await run({
+        metrics: ["per_business_day", "revenue"],
+        range: { gte: { date: "2026-01-01" }, lt: { date: "2026-04-01" } },
+      })
+    ).toEqual([
+      [
+        (
+          Math.round(
+            (1640.74 /
+              businessDays(DEFAULT_CALENDAR, "2026-01-01", "2026-03-31")!) *
+              1e6
+          ) / 1e6
+        ).toFixed(6),
+        "1640.74",
+      ],
+    ]);
+    for (const range of [undefined, { gte: { date: "2026-01-01" } }]) {
+      expect(
+        await refusal({ metrics: ["per_business_day"], range })
+      ).toMatchObject({
+        statusCode: 422,
+        code: "invalid_operator",
+        message:
+          'Metric "per_business_day": businessDaysInPeriod needs the query\'s bucket, or a range with both gte and lt',
+        details: { path: ["metrics", 0] },
+      });
+    }
+  });
+
+  it("buckets a measure over the new calendar functions", async () => {
+    const rows = await run({ metrics: ["business_day_sum"], bucket: "month" });
+    const sums = new Map<string, number>();
+    for (const time of Object.values(ORDER_TIMES)) {
+      const date = time.slice(0, 10);
+      const month = `${date.slice(0, 7)}-01T00:00:00.000Z`;
+      sums.set(
+        month,
+        (sums.get(month) ?? 0) + businessDaysElapsed(DEFAULT_CALENDAR, date)!
+      );
+    }
+    expect(rows.map((r) => [iso(r[0]), Number(r[1])])).toEqual([...sums]);
   });
 });

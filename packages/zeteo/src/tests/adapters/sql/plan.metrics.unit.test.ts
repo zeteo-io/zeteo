@@ -516,3 +516,104 @@ describe("metric formulas", () => {
     expect(MEASURES.length).toBeGreaterThan(0);
   });
 });
+
+describe("metric formulas: business days", () => {
+  const perDay = metric("per_day", {
+    div: [{ measure: "revenue" }, { businessDaysInPeriod: true }],
+  });
+  const catalog = (calendar: Partial<VisibleCatalog["calendar"]> = {}) => {
+    const base = metricsCatalog({}, { metrics: [perDay] });
+    return { ...base, calendar: { ...base.calendar, ...calendar } };
+  };
+  const termOf = (p: MetricPlan) =>
+    (p.select[0]!.expr as { args: unknown[] }).args[1] as Record<
+      string,
+      unknown
+    >;
+
+  it("take the new calendar functions of literal dates, and businessDaysInPeriod", () => {
+    const day = { date: "2026-06-01" };
+    for (const term of [
+      { businessDaysBetween: [day, day] },
+      { businessDaysIn: ["fiscal_year", day] },
+      { businessDaysElapsed: ["week", day] },
+      { businessDaysRemaining: day },
+      { businessDaysInPeriod: true },
+    ]) {
+      expect(
+        metricFormulaProblem({ div: [{ measure: "a" }, term] }),
+        JSON.stringify(term)
+      ).toBeUndefined();
+    }
+    const refused: [unknown, (string | number)[]][] = [
+      [{ businessDaysIn: ["week", "ordered_on"] }, ["businessDaysIn", 1]],
+      [
+        { businessDaysElapsed: ["week", "ordered_on"] },
+        ["businessDaysElapsed", 1],
+      ],
+      [
+        { businessDaysBetween: [day, "ordered_on"] },
+        ["businessDaysBetween", 1],
+      ],
+      [{ addBusinessDays: [day, 1] }, ["addBusinessDays"]],
+    ];
+    for (const [term, path] of refused) {
+      expect(
+        metricFormulaProblem({ add: [{ measure: "a" }, term] }),
+        JSON.stringify(term)
+      ).toMatchObject({ path: ["add", 1, ...path] });
+    }
+  });
+
+  it("plans businessDaysInPeriod as the business days of each bucket's period", () => {
+    const term = termOf(
+      plan(
+        { metrics: ["per_day"], bucket: "fiscal_quarter" },
+        catalog({ fiscalYearStartMonth: 4 })
+      )
+    );
+    expect(term).toMatchObject({
+      kind: "businessPeriod",
+      fn: "in",
+      unit: "fiscal_quarter",
+      fiscalStartMonth: 4,
+      date: {
+        type: "date",
+        expr: { kind: "column", column: { alias: "u", name: "period" } },
+      },
+    });
+  });
+
+  it("folds it to the range's business days without a bucket, lt excluded", () => {
+    const term = termOf(
+      plan(
+        {
+          metrics: ["per_day"],
+          range: {
+            gte: { date: "2026-06-01" },
+            lt: { timestamp: "2026-07-01T05:00:00Z" },
+          },
+        },
+        catalog({ timeZone: "America/New_York" })
+      )
+    );
+    // June 2026: 22 weekdays; lt is 1 July 01:00 in New York.
+    expect(term).toEqual({ kind: "literal", value: 22, type: "number" });
+  });
+
+  it("refuses it without a bucket or a whole range, at the metric", () => {
+    for (const range of [undefined, { lt: { date: "2026-07-01" } }]) {
+      expect(
+        refusal(
+          { metrics: ["per_day"], ...(range ? { range } : {}) },
+          catalog()
+        )
+      ).toMatchObject({
+        code: "invalid_operator",
+        path: ["metrics", 0],
+        message:
+          'Metric "per_day": businessDaysInPeriod needs the query\'s bucket, or a range with both gte and lt',
+      });
+    }
+  });
+});
