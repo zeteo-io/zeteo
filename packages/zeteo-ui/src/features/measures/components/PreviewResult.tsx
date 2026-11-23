@@ -1,3 +1,4 @@
+import { RowsLimitedPill } from "@/components/RowsLimitedPill";
 import type { PreviewResult as Result } from "../api/types";
 import "./styles.css";
 
@@ -8,6 +9,7 @@ export const PreviewResult = ({ result }: { result: Result }) => {
     typeof v === "number" ? v.toLocaleString() : v === null ? "—" : String(v);
   return (
     <div className="z-measure-preview">
+      {result.rows_limited && <RowsLimitedPill />}
       {single ? (
         <strong
           className="z-measure-preview-value"
