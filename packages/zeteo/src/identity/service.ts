@@ -53,7 +53,9 @@ export const valuesOfUser = async (
     select: { keyId: true, value: true },
   });
   for (const row of rows) {
-    out.set(row.keyId, [...(out.get(row.keyId) ?? []), row.value]);
+    const list = out.get(row.keyId);
+    if (list) list.push(row.value);
+    else out.set(row.keyId, [row.value]);
   }
   return out;
 };
@@ -222,29 +224,34 @@ export const addValues = async (
         throw new IdentityValueTakenError(value);
     }
     const fresh = [...wanted].filter(([value]) => !held.has(value));
-    const created: IdentityValue[] = [];
-    for (const [value, userId] of fresh) {
-      created.push(
-        await tx.identityValue.create({
-          data: { keyId, userId, value, createdBy: actorId },
-        })
-      );
+    const created =
+      fresh.length === 0
+        ? []
+        : await tx.identityValue.createManyAndReturn({
+            data: fresh.map(([value, userId]) => ({
+              keyId,
+              userId,
+              value,
+              createdBy: actorId,
+            })),
+          });
+    if (created.length > 0) {
+      const key = await tx.identityKey.findUniqueOrThrow({
+        where: { id: keyId },
+      });
+      audit({
+        action: AUDIT_EVENTS.identityValuesAdded,
+        resourceType: KEY_TYPE,
+        resourceId: keyId,
+        actorId,
+        // Counts and users only: the values themselves stay out of the log.
+        metadata: {
+          name: key.name,
+          user_ids: [...new Set(created.map((row) => row.userId))],
+          count: created.length,
+        },
+      });
     }
-    const key = await tx.identityKey.findUniqueOrThrow({
-      where: { id: keyId },
-    });
-    audit({
-      action: AUDIT_EVENTS.identityValuesAdded,
-      resourceType: KEY_TYPE,
-      resourceId: keyId,
-      actorId,
-      // Counts and users only: the values themselves stay out of the log.
-      metadata: {
-        name: key.name,
-        user_ids: [...new Set(created.map((row) => row.userId))],
-        count: created.length,
-      },
-    });
     return [...held.values()]
       .filter((row) => wanted.get(row.value) === row.userId)
       .concat(created);

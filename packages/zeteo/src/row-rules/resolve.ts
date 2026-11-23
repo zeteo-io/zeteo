@@ -111,6 +111,10 @@ const resolveCounted = (
     // whatever surrounds it: notIn or not over nothing must never widen.
     if (kept.length === 0) never = true;
     substituted += kept.length;
+    // An operator outside the table would key the list "undefined": refuse.
+    if (!Object.hasOwn(LIST_OP, op)) {
+      throw new Error(`Operator ${op} cannot take an identity reference`);
+    }
     const listOp = LIST_OP[op as keyof typeof LIST_OP];
     return [columnId, { [listOp]: kept } as RuleCondition];
   });

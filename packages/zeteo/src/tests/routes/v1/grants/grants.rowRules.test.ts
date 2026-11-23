@@ -164,11 +164,71 @@ describe("/v1/grants row access", () => {
       { total: { gt: { measure: "revenue" } } },
       ["row_rule", "total", "gt"],
     ],
+    [
+      "a bad column nested inside and and or",
+      {
+        and: [
+          { status: { eq: "paid" } },
+          { or: [{ status: { eq: "paid" } }, { total: { contains: "1" } }] },
+        ],
+      },
+      ["row_rule", "and", 1, "or", 1, "total", "contains"],
+    ],
   ])("refuses %s with invalid_row_rule at its path", async (_n, rule, path) => {
     const res = await create({ row_access: "rule", row_rule: rule });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("invalid_row_rule");
     expect(res.body.path).toEqual(path);
+  });
+
+  it.each([
+    [
+      "a column missing from the source",
+      { missingSince: new Date() },
+      { notes: { eq: "x" } },
+      "is missing from the source",
+    ],
+    [
+      "a column of a type that cannot be queried",
+      { type: "other" as const },
+      { notes: { eq: "x" } },
+      "cannot be queried",
+    ],
+    [
+      "an identity value on a boolean column",
+      { type: "boolean" as const },
+      { notes: { eq: { identity: keyName } } },
+      "cannot be compared",
+    ],
+    [
+      "an identity value on a json column (no operator takes one)",
+      { type: "json" as const },
+      { notes: { eq: { identity: keyName } } },
+      "does not apply",
+    ],
+  ])("refuses %s", async (_n, change, rule, message) => {
+    const column = await prisma.sourceColumn.findFirstOrThrow({
+      where: { tableId: orders.id, name: "notes" },
+    });
+    await prisma.sourceColumn.update({
+      where: { id: column.id },
+      data: change,
+    });
+    try {
+      const res = await create({ row_access: "rule", row_rule: rule });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe("invalid_row_rule");
+      expect(res.body.path.slice(0, 2)).toEqual(["row_rule", "notes"]);
+      expect(res.body.error_description).toContain(message);
+    } finally {
+      await prisma.sourceColumn.update({
+        where: { id: column.id },
+        data: {
+          missingSince: column.missingSince,
+          type: column.type,
+        },
+      });
+    }
   });
 
   it("refuses below: true as not available yet", async () => {

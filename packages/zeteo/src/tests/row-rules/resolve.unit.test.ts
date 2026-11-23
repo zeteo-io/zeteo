@@ -145,3 +145,15 @@ describe("resolveGrantRule", () => {
     ).toBe("never");
   });
 });
+
+describe("resolveGrantRule with an operator that cannot take an identity", () => {
+  it("throws rather than key a list by undefined", () => {
+    const columns = new Map<string, RuleColumn>([
+      ["c_rep", { id: "c_rep", name: "rep", type: "text", nativeType: "text" }],
+    ]);
+    const rule = { c_rep: { gt: { identity: "k1" } } } as unknown as RuleFilter;
+    expect(() =>
+      resolveGrantRule(rule, new Map([["k1", ["a"]]]), columns)
+    ).toThrow(/cannot take an identity/);
+  });
+});
