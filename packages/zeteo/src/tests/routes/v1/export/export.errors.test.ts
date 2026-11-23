@@ -30,7 +30,12 @@ const firstChunk = (res: IncomingMessage) =>
     });
   });
 
-/** Reads `res` (after `first`, when given) until it ends or fails, keeping what came. */
+/**
+ * Reads `res` (after `first`, when given) until it ends or fails, keeping what
+ * came. Called before the cut: Node destroys a response whose connection
+ * closes, but emits its `error` only to listeners already attached, so a read
+ * begun after the cut would wait forever.
+ */
 const readUntilCut = (res: IncomingMessage, first: Buffer | null) =>
   new Promise<{ raw: Buffer; err: unknown }>((resolve) => {
     const chunks: Buffer[] = first ? [first] : [];
@@ -132,9 +137,12 @@ describeEachEngine("POST /v1/export", (engine) => {
       expect(res.headers["content-encoding"]).toBe(acceptEncoding);
       // Unflushed, a gzip stream has sent nothing yet but its headers.
       const first = acceptEncoding === undefined ? await firstChunk(res) : null;
+      // Reading from now on: the server may cut the response before
+      // `endSessionsReading` has returned.
+      const cut = readUntilCut(res, first);
       await statementRunning();
       expect(await endSessionsReading(engine, "trickle")).toBeGreaterThan(0);
-      const { raw, err } = await readUntilCut(res, first);
+      const { raw, err } = await cut;
       expect(err).toBeInstanceOf(Error);
       expect(res.trailers).toEqual({});
       // What arrived before the cut, decoded as far as it goes.
