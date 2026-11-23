@@ -241,7 +241,13 @@ const ConditionRow = ({
     );
     onChange(
       stillThere
-        ? { ...c, column: name, numeric: undefined, boolean: undefined }
+        ? {
+            ...c,
+            column: name,
+            numeric: undefined,
+            boolean: undefined,
+            loaded: undefined,
+          }
         : newCondition({ id: c.id, column: name })
     );
   };

@@ -43,6 +43,7 @@ describeEachEngine("row rules", (engine) => {
   const many = newQueryUser();
   const manyText = newQueryUser();
   const missing = newQueryUser();
+  const bigRef = newQueryUser();
   const users = [
     admin,
     paid,
@@ -54,6 +55,7 @@ describeEachEngine("row rules", (engine) => {
     many,
     manyText,
     missing,
+    bigRef,
   ];
   const keyIds: string[] = [];
 
@@ -176,6 +178,12 @@ describeEachEngine("row rules", (engine) => {
       rule: { status: { in: { identity: textKey.name } } },
     });
 
+    // 2^53 + 1, as a decimal string: as a JS number it would be 2^53.
+    await grantTo(bigRef.principal, orders!, "all", {
+      access: "rule",
+      rule: { external_ref: { eq: "9007199254740993" } },
+    });
+
     await grantTo(missing.principal, orders!, "all", {
       access: "rule",
       rule: { notes: { isNull: true } },
@@ -203,6 +211,15 @@ describeEachEngine("row rules", (engine) => {
       where: { status: { eq: "paid" } },
     });
     expect(rows).toHaveLength(filtered.length);
+  });
+
+  it("matches a bigint past 2^53 exactly, given as a decimal string", async () => {
+    const rows = await ok(bigRef.token, {
+      from: "orders",
+      select: ["id", "external_ref"],
+    });
+    expect(ids(rows)).toEqual([2]);
+    expect(String(rows[0]![1])).toBe("9007199254740993");
   });
 
   it("counts and sums only the rule's rows", async () => {

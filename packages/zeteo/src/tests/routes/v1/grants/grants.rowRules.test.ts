@@ -107,6 +107,25 @@ describe("/v1/grants row access", () => {
     expect(got.body.row_rule).toEqual(RULE);
   });
 
+  it("keeps a decimal string past 2^53 on a number column exactly as written", async () => {
+    const rule = {
+      or: [
+        { external_ref: { eq: "12345678901234567891" } },
+        { external_ref: { in: ["9007199254740993", 7] } },
+        { total: { between: ["0.10", "99999999999999999999.99"] } },
+      ],
+    };
+    const res = await create({ row_access: "rule", row_rule: rule });
+    expect(res.status).toBe(201);
+    expect(res.body.row_rule).toEqual(rule);
+    const row = await prisma.grant.findUniqueOrThrow({
+      where: { id: res.body.id },
+    });
+    expect(JSON.stringify(row.rowRule)).toContain('"12345678901234567891"');
+    const got = await call("GET", `/${res.body.id}`);
+    expect(got.body.row_rule).toEqual(rule);
+  });
+
   it("stores the rule by column id and identity key id", async () => {
     const rule = {
       and: [

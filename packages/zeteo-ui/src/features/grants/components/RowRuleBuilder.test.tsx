@@ -43,6 +43,75 @@ describe("row rule model", () => {
     }
   });
 
+  it("re-saves loaded numbers and decimal strings exactly as they were", () => {
+    const rules = [
+      { amount: { eq: "12345678901234567891" } },
+      { amount: { eq: 5 } },
+      { amount: { eq: "5" } },
+      { amount: { in: ["12345678901234567891", 7, "0.10"] } },
+      { amount: { notIn: ["9007199254740993", "8"] } },
+      { amount: { between: ["12345678901234567891", "99999999999999999999"] } },
+      { amount: { between: [1.5, "2.50"] } },
+      // A column the page does not know: the loaded value decides.
+      { other: { gte: "12345678901234567891" } },
+    ];
+    for (const rule of rules) {
+      expect(toRule(parseRule(rule)!, columns)).toEqual(rule);
+    }
+  });
+
+  it("never sends a number that loses precision", () => {
+    const at = (text: string, extra: object = {}) =>
+      toRule(
+        newGroup([newCondition({ column: "amount", text, ...extra })]),
+        columns
+      );
+    expect(at("12345678901234567891")).toEqual({
+      amount: { eq: "12345678901234567891" },
+    });
+    expect(at("9007199254740993")).toEqual({
+      amount: { eq: "9007199254740993" },
+    });
+    expect(at("42")).toEqual({ amount: { eq: 42 } });
+    expect(at("-1.25")).toEqual({ amount: { eq: -1.25 } });
+    expect(at("0.10")).toEqual({ amount: { eq: "0.10" } });
+    expect(at("1e30")).toEqual({ amount: { eq: "1e30" } });
+    expect(
+      toRule(
+        newGroup([
+          newCondition({
+            column: "amount",
+            op: "in",
+            list: ["12345678901234567891", "3"],
+          }),
+        ]),
+        columns
+      )
+    ).toEqual({ amount: { in: ["12345678901234567891", 3] } });
+    expect(
+      toRule(
+        newGroup([
+          newCondition({
+            column: "amount",
+            op: "between",
+            text: "1",
+            text2: "12345678901234567891",
+          }),
+        ]),
+        columns
+      )
+    ).toEqual({ amount: { between: [1, "12345678901234567891"] } });
+  });
+
+  it("saves an edited value by the column's type, not the loaded one", () => {
+    const draft = parseRule({ amount: { eq: 5 } })!;
+    const c = draft.items[0] as ReturnType<typeof newCondition>;
+    const edited = newGroup([{ ...c, text: "12345678901234567891" }]);
+    expect(toRule(edited, columns)).toEqual({
+      amount: { eq: "12345678901234567891" },
+    });
+  });
+
   it("does not parse what the builder cannot show", () => {
     expect(parseRule({ not: { status: { eq: "a" } } })).toBeNull();
     expect(

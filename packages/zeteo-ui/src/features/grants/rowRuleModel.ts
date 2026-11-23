@@ -52,6 +52,12 @@ export interface Condition {
   numeric?: boolean;
   /** A boolean the rule held for a column whose type is not known here. */
   boolean?: boolean;
+  /**
+   * The values the loaded rule held, by their text: a value left unedited is
+   * saved exactly as it was loaded (a number stays a number, a decimal string
+   * a string).
+   */
+  loaded?: Record<string, string | number | boolean>;
 }
 
 export interface Group {
@@ -116,15 +122,32 @@ const isBoolean = (c: Condition, columns: RuleColumn[]) =>
   c.boolean ||
   columnKind(columns.find((x) => x.name === c.column)?.type) === "boolean";
 
+/** A JSON number that holds exactly this decimal; otherwise the text itself. */
+const DECIMAL = /^-?\d+(\.\d+)?$/;
+
+/**
+ * A number column's value: a number when it holds the text without loss,
+ * otherwise the decimal text as a string (which the API takes for number
+ * columns), so an id past 2^53 keeps every digit.
+ */
+const numberValue = (text: string): string | number => {
+  const t = text.trim();
+  if (t === "") return text;
+  const n = Number(t);
+  if (!Number.isFinite(n)) return text;
+  if (DECIMAL.test(t)) return String(n) === t ? n : t;
+  // Exponent forms and the like: a string the API would refuse, so keep the
+  // number only when it is exact.
+  return Number.isSafeInteger(n) || !Number.isInteger(n) ? n : text;
+};
+
 const scalar = (
   text: string,
   c: Condition,
   columns: RuleColumn[]
 ): string | number | boolean => {
-  if (isNumeric(c, columns)) {
-    const n = Number(text);
-    return Number.isFinite(n) && text.trim() !== "" ? n : text;
-  }
+  if (c.loaded && Object.hasOwn(c.loaded, text)) return c.loaded[text]!;
+  if (isNumeric(c, columns)) return numberValue(text);
   if (isBoolean(c, columns)) return text === "true";
   return text;
 };
@@ -236,6 +259,21 @@ const hintOf = (v: unknown): { numeric?: true; boolean?: true } =>
       ? { boolean: true }
       : {};
 
+/** The loaded values by their text; a text two values share keeps neither. */
+const loadedOf = (
+  values: (string | number | boolean)[]
+): Record<string, string | number | boolean> => {
+  const out: Record<string, string | number | boolean> = {};
+  const clash = new Set<string>();
+  for (const v of values) {
+    const key = String(v);
+    if (Object.hasOwn(out, key) && out[key] !== v) clash.add(key);
+    out[key] = v;
+  }
+  for (const key of clash) delete out[key];
+  return out;
+};
+
 const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
   if (!isRecord(body)) return NOT_PARSED;
   const ops = Object.keys(body);
@@ -269,7 +307,13 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
         return NOT_PARSED;
       }
       return isScalar(v)
-        ? newCondition({ column, op, text: String(v), ...hint })
+        ? newCondition({
+            column,
+            op,
+            text: String(v),
+            loaded: loadedOf([v]),
+            ...hint,
+          })
         : NOT_PARSED;
     case "between":
       return Array.isArray(v) &&
@@ -281,6 +325,7 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
             op: "between",
             text: String(v[0]),
             text2: String(v[1]),
+            loaded: loadedOf(v),
             ...hintOf(v[0]),
           })
         : NOT_PARSED;
@@ -299,6 +344,7 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
             column,
             op,
             list: v.map(String),
+            loaded: loadedOf(v),
             ...hintOf(v[0]),
           })
         : NOT_PARSED;
