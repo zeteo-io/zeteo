@@ -323,6 +323,7 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
     const rev = byMonth(revenue);
     const sp = byMonth(spend);
     expect(mine.length).toBeGreaterThan(0);
+    let compared = 0;
     for (const row of mine) {
       const key = iso(row[0]);
       expect([String(row[2] ?? "null"), String(row[3] ?? "null")]).toEqual([
@@ -333,9 +334,12 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
       const revenueValue = row[2];
       const spendValue = row[3];
       if (revenueValue != null && spendValue != null && num(spendValue) !== 0) {
+        compared += 1;
         expect(num(row[1])).toBeCloseTo(num(revenueValue) / num(spendValue), 4);
       }
     }
+    // The check above must have run on some months.
+    expect(compared).toBeGreaterThan(0);
   });
 
   it("gives dashboard viewers with different rules their own metric values, not from one cache", async () => {

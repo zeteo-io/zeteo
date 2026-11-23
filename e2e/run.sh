@@ -4,6 +4,9 @@
 #   e2e/run.sh                     # or: npm run test:e2e
 #   KEEP=1 e2e/run.sh              # leave the stack running afterwards
 #   e2e/run.sh down                # tear down a stack left by KEEP=1
+#                                  # WARNING: deletes the project's containers AND volumes.
+#                                  # Refused unless this checkout's run left e2e/.env.run or
+#                                  # E2E_PROJECT=<name> is given: E2E_PROJECT=<name> e2e/run.sh down
 #   e2e/run.sh --browser           # only the browser test (Playwright)
 #   PLAYWRIGHT=0 e2e/run.sh        # only the Vitest files
 #
@@ -37,6 +40,14 @@ log() { printf '\n==> %s\n' "$*" >&2; }
 # the values it requires, so its named volumes are found and removed. The env
 # file is kept when `down` fails, so it can be run again.
 teardown() {
+  # Only a stack this checkout's own run wrote (its env file) or one named on
+  # purpose is removed: the default project name may belong to a stack someone
+  # keeps running (a demo), and its volumes would go with it.
+  if [[ ! -f "$ENV_FILE" && -z "${E2E_PROJECT:-}" ]]; then
+    echo "Refusing to remove the compose project $PROJECT: $ENV_FILE does not exist, so no run of this checkout owns it." >&2
+    echo "Its containers and volumes could belong to a stack kept on purpose. To remove it anyway, name it: E2E_PROJECT=$PROJECT e2e/run.sh down" >&2
+    return 1
+  fi
   local env_file="$ENV_FILE" placeholder=""
   if [[ ! -f "$ENV_FILE" ]]; then
     placeholder="$(mktemp)"
