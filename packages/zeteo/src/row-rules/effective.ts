@@ -1,13 +1,17 @@
 import { keysById, valuesOfUser, valuesOfUsers } from "../identity/service.js";
 import { identityKeysOf, isIdentityRef, mapRule, opOf } from "./store.js";
 import type { RowAccess, RuleFilter } from "./types.js";
-import { usersBelow } from "../grants/hierarchy.js";
 import { loadAccessAs } from "../grants/access.js";
 import { NotFoundError } from "../utils/errors.js";
 import { combineRowAccess } from "./resolve.js";
 import { originOf } from "../uploads/origin.js";
 import { describeRowRule } from "./describe.js";
 import { prisma } from "../utils/db/prisma.js";
+import {
+  HierarchyTooLargeError,
+  HierarchyUnavailableError,
+  usersBelow,
+} from "../grants/hierarchy.js";
 import type {
   ResolvedRuleFilter,
   RowRule,
@@ -68,8 +72,14 @@ const valuesWithBelow = async (
   let below: string[];
   try {
     below = await usersBelow(userId);
-  } catch {
-    return null;
+  } catch (err) {
+    if (
+      err instanceof HierarchyUnavailableError ||
+      err instanceof HierarchyTooLargeError
+    ) {
+      return null;
+    }
+    throw err;
   }
   return valuesOfUsers([...new Set([userId, ...below])], keyIds);
 };

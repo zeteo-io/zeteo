@@ -507,7 +507,7 @@ PanelLine:
     cached_at: { type: string, format: date-time, description: Present when the result came from the cache; when it was read from the source }
     error:
       type: object
-      description: A failure of the panel's run, as an error body of `POST /v1/query` carries it
+      description: A failure of the panel's run, as an error body of `POST /v1/query` carries it; `row_rule_unavailable` when the viewer's row rule cannot be applied, including when it uses `below` and Tereo cannot give the reporting lines now (retry shortly)
       required: [error, error_description]
       properties:
         error: { type: string }

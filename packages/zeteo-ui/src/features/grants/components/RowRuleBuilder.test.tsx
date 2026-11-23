@@ -34,6 +34,8 @@ describe("row rule model", () => {
       },
       { placed_on: { gte: { relative: { unit: "day", offset: -90 } } } },
       { status: { notIn: { identity: "rep" } } },
+      { status: { in: { identity: "rep", below: true } } },
+      { status: { notIn: { identity: "rep", below: true } } },
     ];
     for (const rule of rules) {
       const draft = parseRule(rule);
@@ -167,6 +169,50 @@ describe("RowRuleBuilder", () => {
     renderWithProviders(<Harness onRule={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Remove condition" }));
     expect(screen.queryByLabelText("Column")).not.toBeInTheDocument();
+  });
+
+  it("includes people who report to me on an identity condition", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const rule = parseRule({ status: { in: { identity: "rep" } } })!;
+    renderWithProviders(
+      <RowRuleBuilder
+        columns={columns}
+        identityKeys={[{ name: "rep", label: "reps", description: null }]}
+        value={rule}
+        onChange={onChange}
+      />
+    );
+    const below = screen.getByLabelText("Include people who report to me");
+    expect(below).toBeEnabled();
+    expect(below).not.toBeChecked();
+    await user.click(below);
+    expect(toRule(onChange.mock.lastCall![0], columns)).toEqual({
+      status: { in: { identity: "rep", below: true } },
+    });
+  });
+
+  it("shows a loaded below as checked, and offers it only on identity conditions", () => {
+    renderWithProviders(
+      <RowRuleBuilder
+        columns={columns}
+        identityKeys={[{ name: "rep", label: "reps", description: null }]}
+        value={parseRule({
+          and: [
+            { status: { in: { identity: "rep", below: true } } },
+            { status: { eq: "paid" } },
+          ],
+        })!}
+        onChange={vi.fn()}
+      />
+    );
+    expect(
+      screen.getAllByLabelText("Include people who report to me")
+    ).toHaveLength(1);
+    expect(
+      screen.getByLabelText("Include people who report to me")
+    ).toBeChecked();
+    expect(screen.queryByText(/coming soon/)).not.toBeInTheDocument();
   });
 
   it("says when the identity options could not be loaded", () => {

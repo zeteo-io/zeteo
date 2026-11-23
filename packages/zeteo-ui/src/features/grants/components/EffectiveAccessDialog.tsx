@@ -67,7 +67,14 @@ const Warning = ({
       return `This user's access to ${members} is limited differently from this merged table.`;
     }
     case "row_rule_unavailable":
-      return "A rule names a column that no longer exists; queries on this table are refused.";
+      switch (warning.reason) {
+        case "too_many_values":
+          return "This user's rule resolves to too many values (or too many people report to them); queries on this table are refused.";
+        case "hierarchy_unavailable":
+          return "Reporting lines couldn't be read from Tereo; queries using them are refused until it answers.";
+        default:
+          return "A rule names a column that no longer exists; queries on this table are refused.";
+      }
   }
 };
 

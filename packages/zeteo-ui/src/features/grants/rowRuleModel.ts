@@ -45,6 +45,8 @@ export interface Condition {
   list: string[];
   /** The identity key of "is one of my…" and "is none of my…". */
   key: string;
+  /** With "is one of my…" and "is none of my…": the values of everyone who reports to the caller count too. */
+  below?: boolean;
   /** "in the last N <unit>s". */
   n: string;
   unit: RelativeUnitChoice;
@@ -181,9 +183,14 @@ const conditionFilter = (c: Condition, columns: RuleColumn[]): unknown => {
         },
       };
     case "mineIn":
-      return { [c.column]: { in: { identity: c.key } } };
     case "mineNotIn":
-      return { [c.column]: { notIn: { identity: c.key } } };
+      return {
+        [c.column]: {
+          [c.op === "mineIn" ? "in" : "notIn"]: c.below
+            ? { identity: c.key, below: true }
+            : { identity: c.key },
+        },
+      };
   }
 };
 
@@ -247,10 +254,16 @@ const isScalar = (v: unknown): v is string | number | boolean =>
 const NOT_PARSED = Symbol("not parsed");
 type Parsed<T> = T | typeof NOT_PARSED;
 
-const identityOf = (v: unknown): string | null =>
-  isRecord(v) && Object.keys(v).length === 1 && typeof v.identity === "string"
-    ? v.identity
-    : null;
+/** An identity reference: `{ identity }`, or `{ identity, below: true }`. */
+const identityOf = (v: unknown): { key: string; below: boolean } | null => {
+  if (!isRecord(v) || typeof v.identity !== "string") return null;
+  const keys = Object.keys(v);
+  if (keys.length === 1) return { key: v.identity, below: false };
+  if (keys.length === 2 && v.below === true) {
+    return { key: v.identity, below: true };
+  }
+  return null;
+};
 
 const hintOf = (v: unknown): { numeric?: true; boolean?: true } =>
   typeof v === "number"
@@ -331,12 +344,13 @@ const parseCondition = (column: string, body: unknown): Parsed<Condition> => {
         : NOT_PARSED;
     case "in":
     case "notIn": {
-      const key = identityOf(v);
-      if (key !== null) {
+      const ref = identityOf(v);
+      if (ref !== null) {
         return newCondition({
           column,
           op: op === "in" ? "mineIn" : "mineNotIn",
-          key,
+          key: ref.key,
+          ...(ref.below ? { below: true } : {}),
         });
       }
       return Array.isArray(v) && v.length > 0 && v.every(isScalar)

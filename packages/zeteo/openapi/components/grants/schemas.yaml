@@ -85,9 +85,11 @@ RowRule:
     paths, and the column need not be granted), with every operator of the filter language and
     relative dates. Two value forms are added, allowed only under `eq`, `in`, `ne` and `notIn`:
     `{ "identity": "<key name>" }`, the caller's values under that identity key, and
-    `{ "identity": "<key name>", "below": true }`, which also takes the values of everyone who
-    reports to the caller. `below` is not available yet in Zeteo, which does not read Tereo's
-    reporting lines yet: it is refused (`400 invalid_row_rule`). An identity condition that resolves to no values makes the whole rule of
+    `{ "identity": "<key name>", "below": true }`, the values of the caller and of everyone below
+    them in Tereo's reporting lines, at any depth, deactivated users included (a service account
+    gets only its own). When Tereo cannot give the reporting lines, a query reading the table is
+    refused with `503 row_rule_unavailable`; when they are too large, `409 row_rule_unavailable`.
+    An identity condition that resolves to no values makes the whole rule of
     that grant match no rows, whatever operator or `not` surrounds it.
 
 RowFields:
@@ -386,7 +388,9 @@ EffectiveAccess:
             required: [code, reason]
             properties:
               code: { type: string, const: row_rule_unavailable }
-              reason: { type: string }
+              reason:
+                type: string
+                description: '`column_missing` (a column the rule reads is gone), `too_many_values` (over 50,000 values, or Tereo refused the reporting lines as too large) or `hierarchy_unavailable` (the rule uses `below` and Tereo cannot give the reporting lines now)'
           - type: object
             description: The table is a merged table the user reads rows of, and these members' rows are limited differently (by a rule while the merged table shows every row, or by a rule other than the merged table's, compared by column name); a member's rules do not flow into the merged table
             required: [code, member_table_ids]

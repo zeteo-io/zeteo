@@ -191,12 +191,18 @@ type BelowValues =
 /**
  * The values under `keyIds` of the caller and of everyone below them, read
  * from tereo. A failure is the reason the rules using `below` cannot be
- * applied: never a fallback to the caller's own values.
+ * applied: never a fallback to the caller's own values. A service account
+ * has no place in tereo's reporting lines, so nobody is below it: it gets
+ * its own values, decided by its type and never by a failure.
  */
 const valuesBelow = async (
   userId: string,
-  keyIds: string[]
+  keyIds: string[],
+  isServiceAccount: boolean
 ): Promise<BelowValues> => {
+  if (isServiceAccount) {
+    return { kind: "ok", values: await valuesOfUsers([userId], keyIds) };
+  }
   let below: string[];
   try {
     below = await usersBelow(userId);
@@ -220,11 +226,13 @@ const valuesBelow = async (
  * rules use and one the caller's identity values; neither runs when no grant
  * has a rule. When a rule uses `below`, tereo is asked once who is below the
  * caller and one more query reads their values with the caller's; when that
- * fails, every table with such a rule is `unavailable`.
+ * fails, every table with such a rule is `unavailable`. A service account
+ * (`isServiceAccount`) is never looked up: `below` gives it its own values.
  */
 export const resolveRowRules = async (
   userId: string,
-  tableGrants: Map<string, GrantRow[]>
+  tableGrants: Map<string, GrantRow[]>,
+  { isServiceAccount = false }: { isServiceAccount?: boolean } = {}
 ): Promise<Map<string, RowRule>> => {
   const limited = new Map<
     string,
@@ -271,7 +279,7 @@ export const resolveRowRules = async (
     valuesOfUser(userId, [...keyIds]),
     belowKeyIds.size === 0
       ? Promise.resolve<BelowValues>({ kind: "ok", values: new Map() })
-      : valuesBelow(userId, [...belowKeyIds]),
+      : valuesBelow(userId, [...belowKeyIds], isServiceAccount),
   ]);
   const byId = new Map(rows.map((row) => [row.id, row]));
 

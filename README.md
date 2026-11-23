@@ -86,7 +86,9 @@ and changes write audit entries to tereo's outbox.
   under `/v1/sources/:sourceId/tables` and `/relations`.
 - **Grants.** `/v1/grants` gives a user or group one table, all its columns or a list. Default deny.
   A grant may also limit which rows it reaches, with a row rule that can compare a column against
-  the caller's own identity values (`/v1/identity-keys`), so a rep sees their own orders; any "All
+  the caller's own identity values (`/v1/identity-keys`), so a rep sees their own orders, or, with
+  `below`, those of the caller and everyone who reports to them in Tereo's reporting lines, so a
+  director sees their whole team's; any "All
   rows" grant overrides other grants' limits, otherwise a caller's rules are OR'd, and results say
   `rows_limited` ([docs/row-rules.md](packages/zeteo/docs/row-rules.md)).
   `/v1/principal-limits` gives a user or group its own limits on how many queries and exports it
@@ -140,5 +142,4 @@ and changes write audit entries to tereo's outbox.
   ([docs/mcp.md](packages/zeteo/docs/mcp.md#the-claude-code-plugin)). A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
-Not there yet: `below` in row rules (the caller and everyone who reports to them): Tereo keeps
-reporting lines, but Zeteo does not read them yet.
+Not there yet: row rules that follow relations.

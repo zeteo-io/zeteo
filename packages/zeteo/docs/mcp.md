@@ -293,4 +293,7 @@ a name the caller is not granted fails exactly as one that does not exist, in ev
 `request_id` is the call's, found on its log lines. An unexpected failure is
 `Internal error (request <id>)`, with nothing of its cause. A call whose input the package's schema
 refuses (`query` without `source`, say) is answered by the MCP SDK's own validation message, not
-zeteo's error shape. Database and driver text never reaches the model.
+zeteo's error shape. Database and driver text never reaches the model. Failures of 500 or above
+that normal operation produces (`query_timeout`, `source_unreachable`, `temporarily_unavailable`,
+and the `503 row_rule_unavailable` of a rule using `below` while Tereo cannot give the reporting
+lines) are logged where they arise, not again at error by the tool call.

@@ -234,10 +234,17 @@ describe("describeRowRule with below", () => {
     expect(text).not.toMatch(/u-report-1|1042/);
   });
 
-  it("is no rows right now when the hierarchy is unavailable", () => {
+  it("says to try again shortly, not to ask an admin, when the hierarchy is unavailable", () => {
     expect(
       rowsLimitedReason(
         { kind: "unavailable", reason: "hierarchy_unavailable" },
+        granted,
+        keyLabels
+      )
+    ).toBe("no rows right now; try again shortly");
+    expect(
+      rowsLimitedReason(
+        { kind: "unavailable", reason: "too_many_values" },
         granted,
         keyLabels
       )

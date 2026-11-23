@@ -186,6 +186,10 @@ export const NO_ROWS = "no rows";
 /** Why a caller sees no row of a table whose rule cannot be applied as written. */
 export const NO_ROWS_UNAVAILABLE = "no rows right now; ask an admin";
 
+/** Why a caller sees no row of a table whose rule needs reporting lines tereo cannot give now (the 503). */
+export const NO_ROWS_HIERARCHY_UNAVAILABLE =
+  "no rows right now; try again shortly";
+
 /**
  * A caller's own resolved rule on a table, in words: the rule described
  * with only `granted` columns named, or why they see no row.
@@ -206,6 +210,8 @@ export const rowsLimitedReason = (
     case "never":
       return NO_ROWS;
     case "unavailable":
-      return NO_ROWS_UNAVAILABLE;
+      return rule.reason === "hierarchy_unavailable"
+        ? NO_ROWS_HIERARCHY_UNAVAILABLE
+        : NO_ROWS_UNAVAILABLE;
   }
 };

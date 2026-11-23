@@ -64,10 +64,9 @@ to the grant's own table and extended with identity values:
   nested `and` / `or` / `not` within the usual depth limit. Not `{ "measure": ... }` values.
 - Two value forms, only under `eq`, `in`, `ne` and `notIn`:
   - `{ "identity": "<key>" }`: the caller's values under that identity key.
-  - `{ "identity": "<key>", "below": true }`: also the values of everyone who reports to the
-    caller. **Not available yet in Zeteo:** Tereo keeps reporting lines (since 0.8.3), but Zeteo
-    does not read them yet, so a rule using `below` is refused (`400 invalid_row_rule`). Do not
-    rely on it.
+  - `{ "identity": "<key>", "below": true }`: the values of the caller and of everyone below
+    them in Tereo's reporting lines, at any depth (a manager's reports, their reports, and so on).
+    See [Everyone below the caller](#everyone-below-the-caller).
 
 `eq` with an identity means "is one of my values" (as `in`); `ne` and `notIn` mean "is none of
 them".
@@ -112,6 +111,25 @@ Upload source owners (`zeteo.uploads.write`) may read key names and labels to bu
 own tables' grants, never any value. Every change is audited (`zeteo.identity_key.created`,
 `.updated`, `.removed`; `zeteo.identity_value.added`, `.removed`) in the same transaction.
 
+## Everyone below the caller
+
+`{ "identity": "<key>", "below": true }` stands for the values under `<key>` of the caller and of
+every user below them in Tereo's reporting lines (`PUT /v1/admin/users/:id/reports-to` in Tereo),
+transitively. A director whose rule is `{ "sales_rep": { "in": { "identity": "rep_id", "below":
+true } } }` sees their own orders and those of every rep under their managers.
+
+- Zeteo asks Tereo (`listUserReports`, transitive; its `user_resolver` role carries `users.read`)
+  only when a rule reaching the caller uses `below`, and never inside a transaction. The answer is
+  cached in-process for 30 seconds per user, so a reorganisation applies within that.
+- Deactivated users stay in the chain and keep their values: a deactivated manager does not cut
+  their reports off from the director above, and a deactivated rep's old rows stay visible.
+- A user with no reports gets exactly their own values; with none of their own and nobody below
+  holding one, the grant's rule matches no rows.
+- The 50,000-value cap counts the values of everyone below.
+- A service account has no place in the reporting lines: `below` gives it only its own values,
+  and Tereo is not asked.
+- The caller's own sentence (`rows_limited_reason`) names no one below them.
+
 ## Failing closed
 
 Any input that cannot be resolved yields fewer rows or a refused query, never more.
@@ -122,6 +140,8 @@ Any input that cannot be resolved yields fewer rows or a refused query, never mo
 | A rule's column has gone missing from the catalogue | Queries reading the table are refused with `409 row_rule_unavailable` ("ask an admin"); the grant shows `column_missing:<name>` in `row_rule_problems`. |
 | A rule resolves to more than 50,000 values | Refused with `409 row_rule_unavailable`; never truncated. |
 | An identity key is deleted while rules use it | The delete is refused: `409 identity_key_in_use`. |
+| Tereo cannot say who reports to the caller (unreachable, erroring, or no such user) while a rule uses `below` | Queries reading the table are refused with `503 row_rule_unavailable` ("try again shortly"); never the caller's own rows only, never every row. |
+| Tereo refuses the reporting lines as too large (over 10,000 users or 64 levels) | Refused with `409 row_rule_unavailable`, reason `too_many_values`. |
 | Tereo is unreachable while a grant's groups are read | The request fails as it does today; there is no fallback to wider access. |
 
 An identity value that does not convert to the rule column's type is dropped; with none left the
@@ -152,7 +172,10 @@ not flow into it ([uploads.md](uploads.md)). Effective access warns when they di
   (sales rep) from the last 90 days"). It names identity keys by label, never values, and a column
   only if the caller is granted it (a condition on another column reads "some rows only"). A grant's
   `row_rule_description` replaces the generated sentence. "No rows" means no rule of theirs keeps any;
-  "no rows right now; ask an admin" means their rule cannot be applied (`row_rule_unavailable`).
+  "no rows right now; ask an admin" means their rule cannot be applied (`row_rule_unavailable`), and
+  "no rows right now; try again shortly" that it uses `below` and Tereo cannot give the reporting
+  lines now (the `503`). A rule with `below` reads "… is your <key label> or that of anyone who
+  reports to you", naming no one.
 - MCP per-caller instructions add one line: some tables show only some rows, `describe_table` says
   which, and totals should be called "your" figures.
 - Callers never see other principals' rules, the list of identity keys, or their identity values.
@@ -167,7 +190,8 @@ an admin what one user gets of one table: `columns` (`"all"` or names), `rows` (
 `none`), `rule_summary` (the combined rule in words, naming every column), the `grants` it comes
 from, and `warnings`: `all_rows_overrides` (an `all` grant overriding another's rule, with its
 `grant_id`), `missing_identity_value` (the `key` the user holds no value for),
-`row_rule_unavailable` (with a `reason`) and `merged_members_limited` (a merged table the user
+`row_rule_unavailable` (with a `reason`: `column_missing`, `too_many_values`, or
+`hierarchy_unavailable` when Tereo cannot give the user's reporting lines) and `merged_members_limited` (a merged table the user
 reads rows of, whose members' rows are limited differently: by a rule while the merged table shows
 every row, or by a rule other than the merged table's, compared by column name; the
 `member_table_ids` are those members). Groups scoped to an organization count only when `organization_id` is
@@ -182,7 +206,5 @@ rows is reset and its id listed in the transfer entry's `row_access_reset`.
 
 ## Not yet
 
-- `below` (people who report to me, transitively): Zeteo does not read Tereo's reporting lines
-  yet; until it does, a rule using it is refused.
 - Rules that propagate across relations, named reusable policies, database-native row-level
   security, and fuzzy matching of identity values.

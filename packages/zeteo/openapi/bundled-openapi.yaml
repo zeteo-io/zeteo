@@ -3615,7 +3615,7 @@ paths:
             Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
             pool briefly unavailable (the source busy). Retry, after `Retry-After` when given. Or
             `uploads_misconfigured`: an upload source while `UPLOADS_READER_URL` cannot be used
-            (the operator's to fix; the detail is logged).
+            (the operator's to fix; the detail is logged). Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
           headers:
             Retry-After:
               description: Seconds to wait before retrying
@@ -3844,7 +3844,8 @@ paths:
             pool briefly unavailable, or the service is shutting down (an export refused for that
             is not recorded). Retry, after `Retry-After` when given. Or `uploads_misconfigured`:
             an upload source while `UPLOADS_READER_URL` cannot be used (the detail is logged). A
-            upload source exported while Uploads are off is `404 uploads_not_configured`.
+            upload source exported while Uploads are off is `404 uploads_not_configured`. Or
+            `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
           headers:
             Retry-After:
               description: Seconds to wait before retrying
@@ -4757,7 +4758,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
+            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
           description: Gateway timeout - `query_timeout`
           content:
@@ -4912,7 +4925,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
+            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
           description: Gateway timeout - `query_timeout`, before the stream starts
           content:
@@ -6147,7 +6172,19 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          description: |
+            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
+            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
+            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '504':
           description: Gateway timeout - `query_timeout`
           content:
@@ -7739,9 +7776,11 @@ components:
         paths, and the column need not be granted), with every operator of the filter language and
         relative dates. Two value forms are added, allowed only under `eq`, `in`, `ne` and `notIn`:
         `{ "identity": "<key name>" }`, the caller's values under that identity key, and
-        `{ "identity": "<key name>", "below": true }`, which also takes the values of everyone who
-        reports to the caller. `below` is not available yet in Zeteo, which does not read Tereo's
-        reporting lines yet: it is refused (`400 invalid_row_rule`). An identity condition that resolves to no values makes the whole rule of
+        `{ "identity": "<key name>", "below": true }`, the values of the caller and of everyone below
+        them in Tereo's reporting lines, at any depth, deactivated users included (a service account
+        gets only its own). When Tereo cannot give the reporting lines, a query reading the table is
+        refused with `503 row_rule_unavailable`; when they are too large, `409 row_rule_unavailable`.
+        An identity condition that resolves to no values makes the whole rule of
         that grant match no rows, whatever operator or `not` surrounds it.
     IdentityKey:
       type: object
@@ -7903,6 +7942,7 @@ components:
                     const: row_rule_unavailable
                   reason:
                     type: string
+                    description: '`column_missing` (a column the rule reads is gone), `too_many_values` (over 50,000 values, or Tereo refused the reporting lines as too large) or `hierarchy_unavailable` (the rule uses `below` and Tereo cannot give the reporting lines now)'
               - type: object
                 description: The table is a merged table the user reads rows of, and these members' rows are limited differently (by a rule while the merged table shows every row, or by a rule other than the merged table's, compared by column name); a member's rules do not flow into the merged table
                 required:
@@ -8336,7 +8376,7 @@ components:
           description: The run's id in the run log
     QueryError:
       type: object
-      description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name. `row_rule_unavailable` (`409`) is a table the query reads whose row rule of the caller's cannot be applied right now (a column it reads is gone, or its resolved values are over the cap), so ask an admin.
+      description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name. `row_rule_unavailable` (`409`) is a table the query reads whose row rule of the caller's cannot be applied right now (a column it reads is gone, or its resolved values are over the cap), so ask an admin; it is `503` when the rule uses `below` and Tereo cannot give the caller's reporting lines now, so try again shortly.
       required:
         - error
         - error_description
@@ -8588,7 +8628,7 @@ components:
           description: The caller's grants show them only some of the table's rows
         rows_limited_reason:
           type: string
-          description: 'Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads "some rows only") and identity keys by label, never the caller''s values; a grant''s `row_rule_description` replaces its generated sentence; "no rows" when no rule keeps any, and "no rows right now; ask an admin" when the caller''s rule cannot be applied as written (a query reading the table is refused with `row_rule_unavailable`)'
+          description: 'Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads "some rows only") and identity keys by label, never the caller''s values; a grant''s `row_rule_description` replaces its generated sentence; "no rows" when no rule keeps any, "no rows right now; ask an admin" when the caller''s rule cannot be applied as written, and "no rows right now; try again shortly" when it uses `below` and Tereo cannot give the reporting lines now (either way a query reading the table is refused with `row_rule_unavailable`)'
         columns:
           type: array
           description: Only the granted columns, in the table's order
@@ -10408,7 +10448,7 @@ components:
           description: Present when the result came from the cache; when it was read from the source
         error:
           type: object
-          description: A failure of the panel's run, as an error body of `POST /v1/query` carries it
+          description: A failure of the panel's run, as an error body of `POST /v1/query` carries it; `row_rule_unavailable` when the viewer's row rule cannot be applied, including when it uses `below` and Tereo cannot give the reporting lines now (retry shortly)
           required:
             - error
             - error_description

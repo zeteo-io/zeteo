@@ -322,6 +322,34 @@ describe("resolveRowRules with below", () => {
     });
   });
 
+  it("gives a service account only its own values, without asking tereo", async () => {
+    mocked.valuesOfUsers.mockResolvedValue(valuesOf([["k1", ["7"]]]));
+    const rules = await resolveRowRules(
+      "svc",
+      new Map([["t1", [ruleGrant(below())]]]),
+      { isServiceAccount: true }
+    );
+    expect(mocked.usersBelow).not.toHaveBeenCalled();
+    expect(mocked.valuesOfUsers).toHaveBeenCalledWith(["svc"], ["k1"]);
+    expect(rules.get("t1")).toMatchObject({
+      kind: "filter",
+      filter: { c_rep: { in: ["7"] } },
+    });
+  });
+
+  it("still refuses a user whose reporting lines tereo cannot read", async () => {
+    mocked.usersBelow.mockRejectedValue(new HierarchyUnavailableError());
+    const rules = await resolveRowRules(
+      "caller",
+      new Map([["t1", [ruleGrant(below())]]]),
+      { isServiceAccount: false }
+    );
+    expect(rules.get("t1")).toEqual({
+      kind: "unavailable",
+      reason: "hierarchy_unavailable",
+    });
+  });
+
   it("never reads the hierarchy for rules without below", async () => {
     mocked.valuesOfUser.mockResolvedValue(valuesOf([["k1", ["1"]]]));
     await resolve(ruleGrant({ c_rep: { in: { identity: "k1" } } }));

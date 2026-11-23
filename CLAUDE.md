@@ -48,9 +48,10 @@ which may compare a column with the caller's own values under a named identity k
 grants reaching a caller on a table, any `all` gives every row, else the rules are OR'd, else every
 row. Identity keys and the values users hold under them are `/v1/identity-keys`; `GET
 /v1/grants/effective` shows an admin one user's access to one table; results say `rows_limited`.
-`below` (the caller and everyone who reports to them) is not available: it comes with Tereo's
-reporting lines, and a rule using it is refused. Do not describe or rely on it as existing. Rules do
-not follow relations.
+An identity reference with `below: true` takes the values of the caller and of everyone below them in
+Tereo's reporting lines (`src/grants/hierarchy.ts`: read only when a rule uses it, cached 30 s per
+user, deactivated users kept in the chain; Tereo unavailable is `503 row_rule_unavailable`, never a
+fallback; a service account gets only its own values). Rules do not follow relations.
 
 Read [README.md](README.md) first. The design and the plans are in `docs/superpowers/` (kept out of
 version control): the design spec is `docs/superpowers/specs/2026-11-12-zeteo-design.md`, and the

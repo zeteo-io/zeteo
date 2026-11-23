@@ -54,11 +54,14 @@ export const loadAccess = async (caller: Caller): Promise<CallerAccess> => {
     tables.set(grant.tableId, columns);
   }
 
-  // A service account is resolved like a user: its own grants and values.
+  // A service account is resolved like a user: its own grants and values;
+  // with `below`, only its own values, as no one reports to it.
   const rowRules = [...tableGrants.values()].some((held) =>
     held.some((g) => g.rowAccess === "rule")
   )
-    ? await resolveRowRules(caller.userId, tableGrants)
+    ? await resolveRowRules(caller.userId, tableGrants, {
+        isServiceAccount: caller.isServiceAccount,
+      })
     : new Map<string, RowRule>();
 
   return {
@@ -78,7 +81,8 @@ export const loadAccess = async (caller: Caller): Promise<CallerAccess> => {
  * `loadAccess` for a user who is not the caller, as if signed in to
  * `organizationId`: their own grants and those of their global groups and
  * that organization's. It asks tereo for the groups, so it never runs inside
- * `withAudit`.
+ * `withAudit`. Judged as a user (effective access is for users, and a
+ * transfer refuses a service account): `below` reads their reporting lines.
  */
 export const loadAccessAs = (
   userId: string,

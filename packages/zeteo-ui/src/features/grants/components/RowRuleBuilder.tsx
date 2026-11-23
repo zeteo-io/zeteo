@@ -256,9 +256,17 @@ const ConditionRow = ({
     switch (c.op) {
       case "empty":
       case "notEmpty":
+        return null;
       case "mineIn":
       case "mineNotIn":
-        return null;
+        return (
+          <Switch
+            size="sm"
+            label="Include people who report to me"
+            checked={c.below === true}
+            onChange={(e) => onChange({ ...c, below: e.target.checked })}
+          />
+        );
       case "in":
       case "notIn":
         return (
@@ -360,6 +368,8 @@ const ConditionRow = ({
               op: o.op,
               key: o.key,
               list: o.op === "in" || o.op === "notIn" ? c.list : [],
+              below:
+                o.op === "mineIn" || o.op === "mineNotIn" ? c.below : undefined,
             })
           }
         />
@@ -530,13 +540,6 @@ const GroupView = ({
   );
 };
 
-const usesIdentity = (g: Group): boolean =>
-  g.items.some((i) =>
-    i.kind === "group"
-      ? usesIdentity(i)
-      : i.op === "mineIn" || i.op === "mineNotIn"
-  );
-
 /**
  * Edits a row rule: groups of conditions, nested one level, each group
  * matching all (AND) or any (OR) of its conditions.
@@ -566,14 +569,5 @@ export const RowRuleBuilder = ({
       invalidMessage={invalidMessage}
       onChange={onChange}
     />
-    {usesIdentity(value) && (
-      <Switch
-        size="sm"
-        label="Include people who report to me (coming soon)"
-        checked={false}
-        disabled
-        onChange={() => undefined}
-      />
-    )}
   </div>
 );

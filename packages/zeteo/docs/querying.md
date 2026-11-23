@@ -569,7 +569,9 @@ once.
   keys by label, never their values; a grant's `row_rule_description` replaces its sentence, and
   "no rows" means no rule of theirs keeps any; "no rows right now; ask an admin" means their rule
   cannot be applied as written (a column it reads is gone, or it resolves to too many values), and
-  a query reading the table is refused with `409 row_rule_unavailable`. How rules are written,
+  a query reading the table is refused with `409 row_rule_unavailable`; "no rows right now; try
+  again shortly" means the rule uses `below` and Tereo cannot give the reporting lines now, and a
+  query reading the table is refused with `503 row_rule_unavailable`. How rules are written,
   combined and enforced is in [row-rules.md](row-rules.md).
 - A query past its time limit is stopped on the source: `504 query_timeout`. The time limit is
   counted from just before the concurrency check, so time spent waiting for a connection to the
@@ -626,6 +628,9 @@ root of the query) and `suggestions` (up to three close names, closest first).
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
   `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable;
   for an export, also one started while the service shuts down, which is not recorded).
+- From the caller's row rules, before running: `409 row_rule_unavailable` (a rule's column is gone,
+  or it resolves to too many values) and `503 row_rule_unavailable` (a rule uses `below` and Tereo
+  cannot give the caller's reporting lines: try again shortly) ([row-rules.md](row-rules.md)).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
   fixed message and the request's `request_id`, which finds the log line.
 

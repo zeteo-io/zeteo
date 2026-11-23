@@ -12,8 +12,9 @@ export type RowAccess = "unlimited_default" | "all" | "rule";
 
 /**
  * The caller's own values under an identity key; with `below`, also those of
- * everyone who reports to them (not available yet: Zeteo does not read Tereo's
- * reporting lines yet, so it is refused).
+ * everyone below them in Tereo's reporting lines, at any depth. While Tereo
+ * cannot give those, a query reading the table is refused with
+ * `503 row_rule_unavailable`.
  */
 export interface IdentityRef {
   identity: string;
@@ -180,7 +181,11 @@ export interface EffectiveAccessOptions {
 export type EffectiveAccessWarning =
   | { code: "all_rows_overrides"; grant_id: string }
   | { code: "missing_identity_value"; key: string }
-  | { code: "row_rule_unavailable"; reason: string }
+  | {
+      code: "row_rule_unavailable";
+      /** `column_missing`, `too_many_values`, or `hierarchy_unavailable` (Tereo cannot give the user's reporting lines now). */
+      reason: string;
+    }
   | { code: "merged_members_limited"; member_table_ids: string[] };
 
 /** What one user gets of one table over all the grants that reach them. */

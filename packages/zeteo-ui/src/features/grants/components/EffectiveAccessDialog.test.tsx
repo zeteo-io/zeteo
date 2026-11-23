@@ -108,7 +108,7 @@ describe("EffectiveAccessDialog", () => {
           { code: "all_rows_overrides", grant_id: "g2" },
           { code: "missing_identity_value", key: "rep_region" },
           { code: "merged_members_limited", member_table_ids: ["t2"] },
-          { code: "row_rule_unavailable", reason: "column_gone" },
+          { code: "row_rule_unavailable", reason: "column_missing" },
         ],
       })
     );
@@ -132,5 +132,22 @@ describe("EffectiveAccessDialog", () => {
         "A rule names a column that no longer exists; queries on this table are refused."
       )
     ).toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      "too_many_values",
+      "This user's rule resolves to too many values (or too many people report to them); queries on this table are refused.",
+    ],
+    [
+      "hierarchy_unavailable",
+      "Reporting lines couldn't be read from Tereo; queries using them are refused until it answers.",
+    ],
+  ])("words a rule unavailable for %s by its reason", async (reason, text) => {
+    show(effective({ warnings: [{ code: "row_rule_unavailable", reason }] }));
+    expect(await screen.findByText(text)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/a column that no longer exists/)
+    ).not.toBeInTheDocument();
   });
 });

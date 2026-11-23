@@ -684,9 +684,28 @@ describe("GrantDialog", () => {
       expect(post.mock.calls[0][1].row_rule).toEqual({
         customer_id: { in: { identity: "netsuite_employee_id" } },
       });
-      expect(
-        screen.getByLabelText(/Include people who report to me/)
-      ).toBeDisabled();
+    });
+
+    it("sends below when people who report to me are included", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseRule(user);
+      await setCondition(
+        user,
+        "customer_id",
+        "is one of my NetSuite employees"
+      );
+      const below = screen.getByLabelText("Include people who report to me");
+      expect(below).toBeEnabled();
+      expect(below).not.toBeChecked();
+      await user.click(below);
+      await user.click(screen.getByRole("button", { name: "Create grant" }));
+      await waitFor(() => expect(post).toHaveBeenCalled());
+      expect(post.mock.calls[0][1].row_rule).toEqual({
+        customer_id: {
+          in: { identity: "netsuite_employee_id", below: true },
+        },
+      });
     });
 
     it("resets the rule draft when the table changes in create mode", async () => {
