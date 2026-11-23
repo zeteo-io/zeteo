@@ -1,5 +1,6 @@
 import { principalLimitsCalls } from "./calls/principalLimits.js";
 import { savedQueriesCalls } from "./calls/savedQueries.js";
+import { identityKeysCalls } from "./calls/identityKeys.js";
 import { savedPanelsCalls } from "./calls/savedPanels.js";
 import { connectionsCalls } from "./calls/connections.js";
 import { dashboardsCalls } from "./calls/dashboards.js";
@@ -62,6 +63,7 @@ const buildCalls = (ctx: CallContext) => ({
   metrics: metricsCalls(ctx),
   calendar: calendarCalls(ctx),
   grants: grantsCalls(ctx),
+  identityKeys: identityKeysCalls(ctx),
   principalLimits: principalLimitsCalls(ctx),
 });
 

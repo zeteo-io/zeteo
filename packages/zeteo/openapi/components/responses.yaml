@@ -55,7 +55,7 @@ Error:
       description: On `writable_login`, present when the check found more than the 20 listed
 
 BadRequestResponse:
-  description: Bad request - `invalid_request`, with `issues`
+  description: Bad request - `invalid_request`, with `issues`; on a grant, `invalid_row_rule`, with `path` into the body (starting `row_rule`)
   content:
     application/json:
       schema:
@@ -83,7 +83,7 @@ NotFoundResponse:
         $ref: '#/Error'
 
 ConflictResponse:
-  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
+  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `identity_key_in_use` (an identity key a grant's rule still names; `grant_ids` lists them), `identity_value_taken` (a value of the key held by another user; `value`), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
   content:
     application/json:
       schema:

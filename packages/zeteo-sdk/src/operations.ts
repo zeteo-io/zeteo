@@ -71,6 +71,27 @@ export const OPERATIONS = {
   getGrant: { method: "GET", path: "/v1/grants/{grantId}" },
   replaceGrant: { method: "PUT", path: "/v1/grants/{grantId}" },
   deleteGrant: { method: "DELETE", path: "/v1/grants/{grantId}" },
+  getEffectiveAccess: { method: "GET", path: "/v1/grants/effective" },
+  listIdentityKeys: { method: "GET", path: "/v1/identity-keys" },
+  createIdentityKey: { method: "POST", path: "/v1/identity-keys" },
+  updateIdentityKey: { method: "PATCH", path: "/v1/identity-keys/{keyId}" },
+  deleteIdentityKey: { method: "DELETE", path: "/v1/identity-keys/{keyId}" },
+  listIdentityValues: {
+    method: "GET",
+    path: "/v1/identity-keys/{keyId}/values",
+  },
+  addIdentityValues: {
+    method: "POST",
+    path: "/v1/identity-keys/{keyId}/values",
+  },
+  deleteIdentityValue: {
+    method: "DELETE",
+    path: "/v1/identity-keys/{keyId}/values/{valueId}",
+  },
+  listMissingIdentityValues: {
+    method: "GET",
+    path: "/v1/identity-keys/{keyId}/missing",
+  },
   listPrincipalLimits: { method: "GET", path: "/v1/principal-limits" },
   createPrincipalLimit: { method: "POST", path: "/v1/principal-limits" },
   getPrincipalLimit: {

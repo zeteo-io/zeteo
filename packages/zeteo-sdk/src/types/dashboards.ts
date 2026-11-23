@@ -329,6 +329,8 @@ export interface PanelLine {
     /** When rows were left out for the row cap: what the viewer is told. */
     notice?: string;
   };
+  /** With `result`: a row rule of the viewer's limited the rows it read. */
+  rows_limited?: boolean;
   /** When the result came from the cache: when it was read from the source. */
   cached_at?: string;
   error?: { error: string; error_description: string };

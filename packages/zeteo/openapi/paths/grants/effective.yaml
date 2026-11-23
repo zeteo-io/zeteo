@@ -1,0 +1,50 @@
+/v1/grants/effective:
+  get:
+    tags: [Grants]
+    summary: Show one user's effective access to one table
+    description: |
+      What the user gets of the table over every grant reaching them (their own and their groups'):
+      the columns, the rows (`all`, `limited` or `none`), the combined rule in words naming every
+      column, the grants it comes from, and warnings an admin should look at: an `all` grant
+      overriding another grant's rule, a rule's identity key the user holds no value for, a rule
+      that cannot be applied, and a merged table whose members carry rules the table itself does
+      not. Groups scoped to an organization count only when `organization_id` is given. Asks tereo
+      for the user's groups and is never cached.
+
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `404 not_found` (the table), `502 tereo_unreachable`.
+    operationId: getEffectiveAccess
+    parameters:
+      - name: user_id
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: table_id
+        in: query
+        required: true
+        schema: { type: string, format: uuid }
+      - name: organization_id
+        in: query
+        required: false
+        description: Count this organization's groups as if the user were signed in to it; absent, global groups only
+        schema: { type: string, format: uuid }
+    responses:
+      '200':
+        description: The access
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/EffectiveAccess'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`, tereo did not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

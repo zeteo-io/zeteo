@@ -46,11 +46,11 @@ const ID2 = "22222222-2222-4222-8222-222222222222";
 const query = { source: "s", from: "t", select: ["id"] };
 
 describe("operations against the API description", () => {
-  it("lists the same 103 operations as the description", () => {
+  it("lists the same 112 operations as the description", () => {
     const { found, blocks } = operationsInSpec();
     // A method block without an operationId would otherwise go unnoticed.
-    expect(blocks).toBe(103);
-    expect(Object.keys(found)).toHaveLength(103);
+    expect(blocks).toBe(112);
+    expect(Object.keys(found)).toHaveLength(112);
     expect(found).toEqual(OPERATIONS);
   });
 
@@ -362,7 +362,10 @@ describe("operations against the API description", () => {
           }),
       ],
       ["grants.get", (c) => c.grants.get(ID)],
-      ["grants.replace", (c) => c.grants.replace(ID, { all_columns: true })],
+      [
+        "grants.replace",
+        (c) => c.grants.replace(ID, { all_columns: true, row_access: "all" }),
+      ],
       ["grants.delete", (c) => c.grants.delete(ID)],
       ["principalLimits.list", (c) => c.principalLimits.list()],
       [
@@ -380,6 +383,30 @@ describe("operations against the API description", () => {
         (c) => c.principalLimits.update(ID, { query_concurrency: 2 }),
       ],
       ["principalLimits.delete", (c) => c.principalLimits.delete(ID)],
+      [
+        "grants.effective",
+        (c) => c.grants.effective({ user_id: ID, table_id: ID2 }),
+      ],
+      ["identityKeys.list", (c) => c.identityKeys.list()],
+      [
+        "identityKeys.create",
+        (c) => c.identityKeys.create({ name: "rep_id", label: "Rep ID" }),
+      ],
+      [
+        "identityKeys.update",
+        (c) => c.identityKeys.update(ID, { label: "Rep" }),
+      ],
+      ["identityKeys.delete", (c) => c.identityKeys.delete(ID)],
+      ["identityKeys.values.list", (c) => c.identityKeys.values.list(ID)],
+      [
+        "identityKeys.values.add",
+        (c) => c.identityKeys.values.add(ID, [{ user_id: ID2, value: "42" }]),
+      ],
+      [
+        "identityKeys.values.delete",
+        (c) => c.identityKeys.values.delete(ID, ID2),
+      ],
+      ["identityKeys.missing", (c) => c.identityKeys.missing(ID)],
     ];
 
     it("has a fixture entry for every function on the client", () => {
@@ -419,18 +446,22 @@ describe("operations against the API description", () => {
 
       const hits = new Map<OperationId, number>();
       for (const request of t.stub.requests) {
-        const match = (
-          Object.entries(OPERATIONS) as [
-            OperationId,
-            { method: string; path: string },
-          ][]
-        ).find(
-          ([, op]) =>
-            op.method === request.method &&
-            new RegExp(`^${op.path.replace(/\{\w+\}/g, "[^/]+")}$`).test(
-              request.path
-            )
-        );
+        const all = Object.entries(OPERATIONS) as [
+          OperationId,
+          { method: string; path: string },
+        ][];
+        // A static path (/v1/grants/effective) beats a {param} one.
+        const match =
+          all.find(
+            ([, op]) => op.method === request.method && op.path === request.path
+          ) ??
+          all.find(
+            ([, op]) =>
+              op.method === request.method &&
+              new RegExp(`^${op.path.replace(/\{\w+\}/g, "[^/]+")}$`).test(
+                request.path
+              )
+          );
         expect(match, `${request.method} ${request.path}`).toBeDefined();
         hits.set(match![0], (hits.get(match![0]) ?? 0) + 1);
       }

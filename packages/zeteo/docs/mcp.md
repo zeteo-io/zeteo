@@ -127,12 +127,12 @@ are run by the tests.
 |------|-------|--------|
 | `list_sources` | none | `{ sources: [{ slug, name, description, type, kind, language, tables, limits: { default_rows, max_rows, timeout_ms, max_joins } }] }`: the sources the caller has a grant on, by slug; `tables` counts the tables they can see |
 | `list_tables` | `{ source }` | `{ source, tables: [{ name, schema_name, kind, description, missing, columns, rows_limited, rows_limited_reason? }] }`; `columns` counts the granted columns |
-| `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join |
+| `describe_table` | `{ source, table }`, `table` as `list_tables` names it | `{ source, table }`, the table as `GET /v1/catalog` shows it: granted columns with type, nullability and description, and the relations the caller may join, with `rows_limited` and, when true, `rows_limited_reason` when a row rule limits the caller's rows of the table ([row-rules.md](row-rules.md)) |
 | `query_guide` | none | `{ guide }`, the reference as Markdown; needs only `zeteo.mcp.use`, not `zeteo.data.read`, as it reads no data |
 | `query` | a query in the source's language, as the body of `POST /v1/query` | `{ columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }` |
 | `list_saved_queries` | `{ scope?: "mine" \| "shared" }` | `{ saved_queries: [view], truncated }` (`truncated` is true when the first 100 were all it returned), the view of `GET /v1/saved-queries` without `owner.id`; one the caller cannot run has `accessible: false` and no `query` or `source` |
 | `get_saved_query` | `{ id }` | the same view |
-| `run_saved_query` | `{ id, limit?, offset? }` | as `query`; refused with `saved_query_not_accessible` when the caller cannot run it |
+| `run_saved_query` | `{ id, limit?, offset? }` | as `query` (`rows_limited` included); refused with `saved_query_not_accessible` when the caller cannot run it |
 | `create_saved_query` | `{ name, description?, query }`, `query` as for `query` | the view; the query is planned against the caller's own grants |
 | `update_saved_query` | `{ id, name?, description?, query? }` | the view |
 | `delete_saved_query` | `{ id }` | `{ deleted: true }` |
@@ -141,7 +141,7 @@ are run by the tests.
 | `get_dashboard` | `{ id }` | the dashboard with its panels, each with `id`, place, `title`, `state` and, for an `ok` panel, its `chart`, `time_column` and `saved_query_id` or `saved_panel_id`; a panel that is not `ok` carries a message instead ([dashboards.md](dashboards.md#panel-states-and-their-copy)) |
 | `create_dashboard`, `update_dashboard`, `delete_dashboard` | name, description, `time_range`, `refresh_seconds`, `theme` | the caller's own dashboard |
 | `add_panel`, `update_panel`, `remove_panel` | a dashboard's id and a panel's saved query, chart, `time_column`, title and place | the panel; what is wrong with the chart is told as `problems` |
-| `preview_panel` | a saved query (`saved_query_id`) or a query that is not saved (`query`, as the `query` tool takes it), exactly one; a chart; optionally `time_range` with `time_column` | `{ columns, row_count, truncated, rows (the first 20), problems }`; a `query` runs exactly as the `query` tool's (recorded as an `mcp` run with no saved query), so a model can show a chart without saving anything; runs as the caller under MCP's row limits, so a query (saved or not) without its own `limit` reads at most 100 rows (`truncated` when there are more); the tool's description says so, so a model does not mistake it for the dashboard's limit (1,000 rows by default) |
+| `preview_panel` | a saved query (`saved_query_id`) or a query that is not saved (`query`, as the `query` tool takes it), exactly one; a chart; optionally `time_range` with `time_column` | `{ columns, row_count, truncated, rows_limited, rows (the first 20), problems }`; a `query` runs exactly as the `query` tool's (recorded as an `mcp` run with no saved query), so a model can show a chart without saving anything; runs as the caller under MCP's row limits, so a query (saved or not) without its own `limit` reads at most 100 rows (`truncated` when there are more); the tool's description says so, so a model does not mistake it for the dashboard's limit (1,000 rows by default) |
 | `list_saved_panels`, `get_saved_panel`, `create_saved_panel`, `update_saved_panel`, `delete_saved_panel` | as the saved query tools, with a chart | the saved panel (a saved query with its chart) |
 | `link_saved_panel`, `detach_panel` | a dashboard and a saved panel, or a linked panel | the panel |
 | `list_measures`, `list_metrics` | `{ source }` (slug) | `{ measures \| metrics: [view], can_edit }`: the views of `GET /v1/sources/:id/measures` and `/metrics` without `id`, redacted ones included for editors |
@@ -207,7 +207,7 @@ grants:
 
 | Tool | Gives |
 |------|-------|
-| `card_panel_rows` | a saved panel's, or a saved query's or unsaved `query`'s with a chart, `{ title, chart, columns, rows, truncated, problems }` (`title` null but for a saved panel) |
+| `card_panel_rows` | a saved panel's, or a saved query's or unsaved `query`'s with a chart, `{ title, chart, columns, rows, truncated, rows_limited, problems }` (`title` null but for a saved panel) |
 | `card_dashboard` | a dashboard's layout, or, with `panel_ids` (1-4, each once), those panels run as the dashboard runs them, one line each |
 
 Both are visible to the card's app only (`visibility: ["app"]`), need `zeteo.mcp.use` and

@@ -147,8 +147,11 @@ The fingerprint is a hash of the source, the plan and the row cap. **Sharing an 
 viewers is safe** because the planner builds a plan only from the viewer's visible catalogue
 (granted tables and columns, relations whose keys are all granted) and the query's bound values,
 so equal plans compile to the same SQL and parameters over data both viewers may read. A viewer
-without a grant never reaches the entry, because they never get that plan. **A future row filter
-must be part of the plan**, or this stops being true; there is no row filter yet.
+without a grant never reaches the entry, because they never get that plan. **A row rule is part of
+the plan** (its resolved form, identity values and relative dates included), so two viewers share an
+entry only when their resolved rules are identical, and this stays true; a test proves it
+([row-rules.md](row-rules.md)). A panel line carries `rows_limited` beside `result`, and
+`row_rule_unavailable` in its error when a viewer's rule cannot be applied.
 
 ## The recording window
 

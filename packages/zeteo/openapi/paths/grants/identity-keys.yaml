@@ -1,0 +1,56 @@
+/v1/identity-keys:
+  get:
+    tags: [Grants]
+    summary: List identity keys
+    description: |
+      Every identity key, by name, in one page (`next_cursor` is always null). A caller with
+      `zeteo.grants.read` gets each key in full (`IdentityKey`, with its `value_count`); an upload
+      source owner holding `zeteo.uploads.write` alone gets only `name`, `label` and `description`,
+      enough to name a key in a rule on their own source's grants, never any value.
+
+      **Required permissions:** `zeteo.grants.read` or `zeteo.uploads.write` (`403 forbidden` without).
+    operationId: listIdentityKeys
+    responses:
+      '200':
+        description: The keys
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/ListIdentityKeysResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Grants]
+    summary: Create an identity key
+    description: |
+      Creates a named key under which users hold identity values (`netsuite_employee_id`,
+      `display_name`), for rules that match a column against the caller's own values. An audit
+      entry `zeteo.identity_key.created` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `409 conflict` (the name is taken).
+    operationId: createIdentityKey
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/CreateIdentityKeyRequest'
+    responses:
+      '201':
+        description: The key
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/IdentityKey'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

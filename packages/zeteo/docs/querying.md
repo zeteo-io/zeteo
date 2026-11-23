@@ -569,7 +569,8 @@ once.
   keys by label, never their values; a grant's `row_rule_description` replaces its sentence, and
   "no rows" means no rule of theirs keeps any; "no rows right now; ask an admin" means their rule
   cannot be applied as written (a column it reads is gone, or it resolves to too many values), and
-  a query reading the table is refused with `409 row_rule_unavailable`.
+  a query reading the table is refused with `409 row_rule_unavailable`. How rules are written,
+  combined and enforced is in [row-rules.md](row-rules.md).
 - A query past its time limit is stopped on the source: `504 query_timeout`. The time limit is
   counted from just before the concurrency check, so time spent waiting for a connection to the
   source counts against it; a query with no time left once it has a connection is not sent.

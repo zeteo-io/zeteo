@@ -2,6 +2,8 @@ import { send, type CallContext } from "../send.js";
 import type { Page } from "../types/common.js";
 import type {
   CreateGrantRequest,
+  EffectiveAccess,
+  EffectiveAccessOptions,
   Grant,
   ListGrantsOptions,
   ReplaceGrantRequest,
@@ -14,7 +16,14 @@ export const grantsCalls = (ctx: CallContext) => ({
     send(ctx, { op: "getGrant", params: { grantId }, nullOn404: true }),
   create: (body: CreateGrantRequest): Promise<Grant> =>
     send(ctx, { op: "createGrant", body, once: true }),
+  /**
+   * One user's combined access to one table, for an admin: columns, rows,
+   * the rule in words, the grants it comes from and warnings.
+   */
+  effective: (options: EffectiveAccessOptions): Promise<EffectiveAccess> =>
+    send(ctx, { op: "getEffectiveAccess", query: { ...options } }),
   // A PUT that replaces whole, so repeating it after a 5xx is harmless.
+  /** `row_access` is required: a body of columns only is refused (400). */
   replace: (grantId: string, body: ReplaceGrantRequest): Promise<Grant> =>
     send(ctx, { op: "replaceGrant", params: { grantId }, body, once: false }),
   delete: async (grantId: string): Promise<void> => {

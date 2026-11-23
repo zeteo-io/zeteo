@@ -47,6 +47,20 @@ GrantIdParam:
   description: The grant's id. A value that is not a UUID is `400 invalid_request`.
   schema: { type: string, format: uuid }
 
+IdentityKeyIdParam:
+  name: keyId
+  in: path
+  required: true
+  description: The identity key's id. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
+IdentityValueIdParam:
+  name: valueId
+  in: path
+  required: true
+  description: The identity value's id, under the key named by the path. A value that is not a UUID is `400 invalid_request`.
+  schema: { type: string, format: uuid }
+
 PrincipalLimitIdParam:
   name: principalLimitId
   in: path

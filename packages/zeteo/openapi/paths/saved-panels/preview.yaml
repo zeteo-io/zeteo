@@ -32,7 +32,7 @@
       '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
       '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
       '409':
-        description: Conflict - `source_archived`, the source was archived while the query ran
+        description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
         content:
           application/json:
             schema:

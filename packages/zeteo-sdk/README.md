@@ -252,7 +252,9 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 | `sources` | `list`, `get`, `create`, `update`, `archive`, `test`, `refresh` |
 | `sources.tables` | `list(sourceId)`, `get(sourceId, tableId)`, `update(sourceId, tableId, body)` |
 | `sources.relations` | `list(sourceId)`, `declare(sourceId, body)`, `delete(sourceId, relationId)` |
-| `grants` | `list`, `get`, `create`, `replace`, `delete` |
+| `grants` | `list`, `get`, `create`, `replace`, `delete`, `effective({ user_id, table_id, organization_id? })` |
+| `identityKeys` | `list`, `create`, `update`, `delete`, `missing(keyId)` |
+| `identityKeys.values` | `list(keyId, { user_id?, limit?, cursor? })`, `add(keyId, [{ user_id, value }])`, `delete(keyId, valueId)` |
 | `principalLimits` | `list`, `get`, `create`, `update`, `delete` |
 | `me` | `get()` |
 | `principals` | `search({ type, q, limit? })`, `lookup(principals)` |
@@ -261,6 +263,25 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 404; every other call, `catalog.get` included, throws on it. An id that is empty, is exactly `.`
 or `..`, or contains `/`, `\`, `?` or `#` throws `ZeteoError` with code `invalid_id` before any
 request is made.
+
+### Row rules
+
+A grant carries `row_access` (`unlimited_default`, `all` or `rule`) with, for `rule`, a `row_rule`
+in the query language's `where` syntax over the grant's own table, which may compare a column with
+the caller's identity values (`{ identity: "netsuite_employee_id" }`). `grants.replace` **requires**
+`row_access`. Results carry `rows_limited` (and a catalogue table `rows_limited_reason`). See the
+service's `docs/row-rules.md`.
+
+```ts
+await client.grants.create({
+  principal_type: "group",
+  principal_id: reps,
+  table_id: orders,
+  all_columns: true,
+  row_access: "rule",
+  row_rule: { sales_rep: { in: { identity: "netsuite_employee_id" } } },
+});
+```
 
 ### Who is calling, and finding principals
 

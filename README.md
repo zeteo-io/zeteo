@@ -6,7 +6,7 @@ zeteo (Greek zēteō, 'to seek') is a query service for apps built on tereo: adm
 databases as sources and grant tables and columns to tereo users and groups; people query through a
 validated JSON query language over HTTP or through an AI connected over MCP.
 
-The repository has all of it except row filters on grants: a service with sign-in through
+The repository has all of it, row rules on grants included: a service with sign-in through
 [tereo](https://github.com/tereo-io/tereo), the sources admin API (register a Postgres or Azure SQL
 database, see [docs/sources.md](packages/zeteo/docs/sources.md)), the catalogue of each source's
 tables, columns and relations ([docs/catalog.md](packages/zeteo/docs/catalog.md)), grants and
@@ -85,6 +85,10 @@ and changes write audit entries to tereo's outbox.
   Administrators describe tables and columns, read the discovered relations and declare their own,
   under `/v1/sources/:sourceId/tables` and `/relations`.
 - **Grants.** `/v1/grants` gives a user or group one table, all its columns or a list. Default deny.
+  A grant may also limit which rows it reaches, with a row rule that can compare a column against
+  the caller's own identity values (`/v1/identity-keys`), so a rep sees their own orders; any "All
+  rows" grant overrides other grants' limits, otherwise a caller's rules are OR'd, and results say
+  `rows_limited` ([docs/row-rules.md](packages/zeteo/docs/row-rules.md)).
   `/v1/principal-limits` gives a user or group its own limits on how many queries and exports it
   runs at once, in place of the environment's defaults; each source has its own limits too.
 - **Querying.** `GET /v1/catalog` lists what the caller may query, with the query language's JSON
@@ -136,4 +140,5 @@ and changes write audit entries to tereo's outbox.
   ([docs/mcp.md](packages/zeteo/docs/mcp.md#the-claude-code-plugin)). A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
-Not there yet: row filters on grants.
+Not there yet: `below` in row rules (the caller and everyone who reports to them), which comes with
+Tereo's reporting lines.
