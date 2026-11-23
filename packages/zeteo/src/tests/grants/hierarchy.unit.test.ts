@@ -6,6 +6,7 @@ import { RequestError } from "@tereo-io/sdk/handler";
 import {
   clearHierarchyCache,
   HierarchyTooLargeError,
+  hierarchyCacheSize,
   HierarchyUnavailableError,
   HIERARCHY_TTL_SECONDS,
   usersBelowFromTereo as usersBelow,
@@ -100,5 +101,28 @@ describe("usersBelow errors", () => {
     );
     auth.listUserReports.mockResolvedValueOnce([]);
     expect(await usersBelow("boss")).toEqual([]);
+  });
+});
+
+describe("usersBelow cache eviction", () => {
+  it("sweeps expired entries when a new answer is cached", async () => {
+    auth.listUserReports.mockResolvedValue([report("a")]);
+    await usersBelow("u1");
+    await usersBelow("u2");
+    expect(hierarchyCacheSize()).toBe(2);
+    vi.advanceTimersByTime((HIERARCHY_TTL_SECONDS + 1) * 1000);
+    await usersBelow("u3");
+    expect(hierarchyCacheSize()).toBe(1);
+    expect(auth.listUserReports).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps live entries and their 30 s semantics", async () => {
+    auth.listUserReports.mockResolvedValue([report("a")]);
+    await usersBelow("u1");
+    vi.advanceTimersByTime(10_000);
+    await usersBelow("u2");
+    expect(hierarchyCacheSize()).toBe(2);
+    await usersBelow("u1");
+    expect(auth.listUserReports).toHaveBeenCalledTimes(2);
   });
 });

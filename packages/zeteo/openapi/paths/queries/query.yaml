@@ -64,12 +64,7 @@
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
-      '409':
-        description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-        content:
-          application/json:
-            schema:
-              $ref: '../../components/responses.yaml#/Error'
+      '409': { $ref: '../../components/responses.yaml#/RowRuleConflictResponse', description: "Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)" }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
         description: |
@@ -110,20 +105,7 @@
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
-      '503':
-        description: |
-          Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-          pool briefly unavailable (the source busy). Retry, after `Retry-After` when given. Or
-          `uploads_misconfigured`: an upload source while `UPLOADS_READER_URL` cannot be used
-          (the operator's to fix; the detail is logged). Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-        headers:
-          Retry-After:
-            description: Seconds to wait before retrying
-            schema: { type: integer }
-        content:
-          application/json:
-            schema:
-              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/RowRuleUnavailableResponse', description: "Service unavailable - `temporarily_unavailable`, or `uploads_misconfigured` (an upload source while `UPLOADS_READER_URL` cannot be used; the operator's to fix), or `row_rule_unavailable` (reason `hierarchy_unavailable`; retry shortly, after `Retry-After` when given)" }
       '504':
         description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
         content:

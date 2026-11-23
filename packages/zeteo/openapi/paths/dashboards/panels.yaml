@@ -35,6 +35,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
       '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/RowRuleConflictResponse' }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
-      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '503': { $ref: '../../components/responses.yaml#/RowRuleUnavailableResponse' }

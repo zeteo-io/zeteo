@@ -88,12 +88,7 @@
       '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
-      '409':
-        description: Conflict - `conflict` (the caller has a saved query of this name)
-        content:
-          application/json:
-            schema:
-              $ref: '../../components/responses.yaml#/Error'
+      '409': { $ref: '../../components/responses.yaml#/RowRuleConflictResponse', description: "Conflict - `conflict` (the caller has a saved query of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)" }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
         description: The query cannot be planned as written - the codes of `POST /v1/query`
@@ -102,4 +97,4 @@
             schema:
               $ref: '../../components/queries/schemas.yaml#/QueryError'
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
-      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '503': { $ref: '../../components/responses.yaml#/RowRuleUnavailableResponse' }

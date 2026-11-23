@@ -31,7 +31,11 @@ export class HierarchyTooLargeError extends Error {
   }
 }
 
+/** Expired entries are swept on every write, so the map holds only live ones. */
 const cache = new Map<string, { ids: string[]; expires: number }>();
+
+/** The number of cached answers (tests). */
+export const hierarchyCacheSize = (): number => cache.size;
 
 /** Forgets every cached answer (tests). */
 export const clearHierarchyCache = (): void => cache.clear();
@@ -65,10 +69,9 @@ export const usersBelowFromTereo = async (
     throw new HierarchyUnavailableError();
   }
   const ids = reports.map((r) => r.id);
-  cache.set(userId, {
-    ids,
-    expires: Date.now() + HIERARCHY_TTL_SECONDS * 1000,
-  });
+  const now = Date.now();
+  for (const [key, entry] of cache) if (entry.expires <= now) cache.delete(key);
+  cache.set(userId, { ids, expires: now + HIERARCHY_TTL_SECONDS * 1000 });
   return ids;
 };
 

@@ -158,3 +158,30 @@ InvalidPanelError:
             properties:
               setting: { type: string, description: 'The setting at fault: a chart key with the index for a list (`y.1`), or `saved_query`, `saved_panel`' }
               problem: { type: string, description: '`missing_column`, `wrong_type`, `needs_order`, or for a saved query or panel that cannot be used, its state such as `not_available`' }
+
+RowRuleConflictResponse:
+  description: |
+    Conflict - `row_rule_unavailable`: a table the request reads has a row rule of the caller's that
+    cannot be applied right now (`column_missing`, a column it reads is gone, or `too_many_values`,
+    it resolves to too many values). The request is refused, never run unfiltered; ask an admin.
+  content:
+    application/json:
+      schema:
+        $ref: '../components/queries/schemas.yaml#/QueryError'
+
+RowRuleUnavailableResponse:
+  description: |
+    Service unavailable - `row_rule_unavailable` (reason `hierarchy_unavailable`): a table the
+    request reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's
+    reporting lines now; retry shortly, after `Retry-After` when given (never the caller's own
+    rows only, never every row). Or `temporarily_unavailable`: the database, Redis or the source's
+    pool was briefly unavailable; retry.
+  headers:
+    Retry-After:
+      description: Seconds to wait before retrying
+      schema:
+        type: integer
+  content:
+    application/json:
+      schema:
+        $ref: '../components/queries/schemas.yaml#/QueryError'

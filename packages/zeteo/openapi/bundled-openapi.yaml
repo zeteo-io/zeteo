@@ -1805,11 +1805,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -1838,7 +1835,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/sources/{sourceId}/measures/{measureId}:
     get:
       tags:
@@ -2136,11 +2133,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -2169,7 +2163,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/sources/{sourceId}/metrics/{metricId}:
     get:
       tags:
@@ -3562,11 +3556,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -3611,20 +3602,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: |
-            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-            pool briefly unavailable (the source busy). Retry, after `Retry-After` when given. Or
-            `uploads_misconfigured`: an upload source while `UPLOADS_READER_URL` cannot be used
-            (the operator's to fix; the detail is logged). Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
+          description: Service unavailable - `temporarily_unavailable`, or `uploads_misconfigured` (an upload source while `UPLOADS_READER_URL` cannot be used; the operator's to fix), or `row_rule_unavailable` (reason `hierarchy_unavailable`; retry shortly, after `Retry-After` when given)
         '504':
           description: Gateway timeout - `query_timeout`, the query ran past the source's time limit and was stopped
           content:
@@ -3800,11 +3779,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '409':
-          description: Conflict - `source_archived`, the source was archived as the export started, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, the source was archived as the export started, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -3839,22 +3815,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: |
-            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-            pool briefly unavailable, or the service is shutting down (an export refused for that
-            is not recorded). Retry, after `Retry-After` when given. Or `uploads_misconfigured`:
-            an upload source while `UPLOADS_READER_URL` cannot be used (the detail is logged). A
-            upload source exported while Uploads are off is `404 uploads_not_configured`. Or
-            `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
+          description: Service unavailable - `temporarily_unavailable` (also while the service is shutting down), `uploads_misconfigured` (an upload source while `UPLOADS_READER_URL` cannot be used), or `row_rule_unavailable` (reason `hierarchy_unavailable`; retry shortly, after `Retry-After` when given)
         '504':
           description: Gateway timeout - `query_timeout`, the export's time ran out before the stream started (its head)
           content:
@@ -4501,11 +4463,8 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
         '409':
-          description: Conflict - `conflict` (the caller has a saved query of this name)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has a saved query of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -4517,7 +4476,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/saved-queries/{savedQueryId}:
     get:
       tags:
@@ -4589,11 +4548,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict` (the caller has another saved query of this name)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has another saved query of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -4605,7 +4561,7 @@ paths:
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
     delete:
       tags:
         - Saved queries
@@ -4723,11 +4679,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -4758,19 +4711,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: |
-            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
-            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
         '504':
           description: Gateway timeout - `query_timeout`
           content:
@@ -4892,11 +4833,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`, the source was archived as the export started, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, the source was archived as the export started, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -4925,19 +4863,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: |
-            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
-            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
         '504':
           description: Gateway timeout - `query_timeout`, before the stream starts
           content:
@@ -5228,17 +5154,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the caller has a dashboard of this name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has a dashboard of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/dashboards/{dashboardId}:
     get:
       tags:
@@ -5310,17 +5233,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the caller has another dashboard of this name, or the panels changed while saving; load the dashboard again and retry
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has another dashboard of this name, or the panels changed while saving; load the dashboard again and retry), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
     delete:
       tags:
         - Dashboards
@@ -5667,12 +5587,14 @@ paths:
           $ref: '#/components/responses/SavedQueryNotAccessibleResponse'
         '404':
           $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/RowRuleConflictResponse'
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/dashboards/{dashboardId}/panels/{panelId}:
     patch:
       tags:
@@ -5714,17 +5636,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the panels changed while saving; load the dashboard again and retry
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the panels changed while saving; load the dashboard again and retry), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
     delete:
       tags:
         - Dashboards
@@ -5833,17 +5752,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the caller has a saved panel of this name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has a saved panel of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/saved-panels:
     get:
       tags:
@@ -5938,17 +5854,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the caller has a saved panel of this name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has a saved panel of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
   /v1/saved-panels/{savedPanelId}:
     get:
       tags:
@@ -6018,17 +5931,14 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `conflict`, the caller has a saved panel of this name
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `conflict` (the caller has a saved panel of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
         '503':
-          $ref: '#/components/responses/ServiceUnavailableResponse'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
     delete:
       tags:
         - Dashboards
@@ -6144,11 +6054,8 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable`, a table it reads has a row rule of the caller's that cannot be applied right now (a column it reads is gone, or too many values), so ask an admin
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleConflictResponse'
+          description: Conflict - `source_archived`, the source was archived while the query ran, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)
         '413':
           $ref: '#/components/responses/PayloadTooLargeResponse'
         '422':
@@ -6172,19 +6079,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '503':
-          description: |
-            Service unavailable - `temporarily_unavailable`: Redis, group membership or the source's
-            pool briefly unavailable, or the database too busy. Retry, after `Retry-After` when given.
-            Or `row_rule_unavailable`: a table it reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's reporting lines now; retry shortly (never the caller's own rows only, never every row).
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
+          $ref: '#/components/responses/RowRuleUnavailableResponse'
         '504':
           description: Gateway timeout - `query_timeout`
           content:
@@ -6556,6 +6451,31 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/InvalidPanelError'
+    RowRuleConflictResponse:
+      description: |
+        Conflict - `row_rule_unavailable`: a table the request reads has a row rule of the caller's that
+        cannot be applied right now (`column_missing`, a column it reads is gone, or `too_many_values`,
+        it resolves to too many values). The request is refused, never run unfiltered; ask an admin.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/QueryError'
+    RowRuleUnavailableResponse:
+      description: |
+        Service unavailable - `row_rule_unavailable` (reason `hierarchy_unavailable`): a table the
+        request reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's
+        reporting lines now; retry shortly, after `Retry-After` when given (never the caller's own
+        rows only, never every row). Or `temporarily_unavailable`: the database, Redis or the source's
+        pool was briefly unavailable; retry.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/QueryError'
   schemas:
     Error:
       type: object

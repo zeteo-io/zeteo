@@ -265,7 +265,7 @@ export const buildTereoDocument = (version: string): ProvisioningDocument => ({
     name: "Zeteo",
     secretFrom: "TEREO_CLIENT_SECRET",
     // Audit entries leave through the outbox in the SDK, under audit_writer;
-    // user_resolver lets zeteo read a caller's groups. group_resolver is
+    // user_resolver lets zeteo read a caller's groups and users' reporting lines. group_resolver is
     // read-only access to every group in every organization (roles, members'
     // names and emails, SCIM skipped members, auth.group.* events); zeteo uses
     // it only to read a group by id, for a group principal's status.

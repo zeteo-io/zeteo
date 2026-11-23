@@ -36,7 +36,8 @@ export interface PlannedSavedQuery {
  * success, so a refusal reads the same in the run's record whatever its cause.
  *
  * The one exception is a row rule that cannot be applied
- * (`row_rule_unavailable`, 409) on a saved query the caller may use, as
+ * (`row_rule_unavailable`: 409, or 503 when the reporting lines can't be read,
+ * reason `hierarchy_unavailable`) on a saved query the caller may use, as
  * `canUse` decides (without rules): it is their access to the rows that
  * fails, not to the query, so it is thrown as it is.
  */
