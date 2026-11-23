@@ -86,8 +86,8 @@ RowRule:
     relative dates. Two value forms are added, allowed only under `eq`, `in`, `ne` and `notIn`:
     `{ "identity": "<key name>" }`, the caller's values under that identity key, and
     `{ "identity": "<key name>", "below": true }`, which also takes the values of everyone who
-    reports to the caller. `below` is refused (`400 invalid_row_rule`) until Tereo's reporting
-    lines are available. An identity condition that resolves to no values makes the whole rule of
+    reports to the caller. `below` is not available yet in Zeteo, which does not read Tereo's
+    reporting lines yet: it is refused (`400 invalid_row_rule`). An identity condition that resolves to no values makes the whole rule of
     that grant match no rows, whatever operator or `not` surrounds it.
 
 RowFields:

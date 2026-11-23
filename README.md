@@ -140,5 +140,5 @@ and changes write audit entries to tereo's outbox.
   ([docs/mcp.md](packages/zeteo/docs/mcp.md#the-claude-code-plugin)). A user sees them only with
   `zeteo.mcp.use` (the role `zeteo_mcp_user`), and each needs `zeteo.data.read` too.
 
-Not there yet: `below` in row rules (the caller and everyone who reports to them), which comes with
-Tereo's reporting lines.
+Not there yet: `below` in row rules (the caller and everyone who reports to them): Tereo keeps
+reporting lines, but Zeteo does not read them yet.

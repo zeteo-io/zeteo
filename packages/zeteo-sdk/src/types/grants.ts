@@ -12,8 +12,8 @@ export type RowAccess = "unlimited_default" | "all" | "rule";
 
 /**
  * The caller's own values under an identity key; with `below`, also those of
- * everyone who reports to them (refused until Tereo's reporting lines are
- * available).
+ * everyone who reports to them (not available yet: Zeteo does not read Tereo's
+ * reporting lines yet, so it is refused).
  */
 export interface IdentityRef {
   identity: string;

@@ -65,8 +65,9 @@ to the grant's own table and extended with identity values:
 - Two value forms, only under `eq`, `in`, `ne` and `notIn`:
   - `{ "identity": "<key>" }`: the caller's values under that identity key.
   - `{ "identity": "<key>", "below": true }`: also the values of everyone who reports to the
-    caller. **Not available yet:** it is refused (`400 invalid_row_rule`) until Tereo's reporting
-    lines exist and Zeteo reads them. Do not rely on it.
+    caller. **Not available yet in Zeteo:** Tereo keeps reporting lines (since 0.8.3), but Zeteo
+    does not read them yet, so a rule using `below` is refused (`400 invalid_row_rule`). Do not
+    rely on it.
 
 `eq` with an identity means "is one of my values" (as `in`); `ne` and `notIn` mean "is none of
 them".
@@ -179,7 +180,7 @@ rows is reset and its id listed in the transfer entry's `row_access_reset`.
 
 ## Not yet
 
-- `below` (people who report to me, transitively): comes with Tereo's reporting lines; until then a
-  rule using it is refused.
+- `below` (people who report to me, transitively): Zeteo does not read Tereo's reporting lines
+  yet; until it does, a rule using it is refused.
 - Rules that propagate across relations, named reusable policies, database-native row-level
   security, and fuzzy matching of identity values.
