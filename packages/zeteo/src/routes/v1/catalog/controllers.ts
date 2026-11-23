@@ -28,7 +28,7 @@ export const getCatalog = async (req: Request, res: Response) => {
 
   const catalogs = [];
   for (const slug of slugs) {
-    const catalog = await loadVisibleCatalog(slug, access);
+    const catalog = await loadVisibleCatalog(slug, access, { keyLabels: true });
     if (catalog) catalogs.push(catalog);
   }
   res

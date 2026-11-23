@@ -26,7 +26,7 @@ const TableInput = SourceInput.extend({
  * source they cannot see gets, whether it exists or not.
  */
 const sourceView = async (access: Access, slug: string) => {
-  const catalog = await loadVisibleCatalog(slug, access);
+  const catalog = await loadVisibleCatalog(slug, access, { keyLabels: true });
   // A source whose type has no adapter is left out, as from the listing.
   const [view] = catalog
     ? visibleCatalogViews([catalog], () => null, "mcp")
