@@ -100,7 +100,7 @@ One ordinary package:
 | `prisma/` | The one schema and migrations |
 
 Outside the package, `e2e/` is a local end-to-end run (`e2e/run.sh`, not run by CI): a released
-Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.2`), zeteo's own image built from
+Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.3`), zeteo's own image built from
 the checkout, and a TLS source Postgres, with real sign-ins, then a Playwright test of the admin UI
 in Chromium (`e2e/run.sh --browser` runs only that); see [e2e/README.md](e2e/README.md).
 Zeteo depends on Tereo only through released artifacts: `@tereo-io/sdk` and `@tereo-io/mcp` from
