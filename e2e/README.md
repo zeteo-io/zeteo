@@ -59,7 +59,7 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
   project's containers, networks **and volumes**. Under the default project name `zeteo-e2e` that
   destroys whatever stack already uses the name, such as a long-running demo. A stack meant to
   last must have its own project name, and a parallel run must set `E2E_PROJECT` and `ZETEO_IMAGE`.
-  `down` refuses when this checkout's `e2e/.env.run` is missing (no run of it owns the project)
+  `down` refuses unless this checkout's `e2e/.env.run` records the project (`E2E_PROJECT_NAME`, so a stale file of another project does not count)
   unless the project is named on purpose: `E2E_PROJECT=<name> e2e/run.sh down`.
 - **Images left behind**: the run keeps the images, so the next one starts faster:
   `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images

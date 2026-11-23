@@ -5,8 +5,9 @@
 #   KEEP=1 e2e/run.sh              # leave the stack running afterwards
 #   e2e/run.sh down                # tear down a stack left by KEEP=1
 #                                  # WARNING: deletes the project's containers AND volumes.
-#                                  # Refused unless this checkout's run left e2e/.env.run or
-#                                  # E2E_PROJECT=<name> is given: E2E_PROJECT=<name> e2e/run.sh down
+#                                  # Refused unless e2e/.env.run records this project as started by
+#                                  # a run of this checkout, or E2E_PROJECT=<name> is given:
+#                                  #   E2E_PROJECT=<name> e2e/run.sh down
 #   e2e/run.sh --browser           # only the browser test (Playwright)
 #   PLAYWRIGHT=0 e2e/run.sh        # only the Vitest files
 #
@@ -40,13 +41,22 @@ log() { printf '\n==> %s\n' "$*" >&2; }
 # the values it requires, so its named volumes are found and removed. The env
 # file is kept when `down` fails, so it can be run again.
 teardown() {
-  # Only a stack this checkout's own run wrote (its env file) or one named on
-  # purpose is removed: the default project name may belong to a stack someone
-  # keeps running (a demo), and its volumes would go with it.
-  if [[ ! -f "$ENV_FILE" && -z "${E2E_PROJECT:-}" ]]; then
-    echo "Refusing to remove the compose project $PROJECT: $ENV_FILE does not exist, so no run of this checkout owns it." >&2
-    echo "Its containers and volumes could belong to a stack kept on purpose. To remove it anyway, name it: E2E_PROJECT=$PROJECT e2e/run.sh down" >&2
-    return 1
+  # Only a stack this checkout's own run wrote (its env file records the
+  # project it started) or one named on purpose is removed: the default
+  # project name may belong to a stack someone keeps running (a demo), and its
+  # volumes would go with it. A stale env file of another project does not count.
+  # `--quiet` (the EXIT trap) says nothing when there is nothing of this run to remove.
+  if [[ -z "${E2E_PROJECT:-}" ]]; then
+    local recorded=""
+    [[ -f "$ENV_FILE" ]] && recorded="$(sed -n 's/^E2E_PROJECT_NAME=//p' "$ENV_FILE")"
+    if [[ "$recorded" != "$PROJECT" ]]; then
+      if [[ "${1:-}" != "--quiet" ]]; then
+        echo "Refusing to remove the compose project $PROJECT: $ENV_FILE does not record it as started by a run of this checkout." >&2
+        echo "Its containers and volumes could belong to a stack kept on purpose. To remove it anyway, name it: E2E_PROJECT=$PROJECT e2e/run.sh down" >&2
+        return 1
+      fi
+      return 0
+    fi
   fi
   local env_file="$ENV_FILE" placeholder=""
   if [[ ! -f "$ENV_FILE" ]]; then
@@ -123,7 +133,7 @@ if [[ "${SKIP_ZETEO_BUILD:-}" != "1" ]]; then
 fi
 
 if [[ "${KEEP:-}" != "1" ]]; then
-  trap teardown EXIT
+  trap "teardown --quiet" EXIT
 fi
 
 # --- Secrets, ports, certificates -----------------------------------------
@@ -175,6 +185,7 @@ node -e '
 
 # Throwaway values for this run only.
 cat >"$ENV_FILE" <<EOF
+E2E_PROJECT_NAME=$PROJECT
 TEREO_IMAGE=$TEREO_IMAGE
 ZETEO_IMAGE=$ZETEO_IMAGE
 E2E_TEREO_PORT=$TEREO_PORT
