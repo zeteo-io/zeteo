@@ -60,6 +60,30 @@ export const valuesOfUser = async (
   return out;
 };
 
+/**
+ * What the users hold together for each of the keys, in one query: key id to
+ * the values of all of them (a key none holds maps to nothing). A value is
+ * held by one user per key, so no value repeats.
+ */
+export const valuesOfUsers = async (
+  userIds: string[],
+  keyIds: string[]
+): Promise<Map<string, string[]>> => {
+  const out = new Map<string, string[]>();
+  if (keyIds.length === 0 || userIds.length === 0) return out;
+  const rows = await prisma.identityValue.findMany({
+    where: { userId: { in: userIds }, keyId: { in: keyIds } },
+    orderBy: { id: "asc" },
+    select: { keyId: true, value: true },
+  });
+  for (const row of rows) {
+    const list = out.get(row.keyId);
+    if (list) list.push(row.value);
+    else out.set(row.keyId, [row.value]);
+  }
+  return out;
+};
+
 export const listKeys = async (): Promise<
   Array<IdentityKey & { valueCount: number }>
 > => {

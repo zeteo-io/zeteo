@@ -8,7 +8,8 @@ import { isIdentityRef, opOf } from "./store.js";
 // looking at someone's access). A column is named only when the reader is
 // granted it: a condition on any other column is "some rows only", so the
 // sentence never reveals a hidden column. Identity keys are named by their
-// label; the reader's values under them are never an input here.
+// label; the reader's values under them, and who reports to the reader,
+// are never an input here.
 
 /** What a condition on a column the reader may not see reads as. */
 export const SOME_ROWS = "some rows only";
@@ -54,6 +55,12 @@ const describeCondition = (
   const [op, raw] = opOf(condition);
   if (isIdentityRef(raw)) {
     const label = keyLabels.get(raw.identity) ?? "identity";
+    // Who reports to the reader is never named, only that they count.
+    if (raw.below === true) {
+      return op === "eq" || op === "in"
+        ? `${name} is your ${label} or that of anyone who reports to you`
+        : `${name} is none of your ${label} or those of anyone who reports to you`;
+    }
     return op === "eq" || op === "in"
       ? `${name} is your ${label}`
       : `${name} is none of your ${label}`;

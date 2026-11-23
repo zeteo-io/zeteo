@@ -1,12 +1,36 @@
 // @module-tag unit
 // @module-tag platform
 import type { RowAccess, RuleFilter } from "../../row-rules/types.js";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   combineRowAccess,
   resolveGrantRule,
+  resolveRowRules,
+  type GrantRow,
   type RuleColumn,
 } from "../../row-rules/resolve.js";
+import {
+  HierarchyTooLargeError,
+  HierarchyUnavailableError,
+} from "../../grants/hierarchy.js";
+
+const mocked = vi.hoisted(() => ({
+  findMany: vi.fn(),
+  valuesOfUser: vi.fn(),
+  valuesOfUsers: vi.fn(),
+  usersBelow: vi.fn(),
+}));
+vi.mock("../../utils/db/prisma.js", () => ({
+  prisma: { sourceColumn: { findMany: mocked.findMany } },
+}));
+vi.mock("../../identity/service.js", () => ({
+  valuesOfUser: mocked.valuesOfUser,
+  valuesOfUsers: mocked.valuesOfUsers,
+}));
+vi.mock(import("../../grants/hierarchy.js"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  usersBelow: mocked.usersBelow,
+}));
 
 const grant = (
   id: string,
@@ -155,5 +179,153 @@ describe("resolveGrantRule with an operator that cannot take an identity", () =>
     expect(() =>
       resolveGrantRule(rule, new Map([["k1", ["a"]]]), columns)
     ).toThrow(/cannot take an identity/);
+  });
+});
+
+describe("resolveRowRules with below", () => {
+  const column = {
+    id: "c_rep",
+    tableId: "t1",
+    name: "rep",
+    type: "text",
+    nativeType: "text",
+    missingSince: null,
+  };
+  const ruleGrant = (rule: RuleFilter, id = "g1"): GrantRow => ({
+    id,
+    rowAccess: "rule",
+    rowRule: rule,
+    rowRuleDescription: null,
+  });
+  const below = (identity = "k1"): RuleFilter => ({
+    c_rep: { in: { identity, below: true } },
+  });
+  const resolve = (...grants: GrantRow[]) =>
+    resolveRowRules("caller", new Map([["t1", grants]]));
+  const valuesOf = (entries: Array<[string, string[]]>) =>
+    new Map<string, string[]>(entries);
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mocked.findMany.mockResolvedValue([column]);
+    mocked.valuesOfUser.mockResolvedValue(new Map());
+    mocked.valuesOfUsers.mockResolvedValue(new Map());
+  });
+
+  it("puts in the values of the caller and of everyone below them", async () => {
+    mocked.usersBelow.mockResolvedValue(["r1", "r2"]);
+    mocked.valuesOfUsers.mockResolvedValue(valuesOf([["k1", ["1", "2", "3"]]]));
+    const rules = await resolve(ruleGrant(below()));
+    expect(mocked.usersBelow).toHaveBeenCalledTimes(1);
+    expect(mocked.usersBelow).toHaveBeenCalledWith("caller");
+    expect(mocked.valuesOfUsers).toHaveBeenCalledWith(
+      ["caller", "r1", "r2"],
+      ["k1"]
+    );
+    expect(rules.get("t1")).toMatchObject({
+      kind: "filter",
+      filter: { c_rep: { in: ["1", "2", "3"] } },
+    });
+  });
+
+  it("gives a caller with no value of their own the values of those below", async () => {
+    mocked.usersBelow.mockResolvedValue(["r1"]);
+    mocked.valuesOfUsers.mockResolvedValue(valuesOf([["k1", ["2"]]]));
+    expect((await resolve(ruleGrant(below()))).get("t1")).toMatchObject({
+      kind: "filter",
+      filter: { c_rep: { in: ["2"] } },
+    });
+  });
+
+  it("gives a caller with no reports exactly their own values", async () => {
+    mocked.usersBelow.mockResolvedValue([]);
+    mocked.valuesOfUsers.mockResolvedValue(valuesOf([["k1", ["1"]]]));
+    expect((await resolve(ruleGrant(below()))).get("t1")).toMatchObject({
+      kind: "filter",
+      filter: { c_rep: { in: ["1"] } },
+    });
+    expect(mocked.valuesOfUsers).toHaveBeenCalledWith(["caller"], ["k1"]);
+  });
+
+  it("is never when neither the caller nor anyone below holds a value", async () => {
+    mocked.usersBelow.mockResolvedValue(["r1"]);
+    expect((await resolve(ruleGrant(below()))).get("t1")).toEqual({
+      kind: "never",
+    });
+  });
+
+  it("keeps a plain identity to the caller's own values beside a below one", async () => {
+    mocked.usersBelow.mockResolvedValue(["r1"]);
+    mocked.valuesOfUser.mockResolvedValue(valuesOf([["k1", ["1"]]]));
+    mocked.valuesOfUsers.mockResolvedValue(valuesOf([["k1", ["1", "2"]]]));
+    const rules = await resolve(
+      ruleGrant(below(), "g1"),
+      ruleGrant({ c_rep: { eq: { identity: "k1" } } }, "g2")
+    );
+    expect(rules.get("t1")).toMatchObject({
+      kind: "filter",
+      filter: {
+        or: [{ c_rep: { in: ["1", "2"] } }, { c_rep: { in: ["1"] } }],
+      },
+    });
+  });
+
+  it("is unavailable, never the caller's own rows, when the hierarchy cannot be read", async () => {
+    mocked.usersBelow.mockRejectedValue(new HierarchyUnavailableError());
+    mocked.valuesOfUser.mockResolvedValue(valuesOf([["k1", ["1"]]]));
+    const rules = await resolve(
+      ruleGrant(below(), "g1"),
+      ruleGrant({ c_rep: { eq: { identity: "k1" } } }, "g2")
+    );
+    expect(rules.get("t1")).toEqual({
+      kind: "unavailable",
+      reason: "hierarchy_unavailable",
+    });
+  });
+
+  it("leaves a table without below alone when the hierarchy cannot be read", async () => {
+    mocked.usersBelow.mockRejectedValue(new HierarchyUnavailableError());
+    mocked.findMany.mockResolvedValue([
+      column,
+      { ...column, id: "c_other", tableId: "t2" },
+    ]);
+    const rules = await resolveRowRules(
+      "caller",
+      new Map([
+        ["t1", [ruleGrant(below())]],
+        ["t2", [ruleGrant({ c_other: { eq: "x" } }, "g2")]],
+      ])
+    );
+    expect(rules.get("t1")).toEqual({
+      kind: "unavailable",
+      reason: "hierarchy_unavailable",
+    });
+    expect(rules.get("t2")).toMatchObject({ kind: "filter" });
+  });
+
+  it("is too many values when tereo refuses the hierarchy as too large", async () => {
+    mocked.usersBelow.mockRejectedValue(new HierarchyTooLargeError());
+    expect((await resolve(ruleGrant(below()))).get("t1")).toEqual({
+      kind: "unavailable",
+      reason: "too_many_values",
+    });
+  });
+
+  it("counts the values of everyone below against the cap", async () => {
+    mocked.usersBelow.mockResolvedValue(["r1"]);
+    mocked.valuesOfUsers.mockResolvedValue(
+      valuesOf([["k1", Array.from({ length: 50_001 }, (_, i) => `${i}`)]])
+    );
+    expect((await resolve(ruleGrant(below()))).get("t1")).toEqual({
+      kind: "unavailable",
+      reason: "too_many_values",
+    });
+  });
+
+  it("never reads the hierarchy for rules without below", async () => {
+    mocked.valuesOfUser.mockResolvedValue(valuesOf([["k1", ["1"]]]));
+    await resolve(ruleGrant({ c_rep: { in: { identity: "k1" } } }));
+    expect(mocked.usersBelow).not.toHaveBeenCalled();
+    expect(mocked.valuesOfUsers).not.toHaveBeenCalled();
   });
 });

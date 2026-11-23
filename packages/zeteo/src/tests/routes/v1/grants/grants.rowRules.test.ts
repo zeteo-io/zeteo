@@ -220,6 +220,12 @@ describe("/v1/grants row access", () => {
       "cannot be compared",
     ],
     [
+      "a below identity value on a boolean column",
+      { type: "boolean" as const },
+      { notes: { eq: { identity: keyName, below: true } } },
+      "cannot be compared",
+    ],
+    [
       "an identity value on a json column (no operator takes one)",
       { type: "json" as const },
       { notes: { eq: { identity: keyName } } },
@@ -250,15 +256,43 @@ describe("/v1/grants row access", () => {
     }
   });
 
-  it("refuses below: true as not available yet", async () => {
+  it("stores below: true with the key id, and drops below: false", async () => {
+    const rule = {
+      or: [
+        { notes: { in: { identity: keyName, below: true } } },
+        { status: { notIn: { identity: keyName, below: false } } },
+      ],
+    };
+    const res = await create({ row_access: "rule", row_rule: rule });
+    expect(res.status).toBe(201);
+    expect(res.body.row_rule).toEqual({
+      or: [
+        { notes: { in: { identity: keyName, below: true } } },
+        { status: { notIn: { identity: keyName } } },
+      ],
+    });
+    const row = await prisma.grant.findUniqueOrThrow({
+      where: { id: res.body.id },
+    });
+    const columns = await prisma.sourceColumn.findMany({
+      where: { tableId: orders.id },
+    });
+    const idOf = (name: string) => columns.find((c) => c.name === name)!.id;
+    expect(row.rowRule).toEqual({
+      or: [
+        { [idOf("notes")]: { in: { identity: keyId, below: true } } },
+        { [idOf("status")]: { notIn: { identity: keyId } } },
+      ],
+    });
+    expect(row.identityKeyIds).toEqual([keyId]);
+  });
+
+  it("refuses below: true on an operator that takes no identity", async () => {
     const res = await create({
       row_access: "rule",
-      row_rule: { notes: { in: { identity: keyName, below: true } } },
+      row_rule: { notes: { gt: { identity: keyName, below: true } } },
     });
     expect(res.status).toBe(400);
-    expect(res.body.error).toBe("invalid_row_rule");
-    expect(res.body.error_description).toMatch(/not available yet/);
-    expect(res.body.path).toEqual(["row_rule", "notes", "in"]);
   });
 
   it.each([

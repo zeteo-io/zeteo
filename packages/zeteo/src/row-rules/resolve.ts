@@ -1,17 +1,23 @@
 import type { RowAccess, RuleCondition, RuleFilter } from "./types.js";
 import type { Condition, Scalar } from "../adapters/sql/language.js";
+import { valuesOfUser, valuesOfUsers } from "../identity/service.js";
 import type { QueryableType } from "../adapters/sql/types.js";
 import { isIdentityRef, mapRule, opOf } from "./store.js";
 import { coerceValue } from "../adapters/sql/plan.js";
-import { valuesOfUser } from "../identity/service.js";
 import { prisma } from "../utils/db/prisma.js";
+import {
+  HierarchyTooLargeError,
+  HierarchyUnavailableError,
+  usersBelow,
+} from "../grants/hierarchy.js";
 
 // A caller's rows on a table, from the row access of every grant that reaches
 // them on it: any `all` grant gives every row; otherwise the rules of the
 // `rule` grants, OR'd; otherwise (every grant `unlimited_default`) every row.
 // Each rule is resolved for the caller first: identity references become the
-// caller's values, coerced to the column's type. Relative dates stay as
-// written, for the planner to resolve against the query's `now`.
+// caller's values (with `below`, those of the caller and of everyone below
+// them in tereo's reporting lines), coerced to the column's type. Relative
+// dates stay as written, for the planner to resolve against the query's `now`.
 
 /** At most this many identity values put into one table's rule; more and the table is unavailable. */
 export const MAX_RULE_VALUES = 50_000;
@@ -51,7 +57,16 @@ export type RowRule =
       columns: Map<string, RuleColumn>;
       descriptions: RuleDescriptionPart[];
     }
-  | { kind: "unavailable"; reason: "column_missing" | "too_many_values" };
+  | {
+      kind: "unavailable";
+      reason: "column_missing" | "too_many_values" | "hierarchy_unavailable";
+    };
+
+/** The values an identity reference stands for: the caller's own, and with `below` those of the caller and everyone below them. */
+export interface IdentityValues {
+  own: Map<string, string[]>;
+  below: Map<string, string[]>;
+}
 
 /** What resolution reads of a grant. */
 export interface GrantRow {
@@ -94,7 +109,7 @@ const LIST_OP = { eq: "in", in: "in", ne: "notIn", notIn: "notIn" } as const;
 
 const resolveCounted = (
   stored: RuleFilter,
-  values: Map<string, string[]>,
+  values: IdentityValues,
   columns: Map<string, RuleColumn>
 ): { filter: ResolvedRuleFilter; substituted: number } | "never" => {
   let never = false;
@@ -104,7 +119,8 @@ const resolveCounted = (
     if (!isIdentityRef(raw)) return [columnId, condition];
     const column = columns.get(columnId);
     if (!column) throw new Error(`Rule column ${columnId} was not loaded`);
-    const kept = (values.get(raw.identity) ?? []).filter(
+    const source = raw.below === true ? values.below : values.own;
+    const kept = (source.get(raw.identity) ?? []).filter(
       (v) => coerceValue(v as Scalar, column.type) !== undefined
     );
     // An identity with no usable value makes the whole grant's rule false,
@@ -125,7 +141,8 @@ const resolveCounted = (
 
 /**
  * The stored rule with each identity reference replaced by the caller's
- * values under that key, as a list (`eq`/`in` → `in`, `ne`/`notIn` → `notIn`).
+ * values under that key (with `below`, `belowValues`, the caller's and those
+ * of everyone below them), as a list (`eq`/`in` → `in`, `ne`/`notIn` → `notIn`).
  * A value that is not of the column's type is dropped; when an identity
  * leaves no value the whole rule is `never`. `columns` must hold every column
  * an identity reference compares with.
@@ -133,31 +150,77 @@ const resolveCounted = (
 export const resolveGrantRule = (
   stored: RuleFilter,
   values: Map<string, string[]>,
-  columns: Map<string, RuleColumn>
+  columns: Map<string, RuleColumn>,
+  belowValues: Map<string, string[]> = new Map()
 ): ResolvedRuleFilter | "never" => {
-  const resolved = resolveCounted(stored, values, columns);
+  const resolved = resolveCounted(
+    stored,
+    { own: values, below: belowValues },
+    columns
+  );
   return resolved === "never" ? "never" : resolved.filter;
 };
 
-/** The column ids and identity key ids a stored rule uses. */
+/** The column ids and identity key ids a stored rule uses, the keys used with `below` apart. */
 const usedBy = (
   rule: RuleFilter,
   columnIds: Set<string>,
-  keyIds: Set<string>
+  keyIds: Set<string>,
+  belowKeyIds: Set<string> = new Set()
 ) =>
   mapRule(rule, [], (columnId, condition) => {
     columnIds.add(columnId);
     const [, raw] = opOf(condition);
-    if (isIdentityRef(raw)) keyIds.add(raw.identity);
+    if (isIdentityRef(raw)) {
+      (raw.below === true ? belowKeyIds : keyIds).add(raw.identity);
+    }
     return [columnId, condition];
   });
+
+/** Whether a stored rule uses `below` anywhere. */
+const usesBelow = (rule: RuleFilter): boolean => {
+  const below = new Set<string>();
+  usedBy(rule, new Set(), new Set(), below);
+  return below.size > 0;
+};
+
+type BelowValues =
+  | { kind: "ok"; values: Map<string, string[]> }
+  | { kind: "failed"; reason: "hierarchy_unavailable" | "too_many_values" };
+
+/**
+ * The values under `keyIds` of the caller and of everyone below them, read
+ * from tereo. A failure is the reason the rules using `below` cannot be
+ * applied: never a fallback to the caller's own values.
+ */
+const valuesBelow = async (
+  userId: string,
+  keyIds: string[]
+): Promise<BelowValues> => {
+  let below: string[];
+  try {
+    below = await usersBelow(userId);
+  } catch (err) {
+    if (err instanceof HierarchyTooLargeError) {
+      return { kind: "failed", reason: "too_many_values" };
+    }
+    if (err instanceof HierarchyUnavailableError) {
+      return { kind: "failed", reason: "hierarchy_unavailable" };
+    }
+    throw err;
+  }
+  const users = [...new Set([userId, ...below])];
+  return { kind: "ok", values: await valuesOfUsers(users, keyIds) };
+};
 
 /**
  * The caller's row rule per table, for the tables whose rows are limited; a
  * table absent from the result gives every row. `tableGrants` holds the
  * grants that reach the caller, by table id. One query reads the columns the
  * rules use and one the caller's identity values; neither runs when no grant
- * has a rule.
+ * has a rule. When a rule uses `below`, tereo is asked once who is below the
+ * caller and one more query reads their values with the caller's; when that
+ * fails, every table with such a rule is `unavailable`.
  */
 export const resolveRowRules = async (
   userId: string,
@@ -169,6 +232,7 @@ export const resolveRowRules = async (
   >();
   const columnIds = new Set<string>();
   const keyIds = new Set<string>();
+  const belowKeyIds = new Set<string>();
   for (const [tableId, grants] of tableGrants) {
     const combined = combineRowAccess(
       grants.map((g) => ({
@@ -183,12 +247,14 @@ export const resolveRowRules = async (
       tableId,
       combined.grants.map((g) => ({ ...g, custom: custom.get(g.id) ?? null }))
     );
-    for (const { rule } of combined.grants) usedBy(rule, columnIds, keyIds);
+    for (const { rule } of combined.grants) {
+      usedBy(rule, columnIds, keyIds, belowKeyIds);
+    }
   }
   const out = new Map<string, RowRule>();
   if (limited.size === 0) return out;
 
-  const [rows, values] = await Promise.all([
+  const [rows, own, below] = await Promise.all([
     columnIds.size === 0
       ? Promise.resolve([])
       : prisma.sourceColumn.findMany({
@@ -203,6 +269,9 @@ export const resolveRowRules = async (
           },
         }),
     valuesOfUser(userId, [...keyIds]),
+    belowKeyIds.size === 0
+      ? Promise.resolve<BelowValues>({ kind: "ok", values: new Map() })
+      : valuesBelow(userId, [...belowKeyIds]),
   ]);
   const byId = new Map(rows.map((row) => [row.id, row]));
 
@@ -235,6 +304,14 @@ export const resolveRowRules = async (
       out.set(tableId, { kind: "unavailable", reason: "column_missing" });
       continue;
     }
+    if (below.kind === "failed" && grants.some((g) => usesBelow(g.rule))) {
+      out.set(tableId, { kind: "unavailable", reason: below.reason });
+      continue;
+    }
+    const values: IdentityValues = {
+      own,
+      below: below.kind === "ok" ? below.values : new Map(),
+    };
 
     const filters: ResolvedRuleFilter[] = [];
     const descriptions: RuleDescriptionPart[] = [];

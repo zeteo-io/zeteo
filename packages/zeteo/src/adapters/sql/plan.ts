@@ -464,7 +464,11 @@ export class Planner {
     if (!rule) return {};
     this.state.rowsLimited = true;
     const refuse = () =>
-      rowRuleUnavailable(queryNameOf(this.catalog.tables, table), path);
+      rowRuleUnavailable(
+        queryNameOf(this.catalog.tables, table),
+        path,
+        rule.kind === "unavailable" ? rule.reason : undefined
+      );
     if (rule.kind === "never") return { rowFilter: { kind: "never" } };
     if (rule.kind === "unavailable") throw refuse();
     const subjectOf = (columnId: string) => {

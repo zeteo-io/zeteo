@@ -1,10 +1,13 @@
 // @module-tag int
 // @module-tag platform
+import { clearTestReports, setTestReports } from "../support/hierarchy.js";
 import { initializeTereo, stopTereo } from "../../utils/tereo.js";
 import type { SourceConnection } from "../../adapters/types.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { removeSources } from "../support/sources.js";
+import { prisma } from "../../utils/db/index.js";
 import { ENGINES } from "../support/engines.js";
+import { randomUUID } from "node:crypto";
 import {
   clearDashboardKeys,
   removeDashboardsOf,
@@ -56,7 +59,11 @@ describe("a dashboard panel under row rules", () => {
   const paidA = newQueryUser();
   const paidB = newQueryUser();
   const shipped = newQueryUser();
-  const users = [owner, paidA, paidB, shipped];
+  const manager = newQueryUser();
+  const repA = newQueryUser();
+  const repB = newQueryUser();
+  const users = [owner, paidA, paidB, shipped, manager, repA, repB];
+  let keyId: string;
 
   beforeAll(async () => {
     await initializeTereo();
@@ -73,6 +80,26 @@ describe("a dashboard panel under row rules", () => {
       access: "rule",
       rule: { status: { eq: "shipped" } },
     });
+    // The manager sees the orders whose id is a value of theirs or of
+    // anyone below them: repA holds 2, repB holds 4.
+    const key = await prisma.identityKey.create({
+      data: {
+        name: `dash_${randomUUID().slice(0, 8)}`,
+        label: "Order",
+        createdBy: owner.id,
+      },
+    });
+    keyId = key.id;
+    await prisma.identityValue.createMany({
+      data: [
+        { keyId, userId: repA.id, value: "2", createdBy: owner.id },
+        { keyId, userId: repB.id, value: "4", createdBy: owner.id },
+      ],
+    });
+    await grantTo(manager.principal, orders, ["id", "status"], {
+      access: "rule",
+      rule: { id: { in: { identity: key.name, below: true } } },
+    });
     seeded = await seedDashboardQuery(source, owner.id);
   });
   afterEach(async () => {
@@ -80,9 +107,12 @@ describe("a dashboard panel under row rules", () => {
     opened.count = 0;
   });
   afterAll(async () => {
+    await clearTestReports(manager.id);
     await removeRunsOf(users.map((u) => u.id));
     await removeDashboardsOf([owner.id]);
     await removeSources([source.id]);
+    await prisma.identityValue.deleteMany({ where: { keyId } });
+    await prisma.identityKey.deleteMany({ where: { id: keyId } });
     await closeAllSourcePools();
     await stopTereo();
   });
@@ -126,5 +156,18 @@ describe("a dashboard panel under row rules", () => {
     expect(opened.count).toBe(1);
     expect(b.rows).toEqual(a.rows);
     expect(a.rows.every((r) => r[1] === "paid")).toBe(true);
+  });
+
+  it("serves no cached result of the old team after a reorganisation", async () => {
+    await setTestReports(manager.id, [repA.id]);
+    const before = await runOnDashboard(manager.id, seeded);
+    expect(before.rows.map((r) => Number(r[0]))).toEqual([2]);
+    // repA moves away and repB comes in: the rule resolves to other values,
+    // so the plan, and with it the cache key, differ.
+    await setTestReports(manager.id, [repB.id]);
+    const after = await runOnDashboard(manager.id, seeded);
+    expect(opened.count).toBe(2);
+    expect(after.cached_at).toBeUndefined();
+    expect(after.rows.map((r) => Number(r[0]))).toEqual([4]);
   });
 });

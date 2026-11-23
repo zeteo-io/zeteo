@@ -103,20 +103,26 @@ export const invalidValue = (): QueryError =>
   );
 
 /**
- * A table the caller's row rule cannot be applied to as written (a column it
- * reads is gone, or it resolves to too many values): the query is refused,
- * never run unfiltered. A conflict with the caller's access, not with the
- * query: 409.
+ * A table the caller's row rule cannot be applied to as written: the query
+ * is refused, never run unfiltered. A column it reads is gone, or it resolves
+ * to too many values: a conflict with the caller's access, not with the
+ * query, 409. Who reports to the caller could not be read from tereo
+ * (`hierarchy_unavailable`): a passing failure, 503.
  */
 export const rowRuleUnavailable = (
   table: string,
-  path: QueryPath
+  path: QueryPath,
+  reason?: string
 ): QueryError => {
+  const name = truncate(table, MAX_NAME_CHARS);
+  const passing = reason === "hierarchy_unavailable";
   const err = new QueryError(
     "row_rule_unavailable",
-    `Your access to ${truncate(table, MAX_NAME_CHARS)} can't be applied right now; ask an admin`,
+    passing
+      ? `Your access to ${name} can't be checked right now; try again shortly`
+      : `Your access to ${name} can't be applied right now; ask an admin`,
     path
   );
-  err.statusCode = 409;
+  err.statusCode = passing ? 503 : 409;
   return err;
 };

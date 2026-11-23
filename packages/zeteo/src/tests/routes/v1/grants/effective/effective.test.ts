@@ -15,6 +15,11 @@ import {
   setTestGroups,
 } from "../../../../support/principals.js";
 import {
+  clearTestReports,
+  failTestReports,
+  setTestReports,
+} from "../../../../support/hierarchy.js";
+import {
   removeUploadSources,
   seedUploadSource,
 } from "../../../../support/uploads.js";
@@ -35,6 +40,7 @@ describe("GET /v1/grants/effective", () => {
   let keyId: string;
   const uploadIds: string[] = [];
   const grouped: string[] = [];
+  const reporting: string[] = [];
 
   const effective = (
     userId: string,
@@ -78,6 +84,7 @@ describe("GET /v1/grants/effective", () => {
   });
   afterAll(async () => {
     for (const userId of grouped) await clearTestGroups(userId);
+    for (const userId of reporting) await clearTestReports(userId);
     await removeSources([sourceId]);
     await removeUploadSources(uploadIds);
     await prisma.identityValue.deleteMany({ where: { keyId } });
@@ -189,6 +196,67 @@ describe("GET /v1/grants/effective", () => {
       warnings: [],
     });
     expect(JSON.stringify(res.body)).not.toContain("R-1");
+  });
+
+  it("describes a below rule without naming anyone, limited by a report's value", async () => {
+    const userId = randomUUID();
+    const reportId = randomUUID();
+    reporting.push(userId);
+    await setTestReports(userId, [reportId]);
+    await grant({
+      principal_id: userId,
+      row_access: "rule",
+      row_rule: { notes: { in: { identity: keyName, below: true } } },
+    });
+    await prisma.identityValue.create({
+      data: { keyId, userId: reportId, value: "R-below", createdBy: userId },
+    });
+    const res = await effective(userId);
+    expect(res.body).toMatchObject({
+      rows: "limited",
+      rule_summary: "notes is your Rep or that of anyone who reports to you",
+      warnings: [],
+    });
+    const text = JSON.stringify(res.body);
+    expect(text).not.toContain(reportId);
+    expect(text).not.toContain("R-below");
+  });
+
+  it("warns of a missing value when no one below holds one either", async () => {
+    const userId = randomUUID();
+    reporting.push(userId);
+    await setTestReports(userId, [randomUUID()]);
+    await grant({
+      principal_id: userId,
+      row_access: "rule",
+      row_rule: { notes: { in: { identity: keyName, below: true } } },
+    });
+    const res = await effective(userId);
+    expect(res.body).toMatchObject({
+      rows: "none",
+      warnings: [{ code: "missing_identity_value", key: keyName }],
+    });
+  });
+
+  it("warns that a below rule cannot be applied when tereo cannot say who is below", async () => {
+    const userId = randomUUID();
+    reporting.push(userId);
+    await failTestReports(userId, "unavailable");
+    await grant({
+      principal_id: userId,
+      row_access: "rule",
+      row_rule: { notes: { in: { identity: keyName, below: true } } },
+    });
+    const res = await effective(userId);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      rows: "none",
+      rule_summary: "notes is your Rep or that of anyone who reports to you",
+      // Whether anyone below holds a value is unknown: no missing value.
+      warnings: [
+        { code: "row_rule_unavailable", reason: "hierarchy_unavailable" },
+      ],
+    });
   });
 
   it("gives no rows and nothing else when no grant reaches the user", async () => {

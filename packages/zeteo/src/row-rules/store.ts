@@ -139,14 +139,6 @@ export const toStoredRule = async (
   rule: RuleFilter
 ): Promise<{ stored: RuleFilter; identityKeyIds: string[] }> => {
   const refs = identityRefs(rule);
-  for (const [ref, path] of refs) {
-    if (ref.below) {
-      throw new InvalidRowRuleError(
-        "Values of the users below the caller (below: true) are not available yet",
-        path
-      );
-    }
-  }
   const names = [...new Set(refs.map(([ref]) => ref.identity))];
   const keys =
     names.length === 0
@@ -224,7 +216,12 @@ export const toStoredRule = async (
         );
       }
       used.add(keyId);
-      return [column.id, { [op]: { identity: keyId } } as RuleCondition];
+      // `below: false` is the plain reference; only `true` is kept.
+      const ref: IdentityRef =
+        raw.below === true
+          ? { identity: keyId, below: true }
+          : { identity: keyId };
+      return [column.id, { [op]: ref } as RuleCondition];
     }
     switch (op) {
       case "between":

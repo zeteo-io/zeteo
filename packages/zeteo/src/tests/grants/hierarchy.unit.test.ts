@@ -8,7 +8,7 @@ import {
   HierarchyTooLargeError,
   HierarchyUnavailableError,
   HIERARCHY_TTL_SECONDS,
-  usersBelow,
+  usersBelowFromTereo as usersBelow,
 } from "../../grants/hierarchy.js";
 
 const auth = vi.hoisted(() => ({ listUserReports: vi.fn() }));

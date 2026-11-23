@@ -198,3 +198,49 @@ describe("rowsLimitedReason", () => {
     ).toBe("no rows right now; ask an admin");
   });
 });
+
+describe("describeRowRule with below", () => {
+  it("says the caller's value or that of anyone who reports to them", () => {
+    expect(
+      say(part({ c_rep: { in: { identity: "k_emp", below: true } } }))
+    ).toBe(
+      "sales_rep is your NetSuite employee ID or that of anyone who reports to you"
+    );
+    expect(
+      say(part({ c_rep: { eq: { identity: "k_emp", below: true } } }))
+    ).toBe(
+      "sales_rep is your NetSuite employee ID or that of anyone who reports to you"
+    );
+  });
+
+  it("says none of them for notIn and ne", () => {
+    expect(
+      say(part({ c_rep: { notIn: { identity: "k_emp", below: true } } }))
+    ).toBe(
+      "sales_rep is none of your NetSuite employee ID or those of anyone who reports to you"
+    );
+  });
+
+  it("names no one below the caller", () => {
+    const rule: RowRule = {
+      kind: "filter",
+      filter: { c_rep: { in: ["u-report-1", "1042"] } },
+      columns,
+      descriptions: [
+        part({ c_rep: { in: { identity: "k_emp", below: true } } }),
+      ],
+    };
+    const text = rowsLimitedReason(rule, granted, keyLabels);
+    expect(text).not.toMatch(/u-report-1|1042/);
+  });
+
+  it("is no rows right now when the hierarchy is unavailable", () => {
+    expect(
+      rowsLimitedReason(
+        { kind: "unavailable", reason: "hierarchy_unavailable" },
+        granted,
+        keyLabels
+      )
+    ).toBe("no rows right now; ask an admin");
+  });
+});

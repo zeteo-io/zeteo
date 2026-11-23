@@ -1,12 +1,13 @@
-import { keysById, valuesOfUser } from "../identity/service.js";
+import { keysById, valuesOfUser, valuesOfUsers } from "../identity/service.js";
+import { identityKeysOf, isIdentityRef, mapRule, opOf } from "./store.js";
 import type { RowAccess, RuleFilter } from "./types.js";
+import { usersBelow } from "../grants/hierarchy.js";
 import { loadAccessAs } from "../grants/access.js";
 import { NotFoundError } from "../utils/errors.js";
 import { combineRowAccess } from "./resolve.js";
 import { originOf } from "../uploads/origin.js";
 import { describeRowRule } from "./describe.js";
 import { prisma } from "../utils/db/prisma.js";
-import { identityKeysOf } from "./store.js";
 import type {
   ResolvedRuleFilter,
   RowRule,
@@ -36,6 +37,42 @@ export interface EffectiveAccess {
   }>;
   warnings: EffectiveWarning[];
 }
+
+/** The identity keys the rules use plainly and with `below`, apart. */
+const keysByUse = (
+  rules: RuleFilter[]
+): { plain: Set<string>; below: Set<string> } => {
+  const plain = new Set<string>();
+  const below = new Set<string>();
+  for (const rule of rules) {
+    mapRule(rule, [], (id, condition) => {
+      const [, raw] = opOf(condition);
+      if (isIdentityRef(raw)) {
+        (raw.below === true ? below : plain).add(raw.identity);
+      }
+      return [id, condition];
+    });
+  }
+  return { plain, below };
+};
+
+/**
+ * The values under `keyIds` of the user and everyone below them, or null when
+ * tereo cannot say who that is (the rule's own warning says so then).
+ */
+const valuesWithBelow = async (
+  userId: string,
+  keyIds: string[]
+): Promise<Map<string, string[]> | null> => {
+  if (keyIds.length === 0) return new Map();
+  let below: string[];
+  try {
+    below = await usersBelow(userId);
+  } catch {
+    return null;
+  }
+  return valuesOfUsers([...new Set([userId, ...below])], keyIds);
+};
 
 /** `value` as JSON with every object's keys sorted, so equal values give equal text. */
 const canonical = (value: unknown): string =>
@@ -183,14 +220,27 @@ export const effectiveAccess = async (
 
   let ruleSummary: string | null = null;
   if (held !== undefined && combined.kind === "rules") {
-    const keyIds = identityKeysOf(combined.grants.map((g) => g.rule));
-    const [keys, values] = await Promise.all([
+    const rules = combined.grants.map((g) => g.rule);
+    const keyIds = identityKeysOf(rules);
+    const used = keysByUse(rules);
+    const [keys, values, withBelow] = await Promise.all([
       keyIds.size === 0 ? new Map() : keysById([...keyIds]),
       valuesOfUser(userId, [...keyIds]),
+      valuesWithBelow(userId, [...used.below]),
     ]);
+    // Used plainly, a key is missing when the user holds no value; with
+    // `below`, when neither they nor anyone below them does (unknown when
+    // tereo cannot say: the rule's own warning covers that).
     for (const keyId of keyIds) {
       const key = keys.get(keyId);
-      if (key && (values.get(keyId) ?? []).length === 0) {
+      if (!key) continue;
+      const missingOwn =
+        used.plain.has(keyId) && (values.get(keyId) ?? []).length === 0;
+      const missingBelow =
+        used.below.has(keyId) &&
+        withBelow !== null &&
+        (withBelow.get(keyId) ?? []).length === 0;
+      if (missingOwn || missingBelow) {
         warnings.push({ code: "missing_identity_value", key: key.name });
       }
     }
