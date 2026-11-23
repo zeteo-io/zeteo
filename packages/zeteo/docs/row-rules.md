@@ -167,8 +167,10 @@ an admin what one user gets of one table: `columns` (`"all"` or names), `rows` (
 `none`), `rule_summary` (the combined rule in words, naming every column), the `grants` it comes
 from, and `warnings`: `all_rows_overrides` (an `all` grant overriding another's rule, with its
 `grant_id`), `missing_identity_value` (the `key` the user holds no value for),
-`row_rule_unavailable` (with a `reason`) and `merged_members_limited` (a merged table with no limit
-whose members carry rules). Groups scoped to an organization count only when `organization_id` is
+`row_rule_unavailable` (with a `reason`) and `merged_members_limited` (a merged table the user
+reads rows of, whose members' rows are limited differently: by a rule while the merged table shows
+every row, or by a rule other than the merged table's, compared by column name; the
+`member_table_ids` are those members). Groups scoped to an organization count only when `organization_id` is
 given. It is never cached.
 
 ## Audit and transfer

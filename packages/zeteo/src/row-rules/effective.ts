@@ -1,4 +1,3 @@
-import type { RuleColumn, RuleDescriptionPart } from "./resolve.js";
 import { keysById, valuesOfUser } from "../identity/service.js";
 import type { RowAccess, RuleFilter } from "./types.js";
 import { loadAccessAs } from "../grants/access.js";
@@ -8,6 +7,12 @@ import { originOf } from "../uploads/origin.js";
 import { describeRowRule } from "./describe.js";
 import { prisma } from "../utils/db/prisma.js";
 import { identityKeysOf } from "./store.js";
+import type {
+  ResolvedRuleFilter,
+  RowRule,
+  RuleColumn,
+  RuleDescriptionPart,
+} from "./resolve.js";
 
 // What one user gets of one table, for an admin: the columns, the rows, the
 // grants that give them, and what an admin should look at. The admin sees
@@ -31,6 +36,52 @@ export interface EffectiveAccess {
   }>;
   warnings: EffectiveWarning[];
 }
+
+/** `value` as JSON with every object's keys sorted, so equal values give equal text. */
+const canonical = (value: unknown): string =>
+  JSON.stringify(value, (_key, inner: unknown) => {
+    if (inner === null || typeof inner !== "object" || Array.isArray(inner)) {
+      return inner;
+    }
+    return Object.fromEntries(
+      Object.keys(inner)
+        .sort()
+        .map((k) => [k, (inner as Record<string, unknown>)[k]])
+    );
+  });
+
+/** The resolved filter keyed by column name, so two tables' filters compare. */
+const byName = (
+  filter: ResolvedRuleFilter,
+  columns: Map<string, RuleColumn>
+): unknown => {
+  if ("and" in filter && Array.isArray(filter.and)) {
+    return { and: filter.and.map((f) => byName(f, columns)) };
+  }
+  if ("or" in filter && Array.isArray(filter.or)) {
+    return { or: filter.or.map((f) => byName(f, columns)) };
+  }
+  if ("not" in filter && Object.keys(filter).length === 1) {
+    return { not: byName(filter.not as ResolvedRuleFilter, columns) };
+  }
+  return Object.fromEntries(
+    Object.entries(filter).map(([id, condition]) => [
+      // An id with no name never equals another table's column.
+      columns.get(id)?.name ?? `#${id}`,
+      condition,
+    ])
+  );
+};
+
+/** A table's resolved rows as comparable text: no rule (every row), no row, unavailable or the filter by column name. */
+const rowsKey = (rule: RowRule | undefined): string =>
+  rule === undefined
+    ? "all"
+    : rule.kind === "filter"
+      ? `filter:${canonical(byName(rule.filter, rule.columns))}`
+      : rule.kind === "unavailable"
+        ? `unavailable:${rule.reason}`
+        : "never";
 
 /**
  * `userId`'s access to `tableId` as if signed in to `organizationId` (null:
@@ -177,11 +228,19 @@ export const effectiveAccess = async (
     );
   }
 
+  // A merged table's rows come from its own grants, not its members'. Warn
+  // when it shows rows while a member the user's rules limit is limited
+  // differently (every row of the merged table, or another rule): the merged
+  // table may show that member's rows the member's own grants do not.
   const origin = originOf(table);
-  if (rows === "all" && origin?.kind === "merged") {
+  if (rows !== "none" && origin?.kind === "merged") {
+    const mergedRows = rowsKey(rule);
     const limited = origin.definition.members
       .map((m) => m.tableId)
-      .filter((id) => access.rowRule(id) !== undefined);
+      .filter((id) => {
+        const member = access.rowRule(id);
+        return member !== undefined && rowsKey(member) !== mergedRows;
+      });
     if (limited.length > 0) {
       warnings.push({
         code: "merged_members_limited",

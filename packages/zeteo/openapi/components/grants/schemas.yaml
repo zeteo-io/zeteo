@@ -388,7 +388,7 @@ EffectiveAccess:
               code: { type: string, const: row_rule_unavailable }
               reason: { type: string }
           - type: object
-            description: The table is a merged table with no limit while members carry rules; a member's rules do not flow into it
+            description: The table is a merged table the user reads rows of, and these members' rows are limited differently (by a rule while the merged table shows every row, or by a rule other than the merged table's, compared by column name); a member's rules do not flow into the merged table
             required: [code, member_table_ids]
             properties:
               code: { type: string, const: merged_members_limited }

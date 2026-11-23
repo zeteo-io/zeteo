@@ -228,7 +228,8 @@ describe("GET /v1/grants/effective", () => {
     }
   });
 
-  it("warns when a merged table shows every row but a member's rows are limited", async () => {
+  /** An upload source with tables east and west (sku x and y each), merged as both. */
+  const mergedEastWest = async () => {
     const ownerId = randomUUID();
     const owner: Caller = {
       userId: ownerId,
@@ -259,8 +260,14 @@ describe("GET /v1/grants/effective", () => {
     });
     const merged = await prisma.sourceTable.findFirstOrThrow({
       where: { sourceId: seeded.id, name: "both" },
+      include: { columns: true },
     });
+    const mergedSku = merged.columns.find((c) => c.name === "sku")!.id;
+    return { ownerId, east, west, merged, mergedSku };
+  };
 
+  it("warns when a merged table shows every row but a member's rows are limited", async () => {
+    const { ownerId, east, west, merged } = await mergedEastWest();
     const userId = randomUUID();
     await prisma.grant.createMany({
       data: [
@@ -297,6 +304,76 @@ describe("GET /v1/grants/effective", () => {
         { code: "merged_members_limited", member_table_ids: [east.id] },
       ],
     });
+  });
+
+  it("warns when a merged table's rule differs from a member's rule", async () => {
+    const { ownerId, east, west, merged, mergedSku } = await mergedEastWest();
+    const userId = randomUUID();
+    await prisma.grant.createMany({
+      data: [
+        {
+          principalType: "user",
+          principalId: userId,
+          tableId: merged.id,
+          allColumns: true,
+          rowAccess: "rule",
+          rowRule: { [mergedSku]: { in: ["x", "y"] } },
+          createdBy: ownerId,
+        },
+        {
+          principalType: "user",
+          principalId: userId,
+          tableId: east.id,
+          allColumns: true,
+          rowAccess: "rule",
+          rowRule: { [east.columns.sku!]: { eq: "x" } },
+          createdBy: ownerId,
+        },
+        {
+          principalType: "user",
+          principalId: userId,
+          tableId: west.id,
+          allColumns: true,
+          rowAccess: "rule",
+          rowRule: { [west.columns.sku!]: { in: ["x", "y"] } },
+          createdBy: ownerId,
+        },
+      ],
+    });
+    const res = await effective(userId, merged.id);
+    expect(res.status).toBe(200);
+    // West's rule is the merged table's, by column name: no warning for it.
+    expect(res.body).toMatchObject({
+      rows: "limited",
+      warnings: [
+        { code: "merged_members_limited", member_table_ids: [east.id] },
+      ],
+    });
+  });
+
+  it("does not warn when every member's rule is the merged table's", async () => {
+    const { ownerId, east, west, merged, mergedSku } = await mergedEastWest();
+    const userId = randomUUID();
+    await prisma.grant.createMany({
+      data: [merged.id, east.id, west.id].map((tableId) => ({
+        principalType: "user" as const,
+        principalId: userId,
+        tableId,
+        allColumns: true,
+        rowAccess: "rule" as const,
+        rowRule: {
+          [tableId === merged.id
+            ? mergedSku
+            : tableId === east.id
+              ? east.columns.sku!
+              : west.columns.sku!]: { eq: "x" },
+        },
+        createdBy: ownerId,
+      })),
+    });
+    const res = await effective(userId, merged.id);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ rows: "limited", warnings: [] });
   });
 
   it("is 404 for a table that does not exist", async () => {
