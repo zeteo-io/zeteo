@@ -124,7 +124,7 @@ describe("EffectiveAccessDialog", () => {
     ).toBeInTheDocument();
     expect(
       await screen.findByText(
-        "This merged table shows all rows, but this user's access to public.orders_eu is limited."
+        "This user's access to public.orders_eu is limited differently from this merged table."
       )
     ).toBeInTheDocument();
     expect(

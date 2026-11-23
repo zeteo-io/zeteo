@@ -64,7 +64,7 @@ const Warning = ({
       const members = warning.member_table_ids
         .map((id) => tables.labelFor(id))
         .join(", ");
-      return `This merged table shows all rows, but this user's access to ${members} is limited.`;
+      return `This user's access to ${members} is limited differently from this merged table.`;
     }
     case "row_rule_unavailable":
       return "A rule names a column that no longer exists; queries on this table are refused.";
