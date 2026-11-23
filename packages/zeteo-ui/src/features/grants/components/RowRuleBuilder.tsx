@@ -21,6 +21,8 @@ interface RowRuleBuilderProps {
   /** All of the table's columns; those the grant does not include are marked. */
   columns: RuleColumn[];
   identityKeys: IdentityKey[];
+  /** Set when the identity keys could not be loaded; the "my …" operators are then missing. */
+  identityError?: boolean;
   value: Group;
   onChange: (value: Group) => void;
   /** The condition or group an `invalid_row_rule` error points at, and its message. */
@@ -118,6 +120,9 @@ const UNIT_LABEL: Record<RelativeUnitChoice, string> = {
   year: "years",
 };
 
+/** The query language takes at most this many values in one list (`MAX_IN_VALUES`). */
+export const MAX_LIST_VALUES = 1000;
+
 const inputType = (kind: ColumnKind) =>
   kind === "number" ? "number" : kind === "date" ? "date" : "text";
 
@@ -134,10 +139,17 @@ const ChipInput = ({
   onChange: (values: string[]) => void;
 }) => {
   const [pending, setPending] = useState("");
+  const [full, setFull] = useState(false);
   const add = () => {
     const v = pending.trim();
     setPending("");
-    if (v && !values.includes(v)) onChange([...values, v]);
+    if (!v || values.includes(v)) return;
+    if (values.length >= MAX_LIST_VALUES) {
+      setFull(true);
+      return;
+    }
+    setFull(false);
+    onChange([...values, v]);
   };
   return (
     <div className="z-rule-chips">
@@ -155,6 +167,11 @@ const ChipInput = ({
         }}
         onBlur={add}
       />
+      {(full || values.length >= MAX_LIST_VALUES) && (
+        <p role="alert" className="z-rule-error">
+          A list holds up to {MAX_LIST_VALUES.toLocaleString("en-US")} values.
+        </p>
+      )}
       {values.length > 0 && (
         <ul className="z-rule-chip-list">
           {values.map((v) => (
@@ -164,7 +181,10 @@ const ChipInput = ({
                 type="button"
                 className="z-chip-clear"
                 aria-label={`Remove ${v}`}
-                onClick={() => onChange(values.filter((x) => x !== v))}
+                onClick={() => {
+                  setFull(false);
+                  onChange(values.filter((x) => x !== v));
+                }}
               >
                 ×
               </button>
@@ -519,11 +539,18 @@ export const RowRuleBuilder = ({
   columns,
   identityKeys,
   value,
+  identityError,
   onChange,
   invalidId,
   invalidMessage,
 }: RowRuleBuilderProps) => (
   <div className="z-rule-builder">
+    {identityError && (
+      <p role="alert" className="z-rule-error">
+        The identity options could not be loaded, so "is one of my …" is not
+        offered. Close and reopen this dialog to try again.
+      </p>
+    )}
     <GroupView
       group={value}
       nested={false}

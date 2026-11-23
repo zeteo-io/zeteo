@@ -413,9 +413,7 @@ export const PanelEditor = ({
         <div className="z-pe-preview" aria-label="Preview">
           {preview.isFetching && <Spinner size="sm" />}
           <ErrorNotice error={preview.error} />
-          {preview.data?.rows_limited && (
-            <RowsLimitedPill reason={preview.data.rows_limited_reason} />
-          )}
+          {preview.data?.rows_limited && <RowsLimitedPill />}
           {preview.data && shown && (
             <div className="z-pe-chart">
               <Chart chart={shown} result={preview.data} />

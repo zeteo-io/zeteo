@@ -5,7 +5,6 @@ export interface RunResult {
   truncated: boolean;
   /** The caller's rows are limited by a row rule. */
   rows_limited?: boolean;
-  rows_limited_reason?: string;
 }
 
 interface ChartBase {

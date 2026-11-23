@@ -99,4 +99,38 @@ describe("RowRuleBuilder", () => {
     await user.click(screen.getByRole("button", { name: "Remove condition" }));
     expect(screen.queryByLabelText("Column")).not.toBeInTheDocument();
   });
+
+  it("says when the identity options could not be loaded", () => {
+    renderWithProviders(
+      <RowRuleBuilder
+        columns={columns}
+        identityKeys={[]}
+        identityError
+        value={emptyRule()}
+        onChange={vi.fn()}
+      />
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /identity options could not be loaded/
+    );
+  });
+
+  it("stops a list at 1,000 values and says so", () => {
+    const list = Array.from({ length: 1000 }, (_, i) => `v${i}`);
+    const onChange = vi.fn();
+    const rule = newGroup([newCondition({ column: "status", op: "in", list })]);
+    renderWithProviders(
+      <RowRuleBuilder
+        columns={columns}
+        identityKeys={[]}
+        value={rule}
+        onChange={onChange}
+      />
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/up to 1,000 values/);
+    return userEvent
+      .setup()
+      .type(screen.getByLabelText("Values"), "one more{Enter}")
+      .then(() => expect(onChange).not.toHaveBeenCalled());
+  });
 });

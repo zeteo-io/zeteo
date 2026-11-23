@@ -689,6 +689,47 @@ describe("GrantDialog", () => {
       ).toBeDisabled();
     });
 
+    it("resets the rule draft when the table changes in create mode", async () => {
+      const user = userEvent.setup();
+      renderForm();
+      await chooseRule(user);
+      await setCondition(user, "note", "is one of");
+      await user.type(screen.getByLabelText("Values"), "paid{Enter}");
+      expect(screen.getByLabelText("Remove paid")).toBeInTheDocument();
+      await pick(user, "Table", "public.customers");
+      await waitFor(() =>
+        expect(screen.queryByLabelText("Remove paid")).not.toBeInTheDocument()
+      );
+      expect(screen.getByLabelText("Column")).toHaveValue("");
+      expect(screen.queryByLabelText("Values")).not.toBeInTheDocument();
+    });
+
+    it("saves a rule the builder can show back unchanged", async () => {
+      const user = userEvent.setup();
+      const rule = {
+        or: [
+          { note: { in: ["paid", "open"] } },
+          { and: [{ id: { gte: 5 } }, { note: { isNull: false } }] },
+        ],
+      };
+      renderForm(
+        makeGrant({
+          row_access: "rule",
+          row_rule: rule,
+          row_rule_description: "Paid or open",
+        })
+      );
+      await screen.findAllByLabelText("Column");
+      expect(screen.queryByLabelText("Row rule")).not.toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Save grant" }));
+      await waitFor(() => expect(put).toHaveBeenCalled());
+      expect(put.mock.calls[0][1]).toMatchObject({
+        row_access: "rule",
+        row_rule: rule,
+        row_rule_description: "Paid or open",
+      });
+    });
+
     it("marks columns that are not in the grant", async () => {
       const user = userEvent.setup();
       renderForm();

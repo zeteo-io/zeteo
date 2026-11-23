@@ -56,9 +56,7 @@ const PreviewDialog = ({
         <ErrorNotice error={preview.error} />
       ) : preview.data && panel.chart ? (
         <div className="z-db-preview-dialog">
-          {preview.data.rows_limited && (
-            <RowsLimitedPill reason={preview.data.rows_limited_reason} />
-          )}
+          {preview.data.rows_limited && <RowsLimitedPill />}
           <Chart chart={panel.chart} result={preview.data} />
         </div>
       ) : null}

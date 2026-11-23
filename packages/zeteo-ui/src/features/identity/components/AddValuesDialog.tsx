@@ -190,6 +190,13 @@ export const AddValuesDialog = ({
                   <Input
                     label={i === 0 ? "Value" : undefined}
                     aria-label={`Value ${i + 1}`}
+                    error={
+                      taken &&
+                      failure.taken_value &&
+                      r.value.trim() === failure.taken_value
+                        ? "Another person holds this value"
+                        : undefined
+                    }
                     value={r.value}
                     onChange={(e) =>
                       setRows(
