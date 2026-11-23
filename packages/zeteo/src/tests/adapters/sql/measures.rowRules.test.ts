@@ -27,7 +27,7 @@ import {
 // row rules keep: a measure's table, a to-one join it reads through, a fixed
 // measure used from another table or as a filter value, and each table of a
 // metric query. Compared with an admin's result over the same rows.
-// (`rows_limited` is asserted once the caller notices land.)
+// Results of a rule-limited caller say `rows_limited`; an admin's do not.
 
 const PAID = { status: { eq: "paid" } };
 const SHIPPED = { status: { eq: "shipped" } };
@@ -66,13 +66,15 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
       },
     });
   };
-  const run = async (token: string, body: Record<string, unknown>) => {
+  const runFull = async (token: string, body: Record<string, unknown>) => {
     const res = await postQuery(token, { source: source.slug, ...body });
     if (res.status !== 200) {
       throw new Error(`${res.status} ${JSON.stringify(res.body)}`);
     }
-    return res.body.rows as unknown[][];
+    return res.body as { rows: unknown[][]; rows_limited: boolean };
   };
+  const run = async (token: string, body: Record<string, unknown>) =>
+    (await runFull(token, body)).rows;
   const byMonth = (rows: unknown[][]) =>
     new Map(rows.map((r) => [iso(r[0]), r.slice(1).map(String)]));
 
@@ -151,19 +153,23 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
   });
 
   it("sums a measure over the caller's rows only, as the admin's sum over paid orders", async () => {
-    const mine = await run(paid.token, {
+    const limited = await runFull(paid.token, {
       from: "orders",
       select: [{ measure: "revenue" }],
     });
+    const mine = limited.rows;
+    expect(limited.rows_limited).toBe(true);
     const theirs = await run(admin.token, {
       from: "orders",
       select: [{ measure: "revenue" }],
       where: PAID,
     });
-    const all = await run(admin.token, {
+    const allFull = await runFull(admin.token, {
       from: "orders",
       select: [{ measure: "revenue" }],
     });
+    const all = allFull.rows;
+    expect(allFull.rows_limited).toBe(false);
     expect(num(mine[0]![0])).toBe(num(theirs[0]![0]));
     expect(num(mine[0]![0])).not.toBe(num(all[0]![0]));
   });
@@ -187,10 +193,12 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
   });
 
   it("reads a to-one column through a rule on the joined table, keeping the orders", async () => {
-    const rows = await run(eu.token, {
+    const limited = await runFull(eu.token, {
       from: "orders",
       select: [{ measure: "order_count" }, { measure: "region_count" }],
     });
+    expect(limited.rows_limited).toBe(true);
+    const rows = limited.rows;
     // Customer 2 (US) is hidden: its 4 orders stay, its region reads null.
     expect(rows.map((r) => r.map(num))).toEqual([[12, 8]]);
   });
@@ -201,18 +209,22 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
       select: [{ min: "total" }],
       where: PAID,
     });
-    const own = await run(paid.token, {
+    const ownFull = await runFull(paid.token, {
       from: "orders",
       select: [{ measure: "min_total" }],
     });
+    const own = ownFull.rows;
+    expect(ownFull.rows_limited).toBe(true);
     expect(num(own[0]![0])).toBe(num(paidMin![0]));
     expect(num(own[0]![0])).not.toBe(5.25);
     // The query's own table (customers) has no rule; the measure's does.
-    const apart = await run(paid.token, {
+    const apartFull = await runFull(paid.token, {
       from: "customers",
       select: [{ measure: "min_total" }],
       limit: 1,
     });
+    const apart = apartFull.rows;
+    expect(apartFull.rows_limited).toBe(true);
     expect(num(apart[0]![0])).toBe(num(paidMin![0]));
 
     const [lastShipped] = await run(admin.token, {
@@ -226,6 +238,12 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
       limit: 1,
     });
     expect(iso(last[0]![0])).toBe(iso(lastShipped![0]));
+    const unfiltered = await run(admin.token, {
+      from: "customers",
+      select: [{ measure: "last_created" }],
+      limit: 1,
+    });
+    expect(iso(last[0]![0])).not.toBe(iso(unfiltered[0]![0]));
   });
 
   it("filters by a fixed measure's rule-filtered value", async () => {
@@ -242,10 +260,18 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
   });
 
   it("gives a metric query's per-period values over the caller's rows only", async () => {
-    const mine = await run(paid.token, {
+    const limited = await runFull(paid.token, {
       metrics: ["revenue"],
       bucket: "month",
     });
+    const mine = limited.rows;
+    expect(limited.rows_limited).toBe(true);
+    const unfiltered = await runFull(admin.token, {
+      metrics: ["revenue"],
+      bucket: "month",
+    });
+    expect(unfiltered.rows_limited).toBe(false);
+    expect(byMonth(mine)).not.toEqual(byMonth(unfiltered.rows));
     const theirs = await run(admin.token, {
       from: "orders",
       select: [
@@ -266,10 +292,17 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
   });
 
   it("applies the rule to the rule table's part of a combining metric only", async () => {
-    const mine = await run(paid.token, {
+    const limited = await runFull(paid.token, {
       metrics: ["roas", "revenue", "spend"],
       bucket: "month",
     });
+    expect(limited.rows_limited).toBe(true);
+    const mine = limited.rows;
+    const everything = await run(admin.token, {
+      metrics: ["roas", "revenue", "spend"],
+      bucket: "month",
+    });
+    expect(byMonth(mine)).not.toEqual(byMonth(everything));
     const revenue = await run(admin.token, {
       from: "orders",
       select: [
@@ -296,6 +329,12 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
         rev.get(key)?.[0] ?? "null",
         sp.get(key)?.[0] ?? "null",
       ]);
+      // roas is revenue over spend wherever both are present.
+      const revenueValue = row[2];
+      const spendValue = row[3];
+      if (revenueValue != null && spendValue != null && num(spendValue) !== 0) {
+        expect(num(row[1])).toBeCloseTo(num(revenueValue) / num(spendValue), 4);
+      }
     }
   });
 
@@ -328,6 +367,18 @@ describeEachEngine("row rules in measures and metrics", (engine) => {
     const b = await runOnDashboard(shipped.id, seeded);
     const c = await runOnDashboard(paidToo.id, seeded);
     expect(b.cached_at).toBeUndefined();
+    expect(a.rows_limited).toBe(true);
+    expect(b.rows_limited).toBe(true);
+    const adminPaid = await run(admin.token, {
+      from: "orders",
+      select: [
+        { bucket: "month", column: "created_at", as: "m" },
+        { measure: "revenue" },
+      ],
+      where: PAID,
+      groupBy: ["m"],
+    });
+    expect(byMonth(a.rows as unknown[][])).toEqual(byMonth(adminPaid));
     expect(byMonth(a.rows as unknown[][])).not.toEqual(
       byMonth(b.rows as unknown[][])
     );

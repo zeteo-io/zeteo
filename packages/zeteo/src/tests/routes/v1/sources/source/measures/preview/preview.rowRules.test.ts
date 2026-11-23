@@ -69,6 +69,8 @@ describe("measure preview under row rules", () => {
       admin.token,
       { measure: draft }
     );
+    expect(res.body.rows_limited).toBe(true);
+    expect(all.body.rows_limited).toBe(false);
     const value = Number(res.body.rows[0][0]);
     expect(value).toBe(Number(paid.body.rows[0][0]));
     expect(value).toBeLessThan(Number(all.body.rows[0][0]));
