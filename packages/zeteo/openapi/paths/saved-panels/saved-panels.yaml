@@ -58,7 +58,12 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/SavedQueryNotAccessibleResponse' }
       '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
-      '409': { $ref: '../../components/responses.yaml#/RowRuleConflictResponse', description: "Conflict - `conflict` (the caller has a saved panel of this name), or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)" }
+      '409':
+        description: Conflict - `conflict`, the caller has a saved panel of this name
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
-      '503': { $ref: '../../components/responses.yaml#/RowRuleUnavailableResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

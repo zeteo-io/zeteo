@@ -167,7 +167,9 @@ RowRuleConflictResponse:
   content:
     application/json:
       schema:
-        $ref: '../components/queries/schemas.yaml#/QueryError'
+        oneOf:
+          - $ref: '#/Error'
+          - $ref: '../components/queries/schemas.yaml#/QueryError'
 
 RowRuleUnavailableResponse:
   description: |
@@ -184,4 +186,6 @@ RowRuleUnavailableResponse:
   content:
     application/json:
       schema:
-        $ref: '../components/queries/schemas.yaml#/QueryError'
+        oneOf:
+          - $ref: '#/Error'
+          - $ref: '../components/queries/schemas.yaml#/QueryError'
