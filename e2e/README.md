@@ -51,8 +51,11 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
 - **Teardown**: at the end, pass or fail, the script removes the project's containers, networks
   and volumes, then `e2e/.env.run`, `e2e/certs/` and `e2e/.run/`, unless `KEEP=1`. If `down` fails, the env file
   is kept and `e2e/run.sh down` tries again; without the env file it still uses the compose file, so
-  the named volumes are found. The script refuses to start while any container or volume of the
-  `zeteo-e2e` project exists. It touches no other compose project. To run beside a stack kept with
+  the named volumes are found. The script refuses to start while any container or volume of its
+  project exists (by compose's project label, or, unlabelled, by compose's naming), even when
+  `E2E_PROJECT` names it, and when Docker cannot list them; it checks again after building the
+  image. Its teardown removes nothing until the run has written its own `e2e/.env.run`. It touches
+  no other compose project. To run beside a stack kept with
   `KEEP=1` (from another checkout, whose `e2e/.run` and `.env.run` are its own), give this run its own
   project and image: `E2E_PROJECT=zeteo-e2e-pr ZETEO_IMAGE=zeteo:e2e-pr e2e/run.sh`.
 - **Warning: `down` deletes volumes.** `e2e/run.sh down`, and any run's teardown, remove the

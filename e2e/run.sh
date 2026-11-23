@@ -21,7 +21,9 @@
 # and removed with the containers, networks and volumes at the end, pass or
 # fail, unless KEEP=1. Extra arguments are passed to vitest, or with
 # --browser to Playwright. The browser test runs after the Vitest files pass,
-# against the same stack.
+# against the same stack. A run refuses to start when anything of its project
+# (containers or volumes) already exists: it never runs inside, or removes, a
+# stack it did not start.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -31,6 +33,8 @@ ENV_FILE="$E2E/.env.run"
 CERTS="$E2E/certs"
 # Files generated for the run's ports: Tereo's provisioning of the login clients.
 RUN_DIR="$E2E/.run"
+# Set once this run has written its own env file; the EXIT trap removes nothing before.
+WROTE_ENV=0
 COMPOSE=(docker compose -p "$PROJECT" -f "$E2E/docker-compose.yml" --env-file "$ENV_FILE")
 
 log() { printf '\n==> %s\n' "$*" >&2; }
@@ -45,7 +49,12 @@ teardown() {
   # project it started) or one named on purpose is removed: the default
   # project name may belong to a stack someone keeps running (a demo), and its
   # volumes would go with it. A stale env file of another project does not count.
-  # `--quiet` (the EXIT trap) says nothing when there is nothing of this run to remove.
+  # `--quiet` (the EXIT trap) says nothing when there is nothing of this run to
+  # remove, and removes nothing until this run has written its own env file: an
+  # env file left by an earlier run (a stack kept with KEEP=1) is not this run's.
+  if [[ "${1:-}" == "--quiet" && "${WROTE_ENV:-0}" != "1" ]]; then
+    return 0
+  fi
   if [[ -z "${E2E_PROJECT:-}" ]]; then
     local recorded=""
     [[ -f "$ENV_FILE" ]] && recorded="$(sed -n 's/^E2E_PROJECT_NAME=//p' "$ENV_FILE")"
@@ -91,15 +100,46 @@ if [[ "${PLAYWRIGHT:-}" == "0" && $BROWSER_ONLY -eq 1 ]]; then
   exit 1
 fi
 
-if docker ps -aq --filter "label=com.docker.compose.project=$PROJECT" | grep -q . ||
-  docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT" | grep -q .; then
-  echo "Containers or volumes of $PROJECT exist from an earlier run; remove them with: e2e/run.sh down" >&2
-  exit 1
-fi
+# Refuses the run when anything of the compose project exists: a container or
+# volume carrying compose's project label, or, with no label, named as compose
+# names them (<project>-<service>-1, <project>_<volume>). The run would start
+# its services inside that stack and its teardown would then delete the
+# stack's volumes (a stack kept with KEEP=1, a demo). There is no exception,
+# E2E_PROJECT included: remove such a stack with `down` first. When docker
+# cannot answer, the run stops: an unknown state is never taken as empty.
+# Output is read whole (no `| grep -q`, which under pipefail can turn a match
+# into a failure).
+refuse_if_project_exists() {
+  local containers volumes label name found=""
+  if ! containers="$(docker ps -a --format '{{.Label "com.docker.compose.project"}}|{{.Names}}')" ||
+    ! volumes="$(docker volume ls --format '{{.Label "com.docker.compose.project"}}|{{.Name}}')"; then
+    echo "Could not list docker's containers and volumes, so cannot tell whether $PROJECT exists; not starting." >&2
+    exit 1
+  fi
+  while IFS='|' read -r label name; do
+    if [[ "$label" == "$PROJECT" ]] ||
+      [[ -z "$label" && ("$name" == "$PROJECT"-* || "$name" == "$PROJECT"_*) ]]; then
+      found+=" container:${name}"
+    fi
+  done <<<"$containers"
+  while IFS='|' read -r label name; do
+    if [[ "$label" == "$PROJECT" ]] || [[ -z "$label" && "$name" == "$PROJECT"_* ]]; then
+      found+=" volume:${name}"
+    fi
+  done <<<"$volumes"
+  if [[ -n "$found" ]]; then
+    echo "The compose project $PROJECT already exists (${found# }); not starting a run inside it." >&2
+    echo "If it is a stack you keep, choose another project: E2E_PROJECT=<name> e2e/run.sh" >&2
+    echo "If it is left from an earlier run, remove it with: e2e/run.sh down" >&2
+    exit 1
+  fi
+}
 
 for tool in docker node npx openssl; do
   command -v "$tool" >/dev/null || { echo "$tool is required" >&2; exit 1; }
 done
+
+refuse_if_project_exists
 
 # Before the stack and the Vitest files, so a missing browser fails fast.
 if [[ "${PLAYWRIGHT:-}" != "0" ]] &&
@@ -131,6 +171,10 @@ if [[ "${SKIP_ZETEO_BUILD:-}" != "1" ]]; then
   log "Building $ZETEO_IMAGE from this checkout"
   docker build -f "$ROOT/docker/Dockerfile" -t "$ZETEO_IMAGE" "$ROOT" >&2
 fi
+
+# Again after the build, which takes minutes, before anything of the run's
+# (certificates, e2e/.run, the env file) replaces what may be another stack's.
+refuse_if_project_exists
 
 if [[ "${KEEP:-}" != "1" ]]; then
   trap "teardown --quiet" EXIT
@@ -201,6 +245,7 @@ E2E_SOURCE_READER_PASSWORD=$(hex 16)
 E2E_USER_PASSWORD=E2e-$(hex 12)-Pw!
 EOF
 chmod 0600 "$ENV_FILE"
+WROTE_ENV=1
 set -a
 # shellcheck disable=SC1090
 source "$ENV_FILE"
