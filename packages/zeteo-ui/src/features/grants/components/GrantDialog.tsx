@@ -462,6 +462,7 @@ const GrantDialogBody = ({
                   <RowRuleBuilder
                     columns={ruleColumns}
                     identityKeys={identity.keys}
+                    identityError={!!identity.error}
                     value={draft}
                     onChange={(g) => {
                       mutation.reset();

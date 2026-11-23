@@ -125,6 +125,44 @@ describe("GrantsPage", () => {
     expect(row).toHaveTextContent("All columns");
   });
 
+  it("shows what each grant does to rows, and flags a rule needing attention", async () => {
+    const limited = makeGrant({
+      id: "e3333333-1c7a-4a53-9d0e-6a3b1f2c4d03",
+      row_access: "rule",
+      row_rule: { note: { eq: "a" } },
+      row_rule_description: "Only a",
+      row_rule_problems: ["note is no longer in the table."],
+    });
+    const everything = makeGrant({
+      id: "e4444444-1c7a-4a53-9d0e-6a3b1f2c4d04",
+      row_access: "all",
+    });
+    get.mockImplementation(async (url: string) => {
+      if (url === "/v1/grants")
+        return {
+          data: { data: [limited, everything, orphan], next_cursor: null },
+        };
+      if (url === "/v1/sources")
+        return { data: { data: [makeSource()], next_cursor: null } };
+      if (url.endsWith("/tables"))
+        return { data: { data: [makeTable()], next_cursor: null } };
+      if (url === "/v1/principals/all") return { data: directory };
+      throw new Error(`unexpected ${url}`);
+    });
+    renderWithProviders(<GrantsPage />);
+    const rule = await screen.findByText("Row rule");
+    expect(rule.closest("[title]")).toHaveAttribute("title", "Only a");
+    const cell = rule.closest("td")!;
+    const attention = within(cell).getByText("Needs attention");
+    expect(attention.closest("[title]")).toHaveAttribute(
+      "title",
+      "note is no longer in the table."
+    );
+    expect(screen.getByText("All rows")).toBeInTheDocument();
+    // A grant that does not limit rows has no pill, and no attention flag.
+    expect(screen.getAllByText("Needs attention")).toHaveLength(1);
+  });
+
   it("counts the columns of a partial grant and flags a missing table", async () => {
     renderWithProviders(<GrantsPage />);
     const row = (

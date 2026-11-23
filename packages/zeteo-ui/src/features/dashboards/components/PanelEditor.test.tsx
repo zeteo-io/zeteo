@@ -167,15 +167,11 @@ describe("PanelEditor", () => {
     );
   });
 
-  it("shows the Rows limited pill beside a preview of limited rows, with the reason", async () => {
+  it("shows the Rows limited pill beside a preview of limited rows, with its default tooltip", async () => {
     post.mockImplementation(async (url: string) => {
       if (url === `/v1/saved-queries/${SAVED_ID}/run`)
         return {
-          data: {
-            ...result,
-            rows_limited: true,
-            rows_limited_reason: "region is one of your regions",
-          },
+          data: { ...result, rows_limited: true },
         };
       throw new Error(`unexpected POST ${url}`);
     });
@@ -183,7 +179,7 @@ describe("PanelEditor", () => {
     const pill = await screen.findByText("Rows limited");
     expect(pill.closest("[title]")).toHaveAttribute(
       "title",
-      "region is one of your regions"
+      expect.stringMatching(/only some rows/)
     );
   });
 
