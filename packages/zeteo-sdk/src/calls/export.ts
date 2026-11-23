@@ -14,6 +14,12 @@ export interface ExportEnd {
 
 export interface ExportRows {
   runId: string;
+  /**
+   * True when a row rule of the caller's limits the rows of a table the query
+   * reads (the response's `X-Zeteo-Rows-Limited`): the export holds only the
+   * rows the caller may see.
+   */
+  rowsLimited: boolean;
   columns: { name: string; type: ColumnType }[];
   warnings: QueryWarning[];
   /**
@@ -33,6 +39,12 @@ export interface ExportRows {
 export interface ExportStream {
   runId: string;
   /**
+   * True when a row rule of the caller's limits the rows of a table the query
+   * reads (the response's `X-Zeteo-Rows-Limited`): the export holds only the
+   * rows the caller may see.
+   */
+  rowsLimited: boolean;
+  /**
    * The connection is held until `stream` is read to its end or destroyed;
    * only the call's `signal` bounds it. Completeness is the caller's to check.
    */
@@ -47,11 +59,20 @@ export interface ExportInternals {
 const runIdHeader = (response: DianemoResponse): string | undefined =>
   header(response.headers, "x-zeteo-run-id") || undefined;
 
+const rowsLimitedHeader = (response: DianemoResponse): boolean =>
+  header(response.headers, "x-zeteo-rows-limited")?.toLowerCase() === "true";
+
 /** What an export call sends: its operation, path parameters and body. */
 export interface ExportTarget {
   op: OperationId;
   params?: Record<string, string>;
   body?: unknown;
+}
+
+interface Opened {
+  runId: string;
+  rowsLimited: boolean;
+  body: Readable;
 }
 
 // Axios has already removed a gzip Content-Encoding it decoded.
@@ -60,7 +81,7 @@ async function open(
   target: ExportTarget,
   format: "ndjson" | "csv",
   signal?: AbortSignal
-): Promise<{ runId: string; body: Readable }> {
+): Promise<Opened> {
   const response = (await sendRaw(ctx, {
     op: target.op,
     params: target.params,
@@ -82,7 +103,11 @@ async function open(
       }
     );
   }
-  return { runId, body: response.data };
+  return {
+    runId,
+    rowsLimited: rowsLimitedHeader(response),
+    body: response.data,
+  };
 }
 
 // What the end line is given to settle: time for the response's last chunk,
@@ -90,7 +115,7 @@ async function open(
 const END_GRACE_MS = 100;
 
 async function readRows(
-  opened: { runId: string; body: Readable },
+  opened: Opened,
   signal: AbortSignal | undefined,
   maxLineBytes: number | undefined
 ): Promise<ExportRows> {
@@ -230,6 +255,7 @@ async function readRows(
   let used = false;
   return {
     runId,
+    rowsLimited: opened.rowsLimited,
     columns: head.columns as ExportRows["columns"],
     warnings: head.warnings as QueryWarning[],
     rows: {
@@ -290,13 +316,13 @@ export const exportMethods = <S>(
     subject: S,
     options?: { format?: "ndjson" | "csv"; signal?: AbortSignal }
   ): Promise<ExportStream> => {
-    const { runId, body } = await open(
+    const { runId, rowsLimited, body } = await open(
       ctx,
       target(subject),
       options?.format ?? "ndjson",
       options?.signal
     );
-    return { runId, stream: body };
+    return { runId, rowsLimited, stream: body };
   },
 });
 

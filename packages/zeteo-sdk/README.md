@@ -195,6 +195,9 @@ const end = await out.done; // { status: "complete" | "truncated", rows: number 
 - `rows` can be read once.
 - The connection is held until you iterate `rows` to its end, leave the loop early (`break`), or
   abort the `signal` you passed. Do not abandon an export you are not reading.
+- `rowsLimited` is `true` when a row rule of the caller's limits the rows of a table the query
+  reads: the export holds only the rows the caller may see (zeteo's `X-Zeteo-Rows-Limited`).
+  `export.stream` returns it too.
 - `done` tells a complete export from a truncated one: `status` is `"truncated"` when zeteo
   sent only the first rows because more existed than the source's export row cap allows.
 - If the connection is cut or the stream ends without zeteo's last line, the iterator throws
