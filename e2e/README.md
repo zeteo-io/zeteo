@@ -32,7 +32,7 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
 | `zeteo-ca` | A second replica of the same deploy (same database and Redis) whose process trusts the run's CA through `NODE_EXTRA_CA_CERTS` |
 | `source-pg` | The source: Postgres with `ssl=on`, a certificate for `source-pg` from a CA generated for the run, and a read-only login `zeteo_ro` (`e2e/source/`) |
 
-- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.2`),
+- **Tereo's image** is a released one, `TEREO_IMAGE` (default `ghcr.io/tereo-io/tereo:0.8.3`),
   pulled when it is not present. If it cannot be pulled the run stops and names the image it needs.
 - **zeteo's image** is built from this checkout as `zeteo:e2e` (`ZETEO_IMAGE`; `SKIP_ZETEO_BUILD=1`
   reuses one already built).
@@ -55,10 +55,16 @@ minute of it in the group case, which waits out zeteo's 30 s group cache twice.
   `zeteo-e2e` project exists. It touches no other compose project. To run beside a stack kept with
   `KEEP=1` (from another checkout, whose `e2e/.run` and `.env.run` are its own), give this run its own
   project and image: `E2E_PROJECT=zeteo-e2e-pr ZETEO_IMAGE=zeteo:e2e-pr e2e/run.sh`.
+- **Warning: `down` deletes volumes.** `e2e/run.sh down`, and any run's teardown, remove the
+  project's containers, networks **and volumes**. Under the default project name `zeteo-e2e` that
+  destroys whatever stack already uses the name, such as a long-running demo. A stack meant to
+  last must have its own project name, and a parallel run must set `E2E_PROJECT` and `ZETEO_IMAGE`.
+  `down` refuses unless this checkout's `e2e/.env.run` records the project (`E2E_PROJECT_NAME`, so a stale file of another project does not count)
+  unless the project is named on purpose: `E2E_PROJECT=<name> e2e/run.sh down`.
 - **Images left behind**: the run keeps the images, so the next one starts faster:
   `ghcr.io/tereo-io/tereo:<tag>` (the `TEREO_IMAGE` used), `zeteo:e2e`, and the base images
   `postgres:18-alpine` and `redis:7-alpine` (which other stacks on the machine may share). Remove
-  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.2 zeteo:e2e`, adding the base images only if
+  them with `docker image rm ghcr.io/tereo-io/tereo:0.8.3 zeteo:e2e`, adding the base images only if
   nothing else uses them; `docker builder prune` drops the build cache of `zeteo:e2e`.
 - **The SDK**: before the tests start, the script builds `@zeteo-io/sdk`
   (`npx nx run @zeteo-io/sdk:build`), which `sdk.e2e.test.ts` imports through the workspace link.
@@ -102,6 +108,7 @@ herself), `bob` (`zeteo_user`, granted only through the group `e2e-analysts`) an
 | `audit.e2e.test.ts` | A query's `zeteo.query.run` and an export's `zeteo.export.started` and `zeteo.export.run` reach Tereo's audit log through the outbox |
 | `sdk.e2e.test.ts` | `@zeteo-io/sdk` as `e2e-app` (a `@dianemo/core` handler on a memory backend): refused before any grant; with `zeteo_admin` grants its own account `orders` (the id from Tereo's `GET /v1/account/me` with the service's token), reads the grant, queries, deletes it; `withToken` queries as alice and is refused for erin, and the run log names each as the caller; `export.rows` read to the end agrees with its end line, `export.stream` as CSV starts with its header; `paginate` over the source's tables one per page finds all of them; `withToken` of an `e2e-other` token is a `ZeteoError` with status 401 |
 | `uiSignIn.e2e.test.ts` | `e2e-ui`'s code is exchanged with `Origin: UI_ORIGIN`, Tereo answers that origin's CORS (and its preflight) and returns the refresh token in the body; the refresh from the body renews and its token reaches `/v1/catalog`; `prompt=none` gives a code with Tereo's session cookies and `login_required` without them; a revoked refresh token no longer renews; zeteo with the UI configured: `/ui-config.json` publishes Tereo's host-facing URL and `e2e-ui`, `/` and `/sources` serve the UI's app shell, and every response carries the content security policy naming Tereo's origin |
+| `identityMissing.e2e.test.ts` | `GET /v1/identity-keys/:id/missing` for a rule grant to a group: zeteo reads the group's members from Tereo (`listGroupMembers`) and lists those who hold no value under the key; once one is given a value, only the other is listed |
 | `directory.e2e.test.ts` | With zeteo's own service token: users by a fragment of name and of email (`GET /v1/admin/users`, `filter[name|email]` with `_op=contains`), groups by `q` (`GET /v1/admin/groups`), users by id in one request (`filter[id]`, `filter[id_op]=in`) with a missing id left out; then zeteo's own `GET /v1/principals` and `POST /v1/principals/lookup` as the admin (alice by email fragment, the group by name, a random id `orphaned`, no refusal of `/v1/admin/users` or `/v1/admin/groups` in Tereo's log), bob refused with 403, and a service account found by lookup but not by search |
 | `me.e2e.test.ts` | `GET /v1/me`: the admin signed in through `e2e-ui` gets name, email and permissions; bob gets only `zeteo.data.read`; `e2e-app`'s token is `type: "service"`; no token is 401 |
 | `mcp.e2e.test.ts` | An unauthenticated `initialize` gets the 401 challenge naming the resource metadata, which names Tereo; a token from a client not in `MCP_ALLOWED_CLIENTS` is refused; a user signed in through `e2e-mcp`, found from the challenge as an MCP client finds it, lists the four tools and runs `query` |

@@ -208,6 +208,14 @@ export const toStoredRule = async (
           at
         );
       }
+      // Identity values are text; none coerces to these types, so the
+      // reference would never match anything.
+      if (type === "boolean" || type === "json") {
+        throw new InvalidRowRuleError(
+          `An identity value cannot be compared with "${name}", a ${type} column`,
+          [...at, "identity"]
+        );
+      }
       const keyId = keyIds.get(raw.identity);
       if (keyId === undefined) {
         throw new InvalidRowRuleError(

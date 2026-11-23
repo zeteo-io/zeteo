@@ -279,4 +279,33 @@ describe("/v1/identity-keys", () => {
       count: 1,
     });
   });
+
+  it("emits no audit entry when every value is already held", async () => {
+    const key = await makeKey();
+    const user = randomUUID();
+    const body = { values: [{ user_id: user, value: "again" }] };
+    await call("POST", `/${key.id}/values`, grantsWriteToken(), body);
+    await call("POST", `/${key.id}/values`, grantsWriteToken(), body);
+    const rows = await (
+      await import("../../../support/sources.js")
+    ).auditRows(key.id);
+    expect(
+      rows.filter(
+        (r) => r.payload.metadata.event === "zeteo.identity_value.added"
+      )
+    ).toHaveLength(1);
+  });
+
+  it("gives a value asked for by two users at once to exactly one", async () => {
+    const key = await makeKey();
+    const post = (user: string) =>
+      call("POST", `/${key.id}/values`, grantsWriteToken(), {
+        values: [{ user_id: user, value: "contested" }],
+      });
+    const results = await Promise.all([post(randomUUID()), post(randomUUID())]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(await prisma.identityValue.count({ where: { keyId: key.id } })).toBe(
+      1
+    );
+  });
 });

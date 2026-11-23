@@ -309,7 +309,12 @@ const keyLabelsFor = async (
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
 export const loadVisibleCatalog = async (
   sourceSlug: string,
-  access: Access
+  access: Access,
+  /**
+   * Whether to read the identity key labels that `rowsLimitedReason` shows;
+   * only the discovery views show it, so planning leaves them out.
+   */
+  options: { keyLabels?: boolean } = {}
 ): Promise<VisibleCatalog | null> => {
   const source = await db.sources.findBySlug(sourceSlug);
   if (!source || source.archivedAt || !access.sourceIds.has(source.id)) {
@@ -320,7 +325,7 @@ export const loadVisibleCatalog = async (
   );
   const [extras, keyLabels] = await Promise.all([
     loadExtras(source.id),
-    keyLabelsFor(tables, access),
+    options.keyLabels ? keyLabelsFor(tables, access) : undefined,
   ]);
   return buildVisibleCatalog(source, tables, columns, relations, access, {
     ...extras,
@@ -344,17 +349,14 @@ export const loadSourceVisibleCatalog = async (
   if (!source) throw new Error(`source ${sourceId} does not exist`);
   const { tables, columns, relations } =
     await db.catalog.loadSourceCatalog(sourceId);
-  const [extras, keyLabels] = await Promise.all([
-    loadExtras(source.id),
-    keyLabelsFor(tables, access),
-  ]);
+  const extras = await loadExtras(source.id);
   const catalog = buildVisibleCatalog(
     source,
     tables,
     columns,
     relations,
     access,
-    { ...extras, keyLabels }
+    extras
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
   return visible
