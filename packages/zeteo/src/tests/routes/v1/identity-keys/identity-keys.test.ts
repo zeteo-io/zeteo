@@ -135,6 +135,7 @@ describe("/v1/identity-keys", () => {
     });
     expect(add.status).toBe(201);
     expect(add.body.data).toHaveLength(3);
+    expect(add.body.warnings).toEqual([]);
 
     const mine = await call(
       "GET",
@@ -220,6 +221,44 @@ describe("/v1/identity-keys", () => {
       list.body.data.find((k: { name: string }) => k.name === key.name)
         .value_count
     ).toBe(4);
+  });
+
+  it("warns of a new value another user holds up to case, padding or number formatting", async () => {
+    const key = await makeKey();
+    const a = randomUUID();
+    const b = randomUUID();
+    const c = randomUUID();
+    const first = await call("POST", `/${key.id}/values`, grantsWriteToken(), {
+      values: [
+        { user_id: a, value: "EU" },
+        { user_id: a, value: "8" },
+        { user_id: a, value: "rep-1" },
+      ],
+    });
+    expect(first.body.warnings).toEqual([]);
+    const added = await call("POST", `/${key.id}/values`, grantsWriteToken(), {
+      values: [
+        { user_id: b, value: " eu " },
+        { user_id: b, value: "08.0" },
+        { user_id: b, value: "rep-2" },
+        // The same user's own near value is no warning.
+        { user_id: a, value: "Rep-1 " },
+        { user_id: c, value: "-0" },
+        { user_id: b, value: "0.00" },
+      ],
+    });
+    expect(added.status).toBe(201);
+    expect(
+      [...added.body.warnings].sort(
+        (x: { value: string }, y: { value: string }) =>
+          x.value.localeCompare(y.value)
+      )
+    ).toEqual([
+      { code: "near_duplicate", value: " eu ", user_id: a },
+      { code: "near_duplicate", value: "-0", user_id: b },
+      { code: "near_duplicate", value: "0.00", user_id: c },
+      { code: "near_duplicate", value: "08.0", user_id: a },
+    ]);
   });
 
   it("refuses to delete a key a grant lists, naming the grants", async () => {

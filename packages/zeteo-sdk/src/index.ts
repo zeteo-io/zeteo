@@ -133,6 +133,8 @@ export type {
   IdentityValue,
   ListIdentityValuesOptions,
   NewIdentityValue,
+  AddIdentityValuesResult,
+  IdentityValueWarning,
   MissingIdentityValues,
   EffectiveAccess,
   EffectiveAccessOptions,

@@ -8,6 +8,7 @@ import type {
   ListIdentityValuesOptions,
   MissingIdentityValues,
   NewIdentityValue,
+  AddIdentityValuesResult,
   UpdateIdentityKeyRequest,
 } from "../types/grants.js";
 
@@ -49,11 +50,15 @@ export const identityKeysCalls = (ctx: CallContext) => ({
         params: { keyId },
         query: { ...options },
       }),
-    /** Up to 1,000 pairs, all or none; a value another user holds is `identity_value_taken` (409, `value`). */
+    /**
+     * Up to 1,000 pairs, all or none; a value another user holds is
+     * `identity_value_taken` (409, `value`). `warnings` names new values close
+     * to another user's (`near_duplicate`).
+     */
     add: (
       keyId: string,
       values: NewIdentityValue[]
-    ): Promise<{ data: IdentityValue[] }> =>
+    ): Promise<AddIdentityValuesResult> =>
       send(ctx, {
         op: "addIdentityValues",
         params: { keyId },

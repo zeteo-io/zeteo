@@ -38,10 +38,18 @@ export const listIdentityValues = async (req: Request, res: Response) => {
 export const addIdentityValues = async (req: Request, res: Response) => {
   const { keyId } = validateParams(IdentityKeyParamsSchema, req);
   const body = validateBody(AddIdentityValuesSchema, req);
-  const rows = await addValues(
+  const { rows, nearDuplicates } = await addValues(
     keyId,
     body.values.map((v) => ({ userId: v.user_id, value: v.value })),
     callerOf(req).userId
   );
-  res.status(201).json({ data: rows.map(identityValueView) });
+  res.status(201).json({
+    data: rows.map(identityValueView),
+    // An admin-only route: naming the other user is theirs to see.
+    warnings: nearDuplicates.map((d) => ({
+      code: "near_duplicate",
+      value: d.value,
+      user_id: d.userId,
+    })),
+  });
 };

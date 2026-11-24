@@ -211,6 +211,31 @@ describe("IdentityValuesPage", () => {
     );
   });
 
+  it("shows after saving the values close to another person's, and stays open", async () => {
+    post.mockImplementation(async (url: string) =>
+      url.endsWith("/values")
+        ? {
+            data: {
+              data: [],
+              warnings: [
+                { code: "near_duplicate", value: "northwest ", user_id: ADA },
+              ],
+            },
+          }
+        : { data: { data: [] } }
+    );
+    const dialog = await openPaste("alan@example.com, northwest ");
+    expect(
+      await within(dialog).findByText(/close to another person's/)
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/is close to a value Ada Lovelace/)
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Close" })
+    ).toBeInTheDocument();
+  });
+
   const openPaste = async (text: string) => {
     const user = userEvent.setup();
     renderPage();

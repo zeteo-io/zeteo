@@ -150,7 +150,7 @@ export interface IdentityValue {
   id: string;
   key_id: string;
   user_id: string;
-  /** Exact text: nothing is trimmed or case-folded. */
+  /** Exact text: nothing is trimmed or case-folded. A rule matches it by the source database's own comparison. */
   value: string;
   created_by: string;
   created_at: string;
@@ -164,6 +164,23 @@ export interface NewIdentityValue {
   user_id: string;
   /** 1 to 500 characters. */
   value: string;
+}
+
+/**
+ * A new value another user holds a value close to: the same after trimming
+ * and ignoring case, or the same number. A source may compare them as equal.
+ */
+export interface IdentityValueWarning {
+  code: "near_duplicate";
+  /** The new value. */
+  value: string;
+  /** The other user. */
+  user_id: string;
+}
+
+export interface AddIdentityValuesResult {
+  data: IdentityValue[];
+  warnings: IdentityValueWarning[];
 }
 
 /** Users a grant whose rule uses the key reaches who hold no value under it. */

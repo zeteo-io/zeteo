@@ -35,8 +35,12 @@
     summary: Add values under an identity key
     description: |
       Adds up to 1,000 (user, value) pairs in one call, all or none. A user may hold several values
-      under a key; a value belongs to one user within its key. Matching is exact: nothing is
-      trimmed or case-folded. An audit entry `zeteo.identity_value.added` is written.
+      under a key; a value belongs to one user within its key, compared as exact text (nothing is
+      trimmed or case-folded). A rule matches values by the source database's own comparison
+      (a collation may ignore case and trailing spaces; numbers compare as numbers), so values that
+      differ as text may match the same rows: `warnings` names each new value equal to another
+      user's after trimming and ignoring case, or as a number (`near_duplicate`). An audit entry
+      `zeteo.identity_value.added` is written.
 
       **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
 

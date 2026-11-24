@@ -37,23 +37,35 @@ export const useMissingValues = (keyId: string, enabled: boolean) => {
   });
 };
 
+/** A new value close to another user's, which a source may match as the same. */
+export interface NearDuplicate {
+  code: "near_duplicate";
+  value: string;
+  /** The other user. */
+  user_id: string;
+}
+
+export interface AddedValues {
+  data: IdentityValue[];
+  warnings: NearDuplicate[];
+}
+
 /** All or nothing: one call with up to 1,000 values. */
 export const useAddIdentityValues = (keyId: string) => {
   const api = useZeteoApi();
   const queryClient = useQueryClient();
   return useMutation<
-    IdentityValue[],
+    AddedValues,
     ApiError,
     { user_id: string; value: string }[]
   >({
     mutationFn: async (values) => {
       try {
-        return (
-          await api.post<{ data: IdentityValue[] }>(
-            `/v1/identity-keys/${keyId}/values`,
-            { values }
-          )
-        ).data.data;
+        const { data } = await api.post<AddedValues>(
+          `/v1/identity-keys/${keyId}/values`,
+          { values }
+        );
+        return { data: data.data, warnings: data.warnings ?? [] };
       } catch (err) {
         throw toApiError(err);
       }

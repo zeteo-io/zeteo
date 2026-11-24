@@ -325,11 +325,21 @@ AddIdentityValuesRequest:
 
 AddIdentityValuesResponse:
   type: object
-  required: [data]
+  required: [data, warnings]
   properties:
     data:
       type: array
       items: { $ref: '#/IdentityValue' }
+    warnings:
+      type: array
+      description: Each new value another user holds a value close to, which a source may compare as equal; one per other user
+      items:
+        type: object
+        required: [code, value, user_id]
+        properties:
+          code: { type: string, const: near_duplicate }
+          value: { type: string, description: The new value }
+          user_id: { type: string, format: uuid, description: 'The other user, who holds a value equal to it after trimming and ignoring case, or as a number' }
 
 MissingIdentityValuesResponse:
   type: object

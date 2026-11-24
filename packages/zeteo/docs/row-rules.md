@@ -134,7 +134,8 @@ usual collations ignore case and trailing spaces, so `rep-ab`, `REP-AB` and `rep
 same rows; a `citext` or `char` column in Postgres is similar; and against a number column values
 compare as numbers, so `"8"` and `"08.0"` match the same rows. Values that differ as text can
 therefore still match the same rows: give two people values that differ in more than case,
-padding or number formatting.
+padding or number formatting. Adding values warns `near_duplicate` when a new value equals another
+user's that way.
 
 | Route | Permission | Result |
 |-------|------------|--------|
@@ -143,7 +144,7 @@ padding or number formatting.
 | `PATCH /v1/identity-keys/:keyId` | `zeteo.grants.write` | the key, with a new `label` or `description` |
 | `DELETE /v1/identity-keys/:keyId` | `zeteo.grants.write` | `204`; `409 identity_key_in_use` (with `grant_ids`) while a rule names it |
 | `GET /v1/identity-keys/:keyId/values` (`user_id`, `limit`, `cursor`) | `zeteo.grants.read` | `{ data, next_cursor }` |
-| `POST /v1/identity-keys/:keyId/values` | `zeteo.grants.write` | `201`, `{ data }`; body `{ values: [{ user_id, value }] }`, 1 to 1,000 pairs, all or none |
+| `POST /v1/identity-keys/:keyId/values` | `zeteo.grants.write` | `201`, `{ data, warnings }`; body `{ values: [{ user_id, value }] }`, 1 to 1,000 pairs, all or none; `warnings` lists `{ code: "near_duplicate", value, user_id }` for each new value equal to another user's after trimming and ignoring case, or as a number (`user_id` is the other user) |
 | `DELETE /v1/identity-keys/:keyId/values/:valueId` | `zeteo.grants.write` | `204` |
 | `GET /v1/identity-keys/:keyId/missing` | `zeteo.grants.read` | `{ users: [{ user_id, via_grant_ids }] }`: users a rule using the key reaches who hold no value |
 

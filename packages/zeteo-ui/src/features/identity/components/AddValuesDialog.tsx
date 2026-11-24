@@ -1,11 +1,14 @@
 import { useDirectory, type Principal } from "@/features/principals";
 import { faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { useAddIdentityValues } from "../api/useIdentityValues";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { parsePasted } from "../bulkPaste";
 import type { ApiError } from "@/lib/api";
 import { useState } from "react";
+import {
+  useAddIdentityValues,
+  type NearDuplicate,
+} from "../api/useIdentityValues";
 import {
   Alert,
   Button,
@@ -57,6 +60,8 @@ export const AddValuesDialog = ({
   const [unresolved, setUnresolved] = useState<string[]>([]);
   const [ambiguous, setAmbiguous] = useState<string[]>([]);
   const [failure, setFailure] = useState<ApiError | null>(null);
+  // After a save: new values close to another person's, shown before closing.
+  const [near, setNear] = useState<NearDuplicate[]>([]);
 
   const users = (directory.data?.data ?? []).filter((p) => p.type === "user");
   const filled = rows.filter((r) => r.person || r.value.trim());
@@ -67,9 +72,13 @@ export const AddValuesDialog = ({
       ? filled.length > 0 && filled.every(complete)
       : !!text.trim());
 
+  /**
+   * Sends `values`; `left` are the pasted lines not sent, kept in the box.
+   * Closes when nothing is left and no value is close to another person's.
+   */
   const send = (
     values: { user_id: string; value: string }[],
-    onDone: () => void
+    left: string[]
   ) => {
     if (values.length > MAX) {
       setFailure({
@@ -79,15 +88,27 @@ export const AddValuesDialog = ({
       });
       return;
     }
-    add.mutate(values, { onSuccess: onDone, onError: setFailure });
+    add.mutate(values, {
+      onSuccess: ({ warnings }) => {
+        if (warnings.length === 0 && left.length === 0) {
+          onClose();
+          return;
+        }
+        setNear(warnings);
+        setRows([emptyRow()]);
+        setText(left.join("\n"));
+      },
+      onError: setFailure,
+    });
   };
 
   const submit = () => {
     setFailure(null);
+    setNear([]);
     if (mode === "rows") {
       send(
         filled.map((r) => ({ user_id: r.person!.id, value: r.value.trim() })),
-        onClose
+        []
       );
       return;
     }
@@ -110,11 +131,8 @@ export const AddValuesDialog = ({
     setUnresolved(missing);
     setAmbiguous(unclear);
     if (values.length === 0) return;
-    const left = [...missing, ...unclear];
     // Lines that were not sent stay in the box, so nothing is lost.
-    send(values, () =>
-      left.length === 0 ? onClose() : setText(left.join("\n"))
-    );
+    send(values, [...missing, ...unclear]);
   };
 
   const taken = failure?.code === "identity_value_taken";
@@ -139,7 +157,7 @@ export const AddValuesDialog = ({
           disabled={add.isPending}
           onClick={onClose}
         >
-          Cancel
+          {near.length > 0 ? "Close" : "Cancel"}
         </Button>,
         <Button
           key="add"
@@ -300,6 +318,26 @@ export const AddValuesDialog = ({
                 Line: <code>{clash}</code>
               </p>
             )}
+          </Alert>
+        )}
+        {near.length > 0 && (
+          <Alert variant="warning">
+            <p>
+              Added. These values are close to another person's (the same but
+              for capitals, spaces or how a number is written), and a source may
+              match them as the same:
+            </p>
+            <ul>
+              {near.map((d, i) => {
+                const other = users.find((p) => p.id === d.user_id);
+                return (
+                  <li key={i}>
+                    <code>{d.value}</code> is close to a value{" "}
+                    {other ? userLabel(other) : d.user_id} holds.
+                  </li>
+                );
+              })}
+            </ul>
           </Alert>
         )}
         {!taken && <ErrorNotice error={failure} />}

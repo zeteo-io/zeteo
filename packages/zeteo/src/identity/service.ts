@@ -1,5 +1,6 @@
 import { AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import { withAudit } from "../utils/transaction.js";
+import type { Prisma } from "../utils/db/prisma.js";
 import { prisma } from "../utils/db/prisma.js";
 import type {
   IdentityKey,
@@ -218,6 +219,84 @@ export const listValues = async (input: {
   };
 };
 
+/** A new value close to another user's under the key (see `nearDuplicates`). */
+export interface NearDuplicate {
+  value: string;
+  userId: string;
+}
+
+const NUMBER_TEXT = /^-?\d+(\.\d+)?$/;
+
+/**
+ * For each of `created`, the other users holding a value under the key that
+ * a source may well compare as equal: the same text after trimming and
+ * ignoring case, or the same number (`8` and `08.0`). Not refused, as Zeteo
+ * cannot know how the source compares; told, so an admin can look.
+ */
+const nearDuplicates = async (
+  tx: Prisma.TransactionClient,
+  keyId: string,
+  created: IdentityValue[]
+): Promise<NearDuplicate[]> => {
+  if (created.length === 0) return [];
+  const folded = (v: string) => v.trim().toLowerCase();
+  const numberOf = (v: string) =>
+    NUMBER_TEXT.test(v.trim()) ? v.trim() : undefined;
+  const texts = [...new Set(created.map((row) => folded(row.value)))];
+  const numbers = [
+    ...new Set(created.flatMap((row) => numberOf(row.value) ?? [])),
+  ];
+  // The CASE keeps the cast off values that are not numbers.
+  const close = await tx.$queryRaw<
+    Array<{
+      user_id: string;
+      value: string;
+      folded: string;
+      number: string | null;
+    }>
+  >`
+    SELECT "user_id", "value",
+      lower(btrim("value", E' \t\r\n')) AS "folded",
+      CASE WHEN btrim("value", E' \t\r\n') ~ '^-?[0-9]+(\.[0-9]+)?$'
+        THEN btrim("value", E' \t\r\n')::numeric::text END AS "number"
+    FROM "zeteo"."identity_values"
+    WHERE "key_id" = ${keyId}::uuid
+      AND (
+        lower(btrim("value", E' \t\r\n')) = ANY(${texts}::text[])
+        OR (CASE WHEN btrim("value", E' \t\r\n') ~ '^-?[0-9]+(\.[0-9]+)?$'
+          THEN btrim("value", E' \t\r\n')::numeric END) = ANY(${numbers}::numeric[])
+      )`;
+  const found: NearDuplicate[] = [];
+  const seen = new Set<string>();
+  for (const row of created) {
+    const number = numberOf(row.value);
+    for (const other of close) {
+      if (other.user_id === row.userId) continue;
+      const sameText = other.folded === folded(row.value);
+      const sameNumber =
+        number !== undefined &&
+        other.number !== null &&
+        canonicalNumber(other.number) === canonicalNumber(number);
+      if (!sameText && !sameNumber) continue;
+      const id = `${row.value}\u0000${other.user_id}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      found.push({ value: row.value, userId: other.user_id });
+    }
+  }
+  return found;
+};
+
+/** A decimal's digits without leading zeros, trailing fraction zeros or a negative zero's sign. */
+const canonicalNumber = (text: string): string => {
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text.trim());
+  if (!m) return text;
+  const whole = m[2]!.replace(/^0+/, "") || "0";
+  const fraction = (m[3] ?? "").replace(/0+$/, "");
+  const sign = whole === "0" && fraction === "" ? "" : m[1]!;
+  return `${sign}${whole}${fraction ? `.${fraction}` : ""}`;
+};
+
 /**
  * Adds the values, all or nothing. A value a user already holds is kept as
  * it is; one held by another user (or given to two users in the call) fails
@@ -227,7 +306,7 @@ export const addValues = async (
   keyId: string,
   values: NewIdentityValue[],
   actorId: string
-): Promise<IdentityValue[]> =>
+): Promise<{ rows: IdentityValue[]; nearDuplicates: NearDuplicate[] }> =>
   withAudit(async (tx, audit) => {
     await lockKey(tx, keyId);
     const wanted = new Map<string, string>();
@@ -276,9 +355,12 @@ export const addValues = async (
         },
       });
     }
-    return [...held.values()]
-      .filter((row) => wanted.get(row.value) === row.userId)
-      .concat(created);
+    return {
+      rows: [...held.values()]
+        .filter((row) => wanted.get(row.value) === row.userId)
+        .concat(created),
+      nearDuplicates: await nearDuplicates(tx, keyId, created),
+    };
   });
 
 export const removeValue = async (
