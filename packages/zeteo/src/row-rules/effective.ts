@@ -1,6 +1,7 @@
 import { keysById, valuesOfUser, valuesOfUsers } from "../identity/service.js";
 import { identityKeysOf, isIdentityRef, mapRule, opOf } from "./store.js";
 import type { RowAccess, RuleFilter } from "./types.js";
+import { namedGroupsOf } from "../grants/principals.js";
 import { loadAccessAs } from "../grants/access.js";
 import { NotFoundError } from "../utils/errors.js";
 import { combineRowAccess } from "./resolve.js";
@@ -27,7 +28,14 @@ export type EffectiveWarning =
   | { code: "all_rows_overrides"; grant_id: string }
   | { code: "missing_identity_value"; key: string }
   | { code: "row_rule_unavailable"; reason: string }
-  | { code: "merged_members_limited"; member_table_ids: string[] };
+  | { code: "merged_members_limited"; member_table_ids: string[] }
+  | {
+      code: "org_scoped_rule_inactive";
+      group_id: string;
+      group_name: string | null;
+      organization_id: string;
+      organization_name: string | null;
+    };
 
 export interface EffectiveAccess {
   columns: "all" | string[];
@@ -40,6 +48,8 @@ export interface EffectiveAccess {
     row_access: RowAccess;
   }>;
   warnings: EffectiveWarning[];
+  /** The organizations of the user's groups, to ask again as signed in to one. */
+  organizations: Array<{ id: string; name: string | null }>;
 }
 
 /** The identity keys the rules use plainly and with `below`, apart. */
@@ -159,7 +169,10 @@ export const effectiveAccess = async (
   });
   if (!table) throw new NotFoundError("Table not found");
 
-  const access = await loadAccessAs(userId, organizationId);
+  const [access, userGroups] = await Promise.all([
+    loadAccessAs(userId, organizationId),
+    namedGroupsOf(userId),
+  ]);
   // The grants loadAccess counts: the user's and their groups', on a live
   // source, with at least one column.
   const grants = (
@@ -225,6 +238,44 @@ export const effectiveAccess = async (
       if (g.rowAccess === "all") {
         warnings.push({ code: "all_rows_overrides", grant_id: g.id });
       }
+    }
+  }
+
+  // A rule on a group of another organization than the sign-in's (or on
+  // any organization's group, signed in to none) does not count, so it
+  // limits nothing here: by design, and worth an admin's notice.
+  const elsewhere = userGroups.filter(
+    (g) => g.organizationId !== null && g.organizationId !== organizationId
+  );
+  if (elsewhere.length > 0) {
+    const ruled = await prisma.grant.findMany({
+      where: {
+        tableId,
+        table: { source: { archivedAt: null } },
+        rowAccess: "rule",
+        principalType: "group",
+        principalId: { in: elsewhere.map((g) => g.id) },
+      },
+      select: {
+        principalId: true,
+        allColumns: true,
+        _count: { select: { columns: true } },
+      },
+    });
+    const ruledIds = new Set(
+      ruled
+        .filter((g) => g.allColumns || g._count.columns > 0)
+        .map((g) => g.principalId)
+    );
+    for (const g of elsewhere) {
+      if (!ruledIds.has(g.id)) continue;
+      warnings.push({
+        code: "org_scoped_rule_inactive",
+        group_id: g.id,
+        group_name: g.name,
+        organization_id: g.organizationId!,
+        organization_name: g.organizationName,
+      });
     }
   }
 
@@ -320,5 +371,15 @@ export const effectiveAccess = async (
       row_access: g.rowAccess,
     })),
     warnings,
+    organizations: [
+      ...new Map(
+        userGroups
+          .filter((g) => g.organizationId !== null)
+          .map((g) => [
+            g.organizationId!,
+            { id: g.organizationId!, name: g.organizationName },
+          ])
+      ).values(),
+    ],
   };
 };

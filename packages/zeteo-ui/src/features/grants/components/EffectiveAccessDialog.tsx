@@ -1,4 +1,4 @@
-import { Alert, Button, Modal, Spinner } from "@kosmeo-ui/react";
+import { Alert, Button, Modal, SearchSelect, Spinner } from "@kosmeo-ui/react";
 import { tableLabel, useAllTables } from "@/features/tables";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useIdentityKeys } from "@/features/identity";
@@ -66,6 +66,11 @@ const Warning = ({
         .join(", ");
       return `This user's access to ${members} is limited differently from this merged table.`;
     }
+    case "org_scoped_rule_inactive": {
+      const group = warning.group_name ?? warning.group_id;
+      const organization = warning.organization_name ?? warning.organization_id;
+      return `A rule on ${group} applies only when signed in to ${organization}; under this sign-in this user isn't limited by it.`;
+    }
     case "row_rule_unavailable":
       switch (warning.reason) {
         case "too_many_values":
@@ -91,8 +96,23 @@ export const EffectiveAccessDialog = ({
       ? { type: "user", id: grant.principal_id }
       : null
   );
-  const access = useEffectiveAccess(person?.id, grant.table.id);
+  // The organization the user is taken to be signed in to; "" for none.
+  const [organization, setOrganization] = useState("");
+  const access = useEffectiveAccess(
+    person?.id,
+    grant.table.id,
+    organization || undefined
+  );
   const data = access.data;
+  // The organizations to pick from: those of the user's groups, which every
+  // answer lists alike; the answer for no organization is the one asked first.
+  const unsigned = useEffectiveAccess(person?.id, grant.table.id);
+  const organizations = unsigned.data?.organizations ?? [];
+  const signIns = ["", ...organizations.map((o) => o.id)];
+  const signInLabel = (id: string) =>
+    id === ""
+      ? "No organization"
+      : (organizations.find((o) => o.id === id)?.name ?? id);
 
   return (
     <Modal
@@ -114,8 +134,21 @@ export const EffectiveAccessDialog = ({
         <PrincipalPicker
           value={person}
           types={["user"]}
-          onChange={(p) => setPerson(p)}
+          onChange={(p) => {
+            setPerson(p);
+            setOrganization("");
+          }}
         />
+        {person && (
+          <SearchSelect<string>
+            label="Signed in to"
+            value={organization}
+            options={signIns}
+            getOptionLabel={signInLabel}
+            getOptionKey={(id) => id || "none"}
+            onSelect={(id) => setOrganization(id)}
+          />
+        )}
         {person && access.isLoading && <Spinner size="sm" />}
         <ErrorNotice error={access.error} />
         {data && (

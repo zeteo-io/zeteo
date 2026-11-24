@@ -56,6 +56,14 @@ updated_at }`. The row fields say which rows the grant reaches ([row-rules.md](r
   are in (global groups, and those of the organization the token was issued for). There are no deny
   rules. Columns are the union; **rows** follow the row rules formula: any `all` grant gives every
   row, else the rules of the `rule` grants are OR'd, else every row ([row-rules.md](row-rules.md)).
+  Only the grants active for the sign-in count, rules included: a rule on an organization's group
+  applies only when the user is signed in to that organization. So a grant that doesn't limit rows,
+  on a global group or on the user, gives **every row** whenever the user signs in outside that
+  organization (to another, or to none), and a user who belongs to no active organization (created
+  by an admin and never added to one, or whose organizations are all inactive) gets a token without
+  one, for whom every organization group's rule drops out. To limit someone everywhere, put the
+  rule on a user or global-group grant
+  ([row-rules.md](row-rules.md#organization-scoped-groups)).
 - **New columns stay hidden on explicit grants.** A grant with a column list does not include
   columns added later. An `all_columns` grant does.
 - **Drift is tracked, not destructive.** A table or column the last refresh did not find is shown

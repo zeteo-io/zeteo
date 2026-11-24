@@ -1,4 +1,4 @@
-import type { GroupRef } from "../../grants/principals.js";
+import type { TestGroupRef } from "../../grants/principals.js";
 import { redis } from "../../utils/redis.js";
 import {
   TEST_DIRECTORY_KEY,
@@ -13,7 +13,7 @@ import {
 } from "../../grants/principals.js";
 
 /** Makes `userId` a member of `groups` for every process sharing this Redis (test mode only). */
-export const setTestGroups = async (userId: string, groups: GroupRef[]) => {
+export const setTestGroups = async (userId: string, groups: TestGroupRef[]) => {
   await redis.set(testGroupsKey(userId), JSON.stringify(groups), "EX", 600);
 };
 

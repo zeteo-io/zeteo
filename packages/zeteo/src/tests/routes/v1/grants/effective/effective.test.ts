@@ -116,6 +116,7 @@ describe("GET /v1/grants/effective", () => {
         },
       ],
       warnings: [],
+      organizations: [],
     });
   });
 
@@ -162,6 +163,52 @@ describe("GET /v1/grants/effective", () => {
     expect(
       (res.body.grants as { grant_id: string }[]).map((g) => g.grant_id).sort()
     ).toEqual([own.id, group.id].sort());
+  });
+
+  it("warns that an organization's group's rule does not apply under a sign-in to another organization or none", async () => {
+    const userId = randomUUID();
+    const org = randomUUID();
+    const reps = randomUUID();
+    const everyone = randomUUID();
+    await setTestGroups(userId, [
+      { id: reps, organizationId: org, name: "Reps", organizationName: "Acme" },
+      { id: everyone, organizationId: null, name: "Everyone" },
+    ]);
+    grouped.push(userId);
+    await grant({
+      principal_type: "group",
+      principal_id: reps,
+      row_access: "rule",
+      row_rule: { status: { eq: "paid" } },
+    });
+    await grant({ principal_type: "group", principal_id: everyone });
+    const inactive = {
+      code: "org_scoped_rule_inactive",
+      group_id: reps,
+      group_name: "Reps",
+      organization_id: org,
+      organization_name: "Acme",
+    };
+    const as = (organizationId?: string) =>
+      fetchJson(
+        "GET",
+        `${app.url}/v1/grants/effective?user_id=${userId}&table_id=${orders.id}${
+          organizationId ? `&organization_id=${organizationId}` : ""
+        }`,
+        grantsReadToken()
+      );
+
+    const none = await as();
+    expect(none.status).toBe(200);
+    expect(none.body).toMatchObject({
+      rows: "all",
+      warnings: [inactive],
+      organizations: [{ id: org, name: "Acme" }],
+    });
+    const other = await as(randomUUID());
+    expect(other.body).toMatchObject({ rows: "all", warnings: [inactive] });
+    const signedIn = await as(org);
+    expect(signedIn.body).toMatchObject({ rows: "limited", warnings: [] });
   });
 
   it("gives no rows and warns when the user has no value under a rule's key", async () => {
@@ -268,6 +315,7 @@ describe("GET /v1/grants/effective", () => {
       rule_summary: null,
       grants: [],
       warnings: [],
+      organizations: [],
     });
   });
 

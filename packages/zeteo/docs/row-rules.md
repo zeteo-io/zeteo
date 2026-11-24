@@ -46,6 +46,25 @@ every column. Someone in "Retail" and "West Reps" sees both sets of rows. A dire
 "Sales leadership" (`all`) sees every row. There is no per-row column masking: one rule per table.
 Whoever wants AND writes it inside one rule.
 
+### Organization-scoped groups
+
+Only the grants **active for the sign-in** count, and a group that belongs to an organization is
+active only when the user's token is for that organization (global groups and the user's own
+grants always are). This holds for a group's rule as for its columns, so the formula above is over
+the grants of that sign-in, and two consequences follow:
+
+1. A grant that **doesn't limit rows** (`unlimited_default`) on a global group or on the user gives
+   **every row** whenever the user signs in outside the organization whose group carries the rule:
+   to another organization, or to none. The organization's rule then reaches no one.
+2. A user who belongs to **no active organization** (created by an admin and never added to one, or
+   whose organizations are all inactive) gets a token without an organization, so **every
+   organization-scoped group's rule drops out** for them. (A user with at least one active
+   organization always gets one in their token. Service accounts get no group grants at all.)
+
+To limit someone everywhere, put the rule on a grant to the user or to a global group. Effective
+access warns `org_scoped_rule_inactive` when a rule on one of the user's organization groups does
+not apply under the sign-in it is asked about.
+
 Each rule is resolved before the OR: identity values are looked up, relative dates are computed
 against the query's "now" (a dashboard's run `now`), and an identity condition that resolves to no
 values makes **that grant's whole rule false**. What changes over time: group membership (cached up
@@ -70,6 +89,13 @@ to the grant's own table and extended with identity values:
 
 `eq` with an identity means "is one of my values" (as `in`); `ne` and `notIn` mean "is none of
 them".
+
+A rule follows SQL's rules for NULL: `ne`, `notIn` and `not` **also hide rows whose column is
+NULL**, as no comparison with a NULL holds (it fails closed). To keep those rows, say so:
+
+```json
+{ "or": [ { "channel": { "notIn": ["Retail"] } }, { "channel": { "isNull": true } } ] }
+```
 
 ```json
 { "channel": { "in": ["Retail", "Wholesale"] } }
@@ -99,9 +125,16 @@ an upload source's included. The grant dialog offers an owner no "is one of my â
 An **identity key** is a named key (`netsuite_employee_id`, `display_name`, `google_id`) under
 which users hold **identity values**: the way a source names a person (an employee id in one table,
 a display name in a sheet). A user may hold several values under a key; a value belongs to one user
-within its key (`409 identity_value_taken`, with the `value`). Matching is exact: nothing is
-trimmed or case-folded, so fix mismatches in the value. Only users hold values, never groups.
-Deactivated users keep theirs.
+within its key (`409 identity_value_taken`, with the `value`), compared as exact text. Only users
+hold values, never groups. Deactivated users keep theirs.
+
+**Matching uses the source database's own comparison**, not Zeteo's: a value is bound as it is
+(never trimmed or case-folded by Zeteo) and the source compares it with the column. SQL Server's
+usual collations ignore case and trailing spaces, so `rep-ab`, `REP-AB` and `rep-ab   ` match the
+same rows; a `citext` or `char` column in Postgres is similar; and against a number column values
+compare as numbers, so `"8"` and `"08.0"` match the same rows. Values that differ as text can
+therefore still match the same rows: give two people values that differ in more than case,
+padding or number formatting.
 
 | Route | Permission | Result |
 |-------|------------|--------|
@@ -225,8 +258,13 @@ from, and `warnings`: `all_rows_overrides` (an `all` grant overriding another's 
 `hierarchy_unavailable` when Tereo cannot give the user's reporting lines) and `merged_members_limited` (a merged table the user
 reads rows of, whose members' rows are limited differently: by a rule while the merged table shows
 every row, or by a rule other than the merged table's, compared by column name; the
-`member_table_ids` are those members). Groups scoped to an organization count only when `organization_id` is
-given. It is never cached.
+`member_table_ids` are those members) and `org_scoped_rule_inactive` (a rule on one of the
+user's groups of another organization than `organization_id`, or of any organization when none is
+given: under that sign-in it limits nothing; with `group_id`, `group_name`, `organization_id` and
+`organization_name`). Groups scoped to an organization count only when `organization_id` is theirs,
+as for a token ([Organization-scoped groups](#organization-scoped-groups)); `organizations` lists the
+organizations of the user's groups, which the admin UI's Effective access dialog offers to ask
+again with. It is never cached.
 
 ## Audit and transfer
 

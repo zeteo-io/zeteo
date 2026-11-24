@@ -174,7 +174,7 @@ export interface MissingIdentityValues {
 export interface EffectiveAccessOptions {
   user_id: string;
   table_id: string;
-  /** Counts this organization's groups too; absent, global groups only. */
+  /** Counts this organization's groups too, as a sign-in to it would; absent, global groups only. */
   organization_id?: string;
 }
 
@@ -186,7 +186,19 @@ export type EffectiveAccessWarning =
       /** `column_missing`, `too_many_values`, or `hierarchy_unavailable` (Tereo cannot give the user's reporting lines now). */
       reason: string;
     }
-  | { code: "merged_members_limited"; member_table_ids: string[] };
+  | { code: "merged_members_limited"; member_table_ids: string[] }
+  | {
+      /**
+       * A rule on the user's group of another organization than
+       * `organization_id` (or of any, when none is given): it does not count
+       * under this sign-in, so it limits nothing.
+       */
+      code: "org_scoped_rule_inactive";
+      group_id: string;
+      group_name: string | null;
+      organization_id: string;
+      organization_name: string | null;
+    };
 
 /** What one user gets of one table over all the grants that reach them. */
 export interface EffectiveAccess {
@@ -202,6 +214,8 @@ export interface EffectiveAccess {
     row_access: RowAccess;
   }[];
   warnings: EffectiveAccessWarning[];
+  /** The organizations of the user's groups, to ask again with one as `organization_id`. */
+  organizations: { id: string; name: string | null }[];
 }
 
 export interface ListGrantsOptions extends ListOptions {

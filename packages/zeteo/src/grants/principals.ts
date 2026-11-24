@@ -86,6 +86,52 @@ const testGroups = async (userId: string): Promise<GroupRef[]> => {
   return raw === null ? [] : (JSON.parse(raw) as GroupRef[]);
 };
 
+/** A user's group with its name and organization, for an admin's view. */
+export interface NamedGroup {
+  id: string;
+  name: string | null;
+  organizationId: string | null;
+  organizationName: string | null;
+}
+
+/** A test-mode group entry: a `GroupRef`, optionally with names. */
+export type TestGroupRef = GroupRef & {
+  name?: string;
+  organizationName?: string;
+};
+
+/**
+ * Every unarchived group of the user, whatever their organization, with its
+ * name and its organization's, asked of tereo afresh (never cached). A failed
+ * request is a 503.
+ */
+export const namedGroupsOf = async (userId: string): Promise<NamedGroup[]> => {
+  if (env.TEREO_TEST_MODE) {
+    return ((await testGroups(userId)) as TestGroupRef[]).map((g) => ({
+      id: g.id,
+      name: g.name ?? null,
+      organizationId: g.organizationId,
+      organizationName: g.organizationName ?? null,
+    }));
+  }
+  assertNoTransaction("tereo listUserGroups()");
+  let groups: Awaited<
+    ReturnType<ReturnType<typeof getTereo>["auth"]["listUserGroups"]>
+  >;
+  try {
+    groups = await getTereo().auth.listUserGroups(userId);
+  } catch (err) {
+    logger.error({ err, user_id: userId }, "listing a user's groups failed");
+    throw unavailable();
+  }
+  return (groups ?? []).map((g) => ({
+    id: g.id,
+    name: g.name,
+    organizationId: g.organizationId,
+    organizationName: g.organization?.name ?? null,
+  }));
+};
+
 /** Ids of the groups whose grants count for the caller: global ones and those of the token's organization. */
 export const groupIdsOf = async (caller: Caller): Promise<string[]> => {
   if (caller.isServiceAccount) return [];

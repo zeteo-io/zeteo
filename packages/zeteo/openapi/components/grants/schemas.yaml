@@ -348,7 +348,7 @@ MissingIdentityValuesResponse:
 EffectiveAccess:
   type: object
   description: What one user gets of one table, for an admin
-  required: [columns, rows, rule_summary, grants, warnings]
+  required: [columns, rows, rule_summary, grants, warnings, organizations]
   properties:
     columns:
       description: '`"all"`, or the names of the granted columns (empty when nothing is granted)'
@@ -401,3 +401,25 @@ EffectiveAccess:
             properties:
               code: { type: string, const: merged_members_limited }
               member_table_ids: { type: array, items: { type: string, format: uuid } }
+          - type: object
+            description: |
+              A grant with a rule on one of the user's groups that belongs to an organization other
+              than `organization_id` (or to any organization, when none is given): under this
+              sign-in the group does not count, so its rule limits nothing, and a grant that does
+              not limit rows (on the user or a global group) gives every row. One warning per group.
+            required: [code, group_id, group_name, organization_id, organization_name]
+            properties:
+              code: { type: string, const: org_scoped_rule_inactive }
+              group_id: { type: string, format: uuid }
+              group_name: { type: [string, 'null'] }
+              organization_id: { type: string, format: uuid }
+              organization_name: { type: [string, 'null'] }
+    organizations:
+      type: array
+      description: The organizations of the user's groups, to ask again with one as `organization_id`
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string, format: uuid }
+          name: { type: [string, 'null'] }

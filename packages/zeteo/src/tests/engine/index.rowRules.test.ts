@@ -2,12 +2,14 @@
 // @module-tag platform
 import { ndjsonLines, newExportUser, postExport } from "../support/exports.js";
 import { savedQueriesCall, shareDirectly } from "../support/savedQueries.js";
+import { clearTestGroups, setTestGroups } from "../support/principals.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
 import { TABLE } from "../support/dashboards.js";
 import { prisma } from "../../utils/db/index.js";
+import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "node:crypto";
 import {
   dashboardWith,
@@ -46,7 +48,12 @@ describeEachEngine("row rules", (engine) => {
   const bigRef = newQueryUser();
   const list100 = newQueryUser();
   const list101 = newQueryUser();
+  const orgMember = newQueryUser();
+  const ORG = randomUUID();
+  const orgGroup = randomUUID();
+  const globalGroup = randomUUID();
   const users = [
+    orgMember,
     list100,
     list101,
     admin,
@@ -203,12 +210,28 @@ describeEachEngine("row rules", (engine) => {
       rule: { external_ref: { in: [...odd, ...filler(97)] } },
     });
 
+    // The rule is on a group of organization ORG; a global group's grant
+    // does not limit rows.
+    await grantTo({ type: "group", id: orgGroup }, orders!, "all", {
+      access: "rule",
+      rule: { status: { eq: "paid" } },
+    });
+    await grantTo({ type: "group", id: globalGroup }, orders!, [
+      "id",
+      "status",
+    ]);
+    await setTestGroups(orgMember.id, [
+      { id: orgGroup, organizationId: ORG },
+      { id: globalGroup, organizationId: null },
+    ]);
+
     await grantTo(missing.principal, orders!, "all", {
       access: "rule",
       rule: { notes: { isNull: true } },
     });
   });
   afterAll(async () => {
+    await clearTestGroups(orgMember.id);
     await removeDashboardsOf([missing.id]);
     await removeRunsOf(users.map((u) => u.id));
     await removeSources([source.id]);
@@ -246,6 +269,24 @@ describeEachEngine("row rules", (engine) => {
     const long = await ok(list101.token, { from: "orders", select: ["id"] });
     expect(ids(short)).toEqual([8]);
     expect(ids(long)).toEqual([8]);
+  });
+
+  // By design (docs/row-rules.md, "Organization-scoped groups"): a rule on
+  // an organization's group counts only when the user is signed in to that
+  // organization. Signed in to another organization, or to none, it drops
+  // out, and a global grant that does not limit rows gives every row.
+  it("applies an organization-scoped group's rule only under a sign-in to that organization", async () => {
+    const as = (org?: string) =>
+      tokenFor({
+        userId: orgMember.id,
+        permissions: ["zeteo.data.read"],
+        ...(org && { org }),
+      });
+    const query = { from: "orders", select: ["id"] };
+    expect(ids(await ok(as(ORG), query))).toEqual(PAID_IDS);
+    const every = Array.from({ length: 12 }, (_, i) => i + 1);
+    expect(ids(await ok(as(), query))).toEqual(every);
+    expect(ids(await ok(as(randomUUID()), query))).toEqual(every);
   });
 
   it("counts and sums only the rule's rows", async () => {

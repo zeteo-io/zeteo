@@ -1,8 +1,10 @@
 import { USER_ID, GRANT_ID, GROUP_ID, makeGrant } from "../testFixtures";
 import { EffectiveAccessDialog } from "./EffectiveAccessDialog";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/render";
-import { screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { pickOption } from "@/test/searchSelect";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
@@ -29,6 +31,7 @@ const effective = (over: object) => ({
     },
   ],
   warnings: [],
+  organizations: [],
   ...over,
 });
 
@@ -132,6 +135,44 @@ describe("EffectiveAccessDialog", () => {
         "A rule names a column that no longer exists; queries on this table are refused."
       )
     ).toBeInTheDocument();
+  });
+
+  it("asks again as signed in to an organization of the user's groups, and words a rule that does not apply", async () => {
+    const ORG = "0rg00000-1c7a-4a53-9d0e-6a3b1f2c4d01";
+    const inactive = {
+      code: "org_scoped_rule_inactive",
+      group_id: GROUP_ID,
+      group_name: "West reps",
+      organization_id: ORG,
+      organization_name: "Acme",
+    };
+    show(
+      effective({
+        rows: "all",
+        rule_summary: null,
+        warnings: [inactive],
+        organizations: [{ id: ORG, name: "Acme" }],
+      })
+    );
+    expect(
+      await screen.findByText(
+        "A rule on West reps applies only when signed in to Acme; under this sign-in this user isn't limited by it."
+      )
+    ).toBeInTheDocument();
+    await pickOption(
+      userEvent.setup(),
+      screen.getByLabelText("Signed in to"),
+      "Acme"
+    );
+    await waitFor(() =>
+      expect(get).toHaveBeenCalledWith("/v1/grants/effective", {
+        params: {
+          user_id: USER_ID,
+          table_id: makeGrant().table.id,
+          organization_id: ORG,
+        },
+      })
+    );
   });
 
   it.each([
