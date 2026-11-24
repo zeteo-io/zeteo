@@ -82,8 +82,17 @@ them".
 ```
 
 On save the rule is checked: the columns exist on the table and are not missing, the operators suit
-their types, literals parse to the column's type, and identity keys exist. A rule that is not valid
-is `400 invalid_row_rule`, with `path` into the request body starting `row_rule`.
+their types, literals parse to the column's type, and identity keys exist. A JSON number a double
+cannot hold as written (an integer past 2^53, or more than 15 significant digits) is refused: write
+large numbers as decimal strings (`"9007199254740993"`). A rule that is not valid is
+`400 invalid_row_rule`, with `path` into the request body starting `row_rule`.
+
+**Upload source owners** may write rules on their own tables' grants, but **without identity
+values**: a rule an owner writes (as the owner, without `zeteo.grants.write`) that names
+`{ "identity": … }` anywhere is `400 invalid_row_rule`, with `path` to the reference. Otherwise an
+owner could put a rule on a group they belong to and read, through their own table, which values
+they and their reports hold. Admins with `zeteo.grants.write` may use identity values on any grant,
+an upload source's included. The grant dialog offers an owner no "is one of my …" conditions.
 
 ## Identity keys and values
 
@@ -107,8 +116,8 @@ Deactivated users keep theirs.
 
 A key has an `id`, `name`, `label` (what callers read: "your NetSuite employee ID"), `description`,
 `value_count` and timestamps. Identity values are access configuration, so no new permission exists.
-Upload source owners (`zeteo.uploads.write`) may read key names and labels to build rules on their
-own tables' grants, never any value. Every change is audited (`zeteo.identity_key.created`,
+Upload source owners (`zeteo.uploads.write`) may read key names and labels, never any value, and
+may not use identity values in the rules they write. Every change is audited (`zeteo.identity_key.created`,
 `.updated`, `.removed`; `zeteo.identity_value.added`, `.removed`) in the same transaction.
 
 ## Everyone below the caller

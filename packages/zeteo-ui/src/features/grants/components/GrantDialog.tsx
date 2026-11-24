@@ -156,7 +156,9 @@ const GrantDialogBody = ({
   const [ruleDescription, setRuleDescription] = useState(
     grant?.row_rule_description ?? ""
   );
-  const identity = useIdentityKeys(access === "rule" && !lockedRule);
+  // A rule an upload source's owner writes may not use identity values
+  // (the server refuses them), so only an admin is offered them.
+  const identity = useIdentityKeys(asAdmin && access === "rule" && !lockedRule);
 
   const activeSourceId = grant?.source.id ?? fixed?.id ?? sourceId;
   const activeTableId = grant?.table.id ?? tableId;
@@ -461,8 +463,8 @@ const GrantDialogBody = ({
                 ) : (
                   <RowRuleBuilder
                     columns={ruleColumns}
-                    identityKeys={identity.keys}
-                    identityError={!!identity.error}
+                    identityKeys={asAdmin ? identity.keys : []}
+                    identityError={asAdmin && !!identity.error}
                     value={draft}
                     onChange={(g) => {
                       mutation.reset();
@@ -474,6 +476,13 @@ const GrantDialogBody = ({
                     }
                   />
                 ))}
+              {showsRule && !ownerLocked && !asAdmin && (
+                <p className="z-muted z-grant-note">
+                  As the source's owner, you limit rows by values in the table.
+                  Only an admin can limit rows by people's identity values ("is
+                  one of my …").
+                </p>
+              )}
               {showsRule && !ownerLocked && (
                 <Input
                   label="Describe this limit for people who have it"

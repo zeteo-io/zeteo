@@ -855,6 +855,28 @@ describe("GrantDialog", () => {
       });
     });
 
+    it("offers an upload source's owner no identity values, which only an admin may use", async () => {
+      held.permissions = ["zeteo.data.read", "zeteo.uploads.write"];
+      const user = userEvent.setup();
+      renderForm(undefined, {
+        id: SOURCE_ID,
+        tables: [{ id: ORDERS_ID, name: "orders", missing: false }],
+      });
+      await pick(user, "Table", "orders");
+      await user.click(screen.getByLabelText("Only rows where…"));
+      expect(
+        screen.getByText(/Only an admin can limit rows by people's identity/)
+      ).toBeInTheDocument();
+      await pick(user, "Column", "customer_id");
+      await user.click(screen.getByLabelText("Operator"));
+      expect(options()).toContain("is one of");
+      expect(options().some((o) => o.includes("my "))).toBe(false);
+      expect(get).not.toHaveBeenCalledWith(
+        "/v1/identity-keys",
+        expect.anything()
+      );
+    });
+
     it("shows an owner grant's rows read-only", async () => {
       renderForm(makeGrant({ owner_grant: true }));
       expect(screen.getByLabelText("Doesn't limit rows")).toBeDisabled();

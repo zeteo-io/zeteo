@@ -1,12 +1,12 @@
 import { Prisma as PrismaRuntime } from "../../prisma/generated/client/index.js";
 import { GRANTS_WRITE, AUDIT_EVENTS } from "../definitions/tereoDeclaration.js";
 import type { PrincipalType } from "../../prisma/generated/client/index.js";
+import { refuseIdentityRefs, toStoredRule } from "../row-rules/store.js";
 import { detailInclude, type GrantDetail } from "../utils/db/grants.js";
 import { mapUniqueViolation } from "../utils/prismaErrors.js";
 import { assertOwnsInTx } from "../uploads/ownership.js";
 import type { RuleFilter } from "../row-rules/types.js";
 import { db, type Prisma } from "../utils/db/index.js";
-import { toStoredRule } from "../row-rules/store.js";
 import { withAudit } from "../utils/transaction.js";
 import type { Caller } from "../middleware/auth.js";
 import {
@@ -122,7 +122,8 @@ const auditMetadata = (grant: {
 const rowData = async (
   tx: Prisma.TransactionClient,
   tableId: string,
-  rows: GrantRows
+  rows: GrantRows,
+  actor: { owner?: Caller }
 ) => {
   if (rows.access !== "rule") {
     return {
@@ -132,6 +133,10 @@ const rowData = async (
       identityKeyIds: [],
     };
   }
+  // An owner's rule may not name identity values: it could limit the owner
+  // themselves to the rows matching their own and their reports' values,
+  // telling them values only `zeteo.grants.read` may see.
+  if (actor.owner) refuseIdentityRefs(rows.rule);
   const { stored, identityKeyIds } = await toStoredRule(tx, tableId, rows.rule);
   return {
     rowAccess: rows.access,
@@ -188,7 +193,7 @@ export const createGrant = async (
     await checkOwner(tx, { actorId, ...actor }, table.sourceId);
     if (table.source.archivedAt) throw new SourceArchivedError();
     const columnIds = await checkedColumnIds(tx, table.id, input.columns);
-    const rows = await rowData(tx, table.id, input.rows);
+    const rows = await rowData(tx, table.id, input.rows, actor);
 
     const taken = await tx.grant.findFirst({
       where: {
@@ -252,7 +257,7 @@ export const replaceGrant = async (
     if (grant.table.source.archivedAt) throw new SourceArchivedError();
     checkOwnerGrant(grant.ownerGrant, { columns, rows: wanted });
     const columnIds = await checkedColumnIds(tx, grant.tableId, columns);
-    const rows = await rowData(tx, grant.tableId, wanted);
+    const rows = await rowData(tx, grant.tableId, wanted, actor);
 
     await tx.grantColumn.deleteMany({ where: { grantId: id } });
     await tx.grantColumn.createMany({

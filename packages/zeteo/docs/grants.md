@@ -67,6 +67,8 @@ updated_at }`. The row fields say which rows the grant reaches ([row-rules.md](r
   on each of its tables, flagged `owner_grant`, which cannot be removed or narrowed. An owner may also
   list, create, change and remove grants on their own tables, with groups limited to global ones and
   those of their signed-in organization ([uploads.md](uploads.md#owning-granting-and-sharing)).
+  A row rule an owner writes may not use identity values (`400 invalid_row_rule`;
+  [row-rules.md](row-rules.md#the-rule)).
 
 ## Principal statuses
 

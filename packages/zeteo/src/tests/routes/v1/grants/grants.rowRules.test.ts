@@ -452,15 +452,72 @@ describe("/v1/grants row access", () => {
 
     it("lets the owner create a rule grant on their own source", async () => {
       const res = await create(
-        {
-          row_access: "rule",
-          row_rule: { region: { in: { identity: keyName } } },
-        },
+        { row_access: "rule", row_rule: { region: { eq: "West" } } },
         upload.tables.deals!,
         owner
       );
       expect(res.status).toBe(201);
       expect(res.body.row_access).toBe("rule");
+    });
+
+    it("refuses identity values in a rule the owner writes, at the reference, on create and replace", async () => {
+      const made = await create(
+        {
+          row_access: "rule",
+          row_rule: {
+            or: [
+              { region: { eq: "West" } },
+              { region: { in: { identity: keyName, below: true } } },
+            ],
+          },
+        },
+        upload.tables.deals!,
+        owner
+      );
+      expect(made.status).toBe(400);
+      expect(made.body).toMatchObject({
+        error: "invalid_row_rule",
+        error_description: expect.stringContaining(
+          "cannot use identity values"
+        ),
+        path: ["row_rule", "or", 1, "region", "in", "identity"],
+      });
+
+      const plain = await create(
+        { row_access: "rule", row_rule: { region: { eq: "West" } } },
+        upload.tables.deals!,
+        owner
+      );
+      expect(plain.status).toBe(201);
+      const replaced = await call(
+        "PUT",
+        `/${plain.body.id}`,
+        {
+          all_columns: true,
+          row_access: "rule",
+          row_rule: { region: { ne: { identity: keyName } } },
+        },
+        owner
+      );
+      expect(replaced.status).toBe(400);
+      expect(replaced.body).toMatchObject({
+        error: "invalid_row_rule",
+        path: ["row_rule", "region", "ne", "identity"],
+      });
+    });
+
+    it("lets an admin with zeteo.grants.write use identity values on an upload source's grant", async () => {
+      const res = await create(
+        {
+          row_access: "rule",
+          row_rule: { region: { in: { identity: keyName, below: true } } },
+        },
+        upload.tables.deals!
+      );
+      expect(res.status).toBe(201);
+      expect(res.body.row_rule).toEqual({
+        region: { in: { identity: keyName, below: true } },
+      });
     });
 
     it("drops a grant's rule when it becomes an owner grant", async () => {

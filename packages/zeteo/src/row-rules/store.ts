@@ -111,6 +111,20 @@ const isExactNumber = (n: number): boolean => {
   return digits.length <= 15;
 };
 
+/**
+ * Refuses a rule written by an upload source's owner (not a holder of
+ * `zeteo.grants.write`) that names identity values, at the first reference.
+ */
+export const refuseIdentityRefs = (rule: RuleFilter): void => {
+  const [first] = identityRefs(rule);
+  if (first) {
+    throw new InvalidRowRuleError(
+      "A row rule written by a source's owner cannot use identity values; ask an admin with zeteo.grants.write to add one",
+      [...first[1], "identity"]
+    );
+  }
+};
+
 /** A literal or relative date checked against the column's type; refused with the path of the value. */
 const checkValue = (
   value: unknown,
