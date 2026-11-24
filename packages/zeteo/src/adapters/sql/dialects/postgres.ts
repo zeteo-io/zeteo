@@ -198,6 +198,8 @@ export const postgresDialect: SqlDialect = {
     },
   }),
   value,
+  // Postgres compares a number with a column as numeric, exactly.
+  exactValues: (values) => [...values],
   inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const shift = fiscalShift(unit, fiscalStartMonth);

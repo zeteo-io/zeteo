@@ -479,6 +479,20 @@ const selectExpression = (
 const escapeLike = (text: string) => text.replace(/[\\%_]/g, "\\$&");
 
 /**
+ * An equality whose values the subject cannot hold, so no row equals one:
+ * `eq` (and `in`) holds for no row; `ne` (and `notIn`) for every row whose
+ * value is not null. Unknown for a null, as the comparison would be, so a
+ * `not` around it keeps hiding that row.
+ */
+const noValueLeft = (
+  expression: Expression<unknown>,
+  op: "eq" | "ne"
+): Expression<SqlBool> =>
+  op === "eq"
+    ? sql<SqlBool>`${expression} <> ${expression}`
+    : sql<SqlBool>`${expression} = ${expression}`;
+
+/**
  * A filter as SQL. `lists` says how an `in` of more than `IN_LIST_MAX` values
  * binds: `set`, as one parameter (`inSet`, a subquery on SQL Server), where
  * the filter is a clause of its own (where, having, a row rule); `literal`,
@@ -511,7 +525,16 @@ const compileFilter = <S>(
         return sql<SqlBool>`1 = 0`;
       case "compare": {
         const s = subject(f.subject);
-        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${valueOf(f.value, s)}`;
+        let v = f.value;
+        if (
+          (f.op === "eq" || f.op === "ne") &&
+          !(typeof v === "object" && v !== null && "kind" in v)
+        ) {
+          const [exact] = dialect.exactValues([v], s);
+          if (exact === undefined) return noValueLeft(s.expression, f.op);
+          v = exact;
+        }
+        return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${valueOf(v, s)}`;
       }
       case "between": {
         const s = subject(f.subject);
@@ -519,11 +542,15 @@ const compileFilter = <S>(
       }
       case "in": {
         const s = subject(f.subject);
-        if (lists === "set" && f.values.length > IN_LIST_MAX) {
-          return dialect.inSet(s.expression, f.values, s, f.op === "notIn");
+        const exact = dialect.exactValues(f.values, s);
+        if (exact.length === 0) {
+          return noValueLeft(s.expression, f.op === "in" ? "eq" : "ne");
+        }
+        if (lists === "set" && exact.length > IN_LIST_MAX) {
+          return dialect.inSet(s.expression, exact, s, f.op === "notIn");
         }
         const values = sql.join(
-          f.values.map((v: PlanValue) => dialect.value(v, s))
+          exact.map((v: PlanValue) => dialect.value(v, s))
         );
         return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${values})`;
       }

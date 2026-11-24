@@ -209,6 +209,88 @@ const value = (
   }
 };
 
+/** The range of each integer type. */
+const INTEGER_RANGES: Record<string, readonly [bigint, bigint]> = {
+  tinyint: [0n, 255n],
+  smallint: [-32_768n, 32_767n],
+  int: [-2_147_483_648n, 2_147_483_647n],
+  bigint: [-INT64_MAX - 1n, INT64_MAX],
+};
+const DECIMAL_SIZE = /\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/;
+
+/**
+ * The exact numbers a column holds: at most `integerDigits` digits before
+ * the point and `scale` after it, within `range` for an integer type.
+ * Undefined for a float, or when the type is not known (an aggregate).
+ */
+interface ExactColumn {
+  integerDigits: number;
+  scale: number;
+  range?: readonly [bigint, bigint];
+}
+
+const exactColumn = (
+  nativeType: string | undefined
+): ExactColumn | undefined => {
+  const base = baseType(nativeType);
+  const range = INTEGER_RANGES[base];
+  if (range) {
+    return { integerDigits: String(range[1]).length, scale: 0, range };
+  }
+  if (DECIMALS.has(base)) {
+    // SQL Server's default is decimal(18, 0).
+    const m = DECIMAL_SIZE.exec(nativeType ?? "");
+    const precision = m ? Number(m[1]) : 18;
+    const scale = m?.[2] === undefined ? 0 : Number(m[2]);
+    return { integerDigits: precision - scale, scale };
+  }
+  if (base === "money") return { integerDigits: 15, scale: 4 };
+  if (base === "smallmoney") return { integerDigits: 6, scale: 4 };
+  return undefined;
+};
+
+/**
+ * A number as exact decimal text, without an exponent, leading zeros or
+ * trailing fraction zeros, or undefined when it holds more digits than
+ * `column` can: no value of the column can equal it.
+ */
+const exactIn = (v: PlanValue, column: ExactColumn): string | undefined => {
+  const text = typeof v === "number" ? plainNumber(v) : String(v);
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!m) return undefined;
+  const whole = m[2]!.replace(/^0+/, "");
+  const fraction = (m[3] ?? "").replace(/0+$/, "");
+  if (whole.length > column.integerDigits || fraction.length > column.scale) {
+    return undefined;
+  }
+  const sign = whole === "" && fraction === "" ? "" : m[1]!;
+  const exact = `${sign}${whole || "0"}${fraction ? `.${fraction}` : ""}`;
+  if (column.range) {
+    const n = BigInt(exact);
+    if (n < column.range[0] || n > column.range[1]) return undefined;
+  }
+  return exact;
+};
+
+/**
+ * The values of an equality (`eq`, `ne`, `in`, `notIn`) that a number
+ * column can equal, as exact text: a value with more digits than an
+ * integer, decimal or money column holds, or past an integer type's range,
+ * is left out, as no row can equal it, so no value is ever compared through
+ * a float. A float column, or an aggregate, keeps every value.
+ */
+const exactValues = (
+  values: readonly PlanValue[],
+  { type, nativeType }: ValueSubject
+): PlanValue[] => {
+  const column = type === "number" ? exactColumn(nativeType) : undefined;
+  if (!column) return [...values];
+  return values.flatMap((v) => {
+    const exact = exactIn(v, column);
+    return exact === undefined ? [] : [exact];
+  });
+};
+
 /**
  * What a list of numbers is read as from JSON text: bigint when each binds as
  * bigint, else a decimal with the list's widest scale when one holds every
@@ -255,9 +337,28 @@ const inSet = (
   let texts = values.map(String);
   let read: Expression<unknown>;
   switch (type) {
-    case "number":
-      read = sql`cast(${item} as ${numberListType(texts)})`;
+    case "number": {
+      // An integer or decimal column reads the list in its own exact type,
+      // never as a float, where neighbouring integers past 2^53 are one.
+      const column = exactColumn(nativeType);
+      if (!column) {
+        read = sql`cast(${item} as ${numberListType(texts)})`;
+        break;
+      }
+      texts = exactValues(values, { type, nativeType }).map(String);
+      if (texts.length === 0) {
+        // No row can equal any value: `in` holds for none, `notIn` for
+        // every row whose value is not null, as the whole list would.
+        return negate
+          ? sql<SqlBool>`${expression} = ${expression}`
+          : sql<SqlBool>`${expression} <> ${expression}`;
+      }
+      read =
+        column.scale === 0 && column.range
+          ? sql`cast(${item} as bigint)`
+          : sql`cast(${item} as decimal(38, ${sql.lit(column.scale)}))`;
       break;
+    }
     case "boolean":
       texts = values.map((v) => (v === true ? "1" : "0"));
       read = sql`cast(${item} as bit)`;
@@ -450,6 +551,7 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
+  exactValues,
   inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);

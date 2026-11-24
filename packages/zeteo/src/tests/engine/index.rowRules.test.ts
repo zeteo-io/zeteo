@@ -44,7 +44,11 @@ describeEachEngine("row rules", (engine) => {
   const manyText = newQueryUser();
   const missing = newQueryUser();
   const bigRef = newQueryUser();
+  const list100 = newQueryUser();
+  const list101 = newQueryUser();
   const users = [
+    list100,
+    list101,
     admin,
     paid,
     euCustomers,
@@ -184,6 +188,21 @@ describeEachEngine("row rules", (engine) => {
       rule: { external_ref: { eq: "9007199254740993" } },
     });
 
+    // One rule as a list of 100 values (a parameter each) and of 101 (one
+    // list): 7 is order 8's; 2^53 is order 2's neighbour (2^53 + 1), the
+    // same number as a float; the 39-digit value fits no bigint or decimal.
+    const odd = ["7", "9007199254740992", "1" + "0".repeat(38), "8.5"];
+    const filler = (n: number) =>
+      Array.from({ length: n }, (_, i) => String(1_000_001 + i));
+    await grantTo(list100.principal, orders!, "all", {
+      access: "rule",
+      rule: { external_ref: { in: [...odd, ...filler(96)] } },
+    });
+    await grantTo(list101.principal, orders!, "all", {
+      access: "rule",
+      rule: { external_ref: { in: [...odd, ...filler(97)] } },
+    });
+
     await grantTo(missing.principal, orders!, "all", {
       access: "rule",
       rule: { notes: { isNull: true } },
@@ -220,6 +239,13 @@ describeEachEngine("row rules", (engine) => {
     });
     expect(ids(rows)).toEqual([2]);
     expect(String(rows[0]![1])).toBe("9007199254740993");
+  });
+
+  it("keeps the same rows for a list of 100 values and of 101, never comparing a bigint through a float", async () => {
+    const short = await ok(list100.token, { from: "orders", select: ["id"] });
+    const long = await ok(list101.token, { from: "orders", select: ["id"] });
+    expect(ids(short)).toEqual([8]);
+    expect(ids(long)).toEqual([8]);
   });
 
   it("counts and sums only the rule's rows", async () => {

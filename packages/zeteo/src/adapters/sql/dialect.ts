@@ -80,6 +80,13 @@ export interface SqlDialect {
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
+   * The values of an equality (`eq`, `ne`, `in`, `notIn`) that the subject
+   * can equal, each written as `value` binds it exactly. A value the
+   * subject's type cannot hold is left out, never compared inexactly: the
+   * compiler reads an equality left with no value as one no row meets.
+   */
+  exactValues(values: readonly PlanValue[], subject: ValueSubject): PlanValue[];
+  /**
    * `expression in (values)`, or `not in` when `negate`, with every value in
    * one bound parameter, so a long list (a row rule's identity values) takes
    * one of the engine's parameters, not one each: Postgres binds an array,

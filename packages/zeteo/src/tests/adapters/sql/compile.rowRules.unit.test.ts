@@ -301,6 +301,56 @@ describe("compileSql: a long in list", () => {
     expect(ms(where).parameters).toHaveLength(3);
   });
 
+  it("reads a long list for an integer column as bigint and for a decimal one at its scale on SQL Server, leaving out values the column cannot hold", () => {
+    const longIds = Array.from({ length: 120 }, (_, i) => String(i + 1));
+    const odd = ["1" + "0".repeat(38), 1e-7, "7.5", "7.505"];
+    const ids = ms({
+      from: "orders",
+      select: ["id"],
+      where: { id: { in: [...longIds, ...odd] } },
+    });
+    expect(ids.sql).toContain(
+      "[t0].[id] in (select cast([value] as bigint) from openjson(@1))"
+    );
+    expect(JSON.parse((ids.parameters[0] as { value: string }).value)).toEqual(
+      longIds
+    );
+    const totals = ms({
+      from: "orders",
+      select: ["id"],
+      where: { total: { notIn: [...longIds, ...odd] } },
+    });
+    expect(totals.sql).toContain(
+      "[t0].[total] not in (select cast([value] as decimal(38, 2)) from openjson(@1))"
+    );
+    expect(
+      JSON.parse((totals.parameters[0] as { value: string }).value)
+    ).toEqual([...longIds, "7.5"]);
+  });
+
+  it("still reads a long list for a float column as float on SQL Server", () => {
+    const catalog = shopCatalog({ engine: "mssql" });
+    const total = catalog.tables
+      .find((t) => t.id === "orders")!
+      .columns.find((c) => c.name === "total")!;
+    total.nativeType = "float";
+    const { sql } = compileSql(
+      sqlLanguage.plan(
+        sqlLanguage.schema.parse({
+          source: "shop",
+          from: "orders",
+          select: ["id"],
+          where: { total: { in: [...values, 1e300] } },
+        }),
+        catalog,
+        { now: NOW }
+      ),
+      mssqlDialect,
+      { limit: 101, offset: 0 }
+    );
+    expect(sql).toContain("cast([value] as float)");
+  });
+
   it("keeps a value per parameter inside an aggregated case on SQL Server, which takes no subquery there", () => {
     const { sql, parameters } = ms(inCase);
     expect(sql).not.toContain("openjson");
