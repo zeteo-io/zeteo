@@ -1,5 +1,6 @@
 // @module-tag int
 // @module-tag platform
+import { ndjsonLines, newExportUser, postExport } from "../support/exports.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import { describeEachEngine } from "../support/engines.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -36,12 +37,45 @@ describeEachEngine("row rules, errors on hidden rows", (engine) => {
   const one = newQueryUser();
   const many = newQueryUser();
   const ident = newQueryUser();
-  const users = [one, many, ident];
+  const exporter = newExportUser();
+  const users = [one, many, ident, exporter];
   const keyIds: string[] = [];
+  const author = randomUUID();
 
   beforeAll(async () => {
-    source = await seedQuerySource(engine, {}, "rrerrors");
-    const { orders } = source.tables;
+    source = await seedQuerySource(
+      engine,
+      { export_enabled: true, export_row_cap: 1000 },
+      "rrerrors"
+    );
+    const { orders, customers } = source.tables;
+    for (const u of users) await grantTo(u.principal, customers!, "all");
+    await grantTo(exporter.principal, orders!, "all", {
+      access: "rule",
+      rule: {
+        status: { in: ["shipped", "a", "b", "c", "d", "e", "f", "g"] },
+      },
+    });
+    // Each overflows a bigint on hidden order 6 (external_ref
+    // 123456789012), and on no row the callers see.
+    for (const [name, fixed] of [
+      ["fx_ext", true],
+      ["m_ext", false],
+    ] as const) {
+      await prisma.measure.create({
+        data: {
+          sourceId: source.id,
+          tableId: orders!.id,
+          name,
+          description: `The ${name}`,
+          formula: { max: { mul: ["external_ref", 80_000_000] } },
+          fixed,
+          dateColumn: fixed ? null : "created_at",
+          createdBy: author,
+          updatedBy: author,
+        },
+      });
+    }
     await grantTo(one.principal, orders!, "all", {
       access: "rule",
       rule: { status: { eq: "shipped" } },
@@ -76,6 +110,7 @@ describeEachEngine("row rules, errors on hidden rows", (engine) => {
     });
   });
   afterAll(async () => {
+    await prisma.measure.deleteMany({ where: { sourceId: source.id } });
     await removeRunsOf(users.map((u) => u.id));
     await removeSources([source.id]);
     await prisma.identityValue.deleteMany({ where: { keyId: { in: keyIds } } });
@@ -163,5 +198,115 @@ describeEachEngine("row rules, errors on hidden rows", (engine) => {
         })
       ).toMatchObject({ status: 200 });
     });
+
+    it(`a joined ruled table cannot be bisected, inner or left (${label})`, async () => {
+      for (const type of ["inner", "left"]) {
+        for (const hidden of [5, 6]) {
+          for (const k of [70_000_000, 80_000_000]) {
+            const res = await postQuery(user.token, {
+              source: source.slug,
+              from: "customers",
+              join: [{ relation: "orders", type }],
+              select: [
+                "id",
+                { calc: { mul: ["orders.external_ref", k] }, as: "p" },
+              ],
+              where: {
+                and: [{ p: { gt: 0 } }, { "orders.id": { eq: hidden } }],
+              },
+            });
+            expect({ type, hidden, k, status: res.status }).toEqual({
+              type,
+              hidden,
+              k,
+              status: 200,
+            });
+            expect(res.body.rows).toEqual([]);
+          }
+        }
+      }
+    });
+
+    it(`a fixed measure and a metric part never read hidden rows (${label})`, async () => {
+      for (const body of [
+        {
+          from: "customers",
+          select: ["name", { measure: "fx_ext" }],
+          groupBy: ["name"],
+        },
+        { from: "orders", select: [{ measure: "fx_ext" }] },
+        {
+          from: "customers",
+          select: ["id"],
+          where: { id: { lt: { measure: "fx_ext" } } },
+        },
+        { metrics: ["m_ext"], bucket: "month" },
+        {
+          metrics: ["m_ext", "fx_ext"],
+          bucket: "month",
+          range: {
+            gte: { timestamp: "2026-01-01T00:00:00Z" },
+            lt: { timestamp: "2027-01-01T00:00:00Z" },
+          },
+        },
+      ]) {
+        const res = await postQuery(user.token, {
+          source: source.slug,
+          ...body,
+        });
+        expect({ body, status: res.status }).toEqual({ body, status: 200 });
+      }
+    });
+
+    it(`conditions that stay outside the rule's read raise nothing on hidden rows (${label})`, async () => {
+      const sq = { calc: { mul: ["external_ref", "external_ref"] }, as: "sq" };
+      for (const [condition, ids] of [
+        [{ customer_id: { gt: "1.5" } }, [11, 3]],
+        [{ notes: { contains: "x" } }, []],
+        [{ id: { lt: "1" + "0".repeat(30) } }, [11, 3]],
+        [{ created_at: { gte: "2026-01-01T00:00:00.123456789Z" } }, [11, 3]],
+        [{ total: { gt: "0.001" } }, [11, 3]],
+        [{ status: { ne: "paid" } }, [11, 3]],
+        [{ or: [{ id: { eq: 6 } }, { id: { eq: 3 } }] }, [3]],
+        [{ not: { id: { eq: 6 } } }, [11, 3]],
+      ] as const) {
+        expect({
+          condition,
+          ...(await run(user.token, {
+            select: ["id", sq],
+            where: { and: [{ sq: { gt: 0 } }, condition] },
+          })),
+        }).toEqual({ condition, status: 200, ids });
+      }
+    });
   }
+
+  it("an export never reads hidden rows", async () => {
+    for (const where of [
+      { p: { gt: 0 } },
+      { and: [{ p: { gt: 0 } }, { id: { eq: 6 } }] },
+    ]) {
+      const res = await postExport({
+        token: exporter.token,
+        body: {
+          source: source.slug,
+          from: "orders",
+          select: [
+            "id",
+            { calc: { mul: ["external_ref", 80_000_000] }, as: "p" },
+          ],
+          where,
+        },
+      });
+      expect(res.status).toBe(200);
+      const lines = ndjsonLines(res.text);
+      const expected = "and" in where ? [] : [11, 3];
+      expect(lines.at(-1)).toEqual({
+        status: "complete",
+        rows: expected.length,
+      });
+      const ids = lines.slice(1, -1).map((r) => Number((r as unknown[])[0]));
+      expect(ids.sort()).toEqual(expected);
+    }
+  });
 });
