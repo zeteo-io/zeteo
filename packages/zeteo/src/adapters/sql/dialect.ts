@@ -58,6 +58,18 @@ export interface Staging {
   statements: Expression<unknown>[];
 }
 
+/**
+ * What `ruled` reads of a table: the columns the query reads of it (none for
+ * `count(*)` alone), and the rows the rule keeps, with any condition of the
+ * caller's that cannot raise an error on any row (`ownValue`, `ownMatch`)
+ * already applied, so an index can serve it.
+ */
+export interface RuledRead {
+  table: Expression<unknown>;
+  columns: readonly string[];
+  where: Expression<SqlBool>;
+}
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -213,13 +225,39 @@ export interface SqlDialect {
    * a derived table's condition ahead of the conditions around it. Postgres
    * reads it as a MATERIALIZED WITH query, computed separately from the query
    * around it; SQL Server copies it into a temp table by a statement of its
-   * own, added to `staging`, run before the query.
+   * own, added to `staging`, run before the query. Only `read.where` is
+   * evaluated on rows the rule leaves out: the rule, and conditions that
+   * cannot raise.
    */
-  ruled(
-    table: Expression<unknown>,
-    rule: Expression<SqlBool>,
-    staging: Staging
-  ): Expression<unknown>;
+  ruled(read: RuledRead, staging: Staging): Expression<unknown>;
+  /**
+   * Whether one `ruled` read may serve every reference to the same table
+   * with the same rule and conditions in a query (SQL Server: one temp table,
+   * read under each alias).
+   */
+  ruledOnce: boolean;
+  /**
+   * `value` bound as exactly the column's own type (`nativeType`), so the
+   * comparison converts nothing on the column's side and the value itself
+   * cannot fail to convert, or undefined when the dialect cannot promise
+   * that for this column and value. A comparison of the column, read as it
+   * is, with what this returns raises no error on any row, so it may be
+   * evaluated beside the rule, on rows the rule leaves out. It compares as
+   * `value` does: the same rows match.
+   */
+  ownValue(
+    value: PlanValue,
+    subject: { type: QueryableType; nativeType: string }
+  ): Expression<unknown> | undefined;
+  /**
+   * `like`, for a column whose match can raise no error on any row, or
+   * undefined. The same rows match as with `like`.
+   */
+  ownMatch(
+    column: Expression<unknown>,
+    pattern: string,
+    nativeType: string
+  ): Expression<SqlBool> | undefined;
   /**
    * How each one-row step of a business-day subquery is fenced so its values
    * are computed once per row: `offset 0` after it (Postgres keeps such a

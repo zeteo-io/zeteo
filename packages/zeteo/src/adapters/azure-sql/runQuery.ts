@@ -120,6 +120,12 @@ const parameterType = ({ type, value }: MssqlParameter) => {
         : sql.NVarChar(4000);
     case "bigint":
       return sql.BigInt;
+    case "int":
+      return sql.Int;
+    case "smallint":
+      return sql.SmallInt;
+    case "tinyint":
+      return sql.TinyInt;
     case "bit":
       return sql.Bit;
     case "float":

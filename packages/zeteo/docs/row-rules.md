@@ -208,21 +208,45 @@ row the caller cannot see, and that one bit, asked often enough, reads the row. 
 a subquery's condition ahead of the conditions around it, so a ruled table is read through a step
 of its own:
 
-- **Postgres** reads it as `(with r as materialized (select * from <table> where <rule>) select *
-  from r)`. The documentation says `MATERIALIZED` forces separate calculation of the `WITH` query
-  (PostgreSQL 12 and later), so the caller's conditions apply to its output only.
+- **Postgres** reads it as `(with r as materialized (select <columns> from <table> where <rule>)
+  select * from r)`. The documentation says `MATERIALIZED` forces separate calculation of the `WITH`
+  query (PostgreSQL 12 and later), so the caller's conditions apply to its output only. A
+  rule-limited query on an older server is refused (`409 row_rule_unavailable`).
   (`security_barrier`, Postgres's own mechanism for this, is an option of a view; user queries run
   in a read-only transaction, which may create nothing.)
-- **SQL Server** copies the rule's rows by a statement of their own, `select * into #rN from
+- **SQL Server** copies the rule's rows by a statement of their own, `select <columns> into #rN from
   <table> where <rule>`, run before the query in the same request; the query reads `#rN` and never
   the table. SQL Server may evaluate any expression of a statement before another of its conditions,
   even through a `CASE`; only the order of statements is kept. Any user may create temp tables, a
   read-only login and a read-only replica included, and the request's temp tables are dropped when
-  it ends.
+  it ends. References to one table under the same rule and conditions (a fixed measure's table and
+  the query's, the parts of a metric) share one copy.
 
-The cost: the caller's conditions cannot narrow the read of a ruled table (no index on them), and
-on SQL Server the rule's rows are copied to `tempdb` once per query, so a query over a ruled table
-costs about as much as reading all the caller's rows of it, whatever its own filters.
+The read keeps only the columns the query reads of the table (join keys, measures and metric parts
+included; none for `count(*)` alone). Beside the rule it also applies the caller's conditions that
+cannot raise an error on any row, so an index can serve them: a whole conjunct of the query's
+`where` (never inside `or` or `not`, never `having`, a calculation, a measure, a fixed measure's
+value or a business-day check) on a column of the from table or of an inner-joined table (never a
+left-joined one, whose missing rows the condition decides), and a metric part's range on its own
+table's date column. The condition must be `isNull`, a comparison, `between` or an `in` of at most
+100 values against values bound as exactly the column's own type, so nothing is converted per row:
+
+| | Postgres | SQL Server |
+|---|---|---|
+| numbers | an integer in an integer column's range (`smallint`, `integer`, `bigint`, `real`, `double precision`); any number for `numeric` | an integer in the column's range (`tinyint`, `smallint`, `int`, `bigint`); a decimal the `decimal`/`numeric` column holds exactly |
+| text | `text`, `varchar`, `char`, `uuid` | `nvarchar` (any length); `startsWith` and `contains` too |
+| dates and times | `date`, `timestamp`, `timestamptz` | `date`; `datetime2`, `datetimeoffset` and `datetime` within years 1754–9998 and offsets up to ±14:00, with no finer fraction than the column keeps |
+| booleans | `boolean` | `bit` |
+
+Anything else stays outside the read: on SQL Server `varchar`, `char`, `nchar`, `uniqueidentifier`,
+`float`, `real`, `money` and `smalldatetime` columns, on Postgres every `startsWith`/`contains`
+(`ILIKE` raises on a column with a nondeterministic collation) and enum, money and domain columns,
+and on both engines any value that is not exactly the column's type. The same rows match either
+way.
+
+The cost: what the caller's conditions cannot narrow, the read reads in full, so such a query costs
+about as much as reading all the caller's rows of the table; on SQL Server the read is copied to
+`tempdb` once per query.
 
 A merged table is its own table: its grants carry their own rules, and a member table's rules do
 not flow into it ([uploads.md](uploads.md)). Effective access warns when they differ.

@@ -36,6 +36,7 @@ interface PlanNode {
   "Subplan Name"?: string;
   Filter?: string;
   "Join Filter"?: string;
+  "Index Cond"?: string;
   Plans?: PlanNode[];
 }
 
@@ -125,9 +126,11 @@ describe("row rules on Postgres: the plan", () => {
     return nodes(rows[0]!["QUERY PLAN"][0].Plan);
   };
 
-  /** The caller's condition, on `external_ref`; the rule's, on `status`. */
+  /** The caller's calculation, on `external_ref`; the rule's condition, on `status`. */
   const callerFilter = (n: PlanNode) =>
-    `${n.Filter ?? ""} ${n["Join Filter"] ?? ""}`.includes("external_ref");
+    `${n.Filter ?? ""} ${n["Join Filter"] ?? ""} ${n["Index Cond"] ?? ""}`.includes(
+      "external_ref"
+    );
 
   it("applies the caller's where to the rule's output, never beside the rule", async () => {
     const plan = await explain({
@@ -141,6 +144,31 @@ describe("row rules on Postgres: the plan", () => {
     const scans = plan.filter((n) => n["Relation Name"] === "orders");
     expect(scans.length).toBeGreaterThan(0);
     for (const scan of scans) {
+      expect(scan.Filter ?? "").toContain("status");
+      expect(callerFilter(scan)).toBe(false);
+      // `id = 6` cannot raise: it is applied beside the rule, through the
+      // primary key's index.
+      expect(`${scan["Index Cond"] ?? ""} ${scan.Filter ?? ""}`).toContain(
+        "id = 6"
+      );
+    }
+    const reads = plan.filter((n) => n["Node Type"] === "CTE Scan");
+    expect(reads).toHaveLength(1);
+    expect(callerFilter(reads[0]!)).toBe(true);
+  });
+
+  it("keeps the rule's read apart from the caller's conditions when nothing moves beside it", async () => {
+    const plan = await explain({
+      from: "orders",
+      select: [
+        "id",
+        { calc: { mul: ["external_ref", "external_ref"] }, as: "sq" },
+      ],
+      where: {
+        or: [{ sq: { gt: 0 } }, { id: { eq: 6 } }],
+      },
+    });
+    for (const scan of plan.filter((n) => n["Relation Name"] === "orders")) {
       expect(scan.Filter ?? "").toContain("status");
       expect(callerFilter(scan)).toBe(false);
       expect(scan["Node Type"]).not.toMatch(/Index/);

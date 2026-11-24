@@ -19,7 +19,8 @@ import {
  * JS value.
  */
 export interface MssqlParameter {
-  type: "nvarchar" | "bigint" | "bit" | "float";
+  type:
+    "nvarchar" | "bigint" | "int" | "smallint" | "tinyint" | "bit" | "float";
   value: string | number | boolean;
 }
 
@@ -533,6 +534,109 @@ const exactKind = (
 
 const ESCAPE = "\\";
 
+// LOWER on both sides makes the match case-insensitive whatever the column's
+// collation; `[` opens a character class in SQL Server's LIKE.
+const like = (
+  column: Expression<unknown>,
+  pattern: string
+): Expression<SqlBool> =>
+  sql<SqlBool>`lower(${column}) like lower(${param(
+    "nvarchar",
+    pattern.replaceAll("[", `${ESCAPE}[`)
+  )}) escape ${sql.lit(ESCAPE)}`;
+
+/** nvarchar of any length: what text binds as, so a value of it is the column's own type. */
+const OWN_TEXT = /^nvarchar\((\d+|max)\)$/;
+const OWN_FRACTIONAL = /^(datetime2|datetimeoffset)\((\d)\)$/;
+const PLAN_TIMESTAMP =
+  /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+/**
+ * `value` bound as exactly the column's own type, or undefined. Each binding
+ * is a typed parameter of that type, or a cast of a parameter to it whose
+ * value the cast holds exactly, so no column value is converted and the
+ * value cannot fail to convert:
+ * - an integer in the range of an integer column, as a parameter of that type;
+ * - a decimal (no exponent) whose digits a decimal or numeric column holds,
+ *   cast from its text to exactly that type: SQL Server compares decimals
+ *   exactly whatever their scale, so as `value`'s decimal(38, s) does;
+ * - text against nvarchar of any length: the value takes the column's
+ *   collation, an implicit one outranking a parameter's default;
+ * - a date; a timestamp within years 1754 to 9998 at an offset SQL Server
+ *   takes (±14:00), against datetimeoffset, datetime2 or datetime, with no
+ *   more fractional digits than the column keeps, so nothing rounds;
+ * - a boolean against bit.
+ * Left out: float and real (a decimal compared with them converts one of the
+ * two to a float), money, varchar, char and nchar (converted to nvarchar),
+ * uniqueidentifier (its text converted), smalldatetime, and large-object text.
+ */
+const ownValue = (
+  v: PlanValue,
+  { type, nativeType }: { type: ValueSubject["type"]; nativeType: string }
+): Expression<unknown> | undefined => {
+  const base = baseType(nativeType);
+  switch (type) {
+    case "number": {
+      if (typeof v === "boolean") return undefined;
+      const text = String(v);
+      const range = INTEGER_RANGES[base];
+      if (range) {
+        if (!INTEGER_TEXT.test(text)) return undefined;
+        const n = BigInt(text);
+        if (n < range[0] || n > range[1]) return undefined;
+        return base === "bigint"
+          ? param("bigint", text)
+          : param(base as "int" | "smallint" | "tinyint", Number(text));
+      }
+      if (!DECIMALS.has(base) || !DECIMAL_TEXT.test(text)) return undefined;
+      const column = exactColumn(nativeType);
+      const exact = column && exactIn(text, column);
+      if (exact === undefined) return undefined;
+      const size = DECIMAL_SIZE.exec(nativeType);
+      if (!size) return undefined;
+      return sql`cast(${param("nvarchar", exact)} as ${sql.raw(base)}(${sql.lit(Number(size[1]))}, ${sql.lit(Number(size[2] ?? 0))}))`;
+    }
+    case "text":
+      return typeof v === "string" && OWN_TEXT.test(nativeType)
+        ? param("nvarchar", v)
+        : undefined;
+    case "boolean":
+      return typeof v === "boolean" && base === "bit"
+        ? param("bit", v)
+        : undefined;
+    case "date":
+      return typeof v === "string" &&
+        base === "date" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(v)
+        ? value(v, { type, nativeType })
+        : undefined;
+    case "timestamp": {
+      const m = typeof v === "string" ? PLAN_TIMESTAMP.exec(v) : null;
+      if (!m) return undefined;
+      const year = Number(m[1]);
+      const fraction = (m[2] ?? "").replace(/0+$/, "").length;
+      if (year < 1754 || year > 9998) return undefined;
+      if (m[3] !== undefined && Number(m[3]) * 60 + Number(m[4]) > 14 * 60) {
+        return undefined;
+      }
+      if (base === "datetime") return value(v, { type, nativeType });
+      const own = OWN_FRACTIONAL.exec(nativeType);
+      if (!own || fraction > Number(own[2])) return undefined;
+      const precise = Number(own[2]) === 7;
+      if (own[1] === "datetimeoffset") {
+        return precise
+          ? value(v, { type, nativeType })
+          : sql`cast(${param("nvarchar", String(v))} as datetimeoffset(${sql.lit(Number(own[2]))}))`;
+      }
+      return precise
+        ? value(v, { type, nativeType })
+        : sql`cast(switchoffset(cast(${param("nvarchar", String(v))} as datetimeoffset), '+00:00') as datetime2(${sql.lit(Number(own[2]))}))`;
+    }
+    default:
+      return undefined;
+  }
+};
+
 export const mssqlDialect: SqlDialect = {
   name: "mssql",
   // SQL Server takes 2,100 parameters per request; sp_executesql, which the
@@ -563,13 +667,7 @@ export const mssqlDialect: SqlDialect = {
         : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${date})))`;
     return sql`cast(${truncated} as date)`;
   },
-  // LOWER on both sides makes the match case-insensitive whatever the
-  // column's collation; `[` opens a character class in SQL Server's LIKE.
-  like: (column, pattern): Expression<SqlBool> =>
-    sql<SqlBool>`lower(${column}) like lower(${param(
-      "nvarchar",
-      pattern.replaceAll("[", `${ESCAPE}[`)
-    )}) escape ${sql.lit(ESCAPE)}`,
+  like,
   // Expressions, not ordinals, which SQL Server has none of in GROUP BY.
   groupBy: (qb, items) => qb.groupBy(items.map(({ expression }) => expression)),
   // Nulls last ascending and first descending by a leading CASE: SQL Server
@@ -696,13 +794,24 @@ export const mssqlDialect: SqlDialect = {
   // read-only replica too; one created inside the request's sp_executesql is
   // dropped when it ends, and `drop table if exists` clears one a batch
   // without parameters left on the connection.
-  ruled: (table, rule, staging) => {
+  //
+  // Only the columns the query reads are copied (a constant where it reads
+  // none, as for `count(*)`), each keeping its type and collation.
+  ruled: ({ table, columns, where }, staging) => {
     const temp = sql.raw(`#r${staging.statements.length}`);
+    const list =
+      columns.length === 0
+        ? sql`0 as ${sql.id("_")}`
+        : sql.join(columns.map((c) => sql.id(c)));
     staging.statements.push(
-      sql`drop table if exists ${temp}; select * into ${temp} from ${table} where ${rule};`
+      sql`drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
     );
     return temp;
   },
+  ruledOnce: true,
+  ownValue,
+  ownMatch: (column, pattern, nativeType) =>
+    OWN_TEXT.test(nativeType) ? like(column, pattern) : undefined,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.
   truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,

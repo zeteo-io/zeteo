@@ -62,8 +62,17 @@ const COMPARE_SQL: Record<CompareOp, RawBuilder<unknown>> = {
 const AND = sql` and `;
 const OR = sql` or `;
 
-const column = (c: ColumnRef, dialect: SqlDialect) =>
-  dialect.column(sql.id(c.alias, c.name), c.nativeType);
+/** `alias.name`, noted as read: a ruled table provides only the columns read of it. */
+const ref = (comp: Compilation, alias: string, name: string) => {
+  const at = comp.scope + alias;
+  let names = comp.reads.get(at);
+  if (!names) comp.reads.set(at, (names = new Set()));
+  names.add(name);
+  return sql.id(alias, name);
+};
+
+const column = (c: ColumnRef, comp: Compilation) =>
+  comp.dialect.column(ref(comp, c.alias, c.name), c.nativeType);
 
 /** More values than this in one `in` of a clause are bound as one list (`inSet`). */
 const IN_LIST_MAX = 100;
@@ -80,6 +89,7 @@ const ARITHMETIC = { add: sql` + `, sub: sql` - `, mul: sql` * ` } as const;
  */
 export interface ExprContext {
   row: boolean;
+  comp: Compilation;
   fixed: Map<string, ScalarPlan>;
   /**
    * The business-day subqueries of a dialect that cannot aggregate a
@@ -89,11 +99,46 @@ export interface ExprContext {
   applied: Map<string, Expression<unknown>>;
 }
 
-const rowContext = (): ExprContext => ({
-  row: true,
+/** A context of its own for one query level: no fixed measure or applied subquery yet. */
+const levelContext = (comp: Compilation, row: boolean): ExprContext => ({
+  row,
+  comp,
   fixed: new Map(),
   applied: new Map(),
 });
+
+/**
+ * One compilation's state, carried through what compiles it, never kept in
+ * the module: two compilations, or one inside another, never share it.
+ */
+export interface Compilation {
+  dialect: SqlDialect;
+  staging: Staging;
+  /**
+   * The query level being compiled, whose aliases are its own: empty for the
+   * query, `p<k>.` for a metric part, `<alias>.` for a fixed measure's query.
+   */
+  scope: string;
+  /** The columns read of each table, by scope and alias. */
+  reads: Map<string, Set<string>>;
+  /** The read each ruled table reference is served by, by scope and alias. */
+  ruled: Map<string, string>;
+  /**
+   * The columns each ruled read provides, by the read: those its references
+   * read in a first pass over the same plan. Absent in that pass.
+   */
+  provides?: ReadonlyMap<string, readonly string[]>;
+  /** The reads made so far, for a dialect that serves a read once (`ruledOnce`). */
+  made: Map<string, Expression<unknown>>;
+  /** Whether conditions that cannot raise are applied beside the rule (`pushDown`). */
+  pushDown: boolean;
+}
+
+/** A condition of the caller's applied beside a table's rule. */
+interface Pushed {
+  filter: ResolvedFilter<ColumnRef>;
+  sql: Expression<SqlBool>;
+}
 
 /** A row rule's column, by its bare name inside its table's derived table. */
 const ruleSubject = (dialect: SqlDialect) => (c: RuleSubject) => ({
@@ -101,13 +146,6 @@ const ruleSubject = (dialect: SqlDialect) => (c: RuleSubject) => ({
   type: c.type,
   nativeType: c.nativeType,
 });
-
-/**
- * The statements of the query being compiled that run before its SELECT
- * (`SqlDialect.ruled`). Set by `compileSql` for the length of one
- * compilation, which is synchronous, so no other compilation sees it.
- */
-let staging: Staging | undefined;
 
 /**
  * The one place a table reaches SQL: as itself under its alias, or, with the
@@ -118,38 +156,66 @@ let staging: Staging | undefined;
  */
 const tableSource = (
   t: TableName & { alias: string } & RowFiltered,
-  dialect: SqlDialect
+  comp: Compilation,
+  pushed: readonly Pushed[] = []
 ): AliasedExpression<unknown, string> => {
   const name = sql.id(t.schemaName, t.name);
   if (!t.rowFilter) return sql`${name}`.as(t.alias);
-  if (!staging) throw new Error("a row rule compiled outside compileSql");
+  const { dialect } = comp;
   // Not per row: a business-day check stays inline in the rule's where, as
   // nothing there aggregates it.
-  const rule = compileFilter(t.rowFilter, dialect, ruleSubject(dialect), {
-    row: false,
-    fixed: new Map(),
-    applied: new Map(),
-  });
-  return sql`${dialect.ruled(name, rule, staging)}`.as(t.alias);
+  const rule = compileFilter(
+    t.rowFilter,
+    dialect,
+    ruleSubject(dialect),
+    levelContext(comp, false)
+  );
+  const where =
+    pushed.length === 0
+      ? rule
+      : sql<SqlBool>`(${rule}) and ${sql.join(
+          pushed.map((p) => p.sql),
+          AND
+        )}`;
+  const at = comp.scope + t.alias;
+  // A read served once is shared by references to the same table under the
+  // same rule and conditions; any other is a reference's own.
+  const key = dialect.ruledOnce
+    ? JSON.stringify(
+        [t.schemaName, t.name, t.rowFilter, pushed.map((p) => p.filter)],
+        (_, v: unknown) => (typeof v === "bigint" ? `${v}n` : v)
+      )
+    : at;
+  comp.ruled.set(at, key);
+  const made = comp.made.get(key);
+  if (made) return sql`${made}`.as(t.alias);
+  const read = dialect.ruled(
+    { table: name, columns: comp.provides?.get(key) ?? [], where },
+    comp.staging
+  );
+  if (dialect.ruledOnce) comp.made.set(key, read);
+  return sql`${read}`.as(t.alias);
 };
 
 /** Joins `joins` in order: inner or left, on their key equalities. */
 const withJoins = (
   qb: AnySelect,
   joins: readonly ResolvedJoin[],
-  dialect: SqlDialect
+  comp: Compilation,
+  pushed: ReadonlyMap<string, readonly Pushed[]> = new Map()
 ): AnySelect => {
   for (const join of joins) {
     const target = tableSource(
       { ...join.table, alias: join.alias, rowFilter: join.rowFilter },
-      dialect
+      comp,
+      pushed.get(join.alias)
     );
     const on = (j: JoinBuilder<never, never>) =>
       j.on(
         sql<SqlBool>`${sql.join(
           join.on.map(
             ([parent, parentColumn, col]) =>
-              sql`${sql.id(parent, parentColumn)} = ${sql.id(join.alias, col)}`
+              sql`${ref(comp, parent, parentColumn)} = ${ref(comp, join.alias, col)}`
           ),
           AND
         )}`
@@ -166,10 +232,10 @@ const withJoins = (
 const withFixed = (
   qb: AnySelect,
   fixed: ReadonlyMap<string, ScalarPlan>,
-  dialect: SqlDialect
+  comp: Compilation
 ): AnySelect => {
   for (const plan of fixed.values()) {
-    qb = qb.innerJoin(scalarQuery(plan, dialect).as(plan.alias), (j) =>
+    qb = qb.innerJoin(scalarQuery(plan, comp).as(plan.alias), (j) =>
       j.on(sql<SqlBool>`1 = 1`)
     );
   }
@@ -233,7 +299,7 @@ const bucketOf = (
   dialect: SqlDialect,
   ctx: ExprContext
 ): Expression<unknown> => {
-  const read = column(c, dialect);
+  const read = column(c, ctx.comp);
   const date =
     c.type === "date"
       ? read
@@ -248,15 +314,20 @@ const bucketOf = (
 };
 
 /** A fixed measure's own query: one row, its value as `v`. */
-const scalarQuery = (plan: ScalarPlan, dialect: SqlDialect): AnySelect => {
-  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
-  const value = compileExpr(plan.expr, dialect, ctx);
+const scalarQuery = (plan: ScalarPlan, outer: Compilation): AnySelect => {
+  const comp = { ...outer, scope: `${plan.alias}.` };
+  const { dialect } = comp;
+  const ctx = levelContext(comp, false);
   const qb = withJoins(
-    dialect.kysely.selectFrom(tableSource(plan.from, dialect)),
+    dialect.kysely.selectFrom(tableSource(plan.from, comp)),
     plan.joins,
-    dialect
-  ).select(sql`${value}`.as("v"));
-  return withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
+    comp
+  );
+  const value = compileExpr(plan.expr, dialect, ctx);
+  return withApplied(
+    withFixed(qb.select(sql`${value}`.as("v")), ctx.fixed, comp),
+    ctx.applied
+  );
 };
 /** Whether an expression's value is a binary float on the engine (a float column, an average, arithmetic over either). */
 const isApproximate = (expr: ResolvedExpr, dialect: SqlDialect): boolean => {
@@ -301,8 +372,8 @@ const typeOf = (expr: ResolvedExpr) =>
   expr.kind === "column" ? expr.column.type : expr.type;
 
 /** A filter over catalogue columns: the column read as every part of the query reads it. */
-const columnSubject = (dialect: SqlDialect) => (c: ColumnRef) => ({
-  expression: column(c, dialect),
+const columnSubject = (comp: Compilation) => (c: ColumnRef) => ({
+  expression: column(c, comp),
   type: c.type,
   nativeType: c.nativeType,
 });
@@ -311,7 +382,7 @@ const columnSubject = (dialect: SqlDialect) => (c: ColumnRef) => ({
 export const compileExpr = (
   expr: ResolvedExpr,
   dialect: SqlDialect,
-  ctx: ExprContext = rowContext()
+  ctx: ExprContext
 ): Expression<unknown> => {
   const inner = (e: ResolvedExpr) => compileExpr(e, dialect, ctx);
   switch (expr.kind) {
@@ -321,12 +392,12 @@ export const compileExpr = (
         return sql.id(expr.plan.alias, "v");
       }
       // Kysely puts a subquery inside an expression in parentheses.
-      return sql`${scalarQuery(expr.plan, dialect)}`;
+      return sql`${scalarQuery(expr.plan, ctx.comp)}`;
     case "pivot":
       // Each period has one row per part, so max picks the part's value.
       return sql`max(${sql.id(UNION, `v${expr.index}`)})`;
     case "column": {
-      const read = column(expr.column, dialect);
+      const read = column(expr.column, ctx.comp);
       if (expr.column.type === "text") {
         return dialect.text(read, expr.column.nativeType);
       }
@@ -374,7 +445,7 @@ export const compileExpr = (
           sql`when ${compileFilter(
             b.when,
             dialect,
-            columnSubject(dialect),
+            columnSubject(ctx.comp),
             ctx,
             // A case may be grouped by or aggregated (a measure's where is
             // one), where SQL Server takes no subquery: no `inSet` there.
@@ -391,7 +462,7 @@ export const compileExpr = (
       return expr.arg.kind === "column"
         ? dialect.aggregate(
             expr.fn,
-            column(expr.arg.column, dialect),
+            column(expr.arg.column, ctx.comp),
             expr.arg.column.nativeType
           )
         : dialect.aggregate(
@@ -443,19 +514,20 @@ const perGroup = (item: ResolvedSelect) =>
 
 const selectExpression = (
   item: ResolvedSelect,
-  dialect: SqlDialect,
+  comp: Compilation,
   fixed: Map<string, ScalarPlan>,
   applied: Map<string, Expression<unknown>>
 ): Expression<unknown> => {
+  const { dialect } = comp;
   switch (item.kind) {
     case "column":
-      return column(item.column, dialect);
+      return column(item.column, comp);
     case "aggregate":
       return item.column === "*"
         ? dialect.aggregate(item.fn, "*")
         : dialect.aggregate(
             item.fn,
-            column(item.column, dialect),
+            column(item.column, comp),
             item.column.nativeType
           );
     case "bucket":
@@ -465,11 +537,12 @@ const selectExpression = (
         item.fiscalStartMonth,
         item.zone,
         dialect,
-        { row: true, fixed, applied }
+        { row: true, comp, fixed, applied }
       );
     case "calc":
       return compileExpr(item.expr, dialect, {
         row: item.level === "row",
+        comp,
         fixed,
         applied,
       });
@@ -589,6 +662,123 @@ const compileFilter = <S>(
   return go(filter);
 };
 
+/** A filter's conjuncts: what must each hold for it to hold. */
+const conjuncts = <S>(f: ResolvedFilter<S>): ResolvedFilter<S>[] =>
+  f.kind === "and" ? f.filters.flatMap(conjuncts) : [f];
+
+const isPlanValue = (v: FilterValue): v is PlanValue =>
+  !(typeof v === "object" && v !== null && "kind" in v);
+
+/**
+ * A condition on one column, written against the column's bare name as a
+ * ruled read sees it, when it raises no error on any row, so it may be
+ * evaluated beside the rule, on rows the rule leaves out; else undefined.
+ * That holds when the column is read as it is and compared with values bound
+ * as exactly its own type (`ownValue`, `ownMatch`): nothing is converted per
+ * row, and a value that could not convert would fail before any row is read.
+ * Only `isNull`, comparisons, `between`, a short `in` and a match qualify,
+ * never a calculation, a fixed measure or a business-day check. It is
+ * written as `compileFilter` writes it, so the same rows match.
+ */
+const besideRule = (
+  f: ResolvedFilter<ColumnRef>,
+  dialect: SqlDialect
+): Expression<SqlBool> | undefined => {
+  if (!("subject" in f)) return undefined;
+  const s = f.subject;
+  const read = sql.id(s.name);
+  if (dialect.column(read, s.nativeType) !== read) return undefined;
+  const own = (v: FilterValue) =>
+    isPlanValue(v) ? dialect.ownValue(v, s) : undefined;
+  switch (f.kind) {
+    case "isNull":
+      return sql<SqlBool>`${read} ${f.isNull ? sql`is null` : sql`is not null`}`;
+    case "compare": {
+      let v = f.value;
+      if (!isPlanValue(v)) return undefined;
+      if (f.op === "eq" || f.op === "ne") {
+        const [exact] = dialect.exactValues([v], s);
+        if (exact === undefined) return noValueLeft(read, f.op);
+        v = exact;
+      }
+      const bound = own(v);
+      return bound && sql<SqlBool>`${read} ${COMPARE_SQL[f.op]} ${bound}`;
+    }
+    case "between": {
+      const low = own(f.low);
+      const high = own(f.high);
+      return low && high && sql<SqlBool>`${read} between ${low} and ${high}`;
+    }
+    case "in": {
+      const exact = dialect.exactValues(f.values, s);
+      if (exact.length === 0) {
+        return noValueLeft(read, f.op === "in" ? "eq" : "ne");
+      }
+      if (exact.length > IN_LIST_MAX) return undefined;
+      const values = exact.map(own);
+      if (values.some((v) => v === undefined)) return undefined;
+      return sql<SqlBool>`${read} ${f.op === "in" ? sql`in` : sql`not in`} (${sql.join(values as Expression<unknown>[])})`;
+    }
+    case "match": {
+      const escaped = escapeLike(f.value);
+      return dialect.ownMatch(
+        read,
+        f.op === "contains" ? `%${escaped}%` : `${escaped}%`,
+        s.nativeType
+      );
+    }
+    default:
+      return undefined;
+  }
+};
+
+/**
+ * Splits `where` into the conditions applied beside the rule of a table of
+ * `aliases` (each a whole conjunct of the where, on one column of that
+ * table, `besideRule`), by alias, and what is left. Nothing inside an `or`,
+ * a `not` or a `case` moves, nor anything of `having`.
+ */
+const pushDown = <S extends WhereSubject>(
+  where: ResolvedFilter<S> | undefined,
+  aliases: ReadonlySet<string>,
+  comp: Compilation
+): {
+  pushed: Map<string, Pushed[]>;
+  rest: ResolvedFilter<S> | undefined;
+} => {
+  const pushed = new Map<string, Pushed[]>();
+  if (!where || aliases.size === 0 || !comp.pushDown) {
+    return { pushed, rest: where };
+  }
+  const rest: ResolvedFilter<S>[] = [];
+  for (const f of conjuncts(where)) {
+    const subject = "subject" in f ? (f.subject as WhereSubject) : undefined;
+    const onColumn =
+      subject && "alias" in subject && aliases.has(subject.alias)
+        ? subject
+        : undefined;
+    const compiled =
+      onColumn && besideRule(f as ResolvedFilter<ColumnRef>, comp.dialect);
+    if (onColumn && compiled) {
+      const list = pushed.get(onColumn.alias) ?? [];
+      list.push({ filter: f as ResolvedFilter<ColumnRef>, sql: compiled });
+      pushed.set(onColumn.alias, list);
+    } else {
+      rest.push(f);
+    }
+  }
+  if (pushed.size === 0) return { pushed, rest: where };
+  return {
+    pushed,
+    rest:
+      rest.length === 0
+        ? undefined
+        : rest.length === 1
+          ? rest[0]
+          : { kind: "and", filters: rest },
+  };
+};
+
 /**
  * Compiles a plan to SQL text and bound parameters without touching a
  * database. `fetch` is what the engine asks the database for (the requested
@@ -601,18 +791,52 @@ const compileFilter = <S>(
 export const compileSql = (
   plan: SqlPlan,
   dialect: SqlDialect,
-  fetch: { limit: number; offset: number; defaultOrder?: boolean }
+  fetch: { limit: number; offset: number; defaultOrder?: boolean },
+  /** `pushDown: false` keeps every condition of the caller's outside the rule's read: for tests that compare the two. */
+  options: { pushDown?: boolean } = {}
 ): CompiledQuery => {
-  staging = { statements: [] };
-  try {
+  const compile = (provides?: ReadonlyMap<string, readonly string[]>) => {
+    const comp: Compilation = {
+      dialect,
+      staging: { statements: [] },
+      scope: "",
+      reads: new Map(),
+      ruled: new Map(),
+      provides,
+      made: new Map(),
+      pushDown: options.pushDown ?? true,
+    };
     const qb =
       plan.kind === "metrics"
-        ? compileMetrics(plan, dialect, fetch)
-        : compileTable(plan, dialect, fetch);
-    return finish(qb, staging, dialect);
-  } finally {
-    staging = undefined;
+        ? compileMetrics(plan, comp, fetch)
+        : compileTable(plan, comp, fetch);
+    return { comp, qb };
+  };
+  const first = compile();
+  if (first.comp.ruled.size === 0) {
+    return finish(first.qb, first.comp.staging, dialect);
   }
+  // A ruled table provides only the columns its references read, which are
+  // known once the whole plan is compiled: it is compiled again, alike.
+  const provides = new Map<string, readonly string[]>();
+  for (const [at, key] of first.comp.ruled) {
+    const names = new Set([
+      ...(provides.get(key) ?? []),
+      ...(first.comp.reads.get(at) ?? []),
+    ]);
+    provides.set(key, [...names].sort());
+  }
+  const second = compile(provides);
+  for (const [at, key] of second.comp.ruled) {
+    for (const name of second.comp.reads.get(at) ?? []) {
+      if (!provides.get(key)!.includes(name)) {
+        throw new Error(
+          "a ruled table was read for a column it does not provide"
+        );
+      }
+    }
+  }
+  return finish(second.qb, second.comp.staging, dialect);
 };
 
 /**
@@ -669,13 +893,29 @@ const partQuery = (
   plan: MetricPlan,
   part: MetricPart,
   k: number,
-  dialect: SqlDialect
+  outer: Compilation
 ): AnySelect => {
-  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
+  const comp = { ...outer, scope: `p${k}.` };
+  const { dialect } = comp;
+  const ctx = levelContext(comp, false);
+  const bounds: ResolvedFilter<ColumnRef>[] = [];
+  for (const op of ["gte", "lt"] as const) {
+    const bound = part.range[op];
+    if (bound !== undefined) {
+      bounds.push({ kind: "compare", op, subject: part.date!, value: bound });
+    }
+  }
+  // The range is the query's: on the part's own table, beside its rule
+  // where it cannot raise.
+  const { pushed, rest } = pushDown(
+    bounds.length === 0 ? undefined : { kind: "and", filters: bounds },
+    part.from.rowFilter ? new Set(["t0"]) : new Set(),
+    comp
+  );
   let qb = withJoins(
-    dialect.kysely.selectFrom(tableSource(part.from, dialect)),
+    dialect.kysely.selectFrom(tableSource(part.from, comp, pushed.get("t0"))),
     part.joins,
-    dialect
+    comp
   );
   const items: unknown[] = [];
   const named: { expression: Expression<unknown>; alias: string }[] = [];
@@ -705,25 +945,16 @@ const partQuery = (
     items.push(sql`${expression}`.as(alias));
   }
   qb = qb.select(items as never);
-  const bounds: ResolvedFilter<ColumnRef>[] = [];
-  for (const op of ["gte", "lt"] as const) {
-    const bound = part.range[op];
-    if (bound !== undefined) {
-      bounds.push({ kind: "compare", op, subject: part.date!, value: bound });
-    }
-  }
-  if (bounds.length > 0) {
+  // One bound is written alone, as before, not as an `and` of one.
+  const range =
+    rest?.kind === "and" && rest.filters.length === 1 ? rest.filters[0]! : rest;
+  if (range) {
     qb = qb.where(
-      compileFilter(
-        bounds.length === 1 ? bounds[0]! : { kind: "and", filters: bounds },
-        dialect,
-        columnSubject(dialect),
-        { ...ctx, row: true }
-      )
+      compileFilter(range, dialect, columnSubject(comp), { ...ctx, row: true })
     );
   }
   if (period) qb = dialect.groupBy(qb, [{ expression: period, index: 0 }]);
-  return withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
+  return withApplied(withFixed(qb, ctx.fixed, comp), ctx.applied);
 };
 
 /**
@@ -734,12 +965,11 @@ const partQuery = (
  */
 const compileMetrics = (
   plan: MetricPlan,
-  dialect: SqlDialect,
+  comp: Compilation,
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
 ): AnySelect => {
-  const branches = plan.parts.map((part, k) =>
-    partQuery(plan, part, k, dialect)
-  );
+  const { dialect } = comp;
+  const branches = plan.parts.map((part, k) => partQuery(plan, part, k, comp));
   let qb: AnySelect =
     branches.length === 0
       ? (dialect.kysely.selectNoFrom([]) as unknown as AnySelect)
@@ -749,7 +979,7 @@ const compileMetrics = (
             .reduce((union, branch) => union.unionAll(branch), branches[0]!)
             .as(UNION)
         );
-  const ctx: ExprContext = { row: false, fixed: new Map(), applied: new Map() };
+  const ctx = levelContext(comp, false);
   const selected: Expression<unknown>[] = [];
   const outputs: ResolvedSelect[] = [];
   if (plan.bucket) {
@@ -803,27 +1033,41 @@ const compileMetrics = (
       direction
     );
   }
-  qb = withApplied(withFixed(qb, ctx.fixed, dialect), ctx.applied);
+  qb = withApplied(withFixed(qb, ctx.fixed, comp), ctx.applied);
   return dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
 };
 
 /** A table query. */
 const compileTable = (
   plan: TablePlan,
-  dialect: SqlDialect,
+  comp: Compilation,
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
 ): AnySelect => {
+  const { dialect } = comp;
+  // A condition on the from table or an inner-joined one filters it as well
+  // before the join as after; on a left-joined one it would turn the outer
+  // join's missing rows into rows, so it stays where it is.
+  const beside = new Set(
+    [
+      { alias: plan.from.alias, rowFilter: plan.from.rowFilter },
+      ...plan.joins.filter((j) => j.type === "inner"),
+    ].flatMap((t) => (t.rowFilter ? [t.alias] : []))
+  );
+  const { pushed, rest: where } = pushDown(plan.where, beside, comp);
   let qb: AnySelect = withJoins(
-    dialect.kysely.selectFrom(tableSource(plan.from, dialect)),
+    dialect.kysely.selectFrom(
+      tableSource(plan.from, comp, pushed.get(plan.from.alias))
+    ),
     plan.joins,
-    dialect
+    comp,
+    pushed
   );
   // The fixed measures read per row, joined once all is compiled.
   const fixed = new Map<string, ScalarPlan>();
   const applied = new Map<string, Expression<unknown>>();
 
   const selected = plan.select.map((item) =>
-    selectExpression(item, dialect, fixed, applied)
+    selectExpression(item, comp, fixed, applied)
   );
   qb = qb.select(
     selected.map((e, i) =>
@@ -838,16 +1082,16 @@ const compileTable = (
     );
   }
 
-  if (plan.where) {
+  if (where) {
     qb = qb.where(
       compileFilter(
-        plan.where,
+        where,
         dialect,
         (s: WhereSubject) =>
           "index" in s
             ? { expression: selected[s.index]!, type: s.type }
-            : columnSubject(dialect)(s),
-        { row: true, fixed, applied }
+            : columnSubject(comp)(s),
+        { row: true, comp, fixed, applied }
       )
     );
   }
@@ -878,7 +1122,7 @@ const compileTable = (
           expression: selected[h.index]!,
           type: h.type,
         }),
-        { row: false, fixed, applied }
+        { row: false, comp, fixed, applied }
       )
     );
   }
@@ -896,7 +1140,7 @@ const compileTable = (
             expression: selected[target.index]!,
             alias: sql.id(`c${target.index}`),
           }
-        : { expression: column(target.column, dialect) };
+        : { expression: column(target.column, comp) };
     const key = JSON.stringify(sorted.expression.toOperationNode(), (_, v) =>
       typeof v === "bigint" ? `${v}n` : v
     );
@@ -908,6 +1152,6 @@ const compileTable = (
     qb = dialect.orderBy(qb, sorted, direction);
   }
 
-  qb = withApplied(withFixed(qb, fixed, dialect), applied);
+  qb = withApplied(withFixed(qb, fixed, comp), applied);
   return dialect.page(qb, fetch.limit, fetch.offset, orderBy.length > 0);
 };

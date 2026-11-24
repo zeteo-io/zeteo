@@ -75,7 +75,7 @@ describe("compileSql: row rules on Postgres", () => {
       pg({ from: "orders", select: ["id"] }, { rowRules: { orders: PAID } })
     ).toEqual({
       sql:
-        'select "t0"."id" as "c0" from (with "r" as materialized (select * from "shop"."orders" where "status" in ($1)) select * from "r") as "t0"' +
+        'select "t0"."id" as "c0" from (with "r" as materialized (select "id" from "shop"."orders" where "status" in ($1)) select * from "r") as "t0"' +
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["paid", 101, 0],
     });
@@ -92,7 +92,7 @@ describe("compileSql: row rules on Postgres", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `from "shop"."orders" as "t0" ${type} join (with "r" as materialized (select * from "shop"."customers" where "region" = $1) select * from "r") as "t1" on "t0"."customer_id" = "t1"."id"`
+        `from "shop"."orders" as "t0" ${type} join (with "r" as materialized (select "id", "name" from "shop"."customers" where "region" = $1) select * from "r") as "t1" on "t0"."customer_id" = "t1"."id"`
       );
       expect(parameters[0]).toBe("EU");
     }
@@ -104,7 +104,7 @@ describe("compileSql: row rules on Postgres", () => {
       { rowRules: { orders: { kind: "never" } } }
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select * from "shop"."orders" where 1 = 0) select * from "r") as "t0"'
+      'from (with "r" as materialized (select "id" from "shop"."orders" where 1 = 0) select * from "r") as "t0"'
     );
   });
 
@@ -118,7 +118,7 @@ describe("compileSql: row rules on Postgres", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select * from "shop"."orders" where "customer_id" = any($1)) select * from "r") as "t0"'
+      'from (with "r" as materialized (select "id" from "shop"."orders" where "customer_id" = any($1)) select * from "r") as "t0"'
     );
     expect(parameters).toEqual([values, 101, 0]);
   });
@@ -154,7 +154,8 @@ describe("compileSql: row rules on Postgres", () => {
       }
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select * from "shop"."orders" where "status" in ($1)) select * from "r") as "f1_t0"'
+      // count(*) reads no column: the WITH query keeps none.
+      'from (with "r" as materialized (select  from "shop"."orders" where "status" in ($1)) select * from "r") as "f1_t0"'
     );
   });
 
@@ -165,7 +166,7 @@ describe("compileSql: row rules on Postgres", () => {
       true
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select * from "shop"."orders" where "status" in ($2)) select * from "r") as "t0"'
+      'from (with "r" as materialized (select "ordered_on", "total" from "shop"."orders" where "status" in ($2)) select * from "r") as "t0"'
     );
   });
 });
@@ -179,7 +180,7 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: PAID } }
     );
     expect(sql).toContain(
-      "drop table if exists #r0; select * into #r0 from [shop].[orders] where [status] in (@1); select [t0].[id] as [c0] from #r0 as [t0]"
+      "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@1); select [t0].[id] as [c0] from #r0 as [t0]"
     );
     expect(parameters[0]).toEqual({ type: "nvarchar", value: "paid" });
   });
@@ -195,7 +196,7 @@ describe("compileSql: row rules on SQL Server", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `drop table if exists #r0; select * into #r0 from [shop].[customers] where [region] = @1; select [t0].[id] as [c0], [t1].[name] as [c1] from [shop].[orders] as [t0] ${type} join #r0 as [t1] on [t0].[customer_id] = [t1].[id]`
+        `drop table if exists #r0; select [id], [name] into #r0 from [shop].[customers] where [region] = @1; select [t0].[id] as [c0], [t1].[name] as [c1] from [shop].[orders] as [t0] ${type} join #r0 as [t1] on [t0].[customer_id] = [t1].[id]`
       );
     }
   });
@@ -206,7 +207,7 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: { kind: "never" } } }
     );
     expect(sql).toContain(
-      "select * into #r0 from [shop].[orders] where 1 = 0; select [t0].[id] as [c0] from #r0 as [t0]"
+      "select [id] into #r0 from [shop].[orders] where 1 = 0; select [t0].[id] as [c0] from #r0 as [t0]"
     );
   });
 
@@ -220,7 +221,7 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      "select * into #r0 from [shop].[orders] where [customer_id] in (select cast([value] as bigint) from openjson(@1)); select [t0].[id] as [c0] from #r0 as [t0]"
+      "select [id] into #r0 from [shop].[orders] where [customer_id] in (select cast([value] as bigint) from openjson(@1)); select [t0].[id] as [c0] from #r0 as [t0]"
     );
     expect(parameters).toHaveLength(3);
     expect(parameters[0]).toEqual({
@@ -242,9 +243,9 @@ describe("compileSql: row rules on SQL Server", () => {
     const statements = sql.split("; ");
     expect(statements.slice(0, 4)).toEqual([
       "drop table if exists #r0",
-      "select * into #r0 from [shop].[orders] where [status] in (@1)",
+      "select [customer_id], [id], [total] into #r0 from [shop].[orders] where [status] in (@1)",
       "drop table if exists #r1",
-      "select * into #r1 from [shop].[customers] where [region] = @2",
+      "select [id] into #r1 from [shop].[customers] where [region] = @2",
     ]);
     const query = statements.slice(4).join("; ");
     expect(query).toMatch(/^select /);
@@ -266,7 +267,7 @@ describe("compileSql: row rules on SQL Server", () => {
       true
     );
     expect(sql).toMatch(
-      /^drop table if exists #r0; select \* into #r0 from \[shop\]\.\[orders\] where \[status\] in \(@1\); select .* from #r0 as \[t0\]/
+      /^drop table if exists #r0; select \[ordered_on\], \[total\] into #r0 from \[shop\]\.\[orders\] where \[status\] in \(@1\); select .* from #r0 as \[t0\]/
     );
   });
 });
@@ -394,5 +395,17 @@ describe("compile.ts", () => {
     const outside = text.slice(0, start) + text.slice(end);
     expect(outside).not.toMatch(/\btable\(/);
     expect(outside).not.toMatch(/schemaName/);
+  });
+});
+
+describe("compile.ts: no module state", () => {
+  it("keeps a compilation's state in its own context, never in a module variable", () => {
+    const text = readFileSync(
+      fileURLToPath(
+        new URL("../../../adapters/sql/compile.ts", import.meta.url)
+      ),
+      "utf8"
+    );
+    expect(text).not.toMatch(/^let /m);
   });
 });

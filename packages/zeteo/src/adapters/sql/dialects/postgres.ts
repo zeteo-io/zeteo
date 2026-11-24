@@ -139,6 +139,73 @@ const inSet = (
     : sql<SqlBool>`${expression} = any(${array})`;
 };
 
+/** Native types (as `format_type` writes them) a value can be bound as exactly. */
+const OWN_INTEGERS = new Set(["smallint", "integer", "bigint"]);
+const OWN_NUMERIC = /^numeric(\(\d+(,\d+)?\))?$/;
+const OWN_FLOATS = new Set(["real", "double precision"]);
+const OWN_TEXT = /^(text|character varying(\(\d+\))?|character(\(\d+\))?)$/;
+const OWN_TIMESTAMPS = /^timestamp(\(\d\))? with(out)? time zone$/;
+
+/**
+ * `value`'s binding where it is the column's own type, or undefined. An
+ * uncast parameter takes the type of the column it is compared with, so its
+ * text is parsed as that type when it is bound, before any row is read: an
+ * integer in the column's range, any number for numeric, text for text,
+ * a date, a boolean. A uuid and a timestamp are cast on the parameter's side
+ * to the column's type. A number `value` casts to numeric (a decimal, or an
+ * integer past the column's range) is numeric, not an integer or float
+ * column's type. Domains, enums and money are read through a cast or another
+ * type and never qualify.
+ */
+const ownValue = (
+  v: PlanValue,
+  { type, nativeType }: ValueSubject & { nativeType: string }
+): Expression<unknown> | undefined => {
+  switch (type) {
+    case "number": {
+      if (typeof v === "boolean") return undefined;
+      const text = String(v);
+      if (OWN_NUMERIC.test(nativeType)) {
+        return DECIMAL_TEXT.test(text) || typeof v === "number"
+          ? value(v, { type, nativeType })
+          : undefined;
+      }
+      if (!OWN_INTEGERS.has(nativeType) && !OWN_FLOATS.has(nativeType)) {
+        return undefined;
+      }
+      if (!INTEGER_TEXT.test(text)) return undefined;
+      const n = BigInt(text);
+      const limit = integerLimit(postgresBaseType(nativeType));
+      return n <= limit && n >= -limit - 1n
+        ? value(v, { type, nativeType })
+        : undefined;
+    }
+    case "text":
+      return typeof v === "string" &&
+        (OWN_TEXT.test(nativeType) || nativeType === "uuid")
+        ? value(v, { type, nativeType })
+        : undefined;
+    case "date":
+      return nativeType === "date" &&
+        typeof v === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(v)
+        ? value(v, { type, nativeType })
+        : undefined;
+    case "timestamp":
+      return OWN_TIMESTAMPS.test(nativeType) &&
+        typeof v === "string" &&
+        /^\d{4}-/.test(v)
+        ? value(v, { type, nativeType })
+        : undefined;
+    case "boolean":
+      return nativeType === "boolean" && typeof v === "boolean"
+        ? value(v, { type, nativeType })
+        : undefined;
+    default:
+      return undefined;
+  }
+};
+
 const ESCAPE = "\\";
 
 /** `n` units as an interval; the number and unit are the planner's, never user text. */
@@ -317,8 +384,18 @@ export const postgresDialect: SqlDialect = {
   // the rule's condition would be merged with theirs and run in order of
   // cost. The WITH query names the table with its schema, so `r` hides
   // nothing it reads.
-  ruled: (table, rule) =>
-    sql`(with ${sql.id("r")} as materialized (select * from ${table} where ${rule}) select * from ${sql.id("r")})`,
+  //
+  // Only the columns the query reads are kept: none for `count(*)` alone,
+  // which Postgres reads as a row of no columns.
+  ruled: ({ table, columns, where }) =>
+    sql`(with ${sql.id("r")} as materialized (select ${sql.join(
+      columns.map((c) => sql.id(c))
+    )} from ${table} where ${where}) select * from ${sql.id("r")})`,
+  ruledOnce: false,
+  ownValue,
+  // ILIKE raises on every row of a column with a nondeterministic collation,
+  // which the catalogue does not record: no match is evaluated beside a rule.
+  ownMatch: () => undefined,
   anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
   truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
   // WIDTH_BUCKET binary-searches the sorted array (bound as one parameter):

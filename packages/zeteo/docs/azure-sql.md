@@ -69,9 +69,9 @@ ALTER ROLE db_datareader ADD MEMBER zeteo_reader;
 
 The catalogue lists only the tables and views of the listed schemas the login can `SELECT` from.
 
-A query over a table the caller has a row rule on first copies the rule's rows into a temp table of
-the request (`#r0`, `#r1`…), dropped when the request ends ([row-rules.md](row-rules.md),
-*Enforcement*). Any user may create temp tables in `tempdb`, so the login needs nothing more, but
+A query over a table the caller has a row rule on first copies the rule's rows, only the columns
+the query reads, into a temp table of the request (`#r0`, `#r1`…), dropped when the request ends
+([row-rules.md](row-rules.md), *Enforcement*). Any user may create temp tables in `tempdb`, so the login needs nothing more, but
 do not revoke its `CONNECT` on `tempdb`.
 
 A source's `size_bytes` is read from `sys.dm_db_partition_stats`, which needs `VIEW DATABASE
