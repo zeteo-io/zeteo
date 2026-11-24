@@ -151,13 +151,35 @@ condition is empty, which matches no rows.
 
 At plan time, for each table in the caller's visible catalogue, the rows of every grant reaching
 them are combined by the formula and resolved. The planner then reads **every reference** to a
-table with a rule (the base table and every join target, inner or left, to-one or to-many) as a
-filtered subquery, so a hidden row never appears: on a left join the parent row stays with the related
+table with a rule (the base table and every join target, inner or left, to-one or to-many, a fixed
+measure's table and a metric part's) through the rule, so a hidden row never appears: on a left join the parent row stays with the related
 columns null, on an inner join it drops. Values are bound parameters; large sets are one array
 parameter on Postgres (`= ANY($1)`) and one JSON value read with `OPENJSON` on SQL Server. A
 measure aggregates over its home table through the rule, and a fixed measure ignores the query's
 filters but never row rules. The resolved rule is part of the plan, so the dashboard cache and
 shared execution key on it: two viewers share an entry only when their resolved rules are identical.
+
+No calculation or condition the caller writes is ever evaluated on a row their rule hides. An
+error raised there (an overflow, a date pushed out of range) would fail the request because of a
+row the caller cannot see, and that one bit, asked often enough, reads the row. Neither engine keeps
+a subquery's condition ahead of the conditions around it, so a ruled table is read through a step
+of its own:
+
+- **Postgres** reads it as `(with r as materialized (select * from <table> where <rule>) select *
+  from r)`. The documentation says `MATERIALIZED` forces separate calculation of the `WITH` query
+  (PostgreSQL 12 and later), so the caller's conditions apply to its output only.
+  (`security_barrier`, Postgres's own mechanism for this, is an option of a view; user queries run
+  in a read-only transaction, which may create nothing.)
+- **SQL Server** copies the rule's rows by a statement of their own, `select * into #rN from
+  <table> where <rule>`, run before the query in the same request; the query reads `#rN` and never
+  the table. SQL Server may evaluate any expression of a statement before another of its conditions,
+  even through a `CASE`; only the order of statements is kept. Any user may create temp tables, a
+  read-only login and a read-only replica included, and the request's temp tables are dropped when
+  it ends.
+
+The cost: the caller's conditions cannot narrow the read of a ruled table (no index on them), and
+on SQL Server the rule's rows are copied to `tempdb` once per query, so a query over a ruled table
+costs about as much as reading all the caller's rows of it, whatever its own filters.
 
 A merged table is its own table: its grants carry their own rules, and a member table's rules do
 not flow into it ([uploads.md](uploads.md)). Effective access warns when they differ.

@@ -53,6 +53,11 @@ export const truncUnit = (unit: BucketUnit): string =>
       ? "quarter"
       : unit;
 
+/** The statements a query runs before its SELECT, in order: SQL Server's ruled tables. */
+export interface Staging {
+  statements: Expression<unknown>[];
+}
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -193,6 +198,21 @@ export interface SqlDialect {
    * rows instead and read as a column.
    */
   subqueryInAggregate: boolean;
+  /**
+   * A table limited by the caller's row rule, as what the query reads in its
+   * place. No expression the caller wrote may be evaluated on a row the rule
+   * leaves out: an error it raised there (an overflow, a date out of range)
+   * would tell the caller something about that row, and neither engine keeps
+   * a derived table's condition ahead of the conditions around it. Postgres
+   * reads it as a MATERIALIZED WITH query, computed separately from the query
+   * around it; SQL Server copies it into a temp table by a statement of its
+   * own, added to `staging`, run before the query.
+   */
+  ruled(
+    table: Expression<unknown>,
+    rule: Expression<SqlBool>,
+    staging: Staging
+  ): Expression<unknown>;
   /**
    * How each one-row step of a business-day subquery is fenced so its values
    * are computed once per row: `offset 0` after it (Postgres keeps such a

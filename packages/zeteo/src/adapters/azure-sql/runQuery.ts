@@ -325,8 +325,10 @@ const closedError = () => new Error("the row stream is closed");
  * or by closing the connection when none comes within the driver's
  * `cancelTimeout` (the pool then discards it). Once the run is stopped, what
  * the driver reports changes nothing. SQL Server has no read-only
- * transaction: the compiled statement is a single SELECT, and the login is
- * checked for write rights when the source is registered.
+ * transaction: the compiled batch is one SELECT, after a `select … into #rN`
+ * per table with a row rule (`SqlDialect.ruled`), which writes only to the
+ * request's own temp tables, and the login is checked for write rights when
+ * the source is registered.
  */
 export const openAzureSqlQuery = async (
   pool: ConnectionPool,

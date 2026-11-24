@@ -309,6 +309,14 @@ export const postgresDialect: SqlDialect = {
   timestampUtc: (expression) => expression,
   stepFence: "offset",
   subqueryInAggregate: true,
+  // A MATERIALIZED WITH query is computed separately from the query around
+  // it (PostgreSQL 12 and later: the WITH queries chapter), so the caller's
+  // conditions only ever see the rows it returns; as a plain derived table,
+  // the rule's condition would be merged with theirs and run in order of
+  // cost. The WITH query names the table with its schema, so `r` hides
+  // nothing it reads.
+  ruled: (table, rule) =>
+    sql`(with ${sql.id("r")} as materialized (select * from ${table} where ${rule}) select * from ${sql.id("r")})`,
   anchorPlus: (days) => sql`(date '1900-01-01' + ${days})`,
   truncate: (n) => sql`cast(trunc(cast(${n} as numeric)) as int)`,
   // WIDTH_BUCKET binary-searches the sorted array (bound as one parameter):

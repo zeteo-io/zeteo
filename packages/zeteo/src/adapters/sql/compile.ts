@@ -1,10 +1,15 @@
-import type { AnySelect, SqlDialect, ValueSubject } from "./dialect.js";
 import { compileBusiness, compileBusinessDay } from "./businessDays.js";
 import type { ZoneWindow } from "../../calendar/calendar.js";
 import { QueryError } from "../../engine/errors.js";
 import { METRIC_UNION as UNION } from "./types.js";
 import { aggregatesRows } from "./aggregates.js";
 import { plainNumber } from "./values.js";
+import type {
+  AnySelect,
+  SqlDialect,
+  Staging,
+  ValueSubject,
+} from "./dialect.js";
 import type {
   BucketUnit,
   ColumnRef,
@@ -98,11 +103,18 @@ const ruleSubject = (dialect: SqlDialect) => (c: RuleSubject) => ({
 });
 
 /**
+ * The statements of the query being compiled that run before its SELECT
+ * (`SqlDialect.ruled`). Set by `compileSql` for the length of one
+ * compilation, which is synchronous, so no other compilation sees it.
+ */
+let staging: Staging | undefined;
+
+/**
  * The one place a table reaches SQL: as itself under its alias, or, with the
- * caller's row rule, as `(select * from <table> where <rule>) as <alias>`, so
- * nothing outside the derived table sees a row the rule leaves out. Whatever
- * reads a table (the from, every join, a fixed measure's query, a metric
- * part) reads it through here.
+ * caller's row rule, as what `dialect.ruled` reads in its place, so nothing
+ * outside it sees, or evaluates an expression on, a row the rule leaves out.
+ * Whatever reads a table (the from, every join, a fixed measure's query, a
+ * metric part) reads it through here.
  */
 const tableSource = (
   t: TableName & { alias: string } & RowFiltered,
@@ -110,14 +122,15 @@ const tableSource = (
 ): AliasedExpression<unknown, string> => {
   const name = sql.id(t.schemaName, t.name);
   if (!t.rowFilter) return sql`${name}`.as(t.alias);
-  // Not per row: a business-day check stays inline in the derived table's
-  // where, as nothing there aggregates it.
+  if (!staging) throw new Error("a row rule compiled outside compileSql");
+  // Not per row: a business-day check stays inline in the rule's where, as
+  // nothing there aggregates it.
   const rule = compileFilter(t.rowFilter, dialect, ruleSubject(dialect), {
     row: false,
     fixed: new Map(),
     applied: new Map(),
   });
-  return sql`(select * from ${name} where ${rule})`.as(t.alias);
+  return sql`${dialect.ruled(name, rule, staging)}`.as(t.alias);
 };
 
 /** Joins `joins` in order: inner or left, on their key equalities. */
@@ -562,17 +575,53 @@ export const compileSql = (
   plan: SqlPlan,
   dialect: SqlDialect,
   fetch: { limit: number; offset: number; defaultOrder?: boolean }
-): CompiledQuery =>
-  finish(
-    plan.kind === "metrics"
-      ? compileMetrics(plan, dialect, fetch)
-      : compileTable(plan, dialect, fetch),
-    dialect
-  );
+): CompiledQuery => {
+  staging = { statements: [] };
+  try {
+    const qb =
+      plan.kind === "metrics"
+        ? compileMetrics(plan, dialect, fetch)
+        : compileTable(plan, dialect, fetch);
+    return finish(qb, staging, dialect);
+  } finally {
+    staging = undefined;
+  }
+};
 
-/** The statement's text and parameters, refused when it binds more than the engine takes. */
-const finish = (qb: AnySelect, dialect: SqlDialect): CompiledQuery => {
-  const { sql: text, parameters } = qb.compile();
+/**
+ * The staging statements, then the query, as one batch with its parameters
+ * numbered across both. Kysely puts a query inside raw SQL in parentheses,
+ * which a statement of its own must not have: the query's text is the batch's
+ * after the statements' own text, which numbers its parameters alike.
+ */
+const staged = (
+  qb: AnySelect,
+  statements: readonly Expression<unknown>[],
+  dialect: SqlDialect
+): { sql: string; parameters: readonly unknown[] } => {
+  const before = sql`${sql.join(statements, sql` `)}`;
+  const prefix = before.compile(dialect.kysely).sql + " (";
+  const batch = sql`${before} ${qb}`.compile(dialect.kysely);
+  if (!batch.sql.startsWith(prefix) || !batch.sql.endsWith(")")) {
+    throw new Error("a staged query did not compile as expected");
+  }
+  return {
+    sql: `${prefix.slice(0, -1)}${batch.sql.slice(prefix.length, -1)}`,
+    parameters: batch.parameters,
+  };
+};
+
+/**
+ * The statement's text and parameters, after its staging statements, refused
+ * when it binds more than the engine takes.
+ */
+const finish = (
+  qb: AnySelect,
+  { statements }: Staging,
+  dialect: SqlDialect
+): CompiledQuery => {
+  const { sql: text, parameters } =
+    statements.length === 0 ? qb.compile() : staged(qb, statements, dialect);
   if (parameters.length > dialect.maxParameters) {
     throw new QueryError(
       "too_many_parameters",

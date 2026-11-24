@@ -585,6 +585,22 @@ export const mssqlDialect: SqlDialect = {
   // taken on the UTC wall clock, or on the calendar zone's, read first.
   stepFence: "aggregate",
   subqueryInAggregate: false,
+  // SQL Server may evaluate any condition or expression of a statement on a
+  // row before another condition drops it, through a derived table, a CTE or
+  // a CASE alike; only the order of statements is kept. So the rule's rows
+  // are copied by a statement of their own into a temp table, which the
+  // query reads: no expression of the caller's is in that statement, and the
+  // query never reads the table itself. Any user may create temp tables, on a
+  // read-only replica too; one created inside the request's sp_executesql is
+  // dropped when it ends, and `drop table if exists` clears one a batch
+  // without parameters left on the connection.
+  ruled: (table, rule, staging) => {
+    const temp = sql.raw(`#r${staging.statements.length}`);
+    staging.statements.push(
+      sql`drop table if exists ${temp}; select * into ${temp} from ${table} where ${rule};`
+    );
+    return temp;
+  },
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.
   truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,

@@ -15,8 +15,10 @@ import { describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
 
-// A table with a row rule is read as `(select * from <table> where <rule>) as
-// <alias>` wherever it is read, its values bound like any filter's.
+// A table with a row rule is read, wherever it is read, through what keeps the
+// caller's expressions off the rows the rule leaves out: a MATERIALIZED WITH
+// query inside its derived table on Postgres, a temp table copied by a
+// statement of its own on SQL Server. Its values are bound like any filter's.
 
 const NOW = new Date("2026-06-15T12:00:00Z");
 
@@ -73,7 +75,7 @@ describe("compileSql: row rules on Postgres", () => {
       pg({ from: "orders", select: ["id"] }, { rowRules: { orders: PAID } })
     ).toEqual({
       sql:
-        'select "t0"."id" as "c0" from (select * from "shop"."orders" where "status" in ($1)) as "t0"' +
+        'select "t0"."id" as "c0" from (with "r" as materialized (select * from "shop"."orders" where "status" in ($1)) select * from "r") as "t0"' +
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["paid", 101, 0],
     });
@@ -90,7 +92,7 @@ describe("compileSql: row rules on Postgres", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `from "shop"."orders" as "t0" ${type} join (select * from "shop"."customers" where "region" = $1) as "t1" on "t0"."customer_id" = "t1"."id"`
+        `from "shop"."orders" as "t0" ${type} join (with "r" as materialized (select * from "shop"."customers" where "region" = $1) select * from "r") as "t1" on "t0"."customer_id" = "t1"."id"`
       );
       expect(parameters[0]).toBe("EU");
     }
@@ -102,7 +104,7 @@ describe("compileSql: row rules on Postgres", () => {
       { rowRules: { orders: { kind: "never" } } }
     );
     expect(sql).toContain(
-      'from (select * from "shop"."orders" where 1 = 0) as "t0"'
+      'from (with "r" as materialized (select * from "shop"."orders" where 1 = 0) select * from "r") as "t0"'
     );
   });
 
@@ -116,7 +118,7 @@ describe("compileSql: row rules on Postgres", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      'from (select * from "shop"."orders" where "customer_id" = any($1)) as "t0"'
+      'from (with "r" as materialized (select * from "shop"."orders" where "customer_id" = any($1)) select * from "r") as "t0"'
     );
     expect(parameters).toEqual([values, 101, 0]);
   });
@@ -152,7 +154,7 @@ describe("compileSql: row rules on Postgres", () => {
       }
     );
     expect(sql).toContain(
-      'from (select * from "shop"."orders" where "status" in ($1)) as "f1_t0"'
+      'from (with "r" as materialized (select * from "shop"."orders" where "status" in ($1)) select * from "r") as "f1_t0"'
     );
   });
 
@@ -163,7 +165,7 @@ describe("compileSql: row rules on Postgres", () => {
       true
     );
     expect(sql).toContain(
-      'from (select * from "shop"."orders" where "status" in ($2)) as "t0"'
+      'from (with "r" as materialized (select * from "shop"."orders" where "status" in ($2)) select * from "r") as "t0"'
     );
   });
 });
@@ -177,7 +179,7 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: PAID } }
     );
     expect(sql).toContain(
-      "from (select * from [shop].[orders] where [status] in (@1)) as [t0]"
+      "drop table if exists #r0; select * into #r0 from [shop].[orders] where [status] in (@1); select [t0].[id] as [c0] from #r0 as [t0]"
     );
     expect(parameters[0]).toEqual({ type: "nvarchar", value: "paid" });
   });
@@ -193,7 +195,7 @@ describe("compileSql: row rules on SQL Server", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `from [shop].[orders] as [t0] ${type} join (select * from [shop].[customers] where [region] = @1) as [t1] on [t0].[customer_id] = [t1].[id]`
+        `drop table if exists #r0; select * into #r0 from [shop].[customers] where [region] = @1; select [t0].[id] as [c0], [t1].[name] as [c1] from [shop].[orders] as [t0] ${type} join #r0 as [t1] on [t0].[customer_id] = [t1].[id]`
       );
     }
   });
@@ -204,7 +206,7 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: { kind: "never" } } }
     );
     expect(sql).toContain(
-      "from (select * from [shop].[orders] where 1 = 0) as [t0]"
+      "select * into #r0 from [shop].[orders] where 1 = 0; select [t0].[id] as [c0] from #r0 as [t0]"
     );
   });
 
@@ -218,13 +220,43 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      "where [customer_id] in (select cast([value] as bigint) from openjson(@1))) as [t0]"
+      "select * into #r0 from [shop].[orders] where [customer_id] in (select cast([value] as bigint) from openjson(@1)); select [t0].[id] as [c0] from #r0 as [t0]"
     );
     expect(parameters).toHaveLength(3);
     expect(parameters[0]).toEqual({
       type: "nvarchar",
       value: JSON.stringify(values),
     });
+  });
+
+  it("copies each ruled table by a statement of its own, which holds nothing of the caller's, and numbers parameters across the batch", () => {
+    const { sql, parameters } = ms(
+      {
+        from: "orders",
+        join: [{ relation: "customer", type: "left" }],
+        select: ["id", { calc: { mul: ["total", 1000] }, as: "p" }],
+        where: { p: { gt: 5 } },
+      },
+      { rowRules: { orders: PAID, customers: EU } }
+    );
+    const statements = sql.split("; ");
+    expect(statements.slice(0, 4)).toEqual([
+      "drop table if exists #r0",
+      "select * into #r0 from [shop].[orders] where [status] in (@1)",
+      "drop table if exists #r1",
+      "select * into #r1 from [shop].[customers] where [region] = @2",
+    ]);
+    const query = statements.slice(4).join("; ");
+    expect(query).toMatch(/^select /);
+    expect(query).toContain(
+      "from #r0 as [t0] left join #r1 as [t1] on [t0].[customer_id] = [t1].[id]"
+    );
+    expect(query).not.toContain("[shop].");
+    expect(query).toContain("@3");
+    expect(parameters.slice(0, 2)).toEqual([
+      { type: "nvarchar", value: "paid" },
+      { type: "nvarchar", value: "EU" },
+    ]);
   });
 
   it("reads each metric part's table through its rule", () => {
@@ -234,7 +266,7 @@ describe("compileSql: row rules on SQL Server", () => {
       true
     );
     expect(sql).toMatch(
-      /from \(select \* from \[shop\]\.\[orders\] where \[status\] in \(@\d+\)\) as \[t0\]/
+      /^drop table if exists #r0; select \* into #r0 from \[shop\]\.\[orders\] where \[status\] in \(@1\); select .* from #r0 as \[t0\]/
     );
   });
 });
