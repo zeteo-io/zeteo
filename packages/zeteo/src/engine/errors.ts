@@ -109,6 +109,21 @@ export const invalidValue = (): QueryError =>
  * query, 409. Who reports to the caller could not be read from tereo
  * (`hierarchy_unavailable`): a passing failure, 503.
  */
+/**
+ * A rule-limited query on a Postgres source older than 12, which cannot read
+ * a table through its row rule (a MATERIALIZED WITH query): refused before it
+ * runs, never run without the rule.
+ */
+export const rowRulesNeedNewerPostgres = (): QueryError => {
+  const err = new QueryError(
+    "row_rule_unavailable",
+    "Your access to this source can't be applied: row rules need PostgreSQL 12 or later on the source; ask an admin",
+    []
+  );
+  err.statusCode = 409;
+  return err;
+};
+
 export const rowRuleUnavailable = (
   table: string,
   path: QueryPath,

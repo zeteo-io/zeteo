@@ -2,12 +2,15 @@ import { DatabaseError, type FieldDef, type Pool, type PoolClient } from "pg";
 import { sendCancelRequest, type CancelTarget } from "./cancel.js";
 import { normaliseValue, type WireKind } from "../sql/values.js";
 import { postgresDialect } from "../sql/dialects/postgres.js";
-import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
 import { performance } from "node:perf_hooks";
 import Cursor from "pg-cursor";
+import {
+  invalidValue,
+  rowRulesNeedNewerPostgres,
+} from "../../engine/errors.js";
 import {
   AppError,
   QueryFailedError,
@@ -106,6 +109,21 @@ const sessionSetup = (timeoutMs: number) =>
     "SET LOCAL extra_float_digits = 3",
     "SET LOCAL standard_conforming_strings = on",
   ].join("; ");
+
+/**
+ * `server_version_num` from which a rule-limited query can run: a table is
+ * read through its row rule as a MATERIALIZED WITH query, which PostgreSQL
+ * parses from 12 on. Read in the session setup's round trip.
+ */
+export const ROW_RULES_MIN_SERVER_VERSION = 120000;
+const SERVER_VERSION = "SELECT current_setting('server_version_num')::int AS n";
+
+/** Refuses a rule-limited query on a server older than `ROW_RULES_MIN_SERVER_VERSION`. */
+export const checkRowRulesServer = (versionNum: number): void => {
+  if (!(versionNum >= ROW_RULES_MIN_SERVER_VERSION)) {
+    throw rowRulesNeedNewerPostgres();
+  }
+};
 
 const isClientReadTimeout = (err: unknown): boolean =>
   err instanceof Error && err.message === CLIENT_READ_TIMEOUT;
@@ -488,7 +506,14 @@ export const openPostgresQuery = async (
   };
 
   try {
-    await client.query(sessionSetup(timeLeft));
+    if (plan.rowsLimited) {
+      const results = (await client.query(
+        `${sessionSetup(timeLeft)}; ${SERVER_VERSION}`
+      )) as unknown as { rows: { n: number }[] }[];
+      checkRowRulesServer(Number(results.at(-1)?.rows[0]?.n));
+    } else {
+      await client.query(sessionSetup(timeLeft));
+    }
     signal?.throwIfAborted();
     active = true;
     deadline = setTimeout(
