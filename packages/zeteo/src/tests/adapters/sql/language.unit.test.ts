@@ -1,5 +1,6 @@
 // @module-tag unit
 // @module-tag platform
+import { RowRuleInputSchema } from "../../../row-rules/schema.js";
 import { describe, expect, it } from "vitest";
 import {
   sqlLanguage,
@@ -212,6 +213,34 @@ describe("sqlQuerySchema", () => {
       where: { and: [{ id: { eq: 1 } }, { id: { gt: 1, lt: 2 } }] },
     });
     expect(issues.map((i) => i.path)).toContainEqual(["where", "and", 1, "id"]);
+  });
+});
+
+describe("sqlQuerySchema: prototype keys", () => {
+  it.each(["__proto__", "constructor", "prototype"])(
+    "refuses %s as a path, at its place, rather than dropping it",
+    (key) => {
+      // JSON.parse makes "__proto__" an own key, as a request body does.
+      const where = JSON.parse(
+        `{"and": [{"${key}": {"eq": "x"}, "status": {"eq": "paid"}}]}`
+      ) as object;
+      const issues = issuesOf({ ...base, where });
+      expect(issues).toContainEqual(
+        expect.objectContaining({
+          path: ["where", "and", 0, key],
+          message: `"${key}" cannot be a path`,
+        })
+      );
+    }
+  );
+
+  it("refuses __proto__ in a row rule too", () => {
+    const rule = JSON.parse(
+      '{"__proto__": {"eq": "x"}, "region": {"eq": "west"}}'
+    ) as object;
+    const parsed = RowRuleInputSchema.safeParse(rule);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(["__proto__"]);
   });
 });
 

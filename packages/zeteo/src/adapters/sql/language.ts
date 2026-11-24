@@ -132,6 +132,8 @@ const makeConditionSchema = (identity: boolean) => {
 
 /** Keys that are always logical operators, never column paths. */
 const LOGICAL_KEYS = new Set(["and", "or", "not"]);
+/** Keys a JS object treats as its prototype's: refused as paths, never dropped. */
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 export type Scalar = string | number | boolean;
 /** `{ measure }` names a fixed measure; the planner refuses any other. */
@@ -172,7 +174,7 @@ const filterAt = (
 ): z.ZodType<Filter | RuleFilter> => {
   const inner =
     depth < MAX_FILTER_DEPTH ? filterAt(depth + 1, identity) : undefined;
-  const node = z
+  const object = z
     .object({
       and: (inner ? z.array(inner).min(1) : tooDeep).optional(),
       or: (inner ? z.array(inner).min(1) : tooDeep).optional(),
@@ -202,7 +204,25 @@ const filterAt = (
           });
         }
       }
-    })
+    });
+  // Checked on the input as sent: parsing rebuilds the object and would drop
+  // a `__proto__` key without a word, losing that condition.
+  const node = z
+    .preprocess((input, ctx) => {
+      if (isPlainObject(input)) {
+        for (const key of Object.keys(input)) {
+          if (PROTOTYPE_KEYS.has(key)) {
+            ctx.issues.push({
+              code: "custom",
+              input,
+              path: [key],
+              message: `"${key}" cannot be a path`,
+            });
+          }
+        }
+      }
+      return input;
+    }, object)
     .meta({
       description:
         "One of { and: [filter] }, { or: [filter] }, { not: filter }, or { path: { operator: value }, ... } where several paths must all hold",
