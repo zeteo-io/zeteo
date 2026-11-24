@@ -98,6 +98,39 @@ describe("row-rules store", () => {
     });
   });
 
+  it("refuses a JSON number that was rounded in parsing, asking for a decimal string", async () => {
+    // 9007199254740993 written in JSON arrives as 2^53.
+    await expect(store({ total: { eq: 2 ** 53 } })).rejects.toMatchObject({
+      code: "invalid_row_rule",
+      message: expect.stringContaining(
+        "write large numbers as decimal strings"
+      ),
+      details: { path: ["row_rule", "total", "eq"] },
+    });
+    await expect(
+      store({ total: { in: [1, 1.2345678901234567] } })
+    ).rejects.toMatchObject({
+      code: "invalid_row_rule",
+      details: { path: ["row_rule", "total", "in", 1] },
+    });
+    await expect(
+      store({ total: { between: [0, 1e21] } })
+    ).rejects.toMatchObject({
+      code: "invalid_row_rule",
+      details: { path: ["row_rule", "total", "between", 1] },
+    });
+    const { stored } = await store({
+      total: {
+        in: [2 ** 53 - 1, -(2 ** 53 - 1), 0.1, 12.5, "9007199254740993"],
+      },
+    });
+    expect(stored).toEqual({
+      [ids.get("total")!]: {
+        in: [2 ** 53 - 1, -(2 ** 53 - 1), 0.1, 12.5, "9007199254740993"],
+      },
+    });
+  });
+
   it("names unknown ids as problems and keeps them", () => {
     const col = randomUUID();
     const key = randomUUID();

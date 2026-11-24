@@ -98,6 +98,19 @@ const identityRefs = (rule: RuleFilter): Array<[IdentityRef, Path]> => {
   return found;
 };
 
+/**
+ * Whether a JSON number reached the server as written: a safe integer, or a
+ * fraction of at most 15 significant digits, which a double always keeps. A
+ * larger integer (past 2^53) or a longer fraction was rounded in parsing, so
+ * a rule holding it would match other rows than the one written.
+ */
+const isExactNumber = (n: number): boolean => {
+  if (!Number.isFinite(n)) return false;
+  if (Number.isInteger(n)) return Number.isSafeInteger(n);
+  const digits = n.toExponential().replace(/e.*$/, "").replace(/[-.]/g, "");
+  return digits.length <= 15;
+};
+
 /** A literal or relative date checked against the column's type; refused with the path of the value. */
 const checkValue = (
   value: unknown,
@@ -120,6 +133,12 @@ const checkValue = (
   if (isRelativeDate(value)) {
     if (type !== "date" && type !== "timestamp") throw wrong();
     return;
+  }
+  if (typeof value === "number" && !isExactNumber(value)) {
+    throw new InvalidRowRuleError(
+      `${value} cannot be held exactly as a JSON number; write large numbers as decimal strings`,
+      path
+    );
   }
   if (coerceValue(value as Scalar, type) === undefined) throw wrong();
 };
