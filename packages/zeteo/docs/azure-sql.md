@@ -167,7 +167,10 @@ can equal it). In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is com
 column widened since the last refresh (`int` to `bigint`, a decimal given a scale) still has those
 rows excluded. A value of more than 38 digits, which no exact number type holds, is left out of a
 query's condition; a row rule's `ne` or `notIn` on one keeps no row (see
-[row-rules.md](row-rules.md#failing-closed)).
+[row-rules.md](row-rules.md#failing-closed)). A row rule's read is refused (`409
+row_rule_unavailable`) when a column it compares no longer has the catalogue's type, until the
+source is refreshed; in a rule, a value whose comparison with the column would need more than 38
+digits is therefore not compared, as no row of the checked type equals it.
 
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on the
 server with an attention on its own connection (no second connection is needed, so a cancel never

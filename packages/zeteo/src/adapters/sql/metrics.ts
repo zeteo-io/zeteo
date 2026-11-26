@@ -285,7 +285,7 @@ class MetricPlanner {
     const home = this.catalog.tables.find((t) => t.id === measure.tableId);
     if (!home) throw notFound("measure", measure.name, at, []);
     const planner = new Planner(this.catalog, this.now, this.state);
-    const { rowFilter } = planner.fromTable(home, at);
+    const { rowFilter, rowRuleAt } = planner.fromTable(home, at);
     const reads = new Map<string, Reference>();
     const calc = planner.resolveExpr({ measure: measure.name }, at, reads);
     const type = typeOf(calc.resolved);
@@ -318,7 +318,7 @@ class MetricPlanner {
         alias: "t0",
         schemaName: home.schemaName,
         name: home.name,
-        ...(rowFilter && { rowFilter }),
+        ...(rowFilter && { rowFilter, rowRuleAt }),
       },
       joins: planner.joins,
       expr: calc.resolved,

@@ -187,6 +187,7 @@ Any input that cannot be resolved yields fewer rows or a refused query, never mo
 | The caller has no value under a key a rule names | **That grant's whole rule matches no rows**, whatever operator or `not` surrounds the identity condition. Other grants still apply. |
 | A rule's column has gone missing from the catalogue | Queries reading the table are refused with `409 row_rule_unavailable` ("ask an admin"); the grant shows `column_missing:<name>` in `row_rule_problems`. |
 | A rule resolves to more than 50,000 values | Refused with `409 row_rule_unavailable`; never truncated. |
+| SQL Server: a column the rule compares, or a condition of the caller's applied beside it, has gone from the table or has another type than the catalogue last read (altered since the last refresh) | Refused with `409 row_rule_unavailable` ("ask an admin"), the same body as a rule column gone missing, until the source is refreshed. A check of `sys.columns` before the rule's read decides it, so the outcome depends on no row. |
 | An identity key is deleted while rules use it | The delete is refused: `409 identity_key_in_use`. |
 | Tereo cannot say who reports to the caller (unreachable, erroring, or no such user) while a rule uses `below` | Queries reading the table are refused with `503 row_rule_unavailable` ("try again shortly"); never the caller's own rows only, never every row. |
 | Tereo refuses the reporting lines as too large (over 10,000 users or 64 levels) | Refused with `409 row_rule_unavailable`, reason `too_many_values`. |
@@ -198,9 +199,16 @@ condition is empty, which matches no rows.
 On SQL Server a number the rule column's type (as the catalogue last read it) cannot hold, an
 identity value past `int` on an `int` column say, is left out of an `eq` or `in`, which only drops
 rows. In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is compared exactly, as
-`decimal(38, s)`, so a column widened since the last refresh still hides the rows holding it. A
-value of more than 38 digits, which no SQL Server exact number holds, makes such a condition keep
-no row ([azure-sql.md](azure-sql.md)).
+`decimal(38, s)`, so a column widened since the last refresh still hides the rows holding it. Where
+that comparison would need more than 38 digits (the column's integer digits plus the value's scale,
+`1.5` against a `decimal(38,0)` column say), it is not made: the read's type check (below) has
+confirmed the column's type, which holds no such value, so no row equals it and the value leaves
+out nothing, as the comparison would. A value of more than 38 digits, which no SQL Server exact
+number holds, makes such a condition keep no row ([azure-sql.md](azure-sql.md)).
+
+Postgres needs no such check: a parameter's type is inferred from the column when the statement is
+prepared, and nothing converts text to a number per row, so a column changed since the last
+refresh changes what matches, or fails the statement before any row is read, never on one row.
 
 ## Enforcement
 
@@ -232,7 +240,12 @@ of its own:
   even through a `CASE`; only the order of statements is kept. Any user may create temp tables, a
   read-only login and a read-only replica included, and the request's temp tables are dropped when
   it ends. References to one table under the same rule and conditions (a fixed measure's table and
-  the query's, the parts of a metric) share one copy.
+  the query's, the parts of a metric) share one copy. Every comparison in that statement was chosen
+  for its column's type as the catalogue last read it, and a column altered since (an `int` now
+  `nvarchar`) would be converted per row, failing on rows the caller's conditions pick. So the copy
+  is preceded, in the same request, by a check of `sys.columns` that the columns the rule and the
+  conditions beside it compare are there with those types; when one is not, it throws and the query
+  is refused (`409 row_rule_unavailable`). The check reads metadata only.
 
 The read keeps only the columns the query reads of the table (join keys, measures and metric parts
 included; none for `count(*)` alone). Beside the rule it also applies the caller's conditions that

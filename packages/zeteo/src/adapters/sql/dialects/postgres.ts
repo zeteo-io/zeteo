@@ -271,6 +271,7 @@ export const postgresDialect: SqlDialect = {
   equalityValues: (values) => ({
     held: [...values],
     wider: [],
+    apart: [],
     unbound: false,
   }),
   inSet,

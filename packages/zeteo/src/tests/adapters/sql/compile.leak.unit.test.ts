@@ -132,9 +132,10 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { rowRules: { orders: msRules.PAID } }
     );
     expect(ruledReads(sql)).toEqual([
-      "select [id] into #r0 from [shop].[orders] where ([status] in (@1)) and [id] = @2 and [customer_id] in (@3, @4) and [total] >= cast(@5 as decimal(12, 2)) and lower([status]) like lower(@6) escape '\\' and [created_at] >= cast(@7 as datetimeoffset);",
+      "select [id] into #r0 from [shop].[orders] where ([status] in (@2)) and [id] = @3 and [customer_id] in (@4, @5) and [total] >= cast(@6 as decimal(12, 2)) and lower([status]) like lower(@7) escape '\\' and [created_at] >= cast(@8 as datetimeoffset);",
     ]);
-    expect(parameters.slice(0, 7)).toEqual([
+    // After the rule's guard (`ruleGuard`).
+    expect(parameters.slice(1, 8)).toEqual([
       { type: "nvarchar", value: "paid" },
       { type: "bigint", value: "6" },
       { type: "int", value: 1 },
@@ -176,7 +177,7 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { rowRules: { orders: msRules.PAID } }
     );
     expect(ruledReads(sql)).toEqual([
-      "select [created_at], [customer_id], [id], [total] into #r0 from [shop].[orders] where [status] in (@1);",
+      "select [created_at], [customer_id], [id], [total] into #r0 from [shop].[orders] where [status] in (@2);",
     ]);
   });
 
@@ -250,9 +251,9 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { pushDown: false }
     );
     expect(ruledReads(outside.sql)).toEqual([
-      "select [id] into #r0 from [shop].[orders] where [status] in (@1);",
+      "select [id] into #r0 from [shop].[orders] where [status] in (@2);",
     ]);
-    expect(outside.sql).toContain("from #r0 as [t0] where [t0].[id] = @2");
+    expect(outside.sql).toContain("from #r0 as [t0] where [t0].[id] = @3");
   });
 
   it("pushes a metric part's range on its own table's date column beside the rule", () => {
@@ -287,7 +288,7 @@ describe("compileSql: one read per table and rule on SQL Server", () => {
       }
     );
     expect(ruledReads(sql)).toEqual([
-      "select [id], [total] into #r0 from [shop].[orders] where [status] in (@1);",
+      "select [id], [total] into #r0 from [shop].[orders] where [status] in (@2);",
     ]);
     expect(sql).toContain("from #r0 as [t0]");
     expect(sql).toContain("from #r0 as [f1_t0]");
@@ -450,7 +451,7 @@ describe("compileSql: a condition whose types do not match stays outside the rul
   it("mssql: an equality no value of the column can meet is the column against itself, binding nothing", () => {
     const sql = outside(mssqlDialect, eq("num", "number", "int", "abc"));
     expect(ruledReads(sql)).toEqual([
-      "select [id] into #r0 from [shop].[orders] where ([status] in (@1)) and [num] <> [num];",
+      "select [id] into #r0 from [shop].[orders] where ([status] in (@2)) and [num] <> [num];",
     ]);
   });
 
@@ -485,7 +486,7 @@ describe("compileSql: a condition whose types do not match stays outside the rul
       // The rule alone decides what the read holds.
       expect(reads[0]).toMatch(
         dialect.name === "mssql"
-          ? /from \[shop\]\.\[orders\] where \[status\] in \(@1\);$/
+          ? /from \[shop\]\.\[orders\] where \[status\] in \(@2\);$/
           : /from "shop"\."orders" where "status" in \(\$1\)\) select \* from "r"$/
       );
       // The condition is the query's own, on the read's rows.

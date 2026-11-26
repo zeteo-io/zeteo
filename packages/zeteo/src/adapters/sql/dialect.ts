@@ -9,6 +9,7 @@ import type {
   QueryableType,
   ResolvedExpr,
   ResolvedSelect,
+  RowRuleAt,
 } from "./types.js";
 
 /** The `dateDiff` units within a day, in seconds. */
@@ -56,6 +57,24 @@ export const truncUnit = (unit: BucketUnit): string =>
 /** The statements a query runs before its SELECT, in order: SQL Server's ruled tables. */
 export interface Staging {
   statements: Expression<unknown>[];
+  /** Where each statement's table is read, by statement: what a failed guard (`RuledRead.guard`) refuses with. */
+  at: (RowRuleAt | undefined)[];
+}
+
+/**
+ * The columns of a ruled table that are evaluated beside its rule, the
+ * rule's own and those of the caller's conditions applied there, each with
+ * its type as the catalogue last read it. Every comparison there was chosen
+ * for that type: one with a column whose type has changed since may convert
+ * the column per row and fail on a row the rule hides. A dialect that can
+ * check them before the read (SQL Server) refuses the query when any differs
+ * or has gone.
+ */
+export interface RuleGuard {
+  schemaName: string;
+  name: string;
+  columns: readonly { name: string; nativeType: string }[];
+  at?: RowRuleAt;
 }
 
 /**
@@ -68,6 +87,7 @@ export interface RuledRead {
   table: Expression<unknown>;
   columns: readonly string[];
   where: Expression<SqlBool>;
+  guard: RuleGuard;
 }
 
 /** An equality's values, by what the subject's catalogue type says of them. */
@@ -76,7 +96,16 @@ export interface EqualityValues {
   held: PlanValue[];
   /** Values its type cannot hold but an exact comparison can still be made with: a column widened since the catalogue was read may hold them. */
   wider: PlanValue[];
-  /** Whether some value can be compared exactly by no means (left out of both): more digits than any exact number type of the engine holds. */
+  /**
+   * Values its type cannot hold whose exact comparison with the column would
+   * need a common type of more digits than the engine's exact numbers hold
+   * (SQL Server: the column's integer digits plus the value's scale past
+   * 38), so it could fail on a row. A row rule leaves them out where they
+   * would add rows: its read first checks the column still has the
+   * catalogue's type (`RuleGuard`), which no such value equals.
+   */
+  apart: PlanValue[];
+  /** Whether some value can be compared exactly by no means (left out of all three): more digits than any exact number type of the engine holds. */
   unbound: boolean;
 }
 

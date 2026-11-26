@@ -180,9 +180,9 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: PAID } }
     );
     expect(sql).toContain(
-      "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@1); select [t0].[id] as [c0] from #r0 as [t0]"
+      "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@2); select [t0].[id] as [c0] from #r0 as [t0]"
     );
-    expect(parameters[0]).toEqual({ type: "nvarchar", value: "paid" });
+    expect(parameters[1]).toEqual({ type: "nvarchar", value: "paid" });
   });
 
   it("reads a joined table through its rule, left or inner", () => {
@@ -196,7 +196,7 @@ describe("compileSql: row rules on SQL Server", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `drop table if exists #r0; select [id], [name] into #r0 from [shop].[customers] where [region] = @1; select [t0].[id] as [c0], [t1].[name] as [c1] from [shop].[orders] as [t0] ${type} join #r0 as [t1] on [t0].[customer_id] = [t1].[id]`
+        `drop table if exists #r0; select [id], [name] into #r0 from [shop].[customers] where [region] = @2; select [t0].[id] as [c0], [t1].[name] as [c1] from [shop].[orders] as [t0] ${type} join #r0 as [t1] on [t0].[customer_id] = [t1].[id]`
       );
     }
   });
@@ -221,10 +221,11 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      "select [id] into #r0 from [shop].[orders] where [customer_id] in (select cast([value] as bigint) from openjson(@1)); select [t0].[id] as [c0] from #r0 as [t0]"
+      "select [id] into #r0 from [shop].[orders] where [customer_id] in (select cast([value] as bigint) from openjson(@2)); select [t0].[id] as [c0] from #r0 as [t0]"
     );
-    expect(parameters).toHaveLength(3);
-    expect(parameters[0]).toEqual({
+    // The guard's, the list's and the page's two.
+    expect(parameters).toHaveLength(4);
+    expect(parameters[1]).toEqual({
       type: "nvarchar",
       value: JSON.stringify(values),
     });
@@ -241,20 +242,27 @@ describe("compileSql: row rules on SQL Server", () => {
       { rowRules: { orders: PAID, customers: EU } }
     );
     const statements = sql.split("; ");
-    expect(statements.slice(0, 4)).toEqual([
+    // Each copy after its guard, which binds one value of the catalogue's.
+    expect(statements[0]).toMatch(
+      /^if exists .*openjson\(@1, .* throw 51000, .*, 1$/
+    );
+    expect(statements[3]).toMatch(
+      /^if exists .*openjson\(@3, .* throw 51000, .*, 2$/
+    );
+    expect([1, 2, 4, 5].map((i) => statements[i])).toEqual([
       "drop table if exists #r0",
-      "select [customer_id], [id], [total] into #r0 from [shop].[orders] where [status] in (@1)",
+      "select [customer_id], [id], [total] into #r0 from [shop].[orders] where [status] in (@2)",
       "drop table if exists #r1",
-      "select [id] into #r1 from [shop].[customers] where [region] = @2",
+      "select [id] into #r1 from [shop].[customers] where [region] = @4",
     ]);
-    const query = statements.slice(4).join("; ");
+    const query = statements.slice(6).join("; ");
     expect(query).toMatch(/^select /);
     expect(query).toContain(
       "from #r0 as [t0] left join #r1 as [t1] on [t0].[customer_id] = [t1].[id]"
     );
     expect(query).not.toContain("[shop].");
-    expect(query).toContain("@3");
-    expect(parameters.slice(0, 2)).toEqual([
+    expect(query).toContain("@5");
+    expect([parameters[1], parameters[3]]).toEqual([
       { type: "nvarchar", value: "paid" },
       { type: "nvarchar", value: "EU" },
     ]);
@@ -267,7 +275,7 @@ describe("compileSql: row rules on SQL Server", () => {
       true
     );
     expect(sql).toMatch(
-      /^drop table if exists #r0; select \[ordered_on\], \[total\] into #r0 from \[shop\]\.\[orders\] where \[status\] in \(@1\); select .* from #r0 as \[t0\]/
+      /^if exists .*?; drop table if exists #r0; select \[ordered_on\], \[total\] into #r0 from \[shop\]\.\[orders\] where \[status\] in \(@2\); select .* from #r0 as \[t0\]/
     );
   });
 });
@@ -297,29 +305,29 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
 
   it("compares a value past int exactly in ne, notIn and a not around in or eq", () => {
     const cases: [Record<string, unknown>, string][] = [
-      [{ "orders.customer_id": { ne: PAST_INT } }, "[customer_id] <> @1"],
+      [{ "orders.customer_id": { ne: PAST_INT } }, "[customer_id] <> @2"],
       [
         { "orders.customer_id": { notIn: [PAST_INT, "2"] } },
-        "[customer_id] not in (@1, @2)",
+        "[customer_id] not in (@2, @3)",
       ],
       [
         { not: { "orders.customer_id": { in: [PAST_INT] } } },
-        "not ([customer_id] in (@1))",
+        "not ([customer_id] in (@2))",
       ],
       [
         { not: { "orders.customer_id": { eq: "2.5" } } },
-        "not ([customer_id] = cast(@1 as decimal(38, 1)))",
+        "not ([customer_id] = cast(@2 as decimal(38, 1)))",
       ],
     ];
     for (const [filter, expected] of cases) {
       const { sql, parameters } = ruleOn(filter);
       expect(where(sql)).toBe(expected);
-      expect(parameters[0]).not.toEqual(
+      expect(parameters[1]).not.toEqual(
         expect.objectContaining({ type: "float" })
       );
     }
     expect(
-      ruleOn({ "orders.customer_id": { ne: PAST_INT } }).parameters[0]
+      ruleOn({ "orders.customer_id": { ne: PAST_INT } }).parameters[1]
     ).toEqual({ type: "bigint", value: PAST_INT });
   });
 
@@ -329,7 +337,7 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
     );
     expect(
       where(ruleOn({ "orders.customer_id": { in: [PAST_INT, "2"] } }).sql)
-    ).toBe("[customer_id] in (@1)");
+    ).toBe("[customer_id] in (@2)");
     expect(
       where(
         ruleOn({ not: { "orders.customer_id": { notIn: [PAST_INT] } } }).sql
@@ -350,7 +358,7 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
     // Where leaving it out drops rows, it is left out.
     expect(
       where(ruleOn({ "orders.customer_id": { in: ["2", HUGE] } }).sql)
-    ).toBe("[customer_id] in (@1)");
+    ).toBe("[customer_id] in (@2)");
   });
 
   it("reads a long notIn's values past the column's type as a list of their own, exactly", () => {
@@ -363,12 +371,12 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
       "orders.customer_id": { notIn: values },
     });
     expect(where(sql)).toBe(
-      "([customer_id] not in (select cast([value] as bigint) from openjson(@1)) and [customer_id] not in (select cast([value] as decimal(38, 0)) from openjson(@2)) and [customer_id] not in (select cast([value] as decimal(38, 1)) from openjson(@3)))"
+      "([customer_id] not in (select cast([value] as bigint) from openjson(@2)) and [customer_id] not in (select cast([value] as decimal(38, 0)) from openjson(@3)) and [customer_id] not in (select cast([value] as decimal(38, 1)) from openjson(@4)))"
     );
-    expect(JSON.parse((parameters[1] as { value: string }).value)).toEqual([
+    expect(JSON.parse((parameters[2] as { value: string }).value)).toEqual([
       PAST_INT,
     ]);
-    expect(JSON.parse((parameters[2] as { value: string }).value)).toEqual([
+    expect(JSON.parse((parameters[3] as { value: string }).value)).toEqual([
       "4000000000.5",
     ]);
   });
@@ -402,9 +410,9 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
       { rowRules: { orders: PAID } }
     );
     expect(sql).toContain(
-      "select [customer_id], [id] into #r0 from [shop].[orders] where [status] in (@1);"
+      "select [customer_id], [id] into #r0 from [shop].[orders] where [status] in (@2);"
     );
-    expect(sql).toContain("where [t0].[customer_id] <> @2");
+    expect(sql).toContain("where [t0].[customer_id] <> @3");
   });
 });
 
@@ -447,7 +455,9 @@ describe("compileSql: columns named as Object's own properties", () => {
       // The rule, then the caller's conditions beside it.
       const q = (name: string) =>
         dialect.name === "mssql" ? `[${name}]` : `"${name}"`;
-      const p = (n: number) => (dialect.name === "mssql" ? `@${n}` : `$${n}`);
+      // SQL Server binds the rule's guard first (`ruleGuard`).
+      const p = (n: number) =>
+        dialect.name === "mssql" ? `@${n + 1}` : `$${n}`;
       expect(sql).toContain(
         `where (${q("constructor")} <> ${p(1)}) and ${q("constructor")} = ${p(2)} and ${q("prototype")} is null`
       );
@@ -595,5 +605,135 @@ describe("compile.ts: no module state", () => {
       "utf8"
     );
     expect(text).not.toMatch(/^let /m);
+  });
+});
+
+// Every comparison beside a rule was chosen for its column's type as the
+// catalogue last read it. Before the copy, a guard reads sys.columns and
+// throws when a column the rule or a condition beside it names has gone or
+// has another type, so no comparison converts a changed column per row.
+describe("compileSql: the guard before a ruled copy, on SQL Server", () => {
+  const { PAID, EU } = rules("nvarchar(200)");
+  const guardOf = (parameters: unknown[]) =>
+    JSON.parse((parameters[0] as { value: string }).value) as unknown;
+
+  it("names the rule's columns and those of the conditions beside it, with their catalogued types", () => {
+    const { sql, parameters, ruledAt } = ms(
+      {
+        from: "orders",
+        select: ["id"],
+        where: {
+          id: { eq: 6 },
+          total: { gte: "10.5" },
+          // Stays outside the copy: not the guard's.
+          customer_id: { gt: "1.5" },
+        },
+      },
+      { rowRules: { orders: PAID } }
+    );
+    expect(sql).toMatch(
+      /^if exists \(select 1 from openjson\(@1, N'\$\.c'\) .* from sys\.columns .* throw 51000, N'a row rule column differs from the catalogue', 1; drop table if exists #r0; select /
+    );
+    expect(guardOf(parameters)).toEqual({
+      s: "shop",
+      t: "orders",
+      c: [
+        ["id", "bigint"],
+        ["status", "nvarchar(200)"],
+        ["total", "decimal(12,2)"],
+      ],
+    });
+    expect(ruledAt).toEqual([{ table: "orders", path: ["from"] }]);
+  });
+
+  it("guards each copy with its own table, and says where each is read", () => {
+    const { sql, parameters, ruledAt } = ms(
+      {
+        from: "orders",
+        join: [{ relation: "customer", type: "inner" }],
+        select: ["id"],
+      },
+      { rowRules: { orders: PAID, customers: EU } }
+    );
+    expect(sql.match(/throw 51000, [^;]*, (\d+);/g)).toHaveLength(2);
+    expect(guardOf(parameters)).toMatchObject({ t: "orders" });
+    expect(
+      JSON.parse((parameters[2] as { value: string }).value)
+    ).toMatchObject({ t: "customers", c: [["region", "nvarchar(200)"]] });
+    expect(ruledAt).toEqual([
+      { table: "orders", path: ["from"] },
+      { table: "customers", path: ["join", 0, "relation"] },
+    ]);
+  });
+
+  it("has nothing to guard where the copy compares no column", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"] },
+      { rowRules: { orders: { kind: "never" } } }
+    );
+    expect(sql).toMatch(/^drop table if exists #r0; /);
+  });
+
+  it("is SQL Server's own: Postgres reads its catalogue types at bind time", () => {
+    const { sql } = pg(
+      { from: "orders", select: ["id"], where: { id: { eq: 6 } } },
+      { rowRules: { orders: PAID } }
+    );
+    expect(sql).not.toContain("sys.columns");
+  });
+});
+
+// A value the catalogue's type cannot hold is compared exactly, as
+// decimal(38, s), where leaving it out would keep more rows. Against a
+// column with more integer digits than 38 - s the comparison's common type
+// would need more than 38 digits; it is not made. The guard has checked the
+// column's type, which holds no such value, so no row equals it: in a rule's
+// ne or notIn it leaves out nothing, as `col = col` (unknown for a null, as
+// the comparison would be).
+describe("compileSql: a rule's value whose comparison would need more than 38 digits, on SQL Server", () => {
+  const ruleOn = (nativeType: string, filter: Record<string, unknown>) =>
+    ms(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule(filter, [
+            ruleColumn("orders.customer_id", "number", nativeType),
+          ]),
+        },
+      }
+    );
+  const where = (sql: string) =>
+    /from \[shop\]\.\[orders\] where (.*?); select/.exec(sql)![1];
+
+  it.each([
+    ["decimal(38,0)", "1.5"],
+    ["bigint", "1." + "0".repeat(19) + "1"],
+    ["decimal(30,2)", "1.00000000001"],
+  ])("%s against %s", (nativeType, value) => {
+    const c = "orders.customer_id";
+    expect(where(ruleOn(nativeType, { [c]: { ne: value } }).sql)).toBe(
+      "[customer_id] = [customer_id]"
+    );
+    expect(where(ruleOn(nativeType, { not: { [c]: { eq: value } } }).sql)).toBe(
+      "not ([customer_id] <> [customer_id])"
+    );
+    const notIn = ruleOn(nativeType, { [c]: { notIn: ["2", value] } });
+    expect(where(notIn.sql)).toBe("[customer_id] not in (@2)");
+    expect(
+      notIn.parameters.some((p) =>
+        String((p as { value: unknown }).value).includes(value)
+      )
+    ).toBe(false);
+    expect(
+      where(ruleOn(nativeType, { not: { [c]: { in: [value] } } }).sql)
+    ).toBe("not ([customer_id] <> [customer_id])");
+  });
+
+  it("still compares a value within 38 digits exactly", () => {
+    expect(
+      where(
+        ruleOn("decimal(36,0)", { "orders.customer_id": { ne: "1.5" } }).sql
+      )
+    ).toBe("[customer_id] <> cast(@2 as decimal(38, 1))");
   });
 });

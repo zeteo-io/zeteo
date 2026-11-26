@@ -1,12 +1,15 @@
 // @module-tag int
 // @module-tag platform
 import { ndjsonLines, newExportUser, postExport } from "../support/exports.js";
+import { describeEachEngine, type EngineFixture } from "../support/engines.js";
+import { fixtureAdminSettings } from "../support/fixtureDb.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
-import { describeEachEngine } from "../support/engines.js";
+import { asMssqlAdmin } from "../support/mssqlFixture.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
 import { prisma } from "../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
+import { Client } from "pg";
 import {
   grantTo,
   newQueryUser,
@@ -310,3 +313,164 @@ describeEachEngine("row rules, errors on hidden rows", (engine) => {
     }
   });
 });
+
+// Differential probes: one query asked of a hidden row's id, of an id no row
+// has and of a visible row's id, with a condition that would raise if it were
+// evaluated on a row. The hidden and the missing id must get the same answer:
+// any difference reads the hidden row. Each table is the test's own, in
+// schema rr_probe, dropped before and after.
+const PROBE_SCHEMA = "rr_probe";
+
+const asProbeAdmin = async (
+  engine: EngineFixture,
+  statements: { postgres: string[]; mssql: string[] }
+): Promise<void> => {
+  if (engine.type === "azure-sql") {
+    await asMssqlAdmin(statements.mssql);
+    return;
+  }
+  const admin = new Client({ ...fixtureAdminSettings(), ssl: false });
+  await admin.connect();
+  try {
+    for (const statement of statements.postgres) await admin.query(statement);
+  } finally {
+    await admin.end();
+  }
+};
+
+/** A hidden row's id, an id no row has, a visible row's id. */
+const HIDDEN = 6;
+const NOWHERE = 99;
+const VISIBLE = 1;
+
+describeEachEngine(
+  "row rules, differential probes on hidden rows",
+  (engine) => {
+    let source: SeededSource;
+    const shown = newQueryUser();
+    const stale = newQueryUser();
+    const users = [shown, stale];
+    const drop = {
+      postgres: [`DROP SCHEMA IF EXISTS ${PROBE_SCHEMA} CASCADE`],
+      mssql: [
+        `DROP TABLE IF EXISTS ${PROBE_SCHEMA}.items`,
+        `DROP SCHEMA IF EXISTS ${PROBE_SCHEMA}`,
+      ],
+    };
+
+    beforeAll(async () => {
+      await asProbeAdmin(engine, drop);
+      await asProbeAdmin(engine, {
+        postgres: [
+          `CREATE SCHEMA ${PROBE_SCHEMA}`,
+          `CREATE COLLATION ${PROBE_SCHEMA}.ci (provider = icu, locale = 'und-u-ks-level2', deterministic = false)`,
+          `CREATE TABLE ${PROBE_SCHEMA}.items (id integer PRIMARY KEY, status text NOT NULL, ref uuid, stamp timestamp(3), label text COLLATE ${PROBE_SCHEMA}.ci, code integer)`,
+          `INSERT INTO ${PROBE_SCHEMA}.items VALUES
+           (1, 'shown', '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', '2026-02-01 00:00:00', 'Alpha', 1),
+           (2, 'shown', NULL, '2026-03-01 00:00:00', 'Beta', 2),
+           (6, 'hidden', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '2026-04-01 00:00:00', 'Gamma', 6)`,
+          `GRANT USAGE ON SCHEMA ${PROBE_SCHEMA} TO zeteo_ro`,
+          `GRANT SELECT ON ${PROBE_SCHEMA}.items TO zeteo_ro`,
+        ],
+        mssql: [
+          `CREATE SCHEMA ${PROBE_SCHEMA}`,
+          `CREATE TABLE ${PROBE_SCHEMA}.items (id int NOT NULL PRIMARY KEY, status nvarchar(20) NOT NULL, ref uniqueidentifier, stamp datetime2(3), label nvarchar(50), code int)`,
+          `INSERT INTO ${PROBE_SCHEMA}.items VALUES
+           (1, N'shown', '6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B', '2026-02-01 00:00:00', N'Alpha', 1),
+           (2, N'shown', NULL, '2026-03-01 00:00:00', N'Beta', 2),
+           (6, N'hidden', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', '2026-04-01 00:00:00', N'Gamma', 6)`,
+          `GRANT SELECT ON SCHEMA::${PROBE_SCHEMA} TO zeteo_ro`,
+        ],
+      });
+      source = await seedQuerySource(
+        engine,
+        { schemas: [PROBE_SCHEMA] },
+        "rrprobe"
+      );
+      const items = source.tables.items!;
+      await grantTo(shown.principal, items, "all", {
+        access: "rule",
+        rule: { status: { eq: "shown" } },
+      });
+      await grantTo(stale.principal, items, "all", {
+        access: "rule",
+        // A rule on code alone: nothing else decides first whether a row's
+        // code is converted.
+        rule: { code: { lt: 100 } },
+      });
+      // Changed behind the catalogue's back, which still says integer: a
+      // comparison chosen for an integer converts the text per row, and fails
+      // on the hidden row's.
+      await asProbeAdmin(engine, {
+        postgres: [
+          `ALTER TABLE ${PROBE_SCHEMA}.items ALTER COLUMN code TYPE text`,
+          `UPDATE ${PROBE_SCHEMA}.items SET code = 'A12' WHERE id = ${HIDDEN}`,
+        ],
+        mssql: [
+          `ALTER TABLE ${PROBE_SCHEMA}.items ALTER COLUMN code nvarchar(20)`,
+          `UPDATE ${PROBE_SCHEMA}.items SET code = N'A12' WHERE id = ${HIDDEN}`,
+        ],
+      });
+    });
+    afterAll(async () => {
+      await removeRunsOf(users.map((u) => u.id));
+      await removeSources([source.id]);
+      await closeAllSourcePools();
+      await asProbeAdmin(engine, drop);
+    });
+
+    /** What a caller sees of one query: its rows' ids, or its error. */
+    const outcome = async (token: string, where: Record<string, unknown>) => {
+      const res = await postQuery(token, {
+        source: source.slug,
+        from: "items",
+        select: ["id"],
+        where,
+      });
+      return res.status === 200
+        ? {
+            status: 200,
+            ids: (res.body.rows as unknown[][]).map((r) => Number(r[0])),
+          }
+        : { status: res.status, error: (res.body as { error?: string }).error };
+    };
+
+    /** The same probe at each id; the hidden and the missing one must answer alike. */
+    const probe = async (
+      token: string,
+      condition?: Record<string, unknown>
+    ) => {
+      const at = (id: number) =>
+        outcome(token, {
+          and: [{ id: { eq: id } }, ...(condition ? [condition] : [])],
+        });
+      const [hidden, nowhere, visible] = [
+        await at(HIDDEN),
+        await at(NOWHERE),
+        await at(VISIBLE),
+      ];
+      expect({ condition, hidden }).toEqual({ condition, hidden: nowhere });
+      return { hidden, visible };
+    };
+
+    it("a rule on a column changed since the catalogue was read tells a hidden row from a missing one by nothing", async () => {
+      const { hidden, visible } = await probe(stale.token);
+      if (engine.type === "azure-sql") {
+        // The guard refuses before the copy, whatever the id.
+        expect(hidden).toEqual({ status: 409, error: "row_rule_unavailable" });
+        expect(visible).toEqual(hidden);
+      } else {
+        // Postgres infers the parameter's type from the column at bind time:
+        // the code is compared as text ('1' < '100', 'A12' not), on no row
+        // converted.
+        expect(visible).toEqual({ status: 200, ids: [VISIBLE] });
+        expect(hidden).toEqual({ status: 200, ids: [] });
+      }
+    });
+
+    it("a condition beside a changed rule column tells a hidden row from a missing one by nothing", async () => {
+      await probe(stale.token, { code: { eq: 5 } });
+      await probe(stale.token, { code: { between: [1, 9] } });
+    });
+  }
+);

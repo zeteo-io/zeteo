@@ -4,12 +4,13 @@ import { ndjsonLines, newExportUser, postExport } from "../support/exports.js";
 import { describeEachEngine, type EngineFixture } from "../support/engines.js";
 import { savedQueriesCall, shareDirectly } from "../support/savedQueries.js";
 import { clearTestGroups, setTestGroups } from "../support/principals.js";
+import { removeSources, writeToken } from "../support/sources.js";
 import { fixtureAdminSettings } from "../support/fixtureDb.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
 import type { RuleFilter } from "../../row-rules/types.js";
 import { asMssqlAdmin } from "../support/mssqlFixture.js";
+import { BASE_URL, fetchJson } from "../support/http.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
-import { removeSources } from "../support/sources.js";
 import { TABLE } from "../support/dashboards.js";
 import { prisma } from "../../utils/db/index.js";
 import { tokenFor } from "../support/tokens.js";
@@ -517,7 +518,9 @@ describeEachEngine("row rules", (engine) => {
 // A column widened after the catalogue was read (an id past int, a decimal
 // given a scale), with no refresh since: the catalogue still says the old
 // type. A rule's ne, notIn or not around in must still hide the rows holding
-// a value the old type could not, never show them.
+// a value the old type could not, never show them. SQL Server refuses the
+// query instead (409 row_rule_unavailable), its guard finding the rule's
+// column changed, until the source is refreshed.
 const DRIFT_SCHEMA = "rr_drift";
 
 const asFixtureAdmin = async (
@@ -635,6 +638,17 @@ describeEachEngine(
           from: "accounts",
           select: ["id"],
         });
+        if (engine.type === "azure-sql") {
+          expect(res.status).toBe(409);
+          expect(res.body).toMatchObject({
+            error: "row_rule_unavailable",
+            error_description:
+              "Your access to accounts can't be applied right now; ask an admin",
+            path: ["from"],
+          });
+          expect(JSON.stringify(res.body)).not.toMatch(/sys\.columns|51000/);
+          return;
+        }
         expect(res.status).toBe(200);
         expect(
           (res.body.rows as unknown[][])
@@ -643,5 +657,31 @@ describeEachEngine(
         ).toEqual(expected);
       }
     );
+
+    it("reads the rows again once the source is refreshed", async () => {
+      const refreshed = await fetchJson(
+        "POST",
+        `${BASE_URL}/v1/sources/${source.id}/refresh`,
+        writeToken()
+      );
+      expect(refreshed.status).toBe(200);
+      for (const [user, expected] of [
+        [notIn, [1, 2, 5]],
+        [ne, [1, 2, 4]],
+        [decimalNotIn, [1, 2, 5]],
+      ] as const) {
+        const res = await postQuery(user.token, {
+          source: source.slug,
+          from: "accounts",
+          select: ["id"],
+        });
+        expect(res.status).toBe(200);
+        expect(
+          (res.body.rows as unknown[][])
+            .map((r) => Number(r[0]))
+            .sort((a, b) => a - b)
+        ).toEqual(expected);
+      }
+    });
   }
 );

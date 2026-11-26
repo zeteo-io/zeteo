@@ -1,7 +1,12 @@
-import type { EqualityValues, SqlDialect, ValueSubject } from "../dialect.js";
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
 import { fiscalShift, SECONDS_IN } from "../dialect.js";
 import { plainNumber } from "../values.js";
+import type {
+  EqualityValues,
+  RuleGuard,
+  SqlDialect,
+  ValueSubject,
+} from "../dialect.js";
 import {
   DummyDriver,
   Kysely,
@@ -301,7 +306,8 @@ const scaleOf = (exact: string) => exact.split(".")[1]?.length ?? 0;
  * exact text; `wider`, those with more digits than it holds or past an
  * integer type's range that some exact number still holds (bound as bigint
  * or decimal(38, s) by `value`, so compared exactly with a widened column);
- * and whether any has more than 38 digits, which none holds. A float column,
+ * `apart`, such values whose scale and the column's integer digits come to
+ * more than 38; and whether any has more than 38 digits, which none holds. A float column,
  * or an aggregate, holds every value. No value is compared through a float.
  */
 const equalityValues = (
@@ -309,9 +315,12 @@ const equalityValues = (
   { type, nativeType }: ValueSubject
 ): EqualityValues => {
   const column = type === "number" ? exactColumn(nativeType) : undefined;
-  if (!column) return { held: [...values], wider: [], unbound: false };
+  if (!column) {
+    return { held: [...values], wider: [], apart: [], unbound: false };
+  }
   const held: PlanValue[] = [];
   const wider: PlanValue[] = [];
+  const apart: PlanValue[] = [];
   let unbound = false;
   for (const v of values) {
     const exact = exactIn(v, column);
@@ -321,9 +330,13 @@ const equalityValues = (
     }
     const wide = exactWide(v);
     if (wide === undefined) unbound = true;
-    else wider.push(wide);
+    // Bound as decimal(38, s), compared in a type of the column's integer
+    // digits and s: past 38 digits, not compared (`EqualityValues.apart`).
+    else if (column.integerDigits + scaleOf(wide) > DECIMAL_MAX_DIGITS) {
+      apart.push(wide);
+    } else wider.push(wide);
   }
-  return { held, wider, unbound };
+  return { held, wider, apart, unbound };
 };
 
 /**
@@ -711,6 +724,47 @@ const ownValue = (
   }
 };
 
+/** The error number a failed `ruleGuard` throws; its state is the staged read's index plus one (at most 255). */
+export const RULE_GUARD_ERROR = 51000;
+
+/**
+ * A column's type as `azureSqlNativeType` writes it from `sys.columns`, in
+ * SQL: `tn` is its type name, as the schema read takes it.
+ */
+const NATIVE_TYPE = `case
+  when k.tn in (N'char', N'varchar', N'binary', N'varbinary', N'nchar', N'nvarchar')
+    then k.tn + N'(' + case when c.max_length = -1 then N'max'
+      when k.tn in (N'nchar', N'nvarchar') then cast(c.max_length / 2 as nvarchar(10))
+      else cast(c.max_length as nvarchar(10)) end + N')'
+  when k.tn in (N'decimal', N'numeric')
+    then k.tn + N'(' + cast(c.precision as nvarchar(10)) + N',' + cast(c.scale as nvarchar(10)) + N')'
+  when k.tn in (N'datetime2', N'datetimeoffset', N'time')
+    then k.tn + N'(' + cast(c.scale as nvarchar(10)) + N')'
+  else k.tn end`;
+
+/**
+ * A statement that throws `RULE_GUARD_ERROR` when a column `guard` names is
+ * not in its table with the type the catalogue last read (compared as the
+ * schema read writes it), before the ruled read evaluates a comparison
+ * chosen for that type: one converting a changed column per row could fail
+ * on a row the rule hides, on a row the caller's conditions picked. It reads
+ * `sys.columns` only, so whether it throws depends on no row. The names and
+ * types are one bound JSON value, compared byte for byte.
+ */
+const ruleGuard = (guard: RuleGuard, index: number): Expression<unknown> => {
+  if (guard.columns.length === 0) return sql``;
+  const spec = param(
+    "nvarchar",
+    JSON.stringify({
+      s: guard.schemaName,
+      t: guard.name,
+      c: guard.columns.map((c) => [c.name, c.nativeType]),
+    })
+  );
+  const state = Math.min(index + 1, 255);
+  return sql`if exists (select 1 from openjson(${spec}, N'$.c') with (n nvarchar(128) N'$[0]', t nvarchar(400) N'$[1]') as e where not exists (select 1 from sys.columns as c left join sys.types as ty on ty.user_type_id = c.user_type_id cross apply (select coalesce(case when ty.is_assembly_type = 1 then ty.name else type_name(c.system_type_id) end, N'unknown') as tn) as k where c.object_id = object_id(quotename(json_value(${spec}, N'$.s')) + N'.' + quotename(json_value(${spec}, N'$.t'))) and c.name collate Latin1_General_BIN2 = e.n collate Latin1_General_BIN2 and ${sql.raw(NATIVE_TYPE.replace(/\s+/g, " "))} collate Latin1_General_BIN2 = e.t collate Latin1_General_BIN2)) throw ${sql.lit(RULE_GUARD_ERROR)}, N'a row rule column differs from the catalogue', ${sql.lit(state)}; `;
+};
+
 export const mssqlDialect: SqlDialect = {
   name: "mssql",
   // SQL Server takes 2,100 parameters per request; sp_executesql, which the
@@ -871,15 +925,20 @@ export const mssqlDialect: SqlDialect = {
   //
   // Only the columns the query reads are copied (a constant where it reads
   // none, as for `count(*)`), each keeping its type and collation.
-  ruled: ({ table, columns, where }, staging) => {
-    const temp = sql.raw(`#r${staging.statements.length}`);
+  //
+  // The copy is preceded by `ruleGuard`, which refuses it when a column
+  // evaluated beside the rule no longer has the type the catalogue says.
+  ruled: ({ table, columns, where, guard }, staging) => {
+    const index = staging.statements.length;
+    const temp = sql.raw(`#r${index}`);
     const list =
       columns.length === 0
         ? sql`0 as ${sql.id("_")}`
         : sql.join(columns.map((c) => sql.id(c)));
     staging.statements.push(
-      sql`drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
+      sql`${ruleGuard(guard, index)}drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
     );
+    staging.at.push(guard.at);
     return temp;
   },
   ruledOnce: true,

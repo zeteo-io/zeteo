@@ -469,7 +469,13 @@ export class Planner {
         path,
         rule.kind === "unavailable" ? rule.reason : undefined
       );
-    if (rule.kind === "never") return { rowFilter: { kind: "never" } };
+    const rowRuleAt = {
+      table: queryNameOf(this.catalog.tables, table),
+      path: [...path],
+    };
+    if (rule.kind === "never") {
+      return { rowFilter: { kind: "never" }, rowRuleAt };
+    }
     if (rule.kind === "unavailable") throw refuse();
     const subjectOf = (columnId: string) => {
       const column = rule.columns.get(columnId);
@@ -489,6 +495,7 @@ export class Planner {
           subjectOf,
           this.ruleValues
         ),
+        rowRuleAt,
       };
     } catch (err) {
       if (err instanceof QueryError) throw refuse();
@@ -2038,7 +2045,10 @@ export const planSql = (
       alias: "t0",
       schemaName: from.table.schemaName,
       name: from.table.name,
-      ...(from.rowFilter && { rowFilter: from.rowFilter }),
+      ...(from.rowFilter && {
+        rowFilter: from.rowFilter,
+        rowRuleAt: from.rowRuleAt,
+      }),
     },
     joins,
     select,

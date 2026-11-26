@@ -56,6 +56,19 @@ export interface RuleSubject {
  */
 export interface RowFiltered {
   rowFilter?: ResolvedFilter<RuleSubject>;
+  /**
+   * The table as the query names it and where, beside `rowFilter`: what a
+   * rule that cannot be applied when the query runs (its columns changed
+   * since the catalogue was read) is refused with, as the planner refuses one
+   * whose column has gone (`row_rule_unavailable`).
+   */
+  rowRuleAt?: RowRuleAt;
+}
+
+/** Where a table with a row rule is read: its name as the query writes it, and the path. */
+export interface RowRuleAt {
+  table: string;
+  path: (string | number)[];
 }
 
 /** The `from` table, always alias `t0`. */

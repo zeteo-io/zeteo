@@ -25,6 +25,7 @@ import type {
   ResolvedJoin,
   ResolvedSelect,
   RowFiltered,
+  RowRuleAt,
   RuleSubject,
   ScalarPlan,
   SqlPlan,
@@ -43,6 +44,8 @@ import {
 export interface CompiledQuery {
   sql: string;
   parameters: unknown[];
+  /** Where each staged read's table is read, by staging statement (`Staging.at`): absent with none. */
+  ruledAt?: (RowRuleAt | undefined)[];
 }
 
 // Identifiers come only from the plan and only through `sql.id`, which quotes
@@ -147,6 +150,40 @@ const ruleSubject = (dialect: SqlDialect) => (c: RuleSubject) => ({
   nativeType: c.nativeType,
 });
 
+/** A filter's columns: each subject it compares, at any depth. */
+const subjectsOf = <S>(f: ResolvedFilter<S>): S[] => {
+  switch (f.kind) {
+    case "and":
+    case "or":
+      return f.filters.flatMap(subjectsOf);
+    case "not":
+      return subjectsOf(f.filter);
+    default:
+      return "subject" in f ? [f.subject as S] : [];
+  }
+};
+
+/**
+ * The columns evaluated beside a table's rule, the rule's and the pushed
+ * conditions', each once with its catalogued type (`RuleGuard`), by name.
+ */
+const guardedColumns = (
+  rule: ResolvedFilter<RuleSubject>,
+  pushed: readonly Pushed[]
+): { name: string; nativeType: string }[] => {
+  const seen = new Map<string, { name: string; nativeType: string }>();
+  for (const { name, nativeType } of [
+    ...subjectsOf(rule),
+    ...pushed.flatMap((p) => subjectsOf(p.filter)),
+  ]) {
+    seen.set(JSON.stringify([name, nativeType]), { name, nativeType });
+  }
+  return [...seen.values()].sort(
+    (a, b) =>
+      a.name.localeCompare(b.name) || a.nativeType.localeCompare(b.nativeType)
+  );
+};
+
 /**
  * The one place a table reaches SQL: as itself under its alias, or, with the
  * caller's row rule, as what `dialect.ruled` reads in its place, so nothing
@@ -191,7 +228,17 @@ const tableSource = (
   const made = comp.made.get(key);
   if (made) return sql`${made}`.as(t.alias);
   const read = dialect.ruled(
-    { table: name, columns: comp.provides?.get(key) ?? [], where },
+    {
+      table: name,
+      columns: comp.provides?.get(key) ?? [],
+      where,
+      guard: {
+        schemaName: t.schemaName,
+        name: t.name,
+        columns: guardedColumns(t.rowFilter, pushed),
+        at: t.rowRuleAt,
+      },
+    },
     comp.staging
   );
   if (dialect.ruledOnce) comp.made.set(key, read);
@@ -207,7 +254,12 @@ const withJoins = (
 ): AnySelect => {
   for (const join of joins) {
     const target = tableSource(
-      { ...join.table, alias: join.alias, rowFilter: join.rowFilter },
+      {
+        ...join.table,
+        alias: join.alias,
+        rowFilter: join.rowFilter,
+        rowRuleAt: join.rowRuleAt,
+      },
       comp,
       pushed.get(join.alias)
     );
@@ -606,10 +658,12 @@ const equalityValuesAt = (
   at: Position,
   mode: FilterMode
 ): PlanValue[] | undefined => {
-  const { held, wider, unbound } = dialect.equalityValues(values, s);
+  const { held, wider, apart, unbound } = dialect.equalityValues(values, s);
   if (at === "positive" ? eq : at === "negative" ? !eq : false) return held;
   if (unbound && mode === "rule" && at !== "neutral") return undefined;
-  return [...held, ...wider];
+  // A rule's read checks its columns' types first (`RuleGuard`): no row
+  // equals a value of `apart`, which is not compared.
+  return mode === "rule" ? [...held, ...wider] : [...held, ...wider, ...apart];
 };
 
 /**
@@ -762,8 +816,10 @@ const besideRule = (
   // or `notIn` with such a value stays in the where, which compares it
   // exactly, as no value outside the column's own type is bound here.
   const besideValues = (values: readonly PlanValue[], eq: boolean) => {
-    const { held, wider, unbound } = dialect.equalityValues(values, s);
-    return eq || (wider.length === 0 && !unbound) ? held : undefined;
+    const { held, wider, apart, unbound } = dialect.equalityValues(values, s);
+    return eq || (wider.length === 0 && apart.length === 0 && !unbound)
+      ? held
+      : undefined;
   };
   switch (f.kind) {
     case "isNull":
@@ -875,7 +931,7 @@ export const compileSql = (
   const compile = (provides?: ReadonlyMap<string, readonly string[]>) => {
     const comp: Compilation = {
       dialect,
-      staging: { statements: [] },
+      staging: { statements: [], at: [] },
       scope: "",
       reads: new Map(),
       ruled: new Map(),
@@ -945,7 +1001,7 @@ const staged = (
  */
 const finish = (
   qb: AnySelect,
-  { statements }: Staging,
+  { statements, at }: Staging,
   dialect: SqlDialect
 ): CompiledQuery => {
   const { sql: text, parameters } =
@@ -957,7 +1013,11 @@ const finish = (
       []
     );
   }
-  return { sql: text, parameters: [...parameters] };
+  return {
+    sql: text,
+    parameters: [...parameters],
+    ...(at.length > 0 && { ruledAt: [...at] }),
+  };
 };
 
 /**
