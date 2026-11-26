@@ -112,7 +112,9 @@ their types, literals parse to the column's type, and identity keys exist. A JSO
 the double it parses to, digit for digit (`9007199254740993`, which parses to 2^53, or
 `0.10000000000000001`, which parses to `0.1`), is refused, as is one the parsed double writes with
 an exponent (`1e21`, `1e-7`): write such numbers as decimal strings (`"9007199254740993"`). A number
-written with more digits than it needs but the same value (`1.50`) is kept. A bound of `gt`, `gte`, `lt`, `lte` or
+written with more digits than it needs but the same value (`1.50`) is kept. The check reads each
+number's text as sent, which `JSON.parse` gives from Node 21 on: Zeteo refuses to start on a runtime
+that does not, and a grant body whose number comes without its text is refused, never stored. A bound of `gt`, `gte`, `lt`, `lte` or
 `between` on a number column with more than 38 digits (before the point, leading zeros aside, and
 after it) is refused: SQL Server holds no decimal that long and would compare it through a float. A
 rule that is not valid is

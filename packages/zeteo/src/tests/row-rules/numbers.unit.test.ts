@@ -1,7 +1,9 @@
 // @module-tag unit
 // @module-tag platform
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  checkJsonSourceText,
+  markRounded,
   parseRuleBody,
   RoundedNumber,
   writtenExactly,
@@ -49,5 +51,44 @@ describe("parseRuleBody", () => {
     expect(rounded).toBeInstanceOf(RoundedNumber);
     expect((rounded as RoundedNumber).source).toBe("0.10000000000000001");
     expect(body.n).toBe(2);
+  });
+});
+
+// The check needs each number's source text, which JSON.parse passes a
+// reviver from Node 21. Without it the reviver could not tell a rounded number
+// from an exact one: it refuses rather than pass the number on, and the server
+// refuses to start where JSON.parse does not give it.
+describe("without a number's source text", () => {
+  it("markRounded throws rather than let the number through", () => {
+    expect(() => markRounded.call(null, "n", 9007199254740992)).toThrow(
+      /source text/
+    );
+    expect(() => markRounded.call(null, "n", 9007199254740992, {})).toThrow(
+      /source text/
+    );
+    // Values other than numbers need none.
+    expect(markRounded.call(null, "s", "x")).toBe("x");
+  });
+
+  it("checkJsonSourceText passes where JSON.parse gives it, and throws where it does not", () => {
+    expect(() => checkJsonSourceText()).not.toThrow();
+    const parse = JSON.parse;
+    const spy = vi
+      .spyOn(JSON, "parse")
+      .mockImplementation(
+        (text: string, reviver?: Parameters<typeof JSON.parse>[1]) =>
+          parse(
+            text,
+            reviver &&
+              function (this: unknown, key: string, value: unknown) {
+                return reviver.call(this, key, value);
+              }
+          )
+      );
+    try {
+      expect(() => checkJsonSourceText()).toThrow(/source text/);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

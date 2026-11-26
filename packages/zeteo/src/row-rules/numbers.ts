@@ -35,9 +35,14 @@ const canonical = (text: string): string | undefined => {
 export const writtenExactly = (source: string, n: number): boolean =>
   Number.isFinite(n) && canonical(source) === canonical(String(n));
 
+const NO_SOURCE_TEXT =
+  "JSON.parse gave a reviver no number's source text (Node 21 or later does)";
+
 /**
  * A `JSON.parse` reviver that puts a `RoundedNumber` in place of each number
  * a double did not keep as written (Node passes each number's source text).
+ * Without the source text it cannot tell, so it throws rather than pass the
+ * number on: the body is refused, never stored rounded.
  */
 export const markRounded = function (
   this: unknown,
@@ -45,11 +50,30 @@ export const markRounded = function (
   value: unknown,
   context?: { source?: string }
 ): unknown {
-  return typeof value === "number" &&
-    context?.source !== undefined &&
-    !writtenExactly(context.source, value)
-    ? new RoundedNumber(context.source)
-    : value;
+  if (typeof value !== "number") return value;
+  if (typeof context?.source !== "string") throw new Error(NO_SOURCE_TEXT);
+  return writtenExactly(context.source, value)
+    ? value
+    : new RoundedNumber(context.source);
+};
+
+/**
+ * Throws unless `JSON.parse` passes a reviver each number's source text,
+ * which `markRounded` needs: checked once at start-up, so a runtime without
+ * it never serves a grant.
+ */
+export const checkJsonSourceText = (): void => {
+  let source: unknown;
+  JSON.parse("[9007199254740993]", function (
+    this: unknown,
+    key: string,
+    value: unknown,
+    context?: { source?: string }
+  ) {
+    if (key === "0") source = context?.source;
+    return value;
+  } as Parameters<typeof JSON.parse>[1]);
+  if (source !== "9007199254740993") throw new Error(NO_SOURCE_TEXT);
 };
 
 /** `text` parsed as `express.json` parses a grant's body. */
