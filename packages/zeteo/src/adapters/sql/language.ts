@@ -132,8 +132,14 @@ const makeConditionSchema = (identity: boolean) => {
 
 /** Keys that are always logical operators, never column paths. */
 const LOGICAL_KEYS = new Set(["and", "or", "not"]);
-/** Keys a JS object treats as its prototype's: refused as paths, never dropped. */
-const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+/**
+ * The one key parsing cannot keep: Zod rebuilds the object by assignment,
+ * where `__proto__` sets the prototype rather than a key, so the condition
+ * would be lost. It is refused as a path, never dropped. Any other name
+ * (`constructor`, `prototype`) is an own key like a column's, and paths are
+ * looked up by `Map` and read with `Object.entries`.
+ */
+const PROTO_KEY = "__proto__";
 
 export type Scalar = string | number | boolean;
 /** `{ measure }` names a fixed measure; the planner refuses any other. */
@@ -210,15 +216,13 @@ const filterAt = (
   const node = z
     .preprocess((input, ctx) => {
       if (isPlainObject(input)) {
-        for (const key of Object.keys(input)) {
-          if (PROTOTYPE_KEYS.has(key)) {
-            ctx.issues.push({
-              code: "custom",
-              input,
-              path: [key],
-              message: `"${key}" cannot be a path`,
-            });
-          }
+        if (Object.hasOwn(input, PROTO_KEY)) {
+          ctx.issues.push({
+            code: "custom",
+            input,
+            path: [PROTO_KEY],
+            message: `"${PROTO_KEY}" cannot be a path`,
+          });
         }
       }
       return input;

@@ -101,7 +101,9 @@ A filter is one of:
 Values are checked against the column: text takes a string; numbers a number or a decimal string
 (`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
 dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
-(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
+(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep. A path may name
+any column but one called `__proto__`, which is refused (`400`, at its place): parsing a JSON
+object cannot keep that key, so its condition would be lost.
 
 Every value is bound as a parameter, and an engine takes only so many in one statement: 2,098 on
 Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two

@@ -408,6 +408,53 @@ describe("compileSql: values the catalogue's type cannot hold, on SQL Server", (
   });
 });
 
+describe("compileSql: columns named as Object's own properties", () => {
+  it("filters, and limits rows by, a column named constructor or prototype", () => {
+    for (const dialect of [postgresDialect, mssqlDialect]) {
+      const catalog = shopCatalog({
+        engine: dialect.name,
+        rowRules: {
+          orders: rule({ "orders.status": { ne: "void" } }, [
+            {
+              id: "orders.status",
+              name: "constructor",
+              type: "text",
+              nativeType: dialect.name === "mssql" ? "nvarchar(200)" : "text",
+            },
+          ]),
+        },
+      });
+      const columns = catalog.tables.find((t) => t.id === "orders")!.columns;
+      columns.find((c) => c.name === "status")!.name = "constructor";
+      columns.find((c) => c.name === "notes")!.name = "prototype";
+      const where = JSON.parse(
+        '{"constructor": {"eq": "paid"}, "prototype": {"isNull": true}}'
+      ) as object;
+      const { sql } = compileSql(
+        sqlLanguage.plan(
+          sqlLanguage.schema.parse({
+            source: "shop",
+            from: "orders",
+            select: ["id", "constructor"],
+            where,
+          }),
+          catalog,
+          { now: NOW }
+        ),
+        dialect,
+        { limit: 101, offset: 0 }
+      );
+      // The rule, then the caller's conditions beside it.
+      const q = (name: string) =>
+        dialect.name === "mssql" ? `[${name}]` : `"${name}"`;
+      const p = (n: number) => (dialect.name === "mssql" ? `@${n}` : `$${n}`);
+      expect(sql).toContain(
+        `where (${q("constructor")} <> ${p(1)}) and ${q("constructor")} = ${p(2)} and ${q("prototype")} is null`
+      );
+    }
+  });
+});
+
 describe("compileSql: a long in list", () => {
   const values = Array.from({ length: 150 }, (_, i) => i + 6);
   const inCase = {
