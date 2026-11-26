@@ -70,6 +70,16 @@ export interface RuledRead {
   where: Expression<SqlBool>;
 }
 
+/** An equality's values, by what the subject's catalogue type says of them. */
+export interface EqualityValues {
+  /** Values the subject's type can hold. */
+  held: PlanValue[];
+  /** Values its type cannot hold but an exact comparison can still be made with: a column widened since the catalogue was read may hold them. */
+  wider: PlanValue[];
+  /** Whether some value can be compared exactly by no means (left out of both): more digits than any exact number type of the engine holds. */
+  unbound: boolean;
+}
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -92,18 +102,25 @@ export interface SqlDialect {
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
   /**
-   * The values of an equality (`eq`, `ne`, `in`, `notIn`) that the subject
-   * can equal, each written as `value` binds it exactly. A value the
-   * subject's type cannot hold is left out, never compared inexactly: the
-   * compiler reads an equality left with no value as one no row meets.
+   * The values of an equality (`eq`, `ne`, `in`, `notIn`), sorted by whether
+   * the subject can equal them, as the catalogue gives its type (which a
+   * column changed since the last refresh may have outgrown); each is
+   * written as `value` binds it exactly, and none is ever compared
+   * inexactly. The compiler leaves out `wider` values only where that can
+   * only drop rows (see `compileFilter`).
    */
-  exactValues(values: readonly PlanValue[], subject: ValueSubject): PlanValue[];
+  equalityValues(
+    values: readonly PlanValue[],
+    subject: ValueSubject
+  ): EqualityValues;
   /**
    * `expression in (values)`, or `not in` when `negate`, with every value in
    * one bound parameter, so a long list (a row rule's identity values) takes
    * one of the engine's parameters, not one each: Postgres binds an array,
-   * SQL Server a JSON array read with `openjson`. Each value is converted as
-   * `value` converts it for the subject.
+   * SQL Server a JSON array read with `openjson` (a few, when some values are
+   * `wider` than the column's type). Each value is converted as `value`
+   * converts it for the subject; `values` are `equalityValues`' `held` and
+   * `wider`.
    */
   inSet(
     expression: Expression<unknown>,

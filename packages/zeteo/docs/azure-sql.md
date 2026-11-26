@@ -158,6 +158,17 @@ once. Timestamps are read as UTC and cut at the millisecond (a `datetime` rounde
 `datetimeoffset` is converted to UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC.
 `sum` of a `real` column is a `real`, as on Postgres.
 
+**Comparing numbers.** No value is compared with an integer, decimal or money column through a
+float. A value binds as `bigint`, or as `decimal(38, s)` at its own scale; a long `in` list is read
+in the column's own exact type, and a value the column's type (as the catalogue last read it) cannot
+hold goes into a list of its own per scale, read as `decimal(38, s)`. Such a value is left out of an
+equality only where that can only drop rows: an `eq` or `in` (no row of the column, as catalogued,
+can equal it). In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is compared exactly, so a
+column widened since the last refresh (`int` to `bigint`, a decimal given a scale) still has those
+rows excluded. A value of more than 38 digits, which no exact number type holds, is left out of a
+query's condition; a row rule's `ne` or `notIn` on one keeps no row (see
+[row-rules.md](row-rules.md#failing-closed)).
+
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on the
 server with an attention on its own connection (no second connection is needed, so a cancel never
 waits for a busy pool); the driver's own request timeout, set when the request gets its connection

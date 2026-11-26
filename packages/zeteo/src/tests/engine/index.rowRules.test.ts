@@ -1,16 +1,20 @@
 // @module-tag int
 // @module-tag platform
 import { ndjsonLines, newExportUser, postExport } from "../support/exports.js";
+import { describeEachEngine, type EngineFixture } from "../support/engines.js";
 import { savedQueriesCall, shareDirectly } from "../support/savedQueries.js";
 import { clearTestGroups, setTestGroups } from "../support/principals.js";
+import { fixtureAdminSettings } from "../support/fixtureDb.js";
 import { closeAllSourcePools } from "../../sources/pools.js";
-import { describeEachEngine } from "../support/engines.js";
+import type { RuleFilter } from "../../row-rules/types.js";
+import { asMssqlAdmin } from "../support/mssqlFixture.js";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { removeSources } from "../support/sources.js";
 import { TABLE } from "../support/dashboards.js";
 import { prisma } from "../../utils/db/index.js";
 import { tokenFor } from "../support/tokens.js";
 import { randomUUID } from "node:crypto";
+import { Client } from "pg";
 import {
   dashboardWith,
   removeDashboardsOf,
@@ -509,3 +513,135 @@ describeEachEngine("row rules", (engine) => {
     }
   });
 });
+
+// A column widened after the catalogue was read (an id past int, a decimal
+// given a scale), with no refresh since: the catalogue still says the old
+// type. A rule's ne, notIn or not around in must still hide the rows holding
+// a value the old type could not, never show them.
+const DRIFT_SCHEMA = "rr_drift";
+
+const asFixtureAdmin = async (
+  engine: EngineFixture,
+  statements: { postgres: string[]; mssql: string[] }
+): Promise<void> => {
+  if (engine.type === "azure-sql") {
+    await asMssqlAdmin(statements.mssql);
+    return;
+  }
+  const admin = new Client({ ...fixtureAdminSettings(), ssl: false });
+  await admin.connect();
+  try {
+    for (const statement of statements.postgres) await admin.query(statement);
+  } finally {
+    await admin.end();
+  }
+};
+
+describeEachEngine(
+  "row rules on a column widened since the catalogue was read",
+  (engine) => {
+    let source: SeededSource;
+    const notIn = newQueryUser();
+    const notAroundIn = newQueryUser();
+    const ne = newQueryUser();
+    const decimalNotIn = newQueryUser();
+    const longNotIn = newQueryUser();
+    const users = [notIn, notAroundIn, ne, decimalNotIn, longNotIn];
+    const drop = {
+      postgres: [`DROP SCHEMA IF EXISTS ${DRIFT_SCHEMA} CASCADE`],
+      mssql: [
+        `DROP TABLE IF EXISTS ${DRIFT_SCHEMA}.accounts`,
+        `DROP SCHEMA IF EXISTS ${DRIFT_SCHEMA}`,
+      ],
+    };
+
+    beforeAll(async () => {
+      await asFixtureAdmin(engine, drop);
+      await asFixtureAdmin(engine, {
+        postgres: [
+          `CREATE SCHEMA ${DRIFT_SCHEMA}`,
+          `CREATE TABLE ${DRIFT_SCHEMA}.accounts (id integer PRIMARY KEY, ref integer, amount numeric(10,0))`,
+          `INSERT INTO ${DRIFT_SCHEMA}.accounts VALUES (1, 1, 1), (2, 2, 2), (3, NULL, NULL)`,
+          `GRANT USAGE ON SCHEMA ${DRIFT_SCHEMA} TO zeteo_ro`,
+          `GRANT SELECT ON ${DRIFT_SCHEMA}.accounts TO zeteo_ro`,
+        ],
+        mssql: [
+          `CREATE SCHEMA ${DRIFT_SCHEMA}`,
+          `CREATE TABLE ${DRIFT_SCHEMA}.accounts (id int NOT NULL PRIMARY KEY, ref int, amount decimal(10,0))`,
+          `INSERT INTO ${DRIFT_SCHEMA}.accounts VALUES (1, 1, 1), (2, 2, 2), (3, NULL, NULL)`,
+          `GRANT SELECT ON SCHEMA::${DRIFT_SCHEMA} TO zeteo_ro`,
+        ],
+      });
+      source = await seedQuerySource(
+        engine,
+        { schemas: [DRIFT_SCHEMA] },
+        "rrdrift"
+      );
+      const accounts = source.tables.accounts!;
+      // Widened behind the catalogue's back: it still says int and (10,0).
+      await asFixtureAdmin(engine, {
+        postgres: [
+          `ALTER TABLE ${DRIFT_SCHEMA}.accounts ALTER COLUMN ref TYPE bigint, ALTER COLUMN amount TYPE numeric(12,2)`,
+          `INSERT INTO ${DRIFT_SCHEMA}.accounts VALUES (4, 3000000000, 5.25), (5, 4000000000, 7)`,
+        ],
+        mssql: [
+          `ALTER TABLE ${DRIFT_SCHEMA}.accounts ALTER COLUMN ref bigint`,
+          `ALTER TABLE ${DRIFT_SCHEMA}.accounts ALTER COLUMN amount decimal(12,2)`,
+          `INSERT INTO ${DRIFT_SCHEMA}.accounts VALUES (4, 3000000000, 5.25), (5, 4000000000, 7)`,
+        ],
+      });
+      const rules: [typeof notIn, RuleFilter][] = [
+        [notIn, { ref: { notIn: ["3000000000"] } }],
+        [notAroundIn, { not: { ref: { in: ["3000000000", "4000000000"] } } }],
+        [ne, { ref: { ne: "4000000000" } }],
+        [decimalNotIn, { amount: { notIn: ["5.25"] } }],
+        [
+          longNotIn,
+          {
+            ref: {
+              notIn: [
+                "3000000000",
+                ...Array.from({ length: 120 }, (_, i) => String(1_000_001 + i)),
+              ],
+            },
+          },
+        ],
+      ];
+      for (const [user, rule] of rules) {
+        await grantTo(user.principal, accounts, "all", {
+          access: "rule",
+          rule,
+        });
+      }
+    });
+    afterAll(async () => {
+      await removeRunsOf(users.map((u) => u.id));
+      await removeSources([source.id]);
+      await closeAllSourcePools();
+      await asFixtureAdmin(engine, drop);
+    });
+
+    it.each([
+      ["notIn", notIn, [1, 2, 5]],
+      ["not around in", notAroundIn, [1, 2]],
+      ["ne", ne, [1, 2, 4]],
+      ["notIn on a decimal given a scale", decimalNotIn, [1, 2, 5]],
+      ["a notIn of 121 values", longNotIn, [1, 2, 5]],
+    ] as const)(
+      "hides the rows holding a value the old type could not (%s)",
+      async (_, user, expected) => {
+        const res = await postQuery(user.token, {
+          source: source.slug,
+          from: "accounts",
+          select: ["id"],
+        });
+        expect(res.status).toBe(200);
+        expect(
+          (res.body.rows as unknown[][])
+            .map((r) => Number(r[0]))
+            .sort((a, b) => a - b)
+        ).toEqual(expected);
+      }
+    );
+  }
+);

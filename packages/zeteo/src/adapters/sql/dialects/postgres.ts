@@ -266,7 +266,13 @@ export const postgresDialect: SqlDialect = {
   }),
   value,
   // Postgres compares a number with a column as numeric, exactly.
-  exactValues: (values) => [...values],
+  // numeric holds any value the planner admits, and `value` casts one past
+  // the column's own integer type to it, so every value is held.
+  equalityValues: (values) => ({
+    held: [...values],
+    wider: [],
+    unbound: false,
+  }),
   inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const shift = fiscalShift(unit, fiscalStartMonth);

@@ -272,6 +272,142 @@ describe("compileSql: row rules on SQL Server", () => {
   });
 });
 
+// The catalogue says `customer_id` is int; the column may have been widened
+// since it was read. A value past int may be left out only where that can
+// only drop rows (eq, in); where it would add rows (ne, notIn, or eq and in
+// under a not) it is compared exactly, and a value no SQL Server exact
+// numeric holds makes a rule's condition keep no row.
+describe("compileSql: values the catalogue's type cannot hold, on SQL Server", () => {
+  const { PAID } = rules("nvarchar(200)");
+  const PAST_INT = "3000000000";
+  const HUGE = "1" + "0".repeat(38);
+  const ruleOn = (filter: Record<string, unknown>) =>
+    ms(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule(filter, [
+            ruleColumn("orders.customer_id", "number", "int"),
+          ]),
+        },
+      }
+    );
+  const where = (sql: string) =>
+    /from \[shop\]\.\[orders\] where (.*?); select/.exec(sql)![1];
+
+  it("compares a value past int exactly in ne, notIn and a not around in or eq", () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ "orders.customer_id": { ne: PAST_INT } }, "[customer_id] <> @1"],
+      [
+        { "orders.customer_id": { notIn: [PAST_INT, "2"] } },
+        "[customer_id] not in (@1, @2)",
+      ],
+      [
+        { not: { "orders.customer_id": { in: [PAST_INT] } } },
+        "not ([customer_id] in (@1))",
+      ],
+      [
+        { not: { "orders.customer_id": { eq: "2.5" } } },
+        "not ([customer_id] = cast(@1 as decimal(38, 1)))",
+      ],
+    ];
+    for (const [filter, expected] of cases) {
+      const { sql, parameters } = ruleOn(filter);
+      expect(where(sql)).toBe(expected);
+      expect(parameters[0]).not.toEqual(
+        expect.objectContaining({ type: "float" })
+      );
+    }
+    expect(
+      ruleOn({ "orders.customer_id": { ne: PAST_INT } }).parameters[0]
+    ).toEqual({ type: "bigint", value: PAST_INT });
+  });
+
+  it("still leaves the value out of eq and in, and of a not around ne or notIn", () => {
+    expect(where(ruleOn({ "orders.customer_id": { eq: PAST_INT } }).sql)).toBe(
+      "[customer_id] <> [customer_id]"
+    );
+    expect(
+      where(ruleOn({ "orders.customer_id": { in: [PAST_INT, "2"] } }).sql)
+    ).toBe("[customer_id] in (@1)");
+    expect(
+      where(
+        ruleOn({ not: { "orders.customer_id": { notIn: [PAST_INT] } } }).sql
+      )
+    ).toBe("not ([customer_id] = [customer_id])");
+  });
+
+  it("keeps no row for a rule's ne or notIn on a value no exact numeric holds", () => {
+    expect(where(ruleOn({ "orders.customer_id": { ne: HUGE } }).sql)).toBe(
+      "1 = 0"
+    );
+    expect(
+      where(ruleOn({ "orders.customer_id": { notIn: ["2", HUGE] } }).sql)
+    ).toBe("1 = 0");
+    expect(
+      where(ruleOn({ not: { "orders.customer_id": { in: [HUGE] } } }).sql)
+    ).toBe("not (1 = 1)");
+    // Where leaving it out drops rows, it is left out.
+    expect(
+      where(ruleOn({ "orders.customer_id": { in: ["2", HUGE] } }).sql)
+    ).toBe("[customer_id] in (@1)");
+  });
+
+  it("reads a long notIn's values past the column's type as a list of their own, exactly", () => {
+    const values = [
+      ...Array.from({ length: 120 }, (_, i) => String(i + 1)),
+      PAST_INT,
+      "4000000000.5",
+    ];
+    const { sql, parameters } = ruleOn({
+      "orders.customer_id": { notIn: values },
+    });
+    expect(where(sql)).toBe(
+      "([customer_id] not in (select cast([value] as bigint) from openjson(@1)) and [customer_id] not in (select cast([value] as decimal(38, 0)) from openjson(@2)) and [customer_id] not in (select cast([value] as decimal(38, 1)) from openjson(@3)))"
+    );
+    expect(JSON.parse((parameters[1] as { value: string }).value)).toEqual([
+      PAST_INT,
+    ]);
+    expect(JSON.parse((parameters[2] as { value: string }).value)).toEqual([
+      "4000000000.5",
+    ]);
+  });
+
+  it("compares the value exactly in a case's condition, which picks a branch either way", () => {
+    const { sql } = ms({
+      from: "orders",
+      select: [
+        "id",
+        {
+          calc: {
+            case: {
+              when: [{ if: { customer_id: { eq: PAST_INT } }, then: 1 }],
+              else: 0,
+            },
+          },
+          as: "big",
+        },
+      ],
+    });
+    expect(sql).toContain("case when [t0].[customer_id] = @1 then");
+  });
+
+  it("compares the value exactly in a caller's ne, and does not move it beside the rule", () => {
+    const { sql } = ms(
+      {
+        from: "orders",
+        select: ["id"],
+        where: { customer_id: { ne: PAST_INT } },
+      },
+      { rowRules: { orders: PAID } }
+    );
+    expect(sql).toContain(
+      "select [customer_id], [id] into #r0 from [shop].[orders] where [status] in (@1);"
+    );
+    expect(sql).toContain("where [t0].[customer_id] <> @2");
+  });
+});
+
 describe("compileSql: a long in list", () => {
   const values = Array.from({ length: 150 }, (_, i) => i + 6);
   const inCase = {
@@ -302,7 +438,7 @@ describe("compileSql: a long in list", () => {
     expect(ms(where).parameters).toHaveLength(3);
   });
 
-  it("reads a long list for an integer column as bigint and for a decimal one at its scale on SQL Server, leaving out values the column cannot hold", () => {
+  it("reads a long list for an integer column as bigint and for a decimal one at its scale on SQL Server, leaving out of an in the values the column cannot hold", () => {
     const longIds = Array.from({ length: 120 }, (_, i) => String(i + 1));
     const odd = ["1" + "0".repeat(38), 1e-7, "7.5", "7.505"];
     const ids = ms({
@@ -321,12 +457,17 @@ describe("compileSql: a long in list", () => {
       select: ["id"],
       where: { total: { notIn: [...longIds, ...odd] } },
     });
+    // A notIn compares them exactly (a widened column may hold them), each
+    // scale as a list of its own; only a caller's 39-digit value, which no
+    // exact number holds, is left out.
     expect(totals.sql).toContain(
-      "[t0].[total] not in (select cast([value] as decimal(38, 2)) from openjson(@1))"
+      "([t0].[total] not in (select cast([value] as decimal(38, 2)) from openjson(@1)) and [t0].[total] not in (select cast([value] as decimal(38, 3)) from openjson(@2)) and [t0].[total] not in (select cast([value] as decimal(38, 7)) from openjson(@3)))"
     );
     expect(
-      JSON.parse((totals.parameters[0] as { value: string }).value)
-    ).toEqual([...longIds, "7.5"]);
+      totals.parameters
+        .slice(0, 3)
+        .map((p) => JSON.parse((p as { value: string }).value) as string[])
+    ).toEqual([[...longIds, "7.5"], ["7.505"], ["0.0000001"]]);
   });
 
   it("still reads a long list for a float column as float on SQL Server", () => {

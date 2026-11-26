@@ -168,7 +168,8 @@ const tableSource = (
     t.rowFilter,
     dialect,
     ruleSubject(dialect),
-    levelContext(comp, false)
+    levelContext(comp, false),
+    { mode: "rule" }
   );
   const where =
     pushed.length === 0
@@ -447,9 +448,12 @@ export const compileExpr = (
             dialect,
             columnSubject(ctx.comp),
             ctx,
-            // A case may be grouped by or aggregated (a measure's where is
-            // one), where SQL Server takes no subquery: no `inSet` there.
-            dialect.subqueryInAggregate ? "set" : "literal"
+            {
+              // A case may be grouped by or aggregated (a measure's where is
+              // one), where SQL Server takes no subquery: no `inSet` there.
+              lists: dialect.subqueryInAggregate ? "set" : "literal",
+              mode: "case",
+            }
           )} then ${inner(b.then)}`
       );
       const otherwise = expr.otherwise
@@ -565,47 +569,105 @@ const noValueLeft = (
     ? sql<SqlBool>`${expression} <> ${expression}`
     : sql<SqlBool>`${expression} = ${expression}`;
 
+const isPlanValue = (v: FilterValue): v is PlanValue =>
+  !(typeof v === "object" && v !== null && "kind" in v);
+
+/**
+ * Where a condition sits: `positive` under an even number of `not`s,
+ * `negative` under an odd number; `neutral` in a `case`, whose branch it
+ * picks.
+ */
+type Position = "positive" | "negative" | "neutral";
+
+const flip = (p: Position): Position =>
+  p === "positive" ? "negative" : p === "negative" ? "positive" : p;
+
+/**
+ * What a filter compiles for: the caller's `where` (or `having`, a metric's
+ * range), a row `rule`, or a `case`'s condition.
+ */
+type FilterMode = "where" | "rule" | "case";
+
+/**
+ * The values an equality compares (`dialect.equalityValues`), or undefined
+ * when a rule's condition must keep no row. A value the catalogue's type
+ * cannot hold is left out only where leaving it out can only drop rows: in
+ * an `eq` or `in` in positive position, a `ne` or `notIn` in negative one.
+ * Elsewhere it is compared exactly, as the column, widened since the
+ * catalogue was read, may hold it; and a value no exact comparison can be
+ * made with is left out of a caller's condition (no exact number column holds
+ * it), but makes a rule's condition keep no row, never more.
+ */
+const equalityValuesAt = (
+  dialect: SqlDialect,
+  values: readonly PlanValue[],
+  s: ValueSubject,
+  eq: boolean,
+  at: Position,
+  mode: FilterMode
+): PlanValue[] | undefined => {
+  const { held, wider, unbound } = dialect.equalityValues(values, s);
+  if (at === "positive" ? eq : at === "negative" ? !eq : false) return held;
+  if (unbound && mode === "rule" && at !== "neutral") return undefined;
+  return [...held, ...wider];
+};
+
+/**
+ * A rule's equality that cannot be compared exactly, as what keeps no row
+ * where it sits: false in positive position, true under a `not`.
+ */
+const keepsNoRow = (at: Position): Expression<SqlBool> =>
+  at === "positive" ? sql<SqlBool>`1 = 0` : sql<SqlBool>`1 = 1`;
+
 /**
  * A filter as SQL. `lists` says how an `in` of more than `IN_LIST_MAX` values
  * binds: `set`, as one parameter (`inSet`, a subquery on SQL Server), where
  * the filter is a clause of its own (where, having, a row rule); `literal`,
  * one parameter per value, inside an expression that may be aggregated or
- * grouped by.
+ * grouped by. `mode` says what it is for (`equalityValuesAt`).
  */
 const compileFilter = <S>(
   filter: ResolvedFilter<S>,
   dialect: SqlDialect,
   subject: (s: S) => ValueSubject & { expression: Expression<unknown> },
   ctx: ExprContext,
-  lists: "set" | "literal" = "set"
+  {
+    lists = "set",
+    mode = "where",
+  }: { lists?: "set" | "literal"; mode?: FilterMode } = {}
 ): Expression<SqlBool> => {
   /** A value bound for the subject, or a fixed measure's value. */
   const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
     typeof v === "object" && v !== null && "kind" in v
       ? compileExpr(v, dialect, ctx)
       : dialect.value(v, s);
-  const go = (f: ResolvedFilter<S>): Expression<SqlBool> => {
+  const go = (f: ResolvedFilter<S>, at: Position): Expression<SqlBool> => {
     switch (f.kind) {
       case "and":
       case "or":
         return sql<SqlBool>`(${sql.join(
-          f.filters.map(go),
+          f.filters.map((g) => go(g, at)),
           f.kind === "and" ? AND : OR
         )})`;
       case "not":
-        return sql<SqlBool>`not (${go(f.filter)})`;
+        return sql<SqlBool>`not (${go(f.filter, flip(at))})`;
       case "never":
         return sql<SqlBool>`1 = 0`;
       case "compare": {
         const s = subject(f.subject);
         let v = f.value;
-        if (
-          (f.op === "eq" || f.op === "ne") &&
-          !(typeof v === "object" && v !== null && "kind" in v)
-        ) {
-          const [exact] = dialect.exactValues([v], s);
-          if (exact === undefined) return noValueLeft(s.expression, f.op);
-          v = exact;
+        if ((f.op === "eq" || f.op === "ne") && isPlanValue(v)) {
+          const values = equalityValuesAt(
+            dialect,
+            [v],
+            s,
+            f.op === "eq",
+            at,
+            mode
+          );
+          if (!values) return keepsNoRow(at);
+          if (values.length === 0) return noValueLeft(s.expression, f.op);
+          v = values[0]!;
         }
         return sql<SqlBool>`${s.expression} ${COMPARE_SQL[f.op]} ${valueOf(v, s)}`;
       }
@@ -615,17 +677,25 @@ const compileFilter = <S>(
       }
       case "in": {
         const s = subject(f.subject);
-        const exact = dialect.exactValues(f.values, s);
-        if (exact.length === 0) {
+        const values = equalityValuesAt(
+          dialect,
+          f.values,
+          s,
+          f.op === "in",
+          at,
+          mode
+        );
+        if (!values) return keepsNoRow(at);
+        if (values.length === 0) {
           return noValueLeft(s.expression, f.op === "in" ? "eq" : "ne");
         }
-        if (lists === "set" && exact.length > IN_LIST_MAX) {
-          return dialect.inSet(s.expression, exact, s, f.op === "notIn");
+        if (lists === "set" && values.length > IN_LIST_MAX) {
+          return dialect.inSet(s.expression, values, s, f.op === "notIn");
         }
-        const values = sql.join(
-          exact.map((v: PlanValue) => dialect.value(v, s))
+        const bound = sql.join(
+          values.map((v: PlanValue) => dialect.value(v, s))
         );
-        return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${values})`;
+        return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${bound})`;
       }
       case "match": {
         const escaped = escapeLike(f.value);
@@ -659,15 +729,12 @@ const compileFilter = <S>(
       }
     }
   };
-  return go(filter);
+  return go(filter, mode === "case" ? "neutral" : "positive");
 };
 
 /** A filter's conjuncts: what must each hold for it to hold. */
 const conjuncts = <S>(f: ResolvedFilter<S>): ResolvedFilter<S>[] =>
   f.kind === "and" ? f.filters.flatMap(conjuncts) : [f];
-
-const isPlanValue = (v: FilterValue): v is PlanValue =>
-  !(typeof v === "object" && v !== null && "kind" in v);
 
 /**
  * A condition on one column, written against the column's bare name as a
@@ -690,6 +757,14 @@ const besideRule = (
   if (dialect.column(read, s.nativeType) !== read) return undefined;
   const own = (v: FilterValue) =>
     isPlanValue(v) ? dialect.ownValue(v, s) : undefined;
+  // A conjunct of the where is in positive position: `eq` and `in` leave out
+  // what the column's type cannot hold, as `compileFilter` does there; a `ne`
+  // or `notIn` with such a value stays in the where, which compares it
+  // exactly, as no value outside the column's own type is bound here.
+  const besideValues = (values: readonly PlanValue[], eq: boolean) => {
+    const { held, wider, unbound } = dialect.equalityValues(values, s);
+    return eq || (wider.length === 0 && !unbound) ? held : undefined;
+  };
   switch (f.kind) {
     case "isNull":
       return sql<SqlBool>`${read} ${f.isNull ? sql`is null` : sql`is not null`}`;
@@ -697,9 +772,10 @@ const besideRule = (
       let v = f.value;
       if (!isPlanValue(v)) return undefined;
       if (f.op === "eq" || f.op === "ne") {
-        const [exact] = dialect.exactValues([v], s);
-        if (exact === undefined) return noValueLeft(read, f.op);
-        v = exact;
+        const values = besideValues([v], f.op === "eq");
+        if (!values) return undefined;
+        if (values.length === 0) return noValueLeft(read, f.op);
+        v = values[0]!;
       }
       const bound = own(v);
       return bound && sql<SqlBool>`${read} ${COMPARE_SQL[f.op]} ${bound}`;
@@ -710,7 +786,8 @@ const besideRule = (
       return low && high && sql<SqlBool>`${read} between ${low} and ${high}`;
     }
     case "in": {
-      const exact = dialect.exactValues(f.values, s);
+      const exact = besideValues(f.values, f.op === "in");
+      if (!exact) return undefined;
       if (exact.length === 0) {
         return noValueLeft(read, f.op === "in" ? "eq" : "ne");
       }

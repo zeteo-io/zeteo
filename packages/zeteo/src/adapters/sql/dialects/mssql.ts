@@ -1,5 +1,5 @@
+import type { EqualityValues, SqlDialect, ValueSubject } from "../dialect.js";
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
-import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { fiscalShift, SECONDS_IN } from "../dialect.js";
 import { plainNumber } from "../values.js";
 import {
@@ -273,23 +273,57 @@ const exactIn = (v: PlanValue, column: ExactColumn): string | undefined => {
   return exact;
 };
 
+/** What any of SQL Server's exact numbers can hold: decimal(38, s). */
+const WIDEST: ExactColumn = {
+  integerDigits: DECIMAL_MAX_DIGITS,
+  scale: DECIMAL_MAX_DIGITS,
+};
+
 /**
- * The values of an equality (`eq`, `ne`, `in`, `notIn`) that a number
- * column can equal, as exact text: a value with more digits than an
- * integer, decimal or money column holds, or past an integer type's range,
- * is left out, as no row can equal it, so no value is ever compared through
- * a float. A float column, or an aggregate, keeps every value.
+ * A number as exact text, as `exactIn` writes it, when some exact number
+ * type holds it: 38 digits at most in all. A column of any exact type, however
+ * widened, holds no other.
  */
-const exactValues = (
+const exactWide = (v: PlanValue): string | undefined => {
+  const exact = exactIn(v, WIDEST);
+  if (exact === undefined) return undefined;
+  const [whole, fraction = ""] = exact.replace(/^-/, "").split(".");
+  const digits = whole!.replace(/^0+/, "").length + fraction.length;
+  return digits <= DECIMAL_MAX_DIGITS ? exact : undefined;
+};
+
+/** An exact text's scale: its digits after the point. */
+const scaleOf = (exact: string) => exact.split(".")[1]?.length ?? 0;
+
+/**
+ * An equality's values (`eq`, `ne`, `in`, `notIn`) against an integer,
+ * decimal or money column: `held`, those the catalogue's type holds, as
+ * exact text; `wider`, those with more digits than it holds or past an
+ * integer type's range that some exact number still holds (bound as bigint
+ * or decimal(38, s) by `value`, so compared exactly with a widened column);
+ * and whether any has more than 38 digits, which none holds. A float column,
+ * or an aggregate, holds every value. No value is compared through a float.
+ */
+const equalityValues = (
   values: readonly PlanValue[],
   { type, nativeType }: ValueSubject
-): PlanValue[] => {
+): EqualityValues => {
   const column = type === "number" ? exactColumn(nativeType) : undefined;
-  if (!column) return [...values];
-  return values.flatMap((v) => {
+  if (!column) return { held: [...values], wider: [], unbound: false };
+  const held: PlanValue[] = [];
+  const wider: PlanValue[] = [];
+  let unbound = false;
+  for (const v of values) {
     const exact = exactIn(v, column);
-    return exact === undefined ? [] : [exact];
-  });
+    if (exact !== undefined) {
+      held.push(exact);
+      continue;
+    }
+    const wide = exactWide(v);
+    if (wide === undefined) unbound = true;
+    else wider.push(wide);
+  }
+  return { held, wider, unbound };
 };
 
 /**
@@ -346,19 +380,55 @@ const inSet = (
         read = sql`cast(${item} as ${numberListType(texts)})`;
         break;
       }
-      texts = exactValues(values, { type, nativeType }).map(String);
-      if (texts.length === 0) {
-        // No row can equal any value: `in` holds for none, `notIn` for
-        // every row whose value is not null, as the whole list would.
+      // Values the column's type holds are read in that type; others
+      // (`equalityValues`' wider ones) in a list per scale, as decimal(38, s),
+      // each exactly.
+      const held: string[] = [];
+      const wider = new Map<number, string[]>();
+      for (const v of values) {
+        const exact = exactIn(v, column);
+        if (exact !== undefined) {
+          held.push(exact);
+          continue;
+        }
+        const wide = exactWide(v);
+        if (wide === undefined) {
+          throw new Error("inSet takes no value that no exact number holds");
+        }
+        const scale = scaleOf(wide);
+        wider.set(scale, [...(wider.get(scale) ?? []), wide]);
+      }
+      const lists: [string[], Expression<unknown>][] = [];
+      if (held.length > 0) {
+        lists.push([
+          held,
+          column.scale === 0 && column.range
+            ? sql`cast(${item} as bigint)`
+            : sql`cast(${item} as decimal(38, ${sql.lit(column.scale)}))`,
+        ]);
+      }
+      for (const scale of [...wider.keys()].sort((a, b) => a - b)) {
+        lists.push([
+          wider.get(scale)!,
+          sql`cast(${item} as decimal(38, ${sql.lit(scale)}))`,
+        ]);
+      }
+      if (lists.length === 0) {
+        // No value: `in` holds for no row, `notIn` for every row whose value
+        // is not null, as the whole list would.
         return negate
           ? sql<SqlBool>`${expression} = ${expression}`
           : sql<SqlBool>`${expression} <> ${expression}`;
       }
-      read =
-        column.scale === 0 && column.range
-          ? sql`cast(${item} as bigint)`
-          : sql`cast(${item} as decimal(38, ${sql.lit(column.scale)}))`;
-      break;
+      const parts = lists.map(([list, as]) => {
+        const set = sql`(select ${as} from openjson(${param("nvarchar", JSON.stringify(list))}))`;
+        return negate
+          ? sql<SqlBool>`${expression} not in ${set}`
+          : sql<SqlBool>`${expression} in ${set}`;
+      });
+      return parts.length === 1
+        ? parts[0]!
+        : sql<SqlBool>`(${sql.join(parts, negate ? sql` and ` : sql` or `)})`;
     }
     case "boolean":
       texts = values.map((v) => (v === true ? "1" : "0"));
@@ -655,7 +725,7 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
-  exactValues,
+  equalityValues,
   inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);

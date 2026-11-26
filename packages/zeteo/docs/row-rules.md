@@ -190,6 +190,13 @@ Any input that cannot be resolved yields fewer rows or a refused query, never mo
 An identity value that does not convert to the rule column's type is dropped; with none left the
 condition is empty, which matches no rows.
 
+On SQL Server a number the rule column's type (as the catalogue last read it) cannot hold, an
+identity value past `int` on an `int` column say, is left out of an `eq` or `in`, which only drops
+rows. In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is compared exactly, as
+`decimal(38, s)`, so a column widened since the last refresh still hides the rows holding it. A
+value of more than 38 digits, which no SQL Server exact number holds, makes such a condition keep
+no row ([azure-sql.md](azure-sql.md)).
+
 ## Enforcement
 
 At plan time, for each table in the caller's visible catalogue, the rows of every grant reaching
