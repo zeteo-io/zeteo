@@ -512,3 +512,147 @@ describeEachEngine(
     });
   }
 );
+
+// A view's column, or a SQL Server computed column, may be an expression that
+// raises per row (`cast(raw as int)`), and a view's persisted column types (on
+// SQL Server, a view not bound to its schema) may be stale, which the guard
+// reads. No condition of the caller's is applied beside the rule of such an
+// object, so the caller cannot pick which hidden row it is evaluated on, and a
+// value the rule compares is compared exactly. Each object is the test's own,
+// in schema rr_probe_v, dropped before and after.
+const VIEW_SCHEMA = "rr_probe_v";
+
+describeEachEngine(
+  "row rules, differential probes on views and computed columns",
+  (engine) => {
+    let source: SeededSource;
+    const viewed = newQueryUser();
+    const stale = newQueryUser();
+    const widened = newQueryUser();
+    const computed = newQueryUser();
+    const users = [viewed, stale, widened, computed];
+    const drop = {
+      postgres: [`DROP SCHEMA IF EXISTS ${VIEW_SCHEMA} CASCADE`],
+      mssql: [
+        `DROP VIEW IF EXISTS ${VIEW_SCHEMA}.v1`,
+        `DROP VIEW IF EXISTS ${VIEW_SCHEMA}.v2`,
+        `DROP TABLE IF EXISTS ${VIEW_SCHEMA}.t1`,
+        `DROP TABLE IF EXISTS ${VIEW_SCHEMA}.t2`,
+        `DROP TABLE IF EXISTS ${VIEW_SCHEMA}.t3`,
+        `DROP SCHEMA IF EXISTS ${VIEW_SCHEMA}`,
+      ],
+    };
+
+    beforeAll(async () => {
+      await asProbeAdmin(engine, drop);
+      await asProbeAdmin(engine, {
+        postgres: [
+          `CREATE SCHEMA ${VIEW_SCHEMA}`,
+          `CREATE TABLE ${VIEW_SCHEMA}.src (id integer PRIMARY KEY, raw text NOT NULL)`,
+          `INSERT INTO ${VIEW_SCHEMA}.src VALUES (1, '5'), (2, '7'), (6, 'A12')`,
+          `CREATE VIEW ${VIEW_SCHEMA}.v AS SELECT id, cast(raw AS integer) AS code FROM ${VIEW_SCHEMA}.src`,
+          `GRANT USAGE ON SCHEMA ${VIEW_SCHEMA} TO zeteo_ro`,
+          `GRANT SELECT ON ${VIEW_SCHEMA}.v TO zeteo_ro`,
+        ],
+        mssql: [
+          `CREATE SCHEMA ${VIEW_SCHEMA}`,
+          `CREATE TABLE ${VIEW_SCHEMA}.t1 (id int NOT NULL PRIMARY KEY, code int)`,
+          `INSERT INTO ${VIEW_SCHEMA}.t1 VALUES (1, 5), (2, 7), (6, 9)`,
+          `CREATE VIEW ${VIEW_SCHEMA}.v1 AS SELECT id, code FROM ${VIEW_SCHEMA}.t1`,
+          `CREATE TABLE ${VIEW_SCHEMA}.t2 (id int NOT NULL PRIMARY KEY, amount decimal(38,0))`,
+          `INSERT INTO ${VIEW_SCHEMA}.t2 VALUES (1, 1), (6, 2)`,
+          `CREATE VIEW ${VIEW_SCHEMA}.v2 AS SELECT id, amount FROM ${VIEW_SCHEMA}.t2`,
+          `CREATE TABLE ${VIEW_SCHEMA}.t3 (id int NOT NULL PRIMARY KEY, raw nvarchar(20) NOT NULL, calc AS cast(raw AS int))`,
+          `INSERT INTO ${VIEW_SCHEMA}.t3 (id, raw) VALUES (1, N'5'), (2, N'7'), (6, N'A12')`,
+          `GRANT SELECT ON SCHEMA::${VIEW_SCHEMA} TO zeteo_ro`,
+        ],
+      });
+      source = await seedQuerySource(
+        engine,
+        { schemas: [VIEW_SCHEMA] },
+        "rrview"
+      );
+      if (engine.type === "azure-sql") {
+        await grantTo(stale.principal, source.tables.v1!, "all", {
+          access: "rule",
+          rule: { code: { ne: 0 } },
+        });
+        await grantTo(widened.principal, source.tables.v2!, "all", {
+          access: "rule",
+          rule: { amount: { ne: 1.5 } },
+        });
+        await grantTo(computed.principal, source.tables.t3!, "all", {
+          access: "rule",
+          rule: { calc: { lt: 100 } },
+        });
+        // Changed under the views, whose sys.columns (and the catalogue)
+        // still say int and decimal(38,0).
+        await asProbeAdmin(engine, {
+          postgres: [],
+          mssql: [
+            `ALTER TABLE ${VIEW_SCHEMA}.t1 ALTER COLUMN code nvarchar(20)`,
+            `UPDATE ${VIEW_SCHEMA}.t1 SET code = N'A12' WHERE id = ${HIDDEN}`,
+            `ALTER TABLE ${VIEW_SCHEMA}.t2 ALTER COLUMN amount decimal(38,2)`,
+            `UPDATE ${VIEW_SCHEMA}.t2 SET amount = 1.50 WHERE id = ${HIDDEN}`,
+          ],
+        });
+      } else {
+        await grantTo(viewed.principal, source.tables.v!, "all", {
+          access: "rule",
+          rule: { code: { lt: 100 } },
+        });
+      }
+    });
+    afterAll(async () => {
+      await removeRunsOf(users.map((u) => u.id));
+      await removeSources([source.id]);
+      await closeAllSourcePools();
+      await asProbeAdmin(engine, drop);
+    });
+
+    const outcome = async (
+      token: string,
+      from: string,
+      where: Record<string, unknown>
+    ) => {
+      const res = await postQuery(token, {
+        source: source.slug,
+        from,
+        select: ["id"],
+        where,
+      });
+      return res.status === 200
+        ? {
+            status: 200,
+            ids: (res.body.rows as unknown[][]).map((r) => Number(r[0])),
+          }
+        : { status: res.status, error: (res.body as { error?: string }).error };
+    };
+
+    /** `id eq` the hidden and a missing id, seekable beside the rule: they must answer alike. */
+    const probe = async (token: string, from: string) => {
+      const hidden = await outcome(token, from, { id: { eq: HIDDEN } });
+      const nowhere = await outcome(token, from, { id: { eq: NOWHERE } });
+      expect({ from, hidden }).toEqual({ from, hidden: nowhere });
+    };
+
+    if (engine.type === "azure-sql") {
+      it("a view over a column changed under it, which its metadata does not show, tells a hidden row from a missing one by nothing", async () => {
+        await probe(stale.token, "v1");
+      });
+
+      it("a view's rule keeps no row holding a value its stale type could not hold", async () => {
+        const all = await outcome(widened.token, "v2", { id: { gte: 0 } });
+        expect(all).toEqual({ status: 200, ids: [VISIBLE] });
+      });
+
+      it("a computed column that raises per row tells a hidden row from a missing one by nothing", async () => {
+        await probe(computed.token, "t3");
+      });
+    } else {
+      it("a view whose column raises per row tells a hidden row from a missing one by nothing", async () => {
+        await probe(viewed.token, "v");
+      });
+    }
+  }
+);

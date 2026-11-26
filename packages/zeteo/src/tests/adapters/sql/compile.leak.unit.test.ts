@@ -621,3 +621,149 @@ describe("compileSql: conditions beside the rule of a view", () => {
     expect(sql).toContain("IsUserTable");
   });
 });
+
+// The guard reads persisted metadata, which for a view can be stale (its
+// sys.columns keep the types it was created with), and neither it nor the
+// type of a comparison sees a computed column that raises per row. So the
+// copy that applies the caller's conditions beside the rule, and that leaves
+// out `apart` values, runs only on a base table with no computed column,
+// decided from live metadata (no row read); otherwise the rule alone is
+// copied, comparing every value exactly, and the caller's conditions are
+// applied by the query, on the copy's rows.
+describe("compileSql: the copy beside the rule, on a base table only, on SQL Server", () => {
+  const { PAID } = rules("nvarchar(200)");
+  const branches = (sql: string) => {
+    const m =
+      /drop table if exists #r0; select top \(0\) \[id\] into #r0 from \[shop\]\.\[orders\] union all select top \(0\) \[id\] from \[shop\]\.\[orders\]; if objectproperty\((object_id\(quotename\(@\d+\) \+ N'\.' \+ quotename\(@\d+\)\)), N'IsUserTable'\) = 1 and not exists \(select 1 from sys\.computed_columns as cc where cc\.object_id = (object_id\(quotename\(@\d+\) \+ N'\.' \+ quotename\(@\d+\)\))\) insert into #r0 select \[id\] from \[shop\]\.\[orders\] where (.*?); else insert into #r0 select \[id\] from \[shop\]\.\[orders\] where (.*?); select /.exec(
+        sql
+      );
+    expect(m, sql).not.toBeNull();
+    expect(m![1]).toBe(m![2]);
+    return { checked: m![3], alone: m![4] };
+  };
+
+  it("applies the caller's conditions beside the rule on a base table only, and in the query's where too", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"], where: { id: { eq: 6 } } },
+      { rowRules: { orders: PAID } }
+    );
+    const { checked, alone } = branches(sql);
+    expect(checked).toMatch(/^\(\[status\] in \(@\d+\)\) and \[id\] = @\d+$/);
+    expect(alone).toMatch(/^\[status\] in \(@\d+\)$/);
+    expect(sql).toMatch(/from #r0 as \[t0\] where \[t0\]\.\[id\] = @\d+/);
+  });
+
+  it("leaves out a value past 38 digits on a base table only, and compares it exactly otherwise", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule({ "orders.customer_id": { ne: "1.5" } }, [
+            ruleColumn("orders.customer_id", "number", "decimal(38,0)"),
+          ]),
+        },
+      }
+    );
+    const { checked, alone } = branches(sql);
+    expect(checked).toBe("[customer_id] = [customer_id]");
+    expect(alone).toMatch(
+      /^\[customer_id\] <> cast\(@\d+ as decimal\(38, 1\)\)$/
+    );
+  });
+
+  it("copies with no branch where the rule alone is all there is to copy", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"] },
+      { rowRules: { orders: PAID } }
+    );
+    expect(sql).not.toContain("IsUserTable");
+    expect(sql).toContain(
+      "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@5); select "
+    );
+  });
+});
+
+// Postgres infers an uncast parameter's type from the column when the
+// statement is planned: a column changed since the catalogue was read (an
+// integer now text) would compare the rule's value another way, `'0150' <
+// '100'`, keeping rows the rule hides. A rule's value is bound cast to the
+// column's catalogued type, so such a column fails when the statement is
+// planned, whatever the rows; a value that type cannot hold is bound as
+// before.
+describe("compileSql: a rule's values in the column's own type, on Postgres", () => {
+  const ruleOn = (
+    nativeType: string,
+    type: QueryableType,
+    filter: Record<string, unknown>
+  ) =>
+    pg(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule(filter, [
+            ruleColumn("orders.customer_id", type, nativeType),
+          ]),
+        },
+      }
+    );
+  const where = (sql: string) =>
+    /from "shop"\."orders" where (.*?)\) select \* from "r"/.exec(sql)![1];
+  const c = "orders.customer_id";
+
+  it.each([
+    ["integer", "number", { lt: 100 }, '"customer_id" < cast($1 as integer)'],
+    ["bigint", "number", { eq: 5 }, '"customer_id" = cast($1 as bigint)'],
+    [
+      "numeric(12,2)",
+      "number",
+      { gte: "10.555" },
+      '"customer_id" >= cast($1 as numeric)',
+    ],
+    [
+      "character varying(20)",
+      "text",
+      { in: ["a", "b"] },
+      '"customer_id" in (cast($1 as varchar), cast($2 as varchar))',
+    ],
+    [
+      "character(3)",
+      "text",
+      { ne: "ab" },
+      '"customer_id" <> cast($1 as bpchar)',
+    ],
+    ["text", "text", { eq: "x" }, '"customer_id" = cast($1 as text)'],
+    ["date", "date", { lt: "2026-01-01" }, '"customer_id" < cast($1 as date)'],
+    ["boolean", "boolean", { eq: true }, '"customer_id" = cast($1 as boolean)'],
+    [
+      "integer",
+      "number",
+      { between: [1, 9] },
+      '"customer_id" between cast($1 as integer) and cast($2 as integer)',
+    ],
+  ])("%s, %j", (nativeType, type, condition, expected) => {
+    expect(
+      where(ruleOn(nativeType, type as QueryableType, { [c]: condition }).sql)
+    ).toBe(expected);
+  });
+
+  it("binds a long list as an array of the column's type", () => {
+    const values = Array.from({ length: 150 }, (_, i) => i + 1);
+    expect(
+      where(ruleOn("integer", "number", { [c]: { in: values } }).sql)
+    ).toBe('"customer_id" = any(cast($1 as integer[]))');
+  });
+
+  it("binds a value the column's type cannot hold as before", () => {
+    expect(where(ruleOn("integer", "number", { [c]: { lt: "1.5" } }).sql)).toBe(
+      '"customer_id" < cast($1 as numeric)'
+    );
+  });
+
+  it("leaves a caller's own where as it was", () => {
+    const { sql } = pg(
+      { from: "orders", select: ["id"], where: { customer_id: { lt: 100 } } },
+      {}
+    );
+    expect(sql).toContain('"t0"."customer_id" < $1');
+  });
+});
