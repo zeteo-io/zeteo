@@ -468,6 +468,32 @@ describeEachEngine(
       }
     });
 
+    it("a timestamp finer than SQL Server reads, beside the rule, tells a hidden row from a missing one by nothing", async () => {
+      // datetime2(3) against 9 fractional digits, zeros past the column's 3:
+      // applied beside the rule, so an index can serve it (the H1 case).
+      for (const stamp of [
+        "2026-01-01T00:00:00.000000000Z",
+        "2026-01-01T00:00:00.100000000+01:00",
+      ]) {
+        const { visible } = await probe(shown.token, { stamp: { gte: stamp } });
+        expect(visible).toEqual({ status: 200, ids: [VISIBLE] });
+      }
+    });
+
+    it("a malformed uuid tells a hidden row from a missing one by nothing", async () => {
+      // SQL Server converts the text to uniqueidentifier, Postgres to uuid:
+      // either fails if it is ever evaluated.
+      await probe(shown.token, { ref: { eq: "not-a-guid" } });
+      await probe(shown.token, { ref: { ne: "not-a-guid" } });
+    });
+
+    it("a match on a column whose collation refuses ILIKE tells a hidden row from a missing one by nothing", async () => {
+      // On Postgres label's collation is nondeterministic, where ILIKE raises.
+      for (const label of [{ contains: "a" }, { startsWith: "G" }]) {
+        await probe(shown.token, { label });
+      }
+    });
+
     it("a condition beside a changed rule column tells a hidden row from a missing one by nothing", async () => {
       await probe(stale.token, { code: { eq: 5 } });
       await probe(stale.token, { code: { between: [1, 9] } });
