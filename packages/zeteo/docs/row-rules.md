@@ -190,6 +190,7 @@ Any input that cannot be resolved yields fewer rows or a refused query, never mo
 | A rule's column has gone missing from the catalogue | Queries reading the table are refused with `409 row_rule_unavailable` ("ask an admin"); the grant shows `column_missing:<name>` in `row_rule_problems`. |
 | A rule resolves to more than 50,000 values | Refused with `409 row_rule_unavailable`; never truncated. |
 | SQL Server: a column the rule compares, or a condition of the caller's applied beside it, has gone from the table or has another type than the catalogue last read (altered since the last refresh) | Refused with `409 row_rule_unavailable` ("ask an admin"), the same body as a rule column gone missing, until the source is refreshed. A check of `sys.columns` before the rule's read decides it, so the outcome depends on no row. |
+| SQL Server: the table is a view (whose persisted column types may be stale), or has a computed column | The rule alone is copied, every value compared exactly; the caller's conditions are applied to the copy's rows. Decided from live metadata, so the outcome depends on no row. |
 | An identity key is deleted while rules use it | The delete is refused: `409 identity_key_in_use`. |
 | Tereo cannot say who reports to the caller (unreachable, erroring, or no such user) while a rule uses `below` | Queries reading the table are refused with `503 row_rule_unavailable` ("try again shortly"); never the caller's own rows only, never every row. |
 | Tereo refuses the reporting lines as too large (over 10,000 users or 64 levels) | Refused with `409 row_rule_unavailable`, reason `too_many_values`. |
@@ -205,7 +206,8 @@ rows. In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is compared exa
 that comparison would need more than 38 digits (the column's integer digits plus the value's scale,
 `1.5` against a `decimal(38,0)` column say), it is not made: the read's type check (below) has
 confirmed the column's type, which holds no such value, so no row equals it and the value leaves
-out nothing, as the comparison would. A value of more than 38 digits, which no SQL Server exact
+out nothing, as the comparison would. That is done on a base table only: a view's rule
+compares the value exactly (see the SQL Server bullet under Enforcement). A value of more than 38 digits, which no SQL Server exact
 number holds, makes such a condition keep no row ([azure-sql.md](azure-sql.md)).
 
 Postgres needs no such check: a parameter's type is inferred from the column when the statement is
@@ -249,7 +251,15 @@ of its own:
   conditions beside it compare are there with those types; when one is not, it throws and the query
   is refused (`409 row_rule_unavailable`). The check reads metadata only, and binds the names and
   types as plain parameters, so it needs no `OPENJSON` (compatibility level 130); only an `in` or
-  `notIn` of more than 100 values does ([azure-sql.md](azure-sql.md)).
+  `notIn` of more than 100 values does ([azure-sql.md](azure-sql.md)). That check reads persisted
+  metadata, which for a view not bound to its schema keeps the types the view was created with
+  (a column of the table under it may have changed since), and no type tells of a computed column
+  whose expression raises per row. So the copy applies the caller's conditions beside the rule
+  (below), and leaves out a value past 38 digits (above), only when the object is a base table with
+  no computed column, which the same request decides from live metadata, reading no row;
+  otherwise it copies the rule alone, comparing every value exactly, and the query applies the
+  caller's conditions to the copy's rows. On SQL Server those conditions are always applied by the
+  query too.
 
 The read keeps only the columns the query reads of the table (join keys, measures and metric parts
 included; none for `count(*)` alone). Beside the rule it also applies the caller's conditions that
@@ -275,7 +285,9 @@ way.
 
 The cost: what the caller's conditions cannot narrow, the read reads in full, so such a query costs
 about as much as reading all the caller's rows of the table; on SQL Server the read is copied to
-`tempdb` once per query.
+`tempdb` once per query. On SQL Server a view or a table with a computed column
+is always read in full under the rule, as the caller's conditions are not applied beside it there;
+the request's batch, cached by the server like any, compiles only the branch it takes.
 
 A merged table is its own table: its grants carry their own rules, and a member table's rules do
 not flow into it ([uploads.md](uploads.md)). Effective access warns when they differ.

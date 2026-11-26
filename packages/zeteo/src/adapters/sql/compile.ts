@@ -208,10 +208,20 @@ const tableSource = (
     levelContext(comp, false),
     { mode: "rule" }
   );
-  const where =
+  const left = { apart: false };
+  const checked = compileFilter(
+    t.rowFilter,
+    dialect,
+    ruleSubject(dialect),
+    levelContext(comp, false),
+    { mode: "checkedRule", left }
+  );
+  const narrowed =
     pushed.length === 0
-      ? rule
-      : sql<SqlBool>`(${rule}) and ${sql.join(
+      ? left.apart
+        ? checked
+        : undefined
+      : sql<SqlBool>`(${checked}) and ${sql.join(
           pushed.map((p) => p.sql),
           AND
         )}`;
@@ -231,7 +241,8 @@ const tableSource = (
     {
       table: name,
       columns: comp.provides?.get(key) ?? [],
-      where,
+      rule,
+      narrowed,
       guard: {
         schemaName: t.schemaName,
         name: t.name,
@@ -636,9 +647,11 @@ const flip = (p: Position): Position =>
 
 /**
  * What a filter compiles for: the caller's `where` (or `having`, a metric's
- * range), a row `rule`, or a `case`'s condition.
+ * range), a row `rule`, comparing every value exactly, a row rule of a read
+ * whose columns' types are known (`checkedRule`, `RuledRead.narrowed`), or a
+ * `case`'s condition.
  */
-type FilterMode = "where" | "rule" | "case";
+type FilterMode = "where" | "rule" | "checkedRule" | "case";
 
 /**
  * The values an equality compares (`dialect.equalityValues`), or undefined
@@ -656,14 +669,19 @@ const equalityValuesAt = (
   s: ValueSubject,
   eq: boolean,
   at: Position,
-  mode: FilterMode
+  mode: FilterMode,
+  left?: { apart: boolean }
 ): PlanValue[] | undefined => {
   const { held, wider, apart, unbound } = dialect.equalityValues(values, s);
   if (at === "positive" ? eq : at === "negative" ? !eq : false) return held;
-  if (unbound && mode === "rule" && at !== "neutral") return undefined;
-  // A rule's read checks its columns' types first (`RuleGuard`): no row
-  // equals a value of `apart`, which is not compared.
-  return mode === "rule" ? [...held, ...wider] : [...held, ...wider, ...apart];
+  const rule = mode === "rule" || mode === "checkedRule";
+  if (unbound && rule && at !== "neutral") return undefined;
+  // A narrowed read runs on a base table whose columns' types were checked
+  // first (`RuleGuard`): no row equals a value of `apart`, which is not
+  // compared.
+  if (mode !== "checkedRule") return [...held, ...wider, ...apart];
+  if (apart.length > 0 && left) left.apart = true;
+  return [...held, ...wider];
 };
 
 /**
@@ -688,7 +706,13 @@ const compileFilter = <S>(
   {
     lists = "set",
     mode = "where",
-  }: { lists?: "set" | "literal"; mode?: FilterMode } = {}
+    left,
+  }: {
+    lists?: "set" | "literal";
+    mode?: FilterMode;
+    /** Set when a `checkedRule` leaves out an `apart` value. */
+    left?: { apart: boolean };
+  } = {}
 ): Expression<SqlBool> => {
   /** A value bound for the subject, or a fixed measure's value. */
   const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
@@ -717,7 +741,8 @@ const compileFilter = <S>(
             s,
             f.op === "eq",
             at,
-            mode
+            mode,
+            left
           );
           if (!values) return keepsNoRow(at);
           if (values.length === 0) return noValueLeft(s.expression, f.op);
@@ -737,7 +762,8 @@ const compileFilter = <S>(
           s,
           f.op === "in",
           at,
-          mode
+          mode,
+          left
         );
         if (!values) return keepsNoRow(at);
         if (values.length === 0) {
@@ -900,7 +926,10 @@ const pushDown = <S extends WhereSubject>(
       rest.push(f);
     }
   }
-  if (pushed.size === 0) return { pushed, rest: where };
+  // A read that decides when it runs whether to apply them may not.
+  if (pushed.size === 0 || comp.dialect.narrowedCheck === "live") {
+    return { pushed, rest: where };
+  }
   return {
     pushed,
     rest:

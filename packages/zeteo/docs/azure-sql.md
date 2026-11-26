@@ -169,8 +169,11 @@ rows excluded. A value of more than 38 digits, which no exact number type holds,
 query's condition; a row rule's `ne` or `notIn` on one keeps no row (see
 [row-rules.md](row-rules.md#failing-closed)). A row rule's read is refused (`409
 row_rule_unavailable`) when a column it compares no longer has the catalogue's type, until the
-source is refreshed; in a rule, a value whose comparison with the column would need more than 38
-digits is therefore not compared, as no row of the checked type equals it.
+source is refreshed; in a rule on a base table, a value whose comparison with the column would need
+more than 38 digits is therefore not compared, as no row of the checked type equals it. A view's
+persisted column types can be stale, so on a view (or a table with a computed column) the rule's
+read compares every value exactly and applies none of the query's conditions beside the rule
+([row-rules.md](row-rules.md#enforcement)).
 
 **Compatibility level.** A condition's `in` or `notIn` of more than 100 values (the caller's or a
 row rule's) is bound as one JSON value read with `OPENJSON`, which needs the database's

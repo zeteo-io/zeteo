@@ -318,7 +318,9 @@ for (const engine of ENGINES) {
         );
         return engine.name === "postgres"
           ? /materialized \((select .*?)\) select \* from "r"/.exec(sql)![1]!
-          : /select [^;]*? into #r0 from [^;]*;/.exec(sql)![0];
+          : // The narrowed copy, a base table's, where there is one.
+            (/insert into #r0 select [^;]*;/.exec(sql) ??
+              /select [^;]*? into #r0 from [^;]*;/.exec(sql))![0];
       };
       const outside: object[] = [
         { customer_id: { gt: "1.5" } },

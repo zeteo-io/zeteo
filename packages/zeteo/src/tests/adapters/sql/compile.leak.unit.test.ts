@@ -73,12 +73,26 @@ const compileOn =
 const pg = compileOn(postgresDialect);
 const ms = compileOn(mssqlDialect);
 
-/** The statement (SQL Server) or WITH query (Postgres) that reads the rule's rows: everything evaluated beside the rule. */
-const ruledReads = (text: string): string[] =>
-  [
-    ...text.matchAll(/select [^;]*? into #r\d+ from [^;]*;/g),
-    ...text.matchAll(/materialized \(select .*?\) select \* from "r"/g),
-  ].map((m) => m[0]);
+/**
+ * The statements (SQL Server) or WITH queries (Postgres) that read the rule's
+ * rows: everything evaluated beside the rule. A SQL Server copy with a
+ * narrowed form is two, the narrowed one (a base table's) and the rule
+ * alone, each written as a `select … into`.
+ */
+const ruledReads = (text: string): string[] => [
+  ...[
+    ...text.matchAll(
+      /select (?!top \(0\))([^;]*?) into (#r\d+) from ([^;]*?) where ([^;]*);|insert into (#r\d+) select ([^;]*?) from ([^;]*?) where ([^;]*);/g
+    ),
+  ].map((m) =>
+    m[1] === undefined
+      ? `select ${m[6]} into ${m[5]} from ${m[7]} where ${m[8]};`
+      : m[0]
+  ),
+  ...[...text.matchAll(/materialized \(select .*?\) select \* from "r"/g)].map(
+    (m) => m[0]
+  ),
+];
 
 describe("compileSql: conditions that cannot raise, beside the rule", () => {
   const pgRules = rules("text");
@@ -131,8 +145,10 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       },
       { rowRules: { orders: msRules.PAID } }
     );
+    // On a base table, beside the rule; else the rule alone (`ruled`).
     expect(ruledReads(sql)).toEqual([
-      "select [id] into #r0 from [shop].[orders] where ([status] in (@13)) and [id] = @14 and [customer_id] in (@15, @16) and [total] >= cast(@17 as decimal(12, 2)) and lower([status]) like lower(@18) escape '\\' and [created_at] >= cast(@19 as datetimeoffset);",
+      "select [created_at], [customer_id], [id], [status], [total] into #r0 from [shop].[orders] where ([status] in (@13)) and [id] = @14 and [customer_id] in (@15, @16) and [total] >= cast(@17 as decimal(12, 2)) and lower([status]) like lower(@18) escape '\\' and [created_at] >= cast(@19 as datetimeoffset);",
+      "select [created_at], [customer_id], [id], [status], [total] into #r0 from [shop].[orders] where [status] in (@20);",
     ]);
     // After the rule's guard (`ruleGuard`).
     expect(parameters.slice(12, 19)).toEqual([
@@ -144,8 +160,11 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { type: "nvarchar", value: "p%" },
       { type: "nvarchar", value: "2026-01-01T00:00:00Z" },
     ]);
-    // Nothing is left for the query's own where.
-    expect(sql.slice(sql.indexOf("from #r0"))).not.toContain(" where ");
+    // The query applies them too, on the copy's rows: the copy may be the
+    // rule's alone.
+    expect(sql.slice(sql.indexOf("from #r0"))).toMatch(
+      /where \(?\[t0\]\.\[id\] = @\d+ and /
+    );
   });
 
   it("keeps a comparison whose value is not the column's own type outside (Postgres: a decimal or an out-of-range integer against an integer column)", () => {
@@ -221,7 +240,8 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
         },
         { rowRules: { customers: r.EU } }
       ).sql;
-      expect(ruledReads(inner)).toHaveLength(1);
+      // SQL Server's copy has the rule's alone besides, for a view.
+      expect(ruledReads(inner)).toHaveLength(compile === ms ? 2 : 1);
       expect(ruledReads(inner)[0]).toMatch(/region.* and .?name.? = /);
       const left = compile(
         {
@@ -308,7 +328,8 @@ describe("compileSql: one read per table and rule on SQL Server", () => {
         measures: [measure("smallest", { min: "total" }, { fixed: true })],
       }
     );
-    expect(ruledReads(sql)).toHaveLength(2);
+    // The query's, narrowed and alone, and the fixed measure's.
+    expect(ruledReads(sql)).toHaveLength(3);
   });
 
   it("stages every part of a metric over one table once", () => {
@@ -322,7 +343,8 @@ describe("compileSql: one read per table and rule on SQL Server", () => {
       true
     );
     const reads = ruledReads(sql);
-    expect(reads).toHaveLength(1);
+    // Narrowed, and the rule alone.
+    expect(reads).toHaveLength(2);
     expect(reads[0]).toContain("[ordered_on] >= cast(@");
     expect(sql.match(/from #r0 as \[t0\]/g)).toHaveLength(2);
   });
@@ -451,7 +473,8 @@ describe("compileSql: a condition whose types do not match stays outside the rul
   it("mssql: an equality no value of the column can meet is the column against itself, binding nothing", () => {
     const sql = outside(mssqlDialect, eq("num", "number", "int", "abc"));
     expect(ruledReads(sql)).toEqual([
-      "select [id] into #r0 from [shop].[orders] where ([status] in (@7)) and [num] <> [num];",
+      "select [id], [num] into #r0 from [shop].[orders] where ([status] in (@7)) and [num] <> [num];",
+      "select [id], [num] into #r0 from [shop].[orders] where [status] in (@8);",
     ]);
   });
 
@@ -546,8 +569,10 @@ describe("compileSql: a timestamp beside the rule binds no more than SQL Server 
       .filter(
         (v): v is string => typeof v === "string" && v.startsWith("2026")
       );
-    expect(texts).toHaveLength(1);
-    expect(texts[0]).not.toMatch(/\.\d{8}/);
-    expect(texts[0]).toBe(value.replace(/(\.\d{7})\d+/, "$1"));
+    // Beside the rule, and in the query's own where.
+    expect(texts.length).toBeGreaterThan(0);
+    for (const text of texts) {
+      expect(text).toBe(value.replace(/(\.\d{7})\d+/, "$1"));
+    }
   });
 });

@@ -394,11 +394,12 @@ export const postgresDialect: SqlDialect = {
   //
   // Only the columns the query reads are kept: none for `count(*)` alone,
   // which Postgres reads as a row of no columns.
-  ruled: ({ table, columns, where }) =>
+  ruled: ({ table, columns, rule, narrowed }) =>
     sql`(with ${sql.id("r")} as materialized (select ${sql.join(
       columns.map((c) => sql.id(c))
-    )} from ${table} where ${where}) select * from ${sql.id("r")})`,
+    )} from ${table} where ${narrowed ?? rule}) select * from ${sql.id("r")})`,
   ruledOnce: false,
+  narrowedCheck: "catalogue",
   ownValue,
   // ILIKE raises on every row of a column with a nondeterministic collation,
   // which the catalogue does not record: no match is evaluated beside a rule.

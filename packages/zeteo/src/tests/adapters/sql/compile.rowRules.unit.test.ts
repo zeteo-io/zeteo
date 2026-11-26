@@ -707,7 +707,8 @@ describe("compileSql: the guard before a ruled copy, on SQL Server", () => {
 // would need more than 38 digits; it is not made. The guard has checked the
 // column's type, which holds no such value, so no row equals it: in a rule's
 // ne or notIn it leaves out nothing, as `col = col` (unknown for a null, as
-// the comparison would be).
+// the comparison would be). That holds on a base table only: the copy of a
+// view, whose persisted types may be stale, compares it exactly (below).
 describe("compileSql: a rule's value whose comparison would need more than 38 digits, on SQL Server", () => {
   const ruleOn = (nativeType: string, filter: Record<string, unknown>) =>
     ms(
@@ -720,8 +721,9 @@ describe("compileSql: a rule's value whose comparison would need more than 38 di
         },
       }
     );
+  // The narrowed read's (a base table's); the rule alone compares exactly.
   const where = (sql: string) =>
-    /from \[shop\]\.\[orders\] where (.*?); select/.exec(sql)![1];
+    /from \[shop\]\.\[orders\] where (.*?); (?:else|select)/.exec(sql)![1];
 
   it.each([
     ["decimal(38,0)", "1.5"],
@@ -737,11 +739,13 @@ describe("compileSql: a rule's value whose comparison would need more than 38 di
     );
     const notIn = ruleOn(nativeType, { [c]: { notIn: ["2", value] } });
     expect(where(notIn.sql)).toBe("[customer_id] not in (@5)");
+    expect((notIn.parameters[4] as { value: unknown }).value).toBe("2");
+    // Only the rule alone, for a view, binds it.
     expect(
-      notIn.parameters.some((p) =>
+      notIn.parameters.filter((p) =>
         String((p as { value: unknown }).value).includes(value)
       )
-    ).toBe(false);
+    ).toHaveLength(1);
     expect(
       where(ruleOn(nativeType, { not: { [c]: { in: [value] } } }).sql)
     ).toBe("not ([customer_id] <> [customer_id])");
@@ -753,5 +757,66 @@ describe("compileSql: a rule's value whose comparison would need more than 38 di
         ruleOn("decimal(36,0)", { "orders.customer_id": { ne: "1.5" } }).sql
       )
     ).toBe("[customer_id] <> cast(@5 as decimal(38, 1))");
+  });
+});
+
+// The guard reads persisted metadata, which for a view can be stale (its
+// sys.columns keep the types it was created with), and neither it nor the
+// type of a comparison sees a computed column that raises per row. So the
+// copy that applies the caller's conditions beside the rule, and that leaves
+// out `apart` values, runs only on a base table with no computed column,
+// decided from live metadata (no row read); otherwise the rule alone is
+// copied, comparing every value exactly, and the caller's conditions are
+// applied by the query, on the copy's rows.
+describe("compileSql: the copy beside the rule, on a base table only, on SQL Server", () => {
+  const { PAID } = rules("nvarchar(200)");
+  const branches = (sql: string) => {
+    const m =
+      /drop table if exists #r0; select top \(0\) \[id\] into #r0 from \[shop\]\.\[orders\] union all select top \(0\) \[id\] from \[shop\]\.\[orders\]; if objectproperty\((object_id\(quotename\(@\d+\) \+ N'\.' \+ quotename\(@\d+\)\)), N'IsUserTable'\) = 1 and not exists \(select 1 from sys\.computed_columns as cc where cc\.object_id = (object_id\(quotename\(@\d+\) \+ N'\.' \+ quotename\(@\d+\)\))\) insert into #r0 select \[id\] from \[shop\]\.\[orders\] where (.*?); else insert into #r0 select \[id\] from \[shop\]\.\[orders\] where (.*?); select /.exec(
+        sql
+      );
+    expect(m, sql).not.toBeNull();
+    expect(m![1]).toBe(m![2]);
+    return { checked: m![3], alone: m![4] };
+  };
+
+  it("applies the caller's conditions beside the rule on a base table only, and in the query's where too", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"], where: { id: { eq: 6 } } },
+      { rowRules: { orders: PAID } }
+    );
+    const { checked, alone } = branches(sql);
+    expect(checked).toMatch(/^\(\[status\] in \(@\d+\)\) and \[id\] = @\d+$/);
+    expect(alone).toMatch(/^\[status\] in \(@\d+\)$/);
+    expect(sql).toMatch(/from #r0 as \[t0\] where \[t0\]\.\[id\] = @\d+/);
+  });
+
+  it("leaves out a value past 38 digits on a base table only, and compares it exactly otherwise", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule({ "orders.customer_id": { ne: "1.5" } }, [
+            ruleColumn("orders.customer_id", "number", "decimal(38,0)"),
+          ]),
+        },
+      }
+    );
+    const { checked, alone } = branches(sql);
+    expect(checked).toBe("[customer_id] = [customer_id]");
+    expect(alone).toMatch(
+      /^\[customer_id\] <> cast\(@\d+ as decimal\(38, 1\)\)$/
+    );
+  });
+
+  it("copies with no branch where the rule alone is all there is to copy", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"] },
+      { rowRules: { orders: PAID } }
+    );
+    expect(sql).not.toContain("IsUserTable");
+    expect(sql).toContain(
+      "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@5); select "
+    );
   });
 });

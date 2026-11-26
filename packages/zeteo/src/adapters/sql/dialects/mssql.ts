@@ -936,19 +936,34 @@ export const mssqlDialect: SqlDialect = {
   //
   // The copy is preceded by `ruleGuard`, which refuses it when a column
   // evaluated beside the rule no longer has the type the catalogue says.
-  ruled: ({ table, columns, where, guard }, staging) => {
+  // That check reads persisted metadata, which for a view not bound to its
+  // schema keeps the types the view was created with, and no type sees a
+  // computed column whose expression raises per row. So where the read has a
+  // narrowed form (the caller's conditions beside the rule, or `apart` values
+  // left out), the batch picks it only for a base table with no computed
+  // column, from live metadata, which reads no row; otherwise it copies the
+  // rule alone. The temp table is made empty first (`top (0)`, which reads
+  // no row; the `union all` keeps a column's identity property from being
+  // copied), as a batch may create it once. Both branches are compiled only
+  // when reached, as each names the temp table the batch creates.
+  ruled: ({ table, columns, rule, narrowed, guard }, staging) => {
     const index = staging.statements.length;
     const temp = sql.raw(`#r${index}`);
     const list =
       columns.length === 0
         ? sql`0 as ${sql.id("_")}`
         : sql.join(columns.map((c) => sql.id(c)));
+    const object = objectIdOf(guard.schemaName, guard.name);
+    const copy = narrowed
+      ? sql`select top (0) ${list} into ${temp} from ${table} union all select top (0) ${list} from ${table}; if objectproperty(${object}, N'IsUserTable') = 1 and not exists (select 1 from sys.computed_columns as cc where cc.object_id = ${object}) insert into ${temp} select ${list} from ${table} where ${narrowed}; else insert into ${temp} select ${list} from ${table} where ${rule};`
+      : sql`select ${list} into ${temp} from ${table} where ${rule};`;
     staging.statements.push(
-      sql`${ruleGuard(guard, objectIdOf(guard.schemaName, guard.name), index)}drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
+      sql`${ruleGuard(guard, object, index)}drop table if exists ${temp}; ${copy}`
     );
     staging.at.push(guard.at);
     return temp;
   },
+  narrowedCheck: "live",
   ruledOnce: true,
   ownValue,
   ownMatch: (column, pattern, nativeType) =>

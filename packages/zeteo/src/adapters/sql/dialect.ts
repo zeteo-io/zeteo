@@ -79,14 +79,19 @@ export interface RuleGuard {
 
 /**
  * What `ruled` reads of a table: the columns the query reads of it (none for
- * `count(*)` alone), and the rows the rule keeps, with any condition of the
- * caller's that cannot raise an error on any row (`ownValue`, `ownMatch`)
- * already applied, so an index can serve it.
+ * `count(*)` alone), and the rows the rule keeps. `rule` is the rule alone,
+ * every value compared exactly, which is right whatever the table is.
+ * `narrowed`, when it differs, is the rule with the caller's conditions that
+ * cannot raise an error on any row of a base table (`ownValue`, `ownMatch`)
+ * applied beside it, so an index can serve them, and with `apart` values left
+ * out: right only where the table is a base table whose columns have the
+ * catalogue's types and none is computed.
  */
 export interface RuledRead {
   table: Expression<unknown>;
   columns: readonly string[];
-  where: Expression<SqlBool>;
+  rule: Expression<SqlBool>;
+  narrowed?: Expression<SqlBool>;
   guard: RuleGuard;
 }
 
@@ -100,9 +105,12 @@ export interface EqualityValues {
    * Values its type cannot hold whose exact comparison with the column would
    * need a common type of more digits than the engine's exact numbers hold
    * (SQL Server: the column's integer digits plus the value's scale past
-   * 38), so it could fail on a row. A row rule leaves them out where they
-   * would add rows: its read first checks the column still has the
-   * catalogue's type (`RuleGuard`), which no such value equals.
+   * 38), so it could fail on a row. A row rule's narrowed read
+   * (`RuledRead.narrowed`) leaves them out where they would add rows: it
+   * runs on a base table only, after a check that the column still has the
+   * catalogue's type (`RuleGuard`), which no such value equals. The rule
+   * alone compares them exactly, as `wider` values are: a view's persisted
+   * types, which the check reads, may be stale.
    */
   apart: PlanValue[];
   /** Whether some value can be compared exactly by no means (left out of all three): more digits than any exact number type of the engine holds. */
@@ -276,6 +284,15 @@ export interface SqlDialect {
    * cannot raise.
    */
   ruled(read: RuledRead, staging: Staging): Expression<unknown>;
+  /**
+   * How a read decides whether it may apply `RuledRead.narrowed`: `live`,
+   * when it runs, from the object's own metadata (SQL Server: a base table
+   * with no computed column), else applying the rule alone, so the caller's
+   * conditions moved beside the rule stay in the query's where too;
+   * `catalogue`, from the table's kind as the catalogue last read it
+   * (Postgres), so they leave it.
+   */
+  narrowedCheck: "live" | "catalogue";
   /**
    * Whether one `ruled` read may serve every reference to the same table
    * with the same rule and conditions in a query (SQL Server: one temp table,
