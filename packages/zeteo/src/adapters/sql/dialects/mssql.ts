@@ -693,14 +693,18 @@ const ownValue = (
       const own = OWN_FRACTIONAL.exec(nativeType);
       if (!own || fraction > Number(own[2])) return undefined;
       const precise = Number(own[2]) === 7;
+      // SQL Server refuses a text with more than 7 fractional digits, and
+      // here only once a row reached the condition: past the 7th, whatever
+      // `fraction` allowed, they are zeros, cut as `value` cuts them.
+      const text = (v as string).replace(PAST_100_NS, "$1");
       if (own[1] === "datetimeoffset") {
         return precise
-          ? value(v, { type, nativeType })
-          : sql`cast(${param("nvarchar", String(v))} as datetimeoffset(${sql.lit(Number(own[2]))}))`;
+          ? value(text, { type, nativeType })
+          : sql`cast(${param("nvarchar", text)} as datetimeoffset(${sql.lit(Number(own[2]))}))`;
       }
       return precise
-        ? value(v, { type, nativeType })
-        : sql`cast(switchoffset(cast(${param("nvarchar", String(v))} as datetimeoffset), '+00:00') as datetime2(${sql.lit(Number(own[2]))}))`;
+        ? value(text, { type, nativeType })
+        : sql`cast(switchoffset(cast(${param("nvarchar", text)} as datetimeoffset), '+00:00') as datetime2(${sql.lit(Number(own[2]))}))`;
     }
     default:
       return undefined;

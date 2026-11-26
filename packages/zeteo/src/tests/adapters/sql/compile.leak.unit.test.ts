@@ -497,3 +497,56 @@ describe("compileSql: a condition whose types do not match stays outside the rul
     });
   }
 });
+
+describe("compileSql: a timestamp beside the rule binds no more than SQL Server reads (SQL Server)", () => {
+  // SQL Server refuses a date or time text with more than 7 fractional
+  // digits. Beside the rule, such a text would fail only when a row reached
+  // the condition: whether a hidden row matched the rest. So it is cut to 7
+  // digits, as `value` cuts it, before every cast.
+  const compare = (
+    nativeType: string,
+    value: string
+  ): ResolvedFilter<WhereSubject> => ({
+    kind: "compare",
+    op: "gte",
+    subject: { alias: "t0", name: "t", type: "timestamp", nativeType },
+    value,
+  });
+  const besideTheRule = (filter: ResolvedFilter<WhereSubject>) => {
+    const r = rules("nvarchar(200)");
+    const plan = sqlLanguage.plan(
+      sqlLanguage.schema.parse({
+        source: "shop",
+        from: "orders",
+        select: ["id"],
+      }),
+      shopCatalog({ engine: "mssql", rowRules: { orders: r.PAID } }),
+      { now: NOW }
+    ) as TablePlan;
+    return compileSql({ ...plan, where: filter }, mssqlDialect, {
+      limit: 101,
+      offset: 0,
+    });
+  };
+
+  it.each([
+    ["datetime2(3)", "2026-01-01T00:00:00.000000000Z"],
+    ["datetime2(3)", "2026-01-01T00:00:00.100000000+01:00"],
+    ["datetimeoffset(3)", "2026-01-01T00:00:00.000000000Z"],
+    ["datetimeoffset(3)", "2026-01-01T00:00:00.100000000+01:00"],
+    ["datetime2(7)", "2026-01-01T00:00:00.123456700Z"],
+    ["datetimeoffset(7)", "2026-01-01T00:00:00.123456700Z"],
+  ])("%s against %s", (nativeType, value) => {
+    const { sql, parameters } = besideTheRule(compare(nativeType, value));
+    // Applied beside the rule: the column holds the value exactly.
+    expect(ruledReads(sql)[0]).toMatch(/and \[t\] >= cast\(/);
+    const texts = parameters
+      .map((p) => (p as { value: unknown }).value)
+      .filter(
+        (v): v is string => typeof v === "string" && v.startsWith("2026")
+      );
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).not.toMatch(/\.\d{8}/);
+    expect(texts[0]).toBe(value.replace(/(\.\d{7})\d+/, "$1"));
+  });
+});

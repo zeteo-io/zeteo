@@ -247,7 +247,7 @@ table's date column. The condition must be `isNull`, a comparison, `between` or 
 |---|---|---|
 | numbers | an integer in an integer column's range (`smallint`, `integer`, `bigint`, `real`, `double precision`); any number for `numeric` | an integer in the column's range (`tinyint`, `smallint`, `int`, `bigint`); a decimal the `decimal`/`numeric` column holds exactly |
 | text | `text`, `varchar`, `char`, `uuid` | `nvarchar` (any length); `startsWith` and `contains` too |
-| dates and times | `date`, `timestamp`, `timestamptz` | `date`; `datetime2`, `datetimeoffset` and `datetime` within years 1754–9998 and offsets up to ±14:00, with no finer fraction than the column keeps |
+| dates and times | `date`, `timestamp`, `timestamptz` | `date`; `datetime2`, `datetimeoffset` and `datetime` within years 1754–9998 and offsets up to ±14:00, with no finer fraction than the column keeps (zeros past the 7th fractional digit, which SQL Server refuses in text, are cut first) |
 | booleans | `boolean` | `bit` |
 
 Anything else stays outside the read: on SQL Server `varchar`, `char`, `nchar`, `uniqueidentifier`,
