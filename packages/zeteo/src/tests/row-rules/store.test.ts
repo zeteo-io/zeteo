@@ -98,18 +98,15 @@ describe("row-rules store", () => {
     });
   });
 
-  it("refuses a JSON number that was rounded in parsing, asking for a decimal string", async () => {
-    // 9007199254740993 written in JSON arrives as 2^53.
-    await expect(store({ total: { eq: 2 ** 53 } })).rejects.toMatchObject({
+  it("refuses a number written with an exponent, asking for a decimal string, and keeps any other", async () => {
+    // A number the request's text did not say is refused as the body is
+    // parsed (numbers.unit.test.ts, grants.rowRules.test.ts).
+    await expect(store({ total: { eq: 1e21 } })).rejects.toMatchObject({
       code: "invalid_row_rule",
-      message: expect.stringContaining(
-        "write large numbers as decimal strings"
-      ),
+      message: expect.stringContaining("write it as a decimal string"),
       details: { path: ["row_rule", "total", "eq"] },
     });
-    await expect(
-      store({ total: { in: [1, 1.2345678901234567] } })
-    ).rejects.toMatchObject({
+    await expect(store({ total: { in: [1, 1e-7] } })).rejects.toMatchObject({
       code: "invalid_row_rule",
       details: { path: ["row_rule", "total", "in", 1] },
     });
@@ -119,16 +116,16 @@ describe("row-rules store", () => {
       code: "invalid_row_rule",
       details: { path: ["row_rule", "total", "between", 1] },
     });
-    const { stored } = await store({
-      total: {
-        in: [2 ** 53 - 1, -(2 ** 53 - 1), 0.1, 12.5, "9007199254740993"],
-      },
-    });
-    expect(stored).toEqual({
-      [ids.get("total")!]: {
-        in: [2 ** 53 - 1, -(2 ** 53 - 1), 0.1, 12.5, "9007199254740993"],
-      },
-    });
+    const values = [
+      2 ** 53,
+      -(2 ** 53 - 1),
+      0.1,
+      0.30000000000000004,
+      12.5,
+      "9007199254740993",
+    ];
+    const { stored } = await store({ total: { in: values } });
+    expect(stored).toEqual({ [ids.get("total")!]: { in: values } });
   });
 
   it("refuses an ordering bound of more than 38 digits, which SQL Server would compare through a float", async () => {

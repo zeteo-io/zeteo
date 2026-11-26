@@ -99,17 +99,14 @@ const identityRefs = (rule: RuleFilter): Array<[IdentityRef, Path]> => {
 };
 
 /**
- * Whether a JSON number reached the server as written: a safe integer, or a
- * fraction of at most 15 significant digits, which a double always keeps. A
- * larger integer (past 2^53) or a longer fraction was rounded in parsing, so
- * a rule holding it would match other rows than the one written.
+ * Whether a number binds as the decimal it is: finite, and written by
+ * `String` without an exponent (from 1e-7 down, 1e21 up), which SQL Server
+ * would read as a float. That the number is the one the request wrote is
+ * checked where its text is known, as the body is parsed
+ * (`refuseRoundedNumbers`).
  */
-const isExactNumber = (n: number): boolean => {
-  if (!Number.isFinite(n)) return false;
-  if (Number.isInteger(n)) return Number.isSafeInteger(n);
-  const digits = n.toExponential().replace(/e.*$/, "").replace(/[-.]/g, "");
-  return digits.length <= 15;
-};
+const isPlainNumber = (n: number): boolean =>
+  Number.isFinite(n) && !/e/i.test(String(n));
 
 /**
  * Refuses a rule written by an upload source's owner (not a holder of
@@ -167,9 +164,9 @@ const checkValue = (
     if (type !== "date" && type !== "timestamp") throw wrong();
     return;
   }
-  if (typeof value === "number" && !isExactNumber(value)) {
+  if (typeof value === "number" && !isPlainNumber(value)) {
     throw new InvalidRowRuleError(
-      `${value} cannot be held exactly as a JSON number; write large numbers as decimal strings`,
+      `${value} is written with an exponent; write it as a decimal string`,
       path
     );
   }

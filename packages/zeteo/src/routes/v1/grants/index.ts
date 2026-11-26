@@ -1,9 +1,10 @@
 import { sourceOfBodyTable, sourceOfListQuery } from "./middleware.js";
 import { allowOwnerOr } from "../../../middleware/uploadOwner.js";
+import { ruleJson } from "../../../middleware/ruleJson.js";
 import { createGrant, listGrants } from "./controllers.js";
 import effectiveRouter from "./effective/index.js";
 import grantRouter from "./grant/index.js";
-import express, { Router } from "express";
+import { Router } from "express";
 import {
   GRANTS_READ,
   GRANTS_WRITE,
@@ -11,7 +12,8 @@ import {
 
 const grantsRouter = Router();
 
-const json64k = express.json({ limit: "64kb" });
+// A grant may carry a row rule: its numbers are checked as written.
+const json64k = ruleJson("64kb");
 
 grantsRouter.use("/effective", effectiveRouter);
 grantsRouter.use("/:grantId", grantRouter);

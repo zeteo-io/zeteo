@@ -1,12 +1,12 @@
 // @module-tag int
 // @module-tag platform
+import { fetchJson, type JsonResponse } from "../../../support/http.js";
 import { auditRows, removeSources } from "../../../support/sources.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { giveOwnerGrant } from "../../../../uploads/service.js";
 import { startV1Routes } from "../../../support/v1App.js";
 import { prisma } from "../../../../utils/db/prisma.js";
 import { tokenFor } from "../../../support/tokens.js";
-import { fetchJson } from "../../../support/http.js";
 import { randomUUID } from "crypto";
 import {
   DATA_READ,
@@ -124,6 +124,65 @@ describe("/v1/grants row access", () => {
     expect(JSON.stringify(row.rowRule)).toContain('"12345678901234567891"');
     const got = await call("GET", `/${res.body.id}`);
     expect(got.body.row_rule).toEqual(rule);
+  });
+
+  it("refuses a JSON number a double rounded, at its path, on create and replace", async () => {
+    // Sent as text: JSON.stringify would write the rounded number.
+    const raw = async (
+      method: string,
+      path: string,
+      text: string
+    ): Promise<JsonResponse> => {
+      const res = await fetch(`${app.url}/v1/grants${path}`, {
+        method,
+        headers: {
+          Authorization: `Bearer ${grantsWriteToken()}`,
+          "Content-Type": "application/json",
+        },
+        body: text,
+      });
+      return { status: res.status, body: (await res.json()) as unknown };
+    };
+    const head = `"principal_type": "user", "principal_id": "${randomUUID()}", "table_id": "${orders.id}", "all_columns": true, "row_access": "rule"`;
+    for (const [rule, path] of [
+      ['{"total": {"eq": 0.10000000000000001}}', ["row_rule", "total", "eq"]],
+      [
+        '{"and": [{"status": {"eq": "paid"}}, {"external_ref": {"in": [7, 9007199254740993]}}]}',
+        ["row_rule", "and", 1, "external_ref", "in", 1],
+      ],
+      [
+        '{"not": {"total": {"between": [1.0000000000000001, 2]}}}',
+        ["row_rule", "not", "total", "between", 0],
+      ],
+    ] as const) {
+      const res = await raw("POST", "", `{${head}, "row_rule": ${rule}}`);
+      expect(res.status).toBe(400);
+      expect(res.body).toMatchObject({
+        error: "invalid_row_rule",
+        path,
+      });
+      expect(res.body.error_description).toContain("decimal string");
+    }
+    // Written as the double it parses to, however many digits: kept.
+    const created = await raw(
+      "POST",
+      "",
+      `{${head}, "row_rule": {"total": {"in": [0.30000000000000004, 1.50, 12]}}}`
+    );
+    expect(created.status).toBe(201);
+    expect(created.body.row_rule).toEqual({
+      total: { in: [0.30000000000000004, 1.5, 12] },
+    });
+    const replaced = await raw(
+      "PUT",
+      `/${created.body.id}`,
+      `{"all_columns": true, "row_access": "rule", "row_rule": {"total": {"eq": 0.10000000000000001}}}`
+    );
+    expect(replaced.status).toBe(400);
+    expect(replaced.body).toMatchObject({
+      error: "invalid_row_rule",
+      path: ["row_rule", "total", "eq"],
+    });
   });
 
   it("stores the rule by column id and identity key id", async () => {
