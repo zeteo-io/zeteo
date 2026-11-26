@@ -267,7 +267,11 @@ cannot raise an error on any row, so an index can serve them: a whole conjunct o
 `where` (never inside `or` or `not`, never `having`, a calculation, a measure, a fixed measure's
 value or a business-day check) on a column of the from table or of an inner-joined table (never a
 left-joined one, whose missing rows the condition decides), and a metric part's range on its own
-table's date column. The condition must be `isNull`, a comparison, `between` or an `in` of at most
+table's date column. Only on a base table: a view's column may be an expression that raises per row
+(`cast(raw as int)`), and Postgres merges a view into the query, so a condition beside its rule would
+pick the rows that expression runs on. Postgres goes by the table's kind in the catalogue (a view or
+materialized view gets none beside its rule); SQL Server decides when the query runs (above). The
+condition must be `isNull`, a comparison, `between` or an `in` of at most
 100 values against values bound as exactly the column's own type, so nothing is converted per row:
 
 | | Postgres | SQL Server |

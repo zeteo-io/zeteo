@@ -473,8 +473,9 @@ export class Planner {
       table: queryNameOf(this.catalog.tables, table),
       path: [...path],
     };
+    const onView = table.kind === "table" ? {} : { rowRuleOnView: true };
     if (rule.kind === "never") {
-      return { rowFilter: { kind: "never" }, rowRuleAt };
+      return { rowFilter: { kind: "never" }, rowRuleAt, ...onView };
     }
     if (rule.kind === "unavailable") throw refuse();
     const subjectOf = (columnId: string) => {
@@ -496,6 +497,7 @@ export class Planner {
           this.ruleValues
         ),
         rowRuleAt,
+        ...onView,
       };
     } catch (err) {
       if (err instanceof QueryError) throw refuse();
@@ -2048,6 +2050,7 @@ export const planSql = (
       ...(from.rowFilter && {
         rowFilter: from.rowFilter,
         rowRuleAt: from.rowRuleAt,
+        ...(from.rowRuleOnView && { rowRuleOnView: true }),
       }),
     },
     joins,

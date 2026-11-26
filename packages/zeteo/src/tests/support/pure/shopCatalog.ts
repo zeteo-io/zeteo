@@ -158,6 +158,8 @@ export interface ShopOptions {
   metrics?: MetricRow[];
   /** The caller's row rules, by table key; a table absent here gives every row. */
   rowRules?: Record<string, RowRule>;
+  /** Table keys the catalogue holds as views; every other is a table. */
+  views?: string[];
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -210,7 +212,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
       sourceId: SOURCE.id,
       schemaName: spec.schemaName,
       name: spec.name,
-      kind: "table",
+      kind: options.views?.includes(key) ? "view" : "table",
       description: null,
       missingSince: since(key),
     } as SourceTable);

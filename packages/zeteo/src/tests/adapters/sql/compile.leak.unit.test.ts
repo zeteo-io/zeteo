@@ -576,3 +576,48 @@ describe("compileSql: a timestamp beside the rule binds no more than SQL Server 
     }
   });
 });
+
+// A view's columns may be expressions that raise per row (`cast(raw as
+// int)`), which no type tells of; Postgres merges a view into the query, so a
+// condition beside the rule would pick the rows such an expression runs on.
+// Postgres applies the caller's conditions beside the rule of a table the
+// catalogue holds as a base table only; SQL Server decides when the query
+// runs (`ruled`).
+describe("compileSql: conditions beside the rule of a view", () => {
+  const where = { id: { eq: 6 }, total: { gte: "10.5" } };
+
+  it("keeps every condition outside a view's read on Postgres", () => {
+    const { sql } = pg(
+      { from: "orders", select: ["id"], where },
+      { rowRules: { orders: rules("text").PAID }, views: ["orders"] }
+    );
+    expect(ruledReads(sql)).toEqual([
+      'materialized (select "id", "total" from "shop"."orders" where "status" in ($1)) select * from "r"',
+    ]);
+    expect(sql).toMatch(/\) as "t0" where \("t0"\."id" = \$\d+ and /);
+  });
+
+  it("keeps a join's condition outside a viewed join target's read on Postgres", () => {
+    const { sql } = pg(
+      {
+        from: "orders",
+        join: [{ relation: "customer", type: "inner" }],
+        select: ["id"],
+        where: { "customer.name": { eq: "Ada" } },
+      },
+      { rowRules: { customers: rules("text").EU }, views: ["customers"] }
+    );
+    expect(ruledReads(sql)[0]).not.toMatch(/"name" = /);
+  });
+
+  it("leaves the choice to the read on SQL Server", () => {
+    const { sql } = ms(
+      { from: "orders", select: ["id"], where },
+      {
+        rowRules: { orders: rules("nvarchar(200)").PAID },
+        views: ["orders"],
+      }
+    );
+    expect(sql).toContain("IsUserTable");
+  });
+});

@@ -63,6 +63,13 @@ export interface RowFiltered {
    * whose column has gone (`row_rule_unavailable`).
    */
   rowRuleAt?: RowRuleAt;
+  /**
+   * Set when the catalogue holds the ruled table as a view (or materialized
+   * view), whose columns may be expressions that raise per row: a dialect
+   * that decides from the catalogue (`narrowedCheck`) applies no condition
+   * of the caller's beside its rule.
+   */
+  rowRuleOnView?: boolean;
 }
 
 /** Where a table with a row rule is read: its name as the query writes it, and the path. */

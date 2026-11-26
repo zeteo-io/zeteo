@@ -270,6 +270,7 @@ const withJoins = (
         alias: join.alias,
         rowFilter: join.rowFilter,
         rowRuleAt: join.rowRuleAt,
+        rowRuleOnView: join.rowRuleOnView,
       },
       comp,
       pushed.get(join.alias)
@@ -892,6 +893,16 @@ const besideRule = (
 };
 
 /**
+ * Whether conditions of the caller's may be applied beside a table's rule:
+ * it has one, and either the read decides when it runs (`narrowedCheck`
+ * `live`) or the catalogue holds the table as a base table, whose columns
+ * are stored values, not expressions that may raise per row.
+ */
+const mayNarrow = (t: RowFiltered, dialect: SqlDialect): boolean =>
+  t.rowFilter !== undefined &&
+  (dialect.narrowedCheck === "live" || !t.rowRuleOnView);
+
+/**
  * Splits `where` into the conditions applied beside the rule of a table of
  * `aliases` (each a whole conjunct of the where, on one column of that
  * table, `besideRule`), by alias, and what is left. Nothing inside an `or`,
@@ -1075,7 +1086,7 @@ const partQuery = (
   // where it cannot raise.
   const { pushed, rest } = pushDown(
     bounds.length === 0 ? undefined : { kind: "and", filters: bounds },
-    part.from.rowFilter ? new Set(["t0"]) : new Set(),
+    mayNarrow(part.from, dialect) ? new Set(["t0"]) : new Set(),
     comp
   );
   let qb = withJoins(
@@ -1214,10 +1225,9 @@ const compileTable = (
   // before the join as after; on a left-joined one it would turn the outer
   // join's missing rows into rows, so it stays where it is.
   const beside = new Set(
-    [
-      { alias: plan.from.alias, rowFilter: plan.from.rowFilter },
-      ...plan.joins.filter((j) => j.type === "inner"),
-    ].flatMap((t) => (t.rowFilter ? [t.alias] : []))
+    [plan.from, ...plan.joins.filter((j) => j.type === "inner")].flatMap((t) =>
+      mayNarrow(t, dialect) ? [t.alias] : []
+    )
   );
   const { pushed, rest: where } = pushDown(plan.where, beside, comp);
   let qb: AnySelect = withJoins(
