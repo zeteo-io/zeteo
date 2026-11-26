@@ -131,6 +131,33 @@ describe("row-rules store", () => {
     });
   });
 
+  it("refuses an ordering bound of more than 38 digits, which SQL Server would compare through a float", async () => {
+    const long = "0.123456789000000000000000000000000000001";
+    for (const [condition, path] of [
+      [{ gte: long }, ["row_rule", "total", "gte"]],
+      [{ lt: "1" + "0".repeat(38) }, ["row_rule", "total", "lt"]],
+      [
+        { between: ["0", "1." + "0".repeat(38)] },
+        ["row_rule", "total", "between", 1],
+      ],
+    ] as const) {
+      await expect(store({ total: condition as never })).rejects.toMatchObject({
+        code: "invalid_row_rule",
+        message: expect.stringContaining("more than 38 digits"),
+        details: { path },
+      });
+    }
+    // 38 digits bind exactly; an equality of more is compared exactly or
+    // fails closed when the query runs.
+    await store({
+      and: [
+        { total: { gte: "0." + "1".repeat(38) } },
+        { total: { lte: "9".repeat(38) } },
+      ],
+    });
+    await store({ total: { notIn: ["1" + "0".repeat(38)] } });
+  });
+
   it("names unknown ids as problems and keeps them", () => {
     const col = randomUUID();
     const key = randomUUID();

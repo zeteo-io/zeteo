@@ -110,7 +110,10 @@ NULL**, as no comparison with a NULL holds (it fails closed). To keep those rows
 On save the rule is checked: the columns exist on the table and are not missing, the operators suit
 their types, literals parse to the column's type, and identity keys exist. A JSON number a double
 cannot hold as written (an integer past 2^53, or more than 15 significant digits) is refused: write
-large numbers as decimal strings (`"9007199254740993"`). A rule that is not valid is
+large numbers as decimal strings (`"9007199254740993"`). A bound of `gt`, `gte`, `lt`, `lte` or
+`between` on a number column with more than 38 digits (before the point, leading zeros aside, and
+after it) is refused: SQL Server holds no decimal that long and would compare it through a float. A
+rule that is not valid is
 `400 invalid_row_rule`, with `path` into the request body starting `row_rule`.
 
 **Upload source owners** may write rules on their own tables' grants, but **without identity

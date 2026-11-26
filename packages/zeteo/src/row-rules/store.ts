@@ -125,6 +125,25 @@ export const refuseIdentityRefs = (rule: RuleFilter): void => {
   }
 };
 
+/** Operators that order: an equality's values are compared exactly, or fail closed, whatever their digits. */
+const ORDERING_OPS: ReadonlySet<string> = new Set([
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "between",
+]);
+
+/**
+ * A number literal's digits as SQL Server binds it: those before the point,
+ * leading zeros aside, and every one after it. Past 38, no decimal holds it
+ * and it would be compared through a float.
+ */
+const digitsOf = (value: unknown): number => {
+  const m = /^-?(\d+)(?:\.(\d+))?$/.exec(String(value));
+  return m ? m[1]!.replace(/^0+/, "").length + (m[2]?.length ?? 0) : 0;
+};
+
 /** A literal or relative date checked against the column's type; refused with the path of the value. */
 const checkValue = (
   value: unknown,
@@ -155,6 +174,12 @@ const checkValue = (
     );
   }
   if (coerceValue(value as Scalar, type) === undefined) throw wrong();
+  if (type === "number" && ORDERING_OPS.has(op) && digitsOf(value) > 38) {
+    throw new InvalidRowRuleError(
+      `${String(value)} has more than 38 digits, more than SQL Server compares exactly; ${op} takes at most 38`,
+      path
+    );
+  }
 };
 
 /**
