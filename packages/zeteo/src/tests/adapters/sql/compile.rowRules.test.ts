@@ -339,8 +339,8 @@ for (const engine of ENGINES) {
           read: expect.stringMatching(
             engine.name === "postgres"
               ? /where "status" = ANY\(\$1\)$|where "status" in \(\$1, \$2\)$/
-              : // After the rule's guard (`ruleGuard`), which binds @1.
-                /where \[status\] in \(@2, @3\);$/
+              : // After the rule's guard (`ruleGuard`), which binds @1 to @4.
+                /where \[status\] in \(@5, @6\);$/
           ),
         });
       }

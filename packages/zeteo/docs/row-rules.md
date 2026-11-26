@@ -247,7 +247,9 @@ of its own:
   `nvarchar`) would be converted per row, failing on rows the caller's conditions pick. So the copy
   is preceded, in the same request, by a check of `sys.columns` that the columns the rule and the
   conditions beside it compare are there with those types; when one is not, it throws and the query
-  is refused (`409 row_rule_unavailable`). The check reads metadata only.
+  is refused (`409 row_rule_unavailable`). The check reads metadata only, and binds the names and
+  types as plain parameters, so it needs no `OPENJSON` (compatibility level 130); only an `in` or
+  `notIn` of more than 100 values does ([azure-sql.md](azure-sql.md)).
 
 The read keeps only the columns the query reads of the table (join keys, measures and metric parts
 included; none for `count(*)` alone). Beside the rule it also applies the caller's conditions that

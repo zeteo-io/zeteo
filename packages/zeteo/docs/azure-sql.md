@@ -172,6 +172,12 @@ row_rule_unavailable`) when a column it compares no longer has the catalogue's t
 source is refreshed; in a rule, a value whose comparison with the column would need more than 38
 digits is therefore not compared, as no row of the checked type equals it.
 
+**Compatibility level.** A condition's `in` or `notIn` of more than 100 values (the caller's or a
+row rule's) is bound as one JSON value read with `OPENJSON`, which needs the database's
+compatibility level to be 130 (SQL Server 2016) or higher; below that, such a query fails with
+`502 query_failed`. Nothing else Zeteo sends needs it: a row rule's type check binds its column
+names and types as plain parameters.
+
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on the
 server with an attention on its own connection (no second connection is needed, so a cancel never
 waits for a busy pool); the driver's own request timeout, set when the request gets its connection

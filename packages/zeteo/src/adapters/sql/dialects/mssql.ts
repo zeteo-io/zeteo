@@ -749,21 +749,29 @@ const NATIVE_TYPE = `case
  * chosen for that type: one converting a changed column per row could fail
  * on a row the rule hides, on a row the caller's conditions picked. It reads
  * `sys.columns` only, so whether it throws depends on no row. The names and
- * types are one bound JSON value, compared byte for byte.
+ * types are plain bound values, a pair per column read as a VALUES list
+ * (no OPENJSON, which needs compatibility level 130), compared byte for
+ * byte; `object` names the table by bound schema and name.
  */
-const ruleGuard = (guard: RuleGuard, index: number): Expression<unknown> => {
+const ruleGuard = (
+  guard: RuleGuard,
+  object: Expression<unknown>,
+  index: number
+): Expression<unknown> => {
   if (guard.columns.length === 0) return sql``;
-  const spec = param(
-    "nvarchar",
-    JSON.stringify({
-      s: guard.schemaName,
-      t: guard.name,
-      c: guard.columns.map((c) => [c.name, c.nativeType]),
-    })
+  const expected = sql.join(
+    guard.columns.map(
+      (c) =>
+        sql`(${param("nvarchar", c.name)}, ${param("nvarchar", c.nativeType)})`
+    )
   );
   const state = Math.min(index + 1, 255);
-  return sql`if exists (select 1 from openjson(${spec}, N'$.c') with (n nvarchar(128) N'$[0]', t nvarchar(400) N'$[1]') as e where not exists (select 1 from sys.columns as c left join sys.types as ty on ty.user_type_id = c.user_type_id cross apply (select coalesce(case when ty.is_assembly_type = 1 then ty.name else type_name(c.system_type_id) end, N'unknown') as tn) as k where c.object_id = object_id(quotename(json_value(${spec}, N'$.s')) + N'.' + quotename(json_value(${spec}, N'$.t'))) and c.name collate Latin1_General_BIN2 = e.n collate Latin1_General_BIN2 and ${sql.raw(NATIVE_TYPE.replace(/\s+/g, " "))} collate Latin1_General_BIN2 = e.t collate Latin1_General_BIN2)) throw ${sql.lit(RULE_GUARD_ERROR)}, N'a row rule column differs from the catalogue', ${sql.lit(state)}; `;
+  return sql`if exists (select 1 from (values ${expected}) as e (n, t) where not exists (select 1 from sys.columns as c left join sys.types as ty on ty.user_type_id = c.user_type_id cross apply (select coalesce(case when ty.is_assembly_type = 1 then ty.name else type_name(c.system_type_id) end, N'unknown') as tn) as k where c.object_id = ${object} and c.name collate Latin1_General_BIN2 = e.n collate Latin1_General_BIN2 and ${sql.raw(NATIVE_TYPE.replace(/\s+/g, " "))} collate Latin1_General_BIN2 = e.t collate Latin1_General_BIN2)) throw ${sql.lit(RULE_GUARD_ERROR)}, N'a row rule column differs from the catalogue', ${sql.lit(state)}; `;
 };
+
+/** The object id of `schemaName.name`, both bound, or null when there is none the caller can see. */
+const objectIdOf = (schemaName: string, name: string): Expression<unknown> =>
+  sql`object_id(quotename(${param("nvarchar", schemaName)}) + N'.' + quotename(${param("nvarchar", name)}))`;
 
 export const mssqlDialect: SqlDialect = {
   name: "mssql",
@@ -936,7 +944,7 @@ export const mssqlDialect: SqlDialect = {
         ? sql`0 as ${sql.id("_")}`
         : sql.join(columns.map((c) => sql.id(c)));
     staging.statements.push(
-      sql`${ruleGuard(guard, index)}drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
+      sql`${ruleGuard(guard, objectIdOf(guard.schemaName, guard.name), index)}drop table if exists ${temp}; select ${list} into ${temp} from ${table} where ${where};`
     );
     staging.at.push(guard.at);
     return temp;
