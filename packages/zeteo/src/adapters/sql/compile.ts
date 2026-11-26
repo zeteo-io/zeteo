@@ -715,11 +715,17 @@ const compileFilter = <S>(
     left?: { apart: boolean };
   } = {}
 ): Expression<SqlBool> => {
+  const rule = mode === "rule" || mode === "checkedRule";
+  /** A plan value bound for the subject: a rule's in the column's own type where it can be (`ruleValue`). */
+  const bind = (v: PlanValue, s: ValueSubject): Expression<unknown> =>
+    (rule && s.nativeType !== undefined
+      ? dialect.ruleValue(v, { type: s.type, nativeType: s.nativeType })
+      : undefined) ?? dialect.value(v, s);
   /** A value bound for the subject, or a fixed measure's value. */
   const valueOf = (v: FilterValue, s: ValueSubject): Expression<unknown> =>
     typeof v === "object" && v !== null && "kind" in v
       ? compileExpr(v, dialect, ctx)
-      : dialect.value(v, s);
+      : bind(v, s);
   const go = (f: ResolvedFilter<S>, at: Position): Expression<SqlBool> => {
     switch (f.kind) {
       case "and":
@@ -771,11 +777,9 @@ const compileFilter = <S>(
           return noValueLeft(s.expression, f.op === "in" ? "eq" : "ne");
         }
         if (lists === "set" && values.length > IN_LIST_MAX) {
-          return dialect.inSet(s.expression, values, s, f.op === "notIn");
+          return dialect.inSet(s.expression, values, s, f.op === "notIn", rule);
         }
-        const bound = sql.join(
-          values.map((v: PlanValue) => dialect.value(v, s))
-        );
+        const bound = sql.join(values.map((v: PlanValue) => bind(v, s)));
         return sql<SqlBool>`${s.expression} ${f.op === "in" ? sql`in` : sql`not in`} (${bound})`;
       }
       case "match": {

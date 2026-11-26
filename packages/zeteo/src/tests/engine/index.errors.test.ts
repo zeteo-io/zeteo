@@ -368,6 +368,7 @@ describeEachEngine(
           `INSERT INTO ${PROBE_SCHEMA}.items VALUES
            (1, 'shown', '6f1c1b2e-3c4d-4e5f-8a9b-0c1d2e3f4a5b', '2026-02-01 00:00:00', 'Alpha', 1),
            (2, 'shown', NULL, '2026-03-01 00:00:00', 'Beta', 2),
+           (3, 'shown', NULL, '2026-03-02 00:00:00', 'Delta', 150),
            (6, 'hidden', 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11', '2026-04-01 00:00:00', 'Gamma', 6)`,
           `GRANT USAGE ON SCHEMA ${PROBE_SCHEMA} TO zeteo_ro`,
           `GRANT SELECT ON ${PROBE_SCHEMA}.items TO zeteo_ro`,
@@ -378,6 +379,7 @@ describeEachEngine(
           `INSERT INTO ${PROBE_SCHEMA}.items VALUES
            (1, N'shown', '6F1C1B2E-3C4D-4E5F-8A9B-0C1D2E3F4A5B', '2026-02-01 00:00:00', N'Alpha', 1),
            (2, N'shown', NULL, '2026-03-01 00:00:00', N'Beta', 2),
+           (3, N'shown', NULL, '2026-03-02 00:00:00', N'Delta', 150),
            (6, N'hidden', 'A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A11', '2026-04-01 00:00:00', N'Gamma', 6)`,
           `GRANT SELECT ON SCHEMA::${PROBE_SCHEMA} TO zeteo_ro`,
         ],
@@ -405,10 +407,13 @@ describeEachEngine(
         postgres: [
           `ALTER TABLE ${PROBE_SCHEMA}.items ALTER COLUMN code TYPE text`,
           `UPDATE ${PROBE_SCHEMA}.items SET code = 'A12' WHERE id = ${HIDDEN}`,
+          // 150 is not below 100; as text, '0150' is below '100'.
+          `UPDATE ${PROBE_SCHEMA}.items SET code = '0150' WHERE id = 3`,
         ],
         mssql: [
           `ALTER TABLE ${PROBE_SCHEMA}.items ALTER COLUMN code nvarchar(20)`,
           `UPDATE ${PROBE_SCHEMA}.items SET code = N'A12' WHERE id = ${HIDDEN}`,
+          `UPDATE ${PROBE_SCHEMA}.items SET code = N'0150' WHERE id = 3`,
         ],
       });
     });
@@ -460,12 +465,19 @@ describeEachEngine(
         expect(hidden).toEqual({ status: 409, error: "row_rule_unavailable" });
         expect(visible).toEqual(hidden);
       } else {
-        // Postgres infers the parameter's type from the column at bind time:
-        // the code is compared as text ('1' < '100', 'A12' not), on no row
-        // converted.
-        expect(visible).toEqual({ status: 200, ids: [VISIBLE] });
-        expect(hidden).toEqual({ status: 200, ids: [] });
+        // The rule's value is bound as the catalogue's integer, which no
+        // operator compares with text: the statement fails when planned,
+        // whatever the id, never comparing the code as text.
+        expect(hidden).toEqual({ status: 502, error: "query_failed" });
+        expect(visible).toEqual(hidden);
       }
+    });
+
+    it("a rule on a column changed since the catalogue was read never keeps a row the rule hides", async () => {
+      // As text, '0150' < '100': a comparison chosen by the column's new
+      // type would keep row 3, whose code is 150.
+      const all = await outcome(stale.token, { id: { gte: 0 } });
+      expect(all.status === 200 ? all.ids : []).not.toContain(3);
     });
 
     it("a timestamp finer than SQL Server reads, beside the rule, tells a hidden row from a missing one by nothing", async () => {

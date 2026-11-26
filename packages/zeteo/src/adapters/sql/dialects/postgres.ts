@@ -113,12 +113,22 @@ const inSet = (
   expression: Expression<unknown>,
   values: readonly PlanValue[],
   { type, nativeType }: ValueSubject,
-  negate: boolean
+  negate: boolean,
+  rule = false
 ): Expression<SqlBool> => {
   const base = postgresBaseType(nativeType);
   const list = values.map((v) => (typeof v === "boolean" ? v : String(v)));
   let array: Expression<unknown> = sql`${list}`;
-  if (type === "timestamp") {
+  // A rule's list in the column's catalogued type, as `ruleValue` binds one.
+  const own = rule && nativeType !== undefined && ownTypeName(nativeType);
+  if (
+    own &&
+    values.every(
+      (v) => ownValue(v, { type, nativeType: nativeType! }) !== undefined
+    )
+  ) {
+    array = sql`cast(${list} as ${sql.raw(own)}[])`;
+  } else if (type === "timestamp") {
     const instants = sql`cast(${list} as timestamptz[])`;
     const v = sql.id("v");
     array = NAIVE_TIMESTAMP.test(base)
@@ -204,6 +214,39 @@ const ownValue = (
     default:
       return undefined;
   }
+};
+
+/**
+ * The type `ownValue`'s value is read as, without a length, precision or
+ * scale (a cast to `numeric(12,2)`, `varchar(20)` or `char(3)` would round
+ * or cut the value): undefined for a value `ownValue` already casts (a uuid,
+ * a timestamp).
+ */
+const ownTypeName = (nativeType: string): string | undefined => {
+  if (OWN_INTEGERS.has(nativeType) || OWN_FLOATS.has(nativeType)) {
+    return nativeType;
+  }
+  if (OWN_NUMERIC.test(nativeType)) return "numeric";
+  if (nativeType === "text") return "text";
+  if (nativeType.startsWith("character varying")) return "varchar";
+  if (/^character(\(\d+\))?$/.test(nativeType)) return "bpchar";
+  if (nativeType === "date" || nativeType === "boolean") return nativeType;
+  return undefined;
+};
+
+/**
+ * `ownValue` cast to the column's catalogued type, so a column whose type
+ * has changed since (an integer now text) fails when the statement is
+ * planned (no operator compares them), not per row and not as text.
+ */
+const ruleValue = (
+  v: PlanValue,
+  subject: ValueSubject & { nativeType: string }
+): Expression<unknown> | undefined => {
+  const own = ownValue(v, subject);
+  if (!own) return undefined;
+  const name = ownTypeName(subject.nativeType);
+  return name ? sql`cast(${v} as ${sql.raw(name)})` : own;
 };
 
 const ESCAPE = "\\";
@@ -401,6 +444,7 @@ export const postgresDialect: SqlDialect = {
   ruledOnce: false,
   narrowedCheck: "catalogue",
   ownValue,
+  ruleValue,
   // ILIKE raises on every row of a column with a nondeterministic collation,
   // which the catalogue does not record: no match is evaluated beside a rule.
   ownMatch: () => undefined,

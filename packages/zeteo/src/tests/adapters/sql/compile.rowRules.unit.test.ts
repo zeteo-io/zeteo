@@ -75,7 +75,7 @@ describe("compileSql: row rules on Postgres", () => {
       pg({ from: "orders", select: ["id"] }, { rowRules: { orders: PAID } })
     ).toEqual({
       sql:
-        'select "t0"."id" as "c0" from (with "r" as materialized (select "id" from "shop"."orders" where "status" in ($1)) select * from "r") as "t0"' +
+        'select "t0"."id" as "c0" from (with "r" as materialized (select "id" from "shop"."orders" where "status" in (cast($1 as text))) select * from "r") as "t0"' +
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["paid", 101, 0],
     });
@@ -92,7 +92,7 @@ describe("compileSql: row rules on Postgres", () => {
         { rowRules: { customers: EU } }
       );
       expect(sql).toContain(
-        `from "shop"."orders" as "t0" ${type} join (with "r" as materialized (select "id", "name" from "shop"."customers" where "region" = $1) select * from "r") as "t1" on "t0"."customer_id" = "t1"."id"`
+        `from "shop"."orders" as "t0" ${type} join (with "r" as materialized (select "id", "name" from "shop"."customers" where "region" = cast($1 as text)) select * from "r") as "t1" on "t0"."customer_id" = "t1"."id"`
       );
       expect(parameters[0]).toBe("EU");
     }
@@ -118,7 +118,7 @@ describe("compileSql: row rules on Postgres", () => {
       { rowRules: { orders: big } }
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select "id" from "shop"."orders" where "customer_id" = any($1)) select * from "r") as "t0"'
+      'from (with "r" as materialized (select "id" from "shop"."orders" where "customer_id" = any(cast($1 as integer[]))) select * from "r") as "t0"'
     );
     expect(parameters).toEqual([values, 101, 0]);
   });
@@ -155,7 +155,7 @@ describe("compileSql: row rules on Postgres", () => {
     );
     expect(sql).toContain(
       // count(*) reads no column: the WITH query keeps none.
-      'from (with "r" as materialized (select  from "shop"."orders" where "status" in ($1)) select * from "r") as "f1_t0"'
+      'from (with "r" as materialized (select  from "shop"."orders" where "status" in (cast($1 as text))) select * from "r") as "f1_t0"'
     );
   });
 
@@ -166,7 +166,7 @@ describe("compileSql: row rules on Postgres", () => {
       true
     );
     expect(sql).toContain(
-      'from (with "r" as materialized (select "ordered_on", "total" from "shop"."orders" where "status" in ($2)) select * from "r") as "t0"'
+      'from (with "r" as materialized (select "ordered_on", "total" from "shop"."orders" where "status" in (cast($2 as text))) select * from "r") as "t0"'
     );
   });
 });
@@ -460,7 +460,7 @@ describe("compileSql: columns named as Object's own properties", () => {
       const p = (n: number) =>
         dialect.name === "mssql" ? `@${n + 6}` : `$${n}`;
       expect(sql).toContain(
-        `where (${q("constructor")} <> ${p(1)}) and ${q("constructor")} = ${p(2)} and ${q("prototype")} is null`
+        `where (${q("constructor")} <> ${dialect.name === "mssql" ? p(1) : `cast(${p(1)} as text)`}) and ${q("constructor")} = ${p(2)} and ${q("prototype")} is null`
       );
     }
   });
@@ -818,5 +818,90 @@ describe("compileSql: the copy beside the rule, on a base table only, on SQL Ser
     expect(sql).toContain(
       "drop table if exists #r0; select [id] into #r0 from [shop].[orders] where [status] in (@5); select "
     );
+  });
+});
+
+// Postgres infers an uncast parameter's type from the column when the
+// statement is planned: a column changed since the catalogue was read (an
+// integer now text) would compare the rule's value another way, `'0150' <
+// '100'`, keeping rows the rule hides. A rule's value is bound cast to the
+// column's catalogued type, so such a column fails when the statement is
+// planned, whatever the rows; a value that type cannot hold is bound as
+// before.
+describe("compileSql: a rule's values in the column's own type, on Postgres", () => {
+  const ruleOn = (
+    nativeType: string,
+    type: QueryableType,
+    filter: Record<string, unknown>
+  ) =>
+    pg(
+      { from: "orders", select: ["id"] },
+      {
+        rowRules: {
+          orders: rule(filter, [
+            ruleColumn("orders.customer_id", type, nativeType),
+          ]),
+        },
+      }
+    );
+  const where = (sql: string) =>
+    /from "shop"\."orders" where (.*?)\) select \* from "r"/.exec(sql)![1];
+  const c = "orders.customer_id";
+
+  it.each([
+    ["integer", "number", { lt: 100 }, '"customer_id" < cast($1 as integer)'],
+    ["bigint", "number", { eq: 5 }, '"customer_id" = cast($1 as bigint)'],
+    [
+      "numeric(12,2)",
+      "number",
+      { gte: "10.555" },
+      '"customer_id" >= cast($1 as numeric)',
+    ],
+    [
+      "character varying(20)",
+      "text",
+      { in: ["a", "b"] },
+      '"customer_id" in (cast($1 as varchar), cast($2 as varchar))',
+    ],
+    [
+      "character(3)",
+      "text",
+      { ne: "ab" },
+      '"customer_id" <> cast($1 as bpchar)',
+    ],
+    ["text", "text", { eq: "x" }, '"customer_id" = cast($1 as text)'],
+    ["date", "date", { lt: "2026-01-01" }, '"customer_id" < cast($1 as date)'],
+    ["boolean", "boolean", { eq: true }, '"customer_id" = cast($1 as boolean)'],
+    [
+      "integer",
+      "number",
+      { between: [1, 9] },
+      '"customer_id" between cast($1 as integer) and cast($2 as integer)',
+    ],
+  ])("%s, %j", (nativeType, type, condition, expected) => {
+    expect(
+      where(ruleOn(nativeType, type as QueryableType, { [c]: condition }).sql)
+    ).toBe(expected);
+  });
+
+  it("binds a long list as an array of the column's type", () => {
+    const values = Array.from({ length: 150 }, (_, i) => i + 1);
+    expect(
+      where(ruleOn("integer", "number", { [c]: { in: values } }).sql)
+    ).toBe('"customer_id" = any(cast($1 as integer[]))');
+  });
+
+  it("binds a value the column's type cannot hold as before", () => {
+    expect(where(ruleOn("integer", "number", { [c]: { lt: "1.5" } }).sql)).toBe(
+      '"customer_id" < cast($1 as numeric)'
+    );
+  });
+
+  it("leaves a caller's own where as it was", () => {
+    const { sql } = pg(
+      { from: "orders", select: ["id"], where: { customer_id: { lt: 100 } } },
+      {}
+    );
+    expect(sql).toContain('"t0"."customer_id" < $1');
   });
 });

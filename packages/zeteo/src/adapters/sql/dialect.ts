@@ -157,13 +157,14 @@ export interface SqlDialect {
    * SQL Server a JSON array read with `openjson` (a few, when some values are
    * `wider` than the column's type). Each value is converted as `value`
    * converts it for the subject; `values` are `equalityValues`' `held` and
-   * `wider`.
+   * `wider`. `rule` binds them as `ruleValue` binds one, where it can.
    */
   inSet(
     expression: Expression<unknown>,
     values: readonly PlanValue[],
     subject: ValueSubject,
-    negate: boolean
+    negate: boolean,
+    rule?: boolean
   ): Expression<SqlBool>;
   /**
    * The first day of the period holding `date` (a date expression), as a
@@ -309,6 +310,19 @@ export interface SqlDialect {
    * `value` does: the same rows match.
    */
   ownValue(
+    value: PlanValue,
+    subject: { type: QueryableType; nativeType: string }
+  ): Expression<unknown> | undefined;
+  /**
+   * A row rule's value bound as exactly the column's catalogued type, so a
+   * comparison with a column whose type has changed since the catalogue was
+   * read fails when the statement is planned, before any row is read,
+   * instead of comparing another way (Postgres infers an uncast parameter's
+   * type from the column). Undefined where the dialect needs none (SQL
+   * Server's read checks the column's type, `RuleGuard`) or cannot bind the
+   * value so: it is then bound by `value`.
+   */
+  ruleValue(
     value: PlanValue,
     subject: { type: QueryableType; nativeType: string }
   ): Expression<unknown> | undefined;

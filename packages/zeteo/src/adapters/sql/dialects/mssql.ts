@@ -966,6 +966,8 @@ export const mssqlDialect: SqlDialect = {
   narrowedCheck: "live",
   ruledOnce: true,
   ownValue,
+  // The read's guard has checked the column's type (`ruleGuard`).
+  ruleValue: () => undefined,
   ownMatch: (column, pattern, nativeType) =>
     OWN_TEXT.test(nativeType) ? like(column, pattern) : undefined,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,

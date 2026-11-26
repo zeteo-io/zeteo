@@ -115,7 +115,7 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { rowRules: { orders: pgRules.PAID } }
     );
     expect(ruledReads(sql)).toEqual([
-      'materialized (select "id", "status", "total" from "shop"."orders" where ("status" in ($2)) and "id" = $3 and "total" >= cast($4 as numeric) and "ordered_on" between $5 and $6 and "notes" is not null) select * from "r"',
+      'materialized (select "id", "status", "total" from "shop"."orders" where ("status" in (cast($2 as text))) and "id" = $3 and "total" >= cast($4 as numeric) and "ordered_on" between $5 and $6 and "notes" is not null) select * from "r"',
     ]);
     expect(parameters.slice(1, 6)).toEqual([
       "paid",
@@ -177,7 +177,7 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       { rowRules: { orders: pgRules.PAID } }
     );
     expect(ruledReads(sql)).toEqual([
-      'materialized (select "customer_id", "id" from "shop"."orders" where "status" in ($1)) select * from "r"',
+      'materialized (select "customer_id", "id" from "shop"."orders" where "status" in (cast($1 as text))) select * from "r"',
     ]);
     expect(sql).toContain('"t0"."customer_id" > cast($2 as numeric)');
   });
@@ -287,7 +287,7 @@ describe("compileSql: conditions that cannot raise, beside the rule", () => {
       true
     );
     expect(ruledReads(sql)[0]).toMatch(
-      /where \("status" in \(\$\d\)\) and "ordered_on" >= \$\d and "ordered_on" < \$\d\)/
+      /where \("status" in \(cast\(\$\d as text\)\)\) and "ordered_on" >= \$\d and "ordered_on" < \$\d\)/
     );
   });
 });
@@ -510,7 +510,7 @@ describe("compileSql: a condition whose types do not match stays outside the rul
       expect(reads[0]).toMatch(
         dialect.name === "mssql"
           ? /from \[shop\]\.\[orders\] where \[status\] in \(@5\);$/
-          : /from "shop"\."orders" where "status" in \(\$1\)\) select \* from "r"$/
+          : /from "shop"\."orders" where "status" in \(cast\(\$1 as text\)\)\) select \* from "r"$/
       );
       // The condition is the query's own, on the read's rows.
       expect(
@@ -592,7 +592,7 @@ describe("compileSql: conditions beside the rule of a view", () => {
       { rowRules: { orders: rules("text").PAID }, views: ["orders"] }
     );
     expect(ruledReads(sql)).toEqual([
-      'materialized (select "id", "total" from "shop"."orders" where "status" in ($1)) select * from "r"',
+      'materialized (select "id", "total" from "shop"."orders" where "status" in (cast($1 as text))) select * from "r"',
     ]);
     expect(sql).toMatch(/\) as "t0" where \("t0"\."id" = \$\d+ and /);
   });

@@ -210,9 +210,14 @@ out nothing, as the comparison would. That is done on a base table only: a view'
 compares the value exactly (see the SQL Server bullet under Enforcement). A value of more than 38 digits, which no SQL Server exact
 number holds, makes such a condition keep no row ([azure-sql.md](azure-sql.md)).
 
-Postgres needs no such check: a parameter's type is inferred from the column when the statement is
-prepared, and nothing converts text to a number per row, so a column changed since the last
-refresh changes what matches, or fails the statement before any row is read, never on one row.
+Postgres needs no such check. A rule's value is bound cast to the column's type as the catalogue
+last read it (`cast($1 as integer)`, without a length, precision or scale, so nothing is rounded or
+cut), so a column changed since the last refresh (an `integer` now `text`) fails the statement when
+it is planned, before any row is read (`502 query_failed`), instead of comparing another way (as
+text, `'0150' < '100'`). A widened column (`integer` to `bigint` or `numeric`) still compares. A value
+the column's type cannot hold, and a value against a column read through a cast or another type
+(an enum, money, a domain), is bound as before, from the column's type when the statement is
+prepared.
 
 ## Enforcement
 
