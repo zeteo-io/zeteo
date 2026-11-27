@@ -33,6 +33,8 @@ const read = (overrides: Partial<RuledTableRead> = {}): RuledTableRead => ({
 const live = (overrides: Partial<LiveTable> = {}): LiveTable => ({
   kind: "r",
   plain: true,
+  rowSecurity: false,
+  nondeterministic: new Set(),
   columns: new Map([
     ["id", "integer"],
     ["code", "integer"],
@@ -82,6 +84,38 @@ describe("decideRuledReads", () => {
       unnarrowed: new Set([tableKey(r)]),
       recompile: true,
     });
+  });
+
+  it("reads a table where row-level security is on (it or a member) with its rule alone", () => {
+    const r = read();
+    expect(
+      decideRuledReads([r], liveOf([r, live({ rowSecurity: true })]))
+    ).toEqual({
+      kind: "run",
+      unnarrowed: new Set([tableKey(r)]),
+      recompile: true,
+    });
+  });
+
+  it("reads a table with its rule alone when a column its rule or conditions name has a nondeterministic collation", () => {
+    const r = read();
+    expect(
+      decideRuledReads(
+        [r],
+        liveOf([r, live({ nondeterministic: new Set(["code"]) })])
+      )
+    ).toEqual({
+      kind: "run",
+      unnarrowed: new Set([tableKey(r)]),
+      recompile: true,
+    });
+    // One it does not name leaves the table plain.
+    expect(
+      decideRuledReads(
+        [r],
+        liveOf([r, live({ nondeterministic: new Set(["id"]) })])
+      )
+    ).toEqual({ kind: "run", unnarrowed: new Set(), recompile: false });
   });
 
   it("compiles again only when a table read with its rule alone had conditions beside it", () => {
@@ -206,14 +240,14 @@ describe("mergeRuledReads", () => {
 });
 
 describe("lockStatements", () => {
-  it("locks a catalogued table, its descendants and a view's tables in ACCESS SHARE mode; a catalogued view by a read of no row", () => {
+  it("locks a catalogued table alone (not its descendants) in ACCESS SHARE mode; a catalogued view, and its tables, by a read of no row", () => {
     expect(
       lockStatements([
         read({ schemaName: 'we"ird', name: "items" }),
         read({ name: "v", onView: true }),
       ])
     ).toEqual([
-      'lock table "we""ird"."items" in access share mode',
+      'lock table only "we""ird"."items" in access share mode',
       'select from "s"."v" where false',
     ]);
   });

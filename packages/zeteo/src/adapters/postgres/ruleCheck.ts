@@ -24,6 +24,17 @@ export interface LiveTable {
    * 18 computes one when read, so it can raise per row).
    */
   plain: boolean;
+  /**
+   * Whether row-level security is on for it or a descendant: the planner may
+   * evaluate a leakproof condition of the caller's before a policy's, which
+   * could then raise on rows the caller picked.
+   */
+  rowSecurity: boolean;
+  /**
+   * The columns asked for whose collation is nondeterministic, where ILIKE
+   * (a rule's `contains` or `startsWith`) raises on each row it reads.
+   */
+  nondeterministic: ReadonlySet<string>;
   /** The type of each column asked for, as the catalogue refresh writes it (`NATIVE_TYPE`). */
   columns: ReadonlyMap<string, string>;
 }
@@ -93,7 +104,12 @@ export const decideRuledReads = (
     ) {
       return { kind: "refuse", at: r.at };
     }
-    if (!PUSHDOWN_KINDS.has(table.kind) || !table.plain) {
+    if (
+      !PUSHDOWN_KINDS.has(table.kind) ||
+      !table.plain ||
+      table.rowSecurity ||
+      r.columns.some((c) => table.nondeterministic.has(c.name))
+    ) {
       unnarrowed.add(key);
       if (r.narrowed) recompile = true;
     }
@@ -104,9 +120,13 @@ export const decideRuledReads = (
 /**
  * The statements that lock each ruled table in ACCESS SHARE mode, what the
  * query itself takes, until the transaction ends, so no DDL lands between the
- * check and the query. LOCK TABLE (allowed in a read-only transaction in
- * this mode) also locks a table's partitions and inheritance children and a
- * view's tables, but refuses a materialized view or a foreign table: one the
+ * check and the query. LOCK TABLE ONLY (allowed in a read-only transaction in
+ * this mode) locks the table alone: locking its partitions and inheritance
+ * children adds nothing the check relies on (a child cannot change an
+ * inherited column's type or its own kind alone, nor gain a virtual column
+ * its parent lacks; detaching one needs the parent's lock; one attached
+ * concurrently races either way), and on older servers would need a
+ * privilege on each. It refuses a materialized view or a foreign table: one the
  * catalogue holds as a table and now is one is refused with the query
  * (wrong object type), as a stale catalogue. One the catalogue holds as a
  * view (a view or a materialized view) is locked by a select of no row,
@@ -118,14 +138,16 @@ export const lockStatements = (reads: readonly RuledTableRead[]): string[] =>
     const name = sql.id(r.schemaName, r.name);
     const statement = r.onView
       ? sql`select from ${name} where false`
-      : sql`lock table ${name} in access share mode`;
+      : sql`lock table only ${name} in access share mode`;
     return statement.compile(postgresDialect.kysely).sql;
   });
 
 /**
- * Each wanted table's kind, whether it and its descendants are plain, and the
- * named columns' types. Metadata only; `attgenerated` exists from
- * PostgreSQL 12, which a rule-limited query already needs.
+ * Each wanted table's kind, whether it and its descendants are plain and
+ * whether row-level security is on for any of them, and the named columns'
+ * types and whether their collation is nondeterministic. Metadata only;
+ * `attgenerated` and `collisdeterministic` exist from PostgreSQL 12, which a
+ * rule-limited query already needs.
  */
 const LIVE_TABLES = `
   WITH RECURSIVE wanted AS (
@@ -149,8 +171,16 @@ const LIVE_TABLES = `
                                WHERE g.attrelid = m.oid AND g.attnum > 0
                                  AND NOT g.attisdropped AND g.attgenerated = 'v'))
          ) AS plain,
+         EXISTS (
+           SELECT 1 FROM members m
+             JOIN pg_catalog.pg_class mc ON mc.oid = m.oid
+            WHERE m.i = w.i AND mc.relrowsecurity
+         ) AS row_security,
          a.attname::text AS column_name,
-         ${NATIVE_TYPE} AS native_type
+         ${NATIVE_TYPE} AS native_type,
+         EXISTS (SELECT 1 FROM pg_catalog.pg_collation co
+                  WHERE co.oid = a.attcollation AND NOT co.collisdeterministic)
+           AS nondeterministic
     FROM wanted w
     LEFT JOIN pg_catalog.pg_attribute a
       ON a.attrelid = w.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -171,8 +201,10 @@ export const readLiveTables = async (
     i: number;
     kind: string;
     plain: boolean;
+    row_security: boolean;
     column_name: string | null;
     native_type: string | null;
+    nondeterministic: boolean;
   }>(LIVE_TABLES, [
     tables.map((t) => t.schemaName),
     tables.map((t) => t.name),
@@ -183,7 +215,13 @@ export const readLiveTables = async (
     const key = tableKey(tables[row.i - 1]!);
     let table = live.get(key);
     if (!table) {
-      table = { kind: row.kind, plain: row.plain, columns: new Map() };
+      table = {
+        kind: row.kind,
+        plain: row.plain,
+        rowSecurity: row.row_security,
+        nondeterministic: new Set(),
+        columns: new Map(),
+      };
       live.set(key, table);
     }
     if (row.column_name !== null && row.native_type !== null) {
@@ -191,6 +229,9 @@ export const readLiveTables = async (
         row.column_name,
         row.native_type
       );
+      if (row.nondeterministic) {
+        (table.nondeterministic as Set<string>).add(row.column_name);
+      }
     }
   }
   return live;

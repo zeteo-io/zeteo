@@ -73,13 +73,18 @@ describe("row rules, Postgres live metadata check", () => {
       `INSERT INTO ${SCHEMA}.ci VALUES (1, '10'), (2, '7'), (${HIDDEN}, '60')`,
       `CREATE TABLE ${SCHEMA}.ciok (id integer PRIMARY KEY, tag public.citext)`,
       `INSERT INTO ${SCHEMA}.ciok VALUES (1, 'Alpha'), (2, 'beta')`,
-      // Locked by LOCK TABLE (its partitions too) and by a select of no
+      // Locked by LOCK TABLE ONLY (the parent alone) and by a select of no
       // row: both run as before.
       `CREATE TABLE ${SCHEMA}.part (id integer, code integer) PARTITION BY RANGE (id)`,
       `CREATE TABLE ${SCHEMA}.part_a PARTITION OF ${SCHEMA}.part FOR VALUES FROM (0) TO (5)`,
       `CREATE TABLE ${SCHEMA}.part_b PARTITION OF ${SCHEMA}.part FOR VALUES FROM (5) TO (100)`,
       `INSERT INTO ${SCHEMA}.part VALUES (1, 5), (2, 500), (${HIDDEN}, 7)`,
       `CREATE MATERIALIZED VIEW ${SCHEMA}.mv AS SELECT id, code FROM ${SCHEMA}.part`,
+      // A rule column with a nondeterministic collation, never analysed: the
+      // rule's ILIKE raises on each row it is evaluated on.
+      `CREATE COLLATION ${SCHEMA}.ci_nd (provider = icu, locale = 'und-u-ks-level2', deterministic = false)`,
+      `CREATE TABLE ${SCHEMA}.nd (id integer PRIMARY KEY, region text COLLATE ${SCHEMA}.ci_nd NOT NULL)`,
+      `INSERT INTO ${SCHEMA}.nd VALUES (1, 'EU-1'), (2, 'EU-2'), (${HIDDEN}, 'US-1')`,
       `GRANT USAGE ON SCHEMA ${SCHEMA} TO zeteo_ro`,
       `GRANT SELECT ON ALL TABLES IN SCHEMA ${SCHEMA} TO zeteo_ro`,
     ]);
@@ -100,6 +105,7 @@ describe("row rules, Postgres live metadata check", () => {
     await rule("ciok", { tag: { eq: "ALPHA" } });
     await rule("part", { code: { lt: 100 } });
     await rule("mv", { code: { lt: 100 } });
+    await rule("nd", { region: { startsWith: "EU" } });
     // Changed behind the catalogue's back.
     await asAdmin([
       `DROP TABLE ${SCHEMA}.swap`,
@@ -204,6 +210,10 @@ describe("row rules, Postgres live metadata check", () => {
       status: 200,
       ids: [1],
     });
+  });
+
+  it("a rule on a column with a nondeterministic collation tells a hidden row from a missing one by nothing", async () => {
+    await probe("nd");
   });
 
   it("a partitioned table and a materialized view keep the rows their rules say", async () => {

@@ -247,20 +247,26 @@ of its own:
   may be stale, so in the same read-only transaction, on the same connection and before the query,
   each table the query reads through a rule (from, joins, fixed measures, metric parts) is locked
   in `ACCESS SHARE` mode, the lock the query itself takes, held until the transaction ends so no
-  change to the table lands between the check and the query: `LOCK TABLE`, which a read-only
-  transaction allows in this mode and which also locks a table's partitions and children and a
-  view's tables, for a table the catalogue holds as a table (it refuses a materialized or foreign
-  table, so one now in its place refuses the query); `select from <view> where false`, which takes
+  change to the table lands between the check and the query: `LOCK TABLE ONLY`, which a read-only
+  transaction allows in this mode, for a table the catalogue holds as a table (its partitions and
+  children are not locked: none can change an inherited column or its own kind alone, and detaching
+  one needs the parent's lock; it refuses a materialized or foreign table, so one now in its place
+  refuses the query); `select from <view> where false`, which takes
   the same lock and reads no row, for one it holds as a view. Then one query of `pg_class`,
   `pg_inherits` and `pg_attribute` reads each table's kind, whether it or a descendant has a virtual
-  generated column or is not a table, and the type of each column the rule and the conditions beside
-  it compare, written as the catalogue refresh writes it. A column gone or of another type refuses
-  the query (`409 row_rule_unavailable`); a table that is not a plain base table (or partitioned
-  table of plain tables) is read with its rule alone (below). The check reads metadata only, so its
+  generated column or is not a table or has row-level security on, and the type and collation of
+  each column the rule and the conditions beside it compare, written as the catalogue refresh writes
+  it. A column gone or of another type refuses the query (`409 row_rule_unavailable`); a table that
+  is not a plain base table (or partitioned table of plain tables), has row-level security on (the
+  planner may apply a condition before a policy's), or has such a column with a nondeterministic
+  collation (where a rule's `contains` or `startsWith` raises on each row it reads) is read with
+  its rule alone (below). The check reads metadata only, so its
   outcome depends on no row, and costs one round trip per rule-limited query (the locks go with the
   session setup's); a query with no rule runs as before. A lock that waits behind a change to the
   table waits within the query's statement timeout, and times out as the query would
-  (`504 query_timeout`).
+  (`504 query_timeout`). One residual: a partition or inheritance child attached concurrently,
+  between the check and the query, by someone with DDL rights on the source (attaching one does not
+  wait for the lock) is not seen by that one query; the next query checks it.
   (`security_barrier`, Postgres's own mechanism for this, is an option of a view; user queries run
   in a read-only transaction, which may create nothing.)
 - **SQL Server** copies the rule's rows by a statement of their own, `select <columns> into #rN from
