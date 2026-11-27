@@ -242,3 +242,32 @@
   display: grid;
   gap: 0.35rem;
 }
+
+/* Once a table is chosen: who and table on the left, columns and rows on the right. */
+.z-grant-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.z-grant-split {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 1rem 1.5rem;
+  align-items: start;
+}
+
+.z-grant-span:empty {
+  display: none;
+}
+
+.z-grant-split > .z-grant-span {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 900px) {
+  .z-grant-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

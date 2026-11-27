@@ -368,10 +368,12 @@ const GrantDialogBody = ({
     </>
   );
 
+  const split = !!(grant || tableId);
+
   return (
     <Modal
       show
-      size="lg"
+      size={split ? "full" : "lg"}
       title={title}
       onClose={onClose}
       dismissible={!mutation.isPending}
@@ -396,120 +398,124 @@ const GrantDialogBody = ({
         </Button>,
       ]}
     >
-      <div className="z-grant-form">
-        <BorderedSection title="Who" as="h2">
-          {who}
-        </BorderedSection>
-        <BorderedSection title="Table" as="h2">
-          {tablePart}
-        </BorderedSection>
-        {(grant || tableId) && (
-          <BorderedSection
-            title="Columns"
-            as="h2"
-            actions={
-              <Switch
-                size="sm"
-                label="All columns"
-                checked={choice.allColumns}
-                onChange={(e) =>
-                  setChoice({ ...choice, allColumns: e.target.checked })
-                }
-              />
-            }
-          >
-            {choice.allColumns ? (
-              <p className="z-muted z-grant-note">
-                Every column of the table, including columns added later.
-              </p>
-            ) : (
-              <ColumnChooser
-                showMode={false}
-                value={choice}
-                onChange={setChoice}
-                columns={columns}
-                loading={table.isLoading}
-                unavailable={
-                  !canListColumns
-                    ? NO_COLUMN_LIST
-                    : table.error
-                      ? table.error.message
-                      : undefined
-                }
-              />
-            )}
+      <div className={split ? "z-grant-form z-grant-split" : "z-grant-form"}>
+        <div className="z-grant-pane">
+          <BorderedSection title="Who" as="h2">
+            {who}
           </BorderedSection>
-        )}
-        {(grant || tableId) && (
-          <BorderedSection title="Rows" as="h2">
-            <div className="z-rule-section">
-              <RadioGroup<RowAccess>
-                name="grant-rows"
-                value={access}
-                disabled={ownerLocked}
-                onChange={(v) => {
-                  mutation.reset();
-                  setAccess(v);
-                }}
-                options={ROW_OPTIONS}
-              />
-              {showsRule &&
-                (lockedRule !== undefined || ownerLocked ? (
-                  <pre className="z-rule-readonly" aria-label="Row rule">
-                    {JSON.stringify(grant?.row_rule, null, 2)}
-                  </pre>
-                ) : !canListColumns ? (
-                  <Alert variant="warning">{NO_COLUMN_LIST}</Alert>
-                ) : (
-                  <RowRuleBuilder
-                    columns={ruleColumns}
-                    identityKeys={asAdmin ? identity.keys : []}
-                    identityError={asAdmin && !!identity.error}
-                    value={draft}
-                    onChange={(g) => {
-                      mutation.reset();
-                      setDraft(g);
-                    }}
-                    invalidId={invalidRule}
-                    invalidMessage={
-                      invalidRule ? mutation.error?.message : undefined
-                    }
-                  />
-                ))}
-              {showsRule && !ownerLocked && !asAdmin && (
+          <BorderedSection title="Table" as="h2">
+            {tablePart}
+          </BorderedSection>
+        </div>
+        {split && (
+          <div className="z-grant-pane">
+            <BorderedSection
+              title="Columns"
+              as="h2"
+              actions={
+                <Switch
+                  size="sm"
+                  label="All columns"
+                  checked={choice.allColumns}
+                  onChange={(e) =>
+                    setChoice({ ...choice, allColumns: e.target.checked })
+                  }
+                />
+              }
+            >
+              {choice.allColumns ? (
                 <p className="z-muted z-grant-note">
-                  As the source's owner, you limit rows by values in the table.
-                  Only an admin can limit rows by people's identity values ("is
-                  one of my …").
+                  Every column of the table, including columns added later.
                 </p>
-              )}
-              {showsRule && !ownerLocked && (
-                <Input
-                  label="Describe this limit for people who have it"
-                  value={ruleDescription}
-                  maxLength={MAX_RULE_DESCRIPTION}
-                  onChange={(e) => setRuleDescription(e.target.value)}
+              ) : (
+                <ColumnChooser
+                  showMode={false}
+                  value={choice}
+                  onChange={setChoice}
+                  columns={columns}
+                  loading={table.isLoading}
+                  unavailable={
+                    !canListColumns
+                      ? NO_COLUMN_LIST
+                      : table.error
+                        ? table.error.message
+                        : undefined
+                  }
                 />
               )}
-              {showsRule && grant && grant.row_rule_problems.length > 0 && (
-                <Alert variant="warning">
-                  {grant.row_rule_problems.join(" ")}
-                </Alert>
-              )}
-            </div>
-          </BorderedSection>
+            </BorderedSection>
+            <BorderedSection title="Rows" as="h2">
+              <div className="z-rule-section">
+                <RadioGroup<RowAccess>
+                  name="grant-rows"
+                  value={access}
+                  disabled={ownerLocked}
+                  onChange={(v) => {
+                    mutation.reset();
+                    setAccess(v);
+                  }}
+                  options={ROW_OPTIONS}
+                />
+                {showsRule &&
+                  (lockedRule !== undefined || ownerLocked ? (
+                    <pre className="z-rule-readonly" aria-label="Row rule">
+                      {JSON.stringify(grant?.row_rule, null, 2)}
+                    </pre>
+                  ) : !canListColumns ? (
+                    <Alert variant="warning">{NO_COLUMN_LIST}</Alert>
+                  ) : (
+                    <RowRuleBuilder
+                      columns={ruleColumns}
+                      identityKeys={asAdmin ? identity.keys : []}
+                      identityError={asAdmin && !!identity.error}
+                      value={draft}
+                      onChange={(g) => {
+                        mutation.reset();
+                        setDraft(g);
+                      }}
+                      invalidId={invalidRule}
+                      invalidMessage={
+                        invalidRule ? mutation.error?.message : undefined
+                      }
+                    />
+                  ))}
+                {showsRule && !ownerLocked && !asAdmin && (
+                  <p className="z-muted z-grant-note">
+                    As the source's owner, you limit rows by values in the
+                    table. Only an admin can limit rows by people's identity
+                    values ("is one of my …").
+                  </p>
+                )}
+                {showsRule && !ownerLocked && (
+                  <Input
+                    label="Describe this limit for people who have it"
+                    value={ruleDescription}
+                    maxLength={MAX_RULE_DESCRIPTION}
+                    onChange={(e) => setRuleDescription(e.target.value)}
+                  />
+                )}
+                {showsRule && grant && grant.row_rule_problems.length > 0 && (
+                  <Alert variant="warning">
+                    {grant.row_rule_problems.join(" ")}
+                  </Alert>
+                )}
+              </div>
+            </BorderedSection>
+          </div>
         )}
-        {!grant && mutation.error?.code === "grant_exists" && principal ? (
-          <ExistingGrantNotice
-            principal={principal}
-            sourceId={activeSourceId}
-            tableId={tableId}
-            error={mutation.error}
-            onEdit={onEditExisting}
-          />
-        ) : invalidRule ? null : (
-          <ErrorNotice error={mutation.error} />
-        )}
+        <div className="z-grant-span">
+          {!grant && mutation.error?.code === "grant_exists" && principal ? (
+            <ExistingGrantNotice
+              principal={principal}
+              sourceId={activeSourceId}
+              tableId={tableId}
+              error={mutation.error}
+              onEdit={onEditExisting}
+            />
+          ) : invalidRule ? null : (
+            <ErrorNotice error={mutation.error} />
+          )}
+        </div>
       </div>
     </Modal>
   );
