@@ -33,6 +33,10 @@ print_access() {
   local zeteo tereo
   zeteo="http://localhost:$(envval ZETEO_PORT)"
   tereo="http://localhost:$(envval TEREO_PORT)"
+  if [[ -z "$("${COMPOSE[@]}" ps --status running --quiet zeteo 2>/dev/null)" ]]; then
+    printf '\nZeteo is stopped: local-instance/start.sh starts it.\n' >&2
+    return 0
+  fi
   cat >&2 <<EOF
 
 Zeteo is running.
@@ -43,7 +47,7 @@ Zeteo is running.
   Tereo      $tereo  (users, groups and roles; same sign-in)
   MCP        $zeteo/mcp  (client id zeteo-mcp)
 
-The sign-in is also in local-instance/.env. Next: add a source (local-instance/README.md).
+The sign-in is also in local-instance/.env.
 EOF
 }
 
@@ -67,11 +71,27 @@ case "${1:-start}" in
   reset)
     [[ -f "$ENV_FILE" ]] || die "no instance here ($ENV_FILE is missing)"
     if [[ "${2:-}" != "--yes" ]]; then
+      [[ -t 0 ]] || die "reset asks for confirmation; without a terminal, run: local-instance/start.sh reset --yes"
       printf 'This deletes the instance: its sources, grants, users and uploads. Type "reset" to go on: ' >&2
-      read -r answer
+      answer=""
+      read -r answer || true
       [[ "$answer" == "reset" ]] || die "not reset"
     fi
+    # Your own containers connected to the instance's network (a database, as
+    # the README suggests) would keep it alive: disconnect them first.
+    network="zeteo-local_default"
+    if docker network inspect "$network" >/dev/null 2>&1; then
+      for c in $(docker network inspect "$network" --format '{{range .Containers}}{{.Name}} {{end}}'); do
+        if [[ "$c" != zeteo-local-* ]]; then
+          log "Disconnecting $c from $network (the container itself is kept)"
+          docker network disconnect "$network" "$c"
+        fi
+      done
+    fi
     "${COMPOSE[@]}" down --volumes --remove-orphans
+    if docker network inspect "$network" >/dev/null 2>&1; then
+      die "the network $network is still there; see the messages above"
+    fi
     rm -rf "$RUN_DIR" "$ENV_FILE"
     log "Removed. local-instance/start.sh starts a new one."
     exit 0
@@ -166,3 +186,4 @@ if curl -fsS "$TEREO/v1/setup/status" | grep -q '"setupComplete":false'; then
 fi
 
 print_access
+printf '\nNext: add data and let people query (local-instance/README.md).\n' >&2
