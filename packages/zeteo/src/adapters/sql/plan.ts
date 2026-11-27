@@ -24,6 +24,7 @@ import {
   QueryError,
   notFound,
   notFoundMessage,
+  rowRuleUnavailable,
   type QueryPath,
 } from "../../engine/errors.js";
 import {
@@ -74,6 +75,8 @@ import type {
   ResolvedOrder,
   ResolvedSelect,
   BusinessDate,
+  RowFiltered,
+  RuleSubject,
   ScalarExpr,
   TablePlan,
   WhereSubject,
@@ -110,6 +113,10 @@ const OPERATORS_BY_TYPE: Record<QueryableType, ReadonlySet<Operator>> = {
   boolean: new Set(["eq", "ne", "isNull"]),
   json: new Set(["isNull"]),
 };
+
+/** Whether `op` applies to a subject of `type`: the planner's check, shared with row rules. */
+export const operatorApplies = (type: QueryableType, op: Operator): boolean =>
+  OPERATORS_BY_TYPE[type].has(op);
 
 const AGGREGATE_FNS: readonly AggregateFn[] = [
   "count",
@@ -156,7 +163,7 @@ export const VALUE_FORMS: Record<QueryableType, string> = {
 };
 
 /** `value` as a value for a subject of `type`, or undefined when it is not one. */
-export const coerce = (
+export const coerceValue = (
   value: Scalar,
   type: QueryableType
 ): PlanValue | undefined => {
@@ -248,6 +255,13 @@ const splitPath = (path: string): { prefix: string; last: string } => {
 const joinPath = (prefix: string, name: string) =>
   prefix === "" ? name : `${prefix}.${name}`;
 
+/**
+ * A row rule's refusal, which passes through a measure's or metric's own
+ * wrapping unchanged: it is about the caller's access, not the definition.
+ */
+export const isRowRuleRefusal = (err: unknown): boolean =>
+  err instanceof QueryError && err.code === "row_rule_unavailable";
+
 export const fail = (
   code: SqlQueryErrorCode,
   message: string,
@@ -284,6 +298,8 @@ export interface QueryState {
   fixedReads: Map<string, Map<string, Reference>>;
   /** The subqueries the fixed measures used so far compile to, at most `MAX_FIXED_MEASURES`. */
   subqueries: number;
+  /** Whether a row rule limits a table read anywhere in the query, fixed measures and metric parts included. */
+  rowsLimited: boolean;
 }
 
 /** The values a filter compares with besides literals: relative dates and fixed measures. */
@@ -377,6 +393,7 @@ export const newQueryState = (): QueryState => ({
   fixedWeight: new Map(),
   fixedReads: new Map(),
   subqueries: 0,
+  rowsLimited: false,
 });
 
 export class Planner {
@@ -398,6 +415,8 @@ export class Planner {
   toManyJoin: string | undefined;
   /** The values filters compare with, for `resolveFilter`. */
   readonly values: ValueContext;
+  /** The values a row rule compares with: as a filter's, but never a measure. */
+  private readonly ruleValues: ValueContext;
 
   constructor(
     private readonly catalog: VisibleCatalog,
@@ -414,6 +433,76 @@ export class Planner {
       compiled: () => compiledCalendar(catalog.calendar, now),
       measure: (name, path, type) => this.fixedValue(name, path, type),
     };
+    this.ruleValues = {
+      ...this.values,
+      measure: (_name, path) => {
+        throw fail(
+          "invalid_value",
+          "A row rule compares with no measure",
+          path
+        );
+      },
+    };
+  }
+
+  /** Whether a row rule limits a table read anywhere in the query so far. */
+  rowsLimited(): boolean {
+    return this.state.rowsLimited;
+  }
+
+  /**
+   * The caller's row rule on `table`, as the plan carries it wherever the
+   * table is read: resolved like a filter against the plan's `now` and the
+   * calendar, its columns read from the rule by id (never from the caller's
+   * grants, so they are never references and never suggested). A rule that
+   * keeps no row is `never`. A rule that cannot be applied, or no longer
+   * fits its columns, refuses the query at `path`: the table is never read
+   * unfiltered.
+   */
+  private rowFilterOf(table: VisibleTable, path: QueryPath): RowFiltered {
+    const rule = table.rowRule;
+    if (!rule) return {};
+    this.state.rowsLimited = true;
+    const refuse = () =>
+      rowRuleUnavailable(
+        queryNameOf(this.catalog.tables, table),
+        path,
+        rule.kind === "unavailable" ? rule.reason : undefined
+      );
+    const rowRuleAt = {
+      table: queryNameOf(this.catalog.tables, table),
+      path: [...path],
+    };
+    const onView = table.kind === "table" ? {} : { rowRuleOnView: true };
+    if (rule.kind === "never") {
+      return { rowFilter: { kind: "never" }, rowRuleAt, ...onView };
+    }
+    if (rule.kind === "unavailable") throw refuse();
+    const subjectOf = (columnId: string) => {
+      const column = rule.columns.get(columnId);
+      if (!column) throw refuse();
+      const subject: RuleSubject = {
+        name: column.name,
+        type: column.type,
+        nativeType: column.nativeType,
+      };
+      return { subject, type: column.type };
+    };
+    try {
+      return {
+        rowFilter: resolveFilter<RuleSubject>(
+          rule.filter as Filter,
+          [],
+          subjectOf,
+          this.ruleValues
+        ),
+        rowRuleAt,
+        ...onView,
+      };
+    } catch (err) {
+      if (err instanceof QueryError) throw refuse();
+      throw err;
+    }
   }
 
   /** The scope at `prefix`: the query's own, then, inside a measure, a measure's. */
@@ -432,7 +521,7 @@ export class Planner {
     return this.catalog.tables.map((t) => queryNameOf(this.catalog.tables, t));
   }
 
-  resolveFrom(name: string): Scope {
+  resolveFrom(name: string): Scope & RowFiltered {
     const path = ["from"];
     const bare = this.catalog.tables.filter((t) => t.name === name);
     const matches =
@@ -460,14 +549,14 @@ export class Planner {
     }
     const scope = { alias: "t0", table };
     this.scopes.set("", scope);
-    return scope;
+    return { ...scope, ...this.rowFilterOf(table, path) };
   }
 
   /**
    * `table` as the `from` of a query the planner makes itself (a metric
    * query's part), alias `t0`. A missing table cannot be read.
    */
-  fromTable(table: VisibleTable, path: QueryPath): Scope {
+  fromTable(table: VisibleTable, path: QueryPath): Scope & RowFiltered {
     if (table.missing) {
       throw fail(
         "missing_in_source",
@@ -477,7 +566,7 @@ export class Planner {
     }
     const scope = { alias: "t0", table };
     this.scopes.set("", scope);
-    return scope;
+    return { ...scope, ...this.rowFilterOf(table, path) };
   }
 
   /**
@@ -575,6 +664,7 @@ export class Planner {
       this.touch({ tableId: target.id, columnId: to.id });
       return [parent.alias, from.name, to.name];
     });
+    const rows = this.rowFilterOf(target, path);
     (this.inMeasure ? this.measureScopes : this.scopes).set(relationPath, {
       alias,
       table: target,
@@ -586,6 +676,7 @@ export class Planner {
         table: { schemaName: target.schemaName, name: target.name },
         type,
         on,
+        ...rows,
       },
       toMany: relation.toMany,
     };
@@ -678,7 +769,7 @@ export class Planner {
     if ("date" in expr || "timestamp" in expr) {
       const type = "date" in expr ? "date" : "timestamp";
       const given = "date" in expr ? expr.date : expr.timestamp;
-      const value = coerce(given, type);
+      const value = coerceValue(given, type);
       if (value === undefined) {
         throw fail(
           "invalid_value",
@@ -895,6 +986,7 @@ export class Planner {
       }
       return { resolved: calc.resolved, hasAggregate: true };
     } catch (err) {
+      if (isRowRuleRefusal(err)) throw err;
       if (err instanceof MeasureError || err instanceof QueryError) {
         throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
       }
@@ -953,6 +1045,8 @@ export class Planner {
       const inner = new Planner(this.catalog, this.now, this.state, prefix);
       const from = { alias: `${prefix}t0`, table: home };
       inner.scopes.set("", from);
+      // A fixed measure ignores the query's filters, never the caller's rows.
+      const homeRows = inner.rowFilterOf(home, at);
       stack.push(name);
       const ownReads = new Map<string, Reference>();
       let calc: ResolvedCalc;
@@ -988,6 +1082,7 @@ export class Planner {
             alias: from.alias,
             schemaName: home.schemaName,
             name: home.name,
+            ...homeRows,
           },
           joins: inner.joins,
           expr: calc.resolved,
@@ -999,6 +1094,7 @@ export class Planner {
       this.state.fixedReads.set(name, ownReads);
       return { resolved: scalar, hasAggregate: false, hasFixed: true };
     } catch (err) {
+      if (isRowRuleRefusal(err)) throw err;
       if (err instanceof MeasureError || err instanceof QueryError) {
         throw new QueryError(err.code, `Measure "${name}": ${err.message}`, at);
       }
@@ -1450,7 +1546,7 @@ const resolveCondition = <S>(
   const { now, calendar } = values;
   const [op, raw] = Object.entries(condition)[0] as [Operator, unknown];
   const at = [...path, op];
-  if (!OPERATORS_BY_TYPE[type].has(op)) {
+  if (!operatorApplies(type, op)) {
     throw fail(
       "invalid_operator",
       `${op} does not apply to "${label}", a ${type} column`,
@@ -1475,7 +1571,7 @@ const resolveCondition = <S>(
         valuePath
       );
     }
-    const coerced = coerce(v, type);
+    const coerced = coerceValue(v, type);
     if (coerced === undefined) {
       throw fail(
         "invalid_value",
@@ -1951,6 +2047,11 @@ export const planSql = (
       alias: "t0",
       schemaName: from.table.schemaName,
       name: from.table.name,
+      ...(from.rowFilter && {
+        rowFilter: from.rowFilter,
+        rowRuleAt: from.rowRuleAt,
+        ...(from.rowRuleOnView && { rowRuleOnView: true }),
+      }),
     },
     joins,
     select,
@@ -1965,5 +2066,6 @@ export const planSql = (
     warnings,
     limit: query.limit,
     offset: query.offset ?? 0,
+    rowsLimited: planner.rowsLimited(),
   };
 };

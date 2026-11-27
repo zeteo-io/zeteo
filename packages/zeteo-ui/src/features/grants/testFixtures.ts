@@ -20,6 +20,8 @@ export const makeGrant = (over: Partial<Grant> = {}): Grant => ({
   },
   all_columns: true,
   columns: [],
+  row_access: "unlimited_default",
+  row_rule_problems: [],
   created_by: "b9999999-1c7a-4a53-9d0e-6a3b1f2c4d09",
   created_at: "2026-11-01T10:00:00.000Z",
   updated_at: "2026-11-01T10:00:00.000Z",

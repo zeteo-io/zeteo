@@ -36,8 +36,9 @@ import type {
 import {
   Planner,
   VALUE_FORMS,
-  coerce,
+  coerceValue,
   fail,
+  isRowRuleRefusal,
   newQueryState,
   referenceKey,
   typeOf,
@@ -229,7 +230,7 @@ const checkRange = (range: MetricQuery["range"]): void => {
     if (bound === undefined || "relative" in bound) continue;
     const type = "date" in bound ? "date" : "timestamp";
     const given = "date" in bound ? bound.date : bound.timestamp;
-    if (coerce(given, type) === undefined) {
+    if (coerceValue(given, type) === undefined) {
       throw fail("invalid_value", `A ${type} bound is ${VALUE_FORMS[type]}`, [
         "range",
         key,
@@ -284,7 +285,7 @@ class MetricPlanner {
     const home = this.catalog.tables.find((t) => t.id === measure.tableId);
     if (!home) throw notFound("measure", measure.name, at, []);
     const planner = new Planner(this.catalog, this.now, this.state);
-    planner.fromTable(home, at);
+    const { rowFilter, rowRuleAt, rowRuleOnView } = planner.fromTable(home, at);
     const reads = new Map<string, Reference>();
     const calc = planner.resolveExpr({ measure: measure.name }, at, reads);
     const type = typeOf(calc.resolved);
@@ -313,7 +314,13 @@ class MetricPlanner {
     }
     const index = this.parts.length;
     this.parts.push({
-      from: { alias: "t0", schemaName: home.schemaName, name: home.name },
+      from: {
+        alias: "t0",
+        schemaName: home.schemaName,
+        name: home.name,
+        ...(rowFilter && { rowFilter, rowRuleAt }),
+        ...(rowRuleOnView && { rowRuleOnView }),
+      },
       joins: planner.joins,
       expr: calc.resolved,
       date,
@@ -347,6 +354,7 @@ class MetricPlanner {
       ref = resolved.ref;
       this.dates.set(referenceKey(resolved.reference), resolved.reference);
     } catch (err) {
+      if (isRowRuleRefusal(err)) throw err;
       if (err instanceof QueryError && UNUSABLE_DATE.has(err.code)) {
         throw noDate();
       }
@@ -560,6 +568,7 @@ export const planMetrics = (
       // refusal is reported at the name, naming the metric.
       if (
         metric &&
+        !isRowRuleRefusal(err) &&
         (err instanceof QueryError || err instanceof MeasureError)
       ) {
         throw new QueryError(err.code, `Metric "${name}": ${err.message}`, at);
@@ -642,5 +651,6 @@ export const planMetrics = (
     warnings: [],
     limit: query.limit,
     offset: query.offset ?? 0,
+    rowsLimited: planner.state.rowsLimited,
   };
 };

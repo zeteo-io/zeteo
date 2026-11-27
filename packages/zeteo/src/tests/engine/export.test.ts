@@ -275,6 +275,7 @@ describeEachEngine("runExport", (engine) => {
         { name: "name", type: "text" },
       ],
       warnings: [],
+      rowsLimited: false,
       runId: run.id,
     });
     expect(seenAtStart).toBe("running");

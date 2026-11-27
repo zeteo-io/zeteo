@@ -1,5 +1,7 @@
 import { AppError, SavedQueryNotAccessibleError } from "../utils/errors.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
+import { canUse, isVisible } from "../saved-queries/access.js";
+import { isRowRuleRefusal } from "../adapters/sql/plan.js";
 import { planFor, type Progress } from "./plan.js";
 import type { Access } from "../grants/access.js";
 import { logger } from "../utils/logger.js";
@@ -32,6 +34,12 @@ export interface PlannedSavedQuery {
  * reference outside the grants), is one fresh `SavedQueryNotAccessibleError`:
  * nothing of the original error goes with it. `progress` is touched only on
  * success, so a refusal reads the same in the run's record whatever its cause.
+ *
+ * The one exception is a row rule that cannot be applied
+ * (`row_rule_unavailable`: 409, or 503 when the reporting lines can't be read,
+ * reason `hierarchy_unavailable`) on a saved query the caller may use, as
+ * `canUse` decides (without rules): it is their access to the rows that
+ * fails, not to the query, so it is thrown as it is.
  */
 export const planSavedAgainst = (
   access: Access,
@@ -50,6 +58,7 @@ export const planSavedAgainst = (
       ctx
     );
   } catch (err) {
+    if (isRowRuleRefusal(err) && canUse(access, saved, catalog)) throw err;
     // A planner or language refusal is the expected kind; anything else is a
     // fault worth seeing in the log, though the caller still gets only this.
     if (!(err instanceof AppError)) {
@@ -57,10 +66,9 @@ export const planSavedAgainst = (
     }
     throw new SavedQueryNotAccessibleError();
   }
-  const visible =
-    catalog.source.id === saved.sourceId &&
-    access.sourceIds.has(saved.sourceId);
-  if (!visible) throw new SavedQueryNotAccessibleError();
+  if (!isVisible(access, saved, catalog)) {
+    throw new SavedQueryNotAccessibleError();
+  }
   progress.sourceId = catalog.source.id;
   return { catalog, ...planned };
 };

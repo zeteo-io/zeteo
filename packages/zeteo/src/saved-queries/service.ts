@@ -1,6 +1,6 @@
 import { savedQueryView, type SavedQueryView } from "../views/savedQuery.js";
 import type { SavedQuery } from "../../prisma/generated/client/index.js";
-import { ForbiddenError, NotFoundError } from "../utils/errors.js";
+import { loadSourceVisibleCatalog } from "../grants/visibleCatalog.js";
 import { loadCatalogFor, sourceSlugOf } from "../engine/index.js";
 import type { SavedQueryRow } from "../utils/db/savedQueries.js";
 import { db, prisma, type Prisma } from "../utils/db/index.js";
@@ -11,9 +11,8 @@ import { hasPermission } from "../utils/permissions.js";
 import { groupIdsOf } from "../grants/principals.js";
 import type { Caller } from "../middleware/auth.js";
 import { withAudit } from "../utils/transaction.js";
-import { planSaved } from "../engine/savedPlan.js";
+import { canUse, decideAccess } from "./access.js";
 import { encodeCursor } from "../utils/cursor.js";
-import { decideAccess } from "./access.js";
 import {
   AUDIT_EVENTS,
   SAVED_QUERIES_READ,
@@ -39,6 +38,11 @@ import {
   loadAccessAs,
   type CallerAccess,
 } from "../grants/access.js";
+import {
+  ForbiddenError,
+  NotFoundError,
+  SavedQueryNotAccessibleError,
+} from "../utils/errors.js";
 
 const NOUN = "saved query";
 
@@ -432,7 +436,16 @@ export const copySavedQuery = async (
 ): Promise<SavedQueryView> => {
   const access = await loadAccess(caller);
   const source = await findForViewer(caller, id, access.groupIds);
-  await planSaved(access, source, freshProgress());
+  // Copying needs access to the query, not to its rows: no row rule applies.
+  if (
+    !canUse(
+      access,
+      source,
+      await loadSourceVisibleCatalog(source.sourceId, access)
+    )
+  ) {
+    throw new SavedQueryNotAccessibleError();
+  }
   const row = await withAudit(async (tx, audit) => {
     const created = await mapUniqueViolation(
       () =>

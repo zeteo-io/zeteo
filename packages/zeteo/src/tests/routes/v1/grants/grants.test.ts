@@ -80,6 +80,10 @@ describe("/v1/grants", () => {
         all_columns: true,
         owner_grant: false,
         columns: [],
+        row_access: "unlimited_default",
+        row_rule: null,
+        row_rule_description: null,
+        row_rule_problems: [],
         created_by: expect.any(String),
         created_at: expect.any(String),
         updated_at: expect.any(String),
@@ -258,6 +262,7 @@ describe("/v1/grants", () => {
       const made = await create();
       const first = customerColumns[0]!;
       const toList = await call("PUT", `/${made.body.id}`, grantsWriteToken(), {
+        row_access: "unlimited_default",
         all_columns: false,
         column_ids: [first.id],
       });
@@ -269,6 +274,7 @@ describe("/v1/grants", () => {
       expect(toList.body.id).toBe(made.body.id);
 
       const toAll = await call("PUT", `/${made.body.id}`, grantsWriteToken(), {
+        row_access: "unlimited_default",
         all_columns: true,
       });
       expect(toAll.status).toBe(200);
@@ -282,6 +288,7 @@ describe("/v1/grants", () => {
     it("answers 422 invalid_grant for a column of another table and keeps the grant", async () => {
       const made = await create();
       const res = await call("PUT", `/${made.body.id}`, grantsWriteToken(), {
+        row_access: "unlimited_default",
         all_columns: false,
         column_ids: [orderColumns[0]!.id],
       });
@@ -292,7 +299,7 @@ describe("/v1/grants", () => {
     });
 
     it("answers 404 for an unknown grant, 403 to a read-only caller", async () => {
-      const body = { all_columns: true };
+      const body = { row_access: "unlimited_default", all_columns: true };
       expect(
         (await call("PUT", `/${randomUUID()}`, grantsWriteToken(), body)).status
       ).toBe(404);
@@ -313,6 +320,7 @@ describe("/v1/grants", () => {
         writeToken()
       );
       const res = await call("PUT", `/${made.body.id}`, grantsWriteToken(), {
+        row_access: "unlimited_default",
         all_columns: false,
         column_ids: [(await columnsOf(table.id))[0]!.id],
       });

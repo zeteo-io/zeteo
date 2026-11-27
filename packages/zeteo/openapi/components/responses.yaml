@@ -55,7 +55,7 @@ Error:
       description: On `writable_login`, present when the check found more than the 20 listed
 
 BadRequestResponse:
-  description: Bad request - `invalid_request`, with `issues`
+  description: Bad request - `invalid_request`, with `issues`; on a grant, `invalid_row_rule`, with `path` into the body (starting `row_rule`)
   content:
     application/json:
       schema:
@@ -83,7 +83,7 @@ NotFoundResponse:
         $ref: '#/Error'
 
 ConflictResponse:
-  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
+  description: Conflict - `slug_taken`, `grant_exists`, `source_archived` (the source is archived and takes no change), `identity_key_in_use` (an identity key a grant's rule still names; `grant_ids` lists them), `identity_value_taken` (a value of the key held by another user; `value`), `conflict` (a concurrent create of the same thing), or `version_conflict` (a concurrent write; re-read and retry)
   content:
     application/json:
       schema:
@@ -158,3 +158,34 @@ InvalidPanelError:
             properties:
               setting: { type: string, description: 'The setting at fault: a chart key with the index for a list (`y.1`), or `saved_query`, `saved_panel`' }
               problem: { type: string, description: '`missing_column`, `wrong_type`, `needs_order`, or for a saved query or panel that cannot be used, its state such as `not_available`' }
+
+RowRuleConflictResponse:
+  description: |
+    Conflict - `row_rule_unavailable`: a table the request reads has a row rule of the caller's that
+    cannot be applied right now (`column_missing`, a column it reads is gone, or `too_many_values`,
+    it resolves to too many values). The request is refused, never run unfiltered; ask an admin.
+  content:
+    application/json:
+      schema:
+        oneOf:
+          - $ref: '#/Error'
+          - $ref: '../components/queries/schemas.yaml#/QueryError'
+
+RowRuleUnavailableResponse:
+  description: |
+    Service unavailable - `row_rule_unavailable` (reason `hierarchy_unavailable`): a table the
+    request reads has a row rule of the caller's with `below`, and Tereo cannot give the caller's
+    reporting lines now; retry shortly, after `Retry-After` when given (never the caller's own
+    rows only, never every row). Or `temporarily_unavailable`: the database, Redis or the source's
+    pool was briefly unavailable; retry.
+  headers:
+    Retry-After:
+      description: Seconds to wait before retrying
+      schema:
+        type: integer
+  content:
+    application/json:
+      schema:
+        oneOf:
+          - $ref: '#/Error'
+          - $ref: '../components/queries/schemas.yaml#/QueryError'

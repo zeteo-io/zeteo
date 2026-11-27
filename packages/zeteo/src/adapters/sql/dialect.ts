@@ -9,6 +9,7 @@ import type {
   QueryableType,
   ResolvedExpr,
   ResolvedSelect,
+  RowRuleAt,
 } from "./types.js";
 
 /** The `dateDiff` units within a day, in seconds. */
@@ -53,6 +54,69 @@ export const truncUnit = (unit: BucketUnit): string =>
       ? "quarter"
       : unit;
 
+/** The statements a query runs before its SELECT, in order: SQL Server's ruled tables. */
+export interface Staging {
+  statements: Expression<unknown>[];
+  /** Where each statement's table is read, by statement: what a failed guard (`RuledRead.guard`) refuses with. */
+  at: (RowRuleAt | undefined)[];
+}
+
+/**
+ * The columns of a ruled table that are evaluated beside its rule, the
+ * rule's own and those of the caller's conditions applied there, each with
+ * its type as the catalogue last read it. Every comparison there was chosen
+ * for that type: one with a column whose type has changed since may convert
+ * the column per row and fail on a row the rule hides. A dialect that can
+ * check them before the read (SQL Server) refuses the query when any differs
+ * or has gone.
+ */
+export interface RuleGuard {
+  schemaName: string;
+  name: string;
+  columns: readonly { name: string; nativeType: string }[];
+  at?: RowRuleAt;
+}
+
+/**
+ * What `ruled` reads of a table: the columns the query reads of it (none for
+ * `count(*)` alone), and the rows the rule keeps. `rule` is the rule alone,
+ * every value compared exactly, which is right whatever the table is.
+ * `narrowed`, when it differs, is the rule with the caller's conditions that
+ * cannot raise an error on any row of a base table (`ownValue`, `ownMatch`)
+ * applied beside it, so an index can serve them, and with `apart` values left
+ * out: right only where the table is a base table whose columns have the
+ * catalogue's types and none is computed.
+ */
+export interface RuledRead {
+  table: Expression<unknown>;
+  columns: readonly string[];
+  rule: Expression<SqlBool>;
+  narrowed?: Expression<SqlBool>;
+  guard: RuleGuard;
+}
+
+/** An equality's values, by what the subject's catalogue type says of them. */
+export interface EqualityValues {
+  /** Values the subject's type can hold. */
+  held: PlanValue[];
+  /** Values its type cannot hold but an exact comparison can still be made with: a column widened since the catalogue was read may hold them. */
+  wider: PlanValue[];
+  /**
+   * Values its type cannot hold whose exact comparison with the column would
+   * need a common type of more digits than the engine's exact numbers hold
+   * (SQL Server: the column's integer digits plus the value's scale past
+   * 38), so it could fail on a row. A row rule's narrowed read
+   * (`RuledRead.narrowed`) leaves them out where they would add rows: it
+   * runs on a base table only, after a check that the column still has the
+   * catalogue's type (`RuleGuard`), which no such value equals. The rule
+   * alone compares them exactly, as `wider` values are: a view's persisted
+   * types, which the check reads, may be stale.
+   */
+  apart: PlanValue[];
+  /** Whether some value can be compared exactly by no means (left out of all three): more digits than any exact number type of the engine holds. */
+  unbound: boolean;
+}
+
 export interface SqlDialect {
   name: "postgres" | "mssql";
   /** Builds and compiles queries only; its driver is a dummy. */
@@ -74,6 +138,34 @@ export interface SqlDialect {
    * absent for an aggregate.
    */
   value(value: PlanValue, subject: ValueSubject): Expression<unknown>;
+  /**
+   * The values of an equality (`eq`, `ne`, `in`, `notIn`), sorted by whether
+   * the subject can equal them, as the catalogue gives its type (which a
+   * column changed since the last refresh may have outgrown); each is
+   * written as `value` binds it exactly, and none is ever compared
+   * inexactly. The compiler leaves out `wider` values only where that can
+   * only drop rows (see `compileFilter`).
+   */
+  equalityValues(
+    values: readonly PlanValue[],
+    subject: ValueSubject
+  ): EqualityValues;
+  /**
+   * `expression in (values)`, or `not in` when `negate`, with every value in
+   * one bound parameter, so a long list (a row rule's identity values) takes
+   * one of the engine's parameters, not one each: Postgres binds an array,
+   * SQL Server a JSON array read with `openjson` (a few, when some values are
+   * `wider` than the column's type). Each value is converted as `value`
+   * converts it for the subject; `values` are `equalityValues`' `held` and
+   * `wider`. `rule` binds them as `ruleValue` binds one, where it can.
+   */
+  inSet(
+    expression: Expression<unknown>,
+    values: readonly PlanValue[],
+    subject: ValueSubject,
+    negate: boolean,
+    rule?: boolean
+  ): Expression<SqlBool>;
   /**
    * The first day of the period holding `date` (a date expression), as a
    * date. A fiscal unit starts its year at `fiscalStartMonth` (1-12). A
@@ -180,6 +272,71 @@ export interface SqlDialect {
    * rows instead and read as a column.
    */
   subqueryInAggregate: boolean;
+  /**
+   * A table limited by the caller's row rule, as what the query reads in its
+   * place. No expression the caller wrote may be evaluated on a row the rule
+   * leaves out: an error it raised there (an overflow, a date out of range)
+   * would tell the caller something about that row, and neither engine keeps
+   * a derived table's condition ahead of the conditions around it. Postgres
+   * reads it as a MATERIALIZED WITH query, computed separately from the query
+   * around it; SQL Server copies it into a temp table by a statement of its
+   * own, added to `staging`, run before the query. Only `read.where` is
+   * evaluated on rows the rule leaves out: the rule, and conditions that
+   * cannot raise.
+   */
+  ruled(read: RuledRead, staging: Staging): Expression<unknown>;
+  /**
+   * How a read decides whether it may apply `RuledRead.narrowed`: `live`,
+   * when it runs, from the object's own metadata (SQL Server: a base table
+   * with no computed column), else applying the rule alone, so the caller's
+   * conditions moved beside the rule stay in the query's where too;
+   * `catalogue`, at compile time, so they leave it: from the table's kind
+   * as the catalogue last read it, and from what `compileSql`'s `narrow`
+   * says (Postgres: the table's live metadata, checked before the query
+   * runs, `adapters/postgres/ruleCheck.ts`).
+   */
+  narrowedCheck: "live" | "catalogue";
+  /**
+   * Whether one `ruled` read may serve every reference to the same table
+   * with the same rule and conditions in a query (SQL Server: one temp table,
+   * read under each alias).
+   */
+  ruledOnce: boolean;
+  /**
+   * `value` bound as exactly the column's own type (`nativeType`), so the
+   * comparison converts nothing on the column's side and the value itself
+   * cannot fail to convert, or undefined when the dialect cannot promise
+   * that for this column and value. A comparison of the column, read as it
+   * is, with what this returns raises no error on any row, so it may be
+   * evaluated beside the rule, on rows the rule leaves out. It compares as
+   * `value` does: the same rows match.
+   */
+  ownValue(
+    value: PlanValue,
+    subject: { type: QueryableType; nativeType: string }
+  ): Expression<unknown> | undefined;
+  /**
+   * A row rule's value bound as exactly the column's catalogued type, so a
+   * comparison with a column whose type has changed since the catalogue was
+   * read fails when the statement is planned, before any row is read,
+   * instead of comparing another way (Postgres infers an uncast parameter's
+   * type from the column). Undefined where the dialect needs none (SQL
+   * Server's read checks the column's type, `RuleGuard`) or cannot bind the
+   * value so: it is then bound by `value`.
+   */
+  ruleValue(
+    value: PlanValue,
+    subject: { type: QueryableType; nativeType: string }
+  ): Expression<unknown> | undefined;
+  /**
+   * `like`, for a column whose match can raise no error on any row, or
+   * undefined. The same rows match as with `like`.
+   */
+  ownMatch(
+    column: Expression<unknown>,
+    pattern: string,
+    nativeType: string
+  ): Expression<SqlBool> | undefined;
   /**
    * How each one-row step of a business-day subquery is fenced so its values
    * are computed once per row: `offset 0` after it (Postgres keeps such a

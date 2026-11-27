@@ -136,6 +136,7 @@ export const httpSink = (
         `attachment; filename="zeteo-export-${head.runId}.${format}"`
       );
       res.setHeader("X-Zeteo-Run-Id", head.runId);
+      if (head.rowsLimited) res.setHeader("X-Zeteo-Rows-Limited", "true");
       res.setHeader("Vary", "Accept-Encoding");
       if (format === "csv") {
         const codes = [...new Set(head.warnings.map((w) => w.code))];

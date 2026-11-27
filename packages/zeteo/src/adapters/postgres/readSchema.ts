@@ -26,7 +26,7 @@ const RELATIONS = `
 // The type as Postgres writes it, with what a dialect must know and the name
 // cannot tell: an enum is marked ` (enum)`, a domain `(domain over <base>)`.
 // A quoted name ends in `"`, so neither mark can be part of a name.
-const NATIVE_TYPE = `
+export const NATIVE_TYPE = `
   CASE t.typtype
     WHEN 'e' THEN pg_catalog.format_type(a.atttypid, a.atttypmod) || ' (enum)'
     WHEN 'd' THEN pg_catalog.format_type(a.atttypid, a.atttypmod)

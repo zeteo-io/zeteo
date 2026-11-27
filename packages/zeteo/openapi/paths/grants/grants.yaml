@@ -12,7 +12,9 @@
       owner's `group` grants must be to groups that are global or of their signed-in organization
       (`422 group_not_allowed`; saved-query shares answer `400 invalid_share` instead, a deliberate
       difference). The owner's own grant has `owner_grant: true` and cannot be removed or narrowed
-      (`409 owner_grant_locked`).
+      (`409 owner_grant_locked`). A row rule an owner writes may not use identity values
+      (`400 invalid_row_rule`, with `path` to the reference); only a holder of
+      `zeteo.grants.write` may.
 
       **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
     operationId: listGrants
@@ -52,12 +54,18 @@
     summary: Create a grant
     description: |
       Grants a user or group the right to query a table: every column, or a list of columns of
-      that table. The principal need not exist yet. A principal has one grant per table. An audit
-      entry `zeteo.grant.created` is written.
+      that table, and which rows: `row_access` is `unlimited_default` (the default: never widens
+      rows when another grant limits them), `all` (every row, overriding other grants' limits) or
+      `rule` (with a `row_rule`, and optionally a `row_rule_description`). An upload owner's own
+      grant is always `unlimited_default`, and a rule an owner writes may not use identity values
+      (`400 invalid_row_rule`; only a holder of `zeteo.grants.write` may). The principal need not exist yet. A principal has one
+      grant per table. An audit entry `zeteo.grant.created` is written, carrying the rule. See
+      `docs/row-rules.md`.
 
       **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found` (the table), `409 source_archived`, `409 grant_exists`,
+      **Errors:** `400 invalid_row_rule` (the rule is not valid: `path` points into the body,
+      starting `row_rule`), `404 not_found` (the table), `409 source_archived`, `409 grant_exists`,
       `422 invalid_grant` (a column that is not on the table).
     operationId: createGrant
     requestBody:

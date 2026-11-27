@@ -26,7 +26,7 @@ const TableInput = SourceInput.extend({
  * source they cannot see gets, whether it exists or not.
  */
 const sourceView = async (access: Access, slug: string) => {
-  const catalog = await loadVisibleCatalog(slug, access);
+  const catalog = await loadVisibleCatalog(slug, access, { keyLabels: true });
   // A source whose type has no adapter is left out, as from the listing.
   const [view] = catalog
     ? visibleCatalogViews([catalog], () => null, "mcp")
@@ -86,7 +86,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "list_tables",
     title: "List tables",
     description:
-      "List the tables and views of a source that you can query, with their descriptions and how many of their columns and measures you can see, and the source's metrics (name, description, formula): cross-table calculations such as ROAS, queried with { metrics: [...] } (see query_guide). Use describe_table for the columns.",
+      "List the tables and views of a source that you can query, with their descriptions and how many of their columns and measures you can see, whether your rows are limited (rows_limited), and the source's metrics (name, description, formula): cross-table calculations such as ROAS, queried with { metrics: [...] } (see query_guide). Use describe_table for the columns.",
     permission: MCP_USE,
     readOnly: true,
     input: SourceInput,
@@ -104,6 +104,10 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
             last_loaded_at: table.last_loaded_at,
             columns: table.columns.length,
             measures: table.measures.length,
+            rows_limited: table.rows_limited,
+            ...(table.rows_limited && {
+              rows_limited_reason: table.rows_limited_reason,
+            }),
           })),
           metrics: view.metrics,
         };
@@ -115,7 +119,7 @@ export const defineDiscoveryTools = (mcp: TereoMcp): void => {
     name: "describe_table",
     title: "Describe a table",
     description:
-      "Show one table of a source: the columns you can query, with their types and descriptions, its relations to other tables you can see, and its measures (name, description, formula, filter, fixed, date_column): ready-made calculations to use in a query as { measure: name }; metrics are listed by list_tables. An upload source's table has last_loaded_at: the data is as of that time.",
+      'Show one table of a source: the columns you can query, with their types and descriptions, its relations to other tables you can see, and its measures (name, description, formula, filter, fixed, date_column): ready-made calculations to use in a query as { measure: name }; metrics are listed by list_tables. An upload source\'s table has last_loaded_at: the data is as of that time. rows_limited: you see only some rows, rows_limited_reason says which; say "your" figures, not totals.',
     permission: MCP_USE,
     readOnly: true,
     input: TableInput,

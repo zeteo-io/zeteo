@@ -1,0 +1,129 @@
+/v1/identity-keys/{keyId}/values:
+  get:
+    tags: [Grants]
+    summary: List the values under an identity key
+    description: |
+      Lists values in creation order, optionally only one user's.
+
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `404 not_found` (the key).
+    operationId: listIdentityValues
+    parameters:
+      - $ref: '../../components/parameters.yaml#/IdentityKeyIdParam'
+      - name: user_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
+      - $ref: '../../components/parameters.yaml#/LimitParam'
+      - $ref: '../../components/parameters.yaml#/CursorParam'
+    responses:
+      '200':
+        description: A page of values
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/ListIdentityValuesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+  post:
+    tags: [Grants]
+    summary: Add values under an identity key
+    description: |
+      Adds up to 1,000 (user, value) pairs in one call, all or none. A user may hold several values
+      under a key; a value belongs to one user within its key, compared as exact text (nothing is
+      trimmed or case-folded). A rule matches values by the source database's own comparison
+      (a collation may ignore case and trailing spaces; numbers compare as numbers), so values that
+      differ as text may match the same rows: `warnings` names each new value equal to another
+      user's after trimming and ignoring case, or as a number (`near_duplicate`). An audit entry
+      `zeteo.identity_value.added` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `400 invalid_request`, `404 not_found` (the key), `409 identity_value_taken`
+      (another user holds the value; `value` names it).
+    operationId: addIdentityValues
+    parameters:
+      - $ref: '../../components/parameters.yaml#/IdentityKeyIdParam'
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '../../components/grants/schemas.yaml#/AddIdentityValuesRequest'
+    responses:
+      '201':
+        description: The values added
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/AddIdentityValuesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '409': { $ref: '../../components/responses.yaml#/ConflictResponse' }
+      '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+/v1/identity-keys/{keyId}/values/{valueId}:
+  delete:
+    tags: [Grants]
+    summary: Remove an identity value
+    description: |
+      Removes one value. The user's rows that depended on it are hidden from the next query on
+      (rules read values at plan time). An audit entry `zeteo.identity_value.removed` is written.
+
+      **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
+
+      **Errors:** `404 not_found`.
+    operationId: deleteIdentityValue
+    parameters:
+      - $ref: '../../components/parameters.yaml#/IdentityKeyIdParam'
+      - $ref: '../../components/parameters.yaml#/IdentityValueIdParam'
+    responses:
+      '204': { $ref: '../../components/responses.yaml#/NoContentResponse' }
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+/v1/identity-keys/{keyId}/missing:
+  get:
+    tags: [Grants]
+    summary: List users who hold no value under an identity key
+    description: |
+      The users that a grant whose rule uses the key reaches (directly, or through a group's
+      members, read from tereo) who hold no value under it, each with the grants that reach them.
+      Their rule matches no rows until they are given one. Never cached.
+
+      **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
+
+      **Errors:** `404 not_found` (the key), `502 tereo_unreachable`.
+    operationId: listMissingIdentityValues
+    parameters:
+      - $ref: '../../components/parameters.yaml#/IdentityKeyIdParam'
+    responses:
+      '200':
+        description: The users
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/grants/schemas.yaml#/MissingIdentityValuesResponse'
+      '400': { $ref: '../../components/responses.yaml#/BadRequestResponse' }
+      '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
+      '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
+      '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
+      '500': { $ref: '../../components/responses.yaml#/ServerErrorResponse' }
+      '502':
+        description: Bad gateway - `tereo_unreachable`, tereo did not answer
+        content:
+          application/json:
+            schema:
+              $ref: '../../components/responses.yaml#/Error'
+      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }

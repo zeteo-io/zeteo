@@ -3,6 +3,7 @@ import { closeHttpServer, tuneServerKeepAlive } from "./utils/httpServer.js";
 import { closeRedisConnection, initializeRedis } from "./utils/redis.js";
 import { getTereo, initializeTereo, stopTereo } from "./utils/tereo.js";
 import { startRunsHousekeepingJob } from "./jobs/runsHousekeeping.js";
+import { checkJsonSourceText } from "./row-rules/numbers.js";
 import { checkUploadsSetup } from "./uploads/readerRole.js";
 import { startRefreshJob } from "./jobs/refreshSources.js";
 import { disconnectDatabase } from "./utils/db/prisma.js";
@@ -75,6 +76,9 @@ export function createAppServer(
   return {
     start: async () => {
       if (running) throw new Error("Server is already running");
+      // A grant's row rule is read with each number's source text
+      // (`markRounded`): refuse to start on a runtime that does not give it.
+      checkJsonSourceText();
       running = true;
       // Uploads' data sits beside Zeteo's own: refuse to start with a
       // reader URL Zeteo cannot use, a database too old or where Zeteo cannot

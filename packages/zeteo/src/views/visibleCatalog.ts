@@ -14,7 +14,7 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 /**
  * What a caller may discover about one source: the names a query is written
  * with, and nothing else. Ids, native types, settings and every name outside
- * their grants stay out. Measures and metrics are the visible ones only, by name; a measure's date column shows only when the caller can read it. The row limits are those of `entryPoint`.
+ * their grants stay out. Measures and metrics are the visible ones only, by name; a measure's date column shows only when the caller can read it. A table whose rows a rule limits says so (`rows_limited`) and why (`rows_limited_reason`). The row limits are those of `entryPoint`.
  */
 export const visibleCatalogView = (
   catalog: VisibleCatalog,
@@ -78,6 +78,12 @@ export const visibleCatalogView = (
       description: table.description,
       missing: table.missing,
       last_loaded_at: table.lastSyncedAt?.toISOString() ?? null,
+      // Whether the caller's grants show them only some rows, and which, in
+      // words that name only their granted columns.
+      rows_limited: table.rowRule !== undefined,
+      ...(table.rowRule !== undefined && {
+        rows_limited_reason: table.rowsLimitedReason,
+      }),
       columns: table.columns.map((c) => ({
         name: c.name,
         type: c.type,

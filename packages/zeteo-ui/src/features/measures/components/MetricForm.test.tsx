@@ -85,6 +85,27 @@ describe("MetricForm", () => {
     expect(body.metric.name).toBe("margin_pct");
     expect(body.range.gte.date).toMatch(/^\d{4}-\d{2}-01$/);
     expect(body.range.lt).toBeUndefined();
+    expect(screen.queryByText("Rows limited")).toBeNull();
+  });
+
+  it("marks a preview whose rows a row rule limits", async () => {
+    post.mockResolvedValue({
+      data: {
+        columns: [
+          { name: "period", type: "date" },
+          { name: "margin_pct", type: "number" },
+        ],
+        rows: [["2026-11-01", 0.5]],
+        truncated: false,
+        rows_limited: true,
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<MetricForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
+    await fill(user);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    expect(await screen.findByText("2026-11-01")).toBeInTheDocument();
+    expect(screen.getByText("Rows limited")).toBeInTheDocument();
   });
 
   it("sends only what changed when editing", async () => {

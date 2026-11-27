@@ -49,12 +49,7 @@
       '401': { $ref: '../../components/responses.yaml#/UnauthorizedResponse' }
       '403': { $ref: '../../components/responses.yaml#/ForbiddenResponse' }
       '404': { $ref: '../../components/responses.yaml#/NotFoundResponse' }
-      '409':
-        description: Conflict - `source_archived`
-        content:
-          application/json:
-            schema:
-              $ref: '../../components/responses.yaml#/Error'
+      '409': { $ref: '../../components/responses.yaml#/RowRuleConflictResponse', description: "Conflict - `source_archived`, or `row_rule_unavailable` (a row rule of the caller's cannot be applied; see the shared response)" }
       '413': { $ref: '../../components/responses.yaml#/PayloadTooLargeResponse' }
       '422':
         description: The query cannot be run as written; the errors of `POST /v1/query`
@@ -79,4 +74,4 @@
           application/json:
             schema:
               $ref: '../../components/responses.yaml#/Error'
-      '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
+      '503': { $ref: '../../components/responses.yaml#/RowRuleUnavailableResponse' }

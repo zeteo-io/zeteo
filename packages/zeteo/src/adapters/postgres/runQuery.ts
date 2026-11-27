@@ -1,13 +1,17 @@
 import { DatabaseError, type FieldDef, type Pool, type PoolClient } from "pg";
 import { sendCancelRequest, type CancelTarget } from "./cancel.js";
+import { compileSql, type RuledReadInfo } from "../sql/compile.js";
 import { normaliseValue, type WireKind } from "../sql/values.js";
 import { postgresDialect } from "../sql/dialects/postgres.js";
-import { invalidValue } from "../../engine/errors.js";
 import { logger } from "../../utils/logger.js";
 import type { SqlPlan } from "../sql/types.js";
-import { compileSql } from "../sql/compile.js";
 import { performance } from "node:perf_hooks";
 import Cursor from "pg-cursor";
+import {
+  invalidValue,
+  rowRulesNeedNewerPostgres,
+  rowRuleUnavailable,
+} from "../../engine/errors.js";
 import {
   AppError,
   QueryFailedError,
@@ -15,6 +19,13 @@ import {
   sourceBusy,
   SourceUnreachableError,
 } from "../../utils/errors.js";
+import {
+  decideRuledReads,
+  lockStatements,
+  mergeRuledReads,
+  readLiveTables,
+  tableKey,
+} from "./ruleCheck.js";
 import type {
   OpenLimits,
   PreparedQuery,
@@ -106,6 +117,21 @@ const sessionSetup = (timeoutMs: number) =>
     "SET LOCAL extra_float_digits = 3",
     "SET LOCAL standard_conforming_strings = on",
   ].join("; ");
+
+/**
+ * `server_version_num` from which a rule-limited query can run: a table is
+ * read through its row rule as a MATERIALIZED WITH query, which PostgreSQL
+ * parses from 12 on. Read in the session setup's round trip.
+ */
+export const ROW_RULES_MIN_SERVER_VERSION = 120000;
+const SERVER_VERSION = "SELECT current_setting('server_version_num')::int AS n";
+
+/** Refuses a rule-limited query on a server older than `ROW_RULES_MIN_SERVER_VERSION`. */
+export const checkRowRulesServer = (versionNum: number): void => {
+  if (!(versionNum >= ROW_RULES_MIN_SERVER_VERSION)) {
+    throw rowRulesNeedNewerPostgres();
+  }
+};
 
 const isClientReadTimeout = (err: unknown): boolean =>
   err instanceof Error && err.message === CLIENT_READ_TIMEOUT;
@@ -204,12 +230,21 @@ const disarmReadTimeout = (cursor: Cursor<unknown[]>): void => {
   submitted.handleError = () => undefined;
 };
 
-/** A plan compiled to Postgres SQL with its bound parameters. */
+/**
+ * A plan compiled to Postgres SQL with its bound parameters. `ruled`, for a
+ * plan that reads tables through row rules, is what the run checks against
+ * each table's live metadata first (`ruleCheck.ts`), and the rows asked for,
+ * to compile the plan again with some table's rule alone.
+ */
 export class PostgresPreparedQuery implements PreparedQuery {
   constructor(
     readonly plan: SqlPlan,
     readonly sql: string,
-    readonly parameters: unknown[]
+    readonly parameters: unknown[],
+    readonly ruled?: {
+      reads: readonly RuledReadInfo[];
+      fetch: { limit: number; offset: number; defaultOrder?: boolean };
+    }
   ) {}
 }
 
@@ -220,8 +255,19 @@ export const preparePostgresQuery = (
 ): PostgresPreparedQuery => {
   // The plan comes from this adapter's own language, so it is a SQL plan.
   const sqlPlan = plan as SqlPlan;
-  const { sql, parameters } = compileSql(sqlPlan, postgresDialect, rows);
-  return new PostgresPreparedQuery(sqlPlan, sql, parameters);
+  const { sql, parameters, ruledReads } = compileSql(
+    sqlPlan,
+    postgresDialect,
+    rows
+  );
+  return new PostgresPreparedQuery(
+    sqlPlan,
+    sql,
+    parameters,
+    ruledReads && ruledReads.length > 0
+      ? { reads: ruledReads, fetch: rows }
+      : undefined
+  );
 };
 
 const checkout = async (
@@ -241,6 +287,46 @@ const checkout = async (
     }
     throw new SourceUnreachableError();
   }
+};
+
+// A ruled table gone (or its schema), or one the catalogue holds as a table
+// that is now a materialized or foreign table, which LOCK TABLE refuses.
+const LOCK_REFUSED = new Set(["42P01", "3F000", "42809"]);
+
+/** The refusal for a ruled read that cannot be checked or differs from the catalogue. */
+const ruleRefused = (
+  err: unknown,
+  at: { table: string; path: (string | number)[] } | undefined
+): AppError => {
+  logger.warn(
+    { err },
+    "a row rule's table differs from the catalogue; refresh the source"
+  );
+  return rowRuleUnavailable(at?.table ?? "a table", at?.path ?? []);
+};
+
+/**
+ * Locks the plan's ruled tables in the session setup's round trip (`locks`
+ * there) and reads their metadata (one more round trip): refuses the query
+ * when a rule's column, or one beside it, has gone or changed type, and
+ * returns the statement to run, compiled again with the rule alone for each
+ * table that is not a plain base table now.
+ */
+const checkRuledReads = async (
+  client: PoolClient,
+  prepared: PostgresPreparedQuery
+): Promise<{ sql: string; parameters: unknown[] }> => {
+  const { plan, ruled } = prepared;
+  if (!ruled) return prepared;
+  const outcome = decideRuledReads(
+    ruled.reads,
+    await readLiveTables(client, ruled.reads)
+  );
+  if (outcome.kind === "refuse") throw ruleRefused(undefined, outcome.at);
+  if (!outcome.recompile) return prepared;
+  return compileSql(plan, postgresDialect, ruled.fetch, {
+    narrow: (t) => !outcome.unnarrowed.has(tableKey(t)),
+  });
 };
 
 /** Rolls back and returns the client to the pool, or destroys it when it cannot be trusted. */
@@ -299,7 +385,8 @@ export const openPostgresQuery = async (
     throw new Error(`invalid query deadline: ${limits.deadlineAt}`);
   }
   signal?.throwIfAborted();
-  const { plan, sql, parameters } = prepared;
+  const { plan } = prepared;
+  let { sql, parameters } = prepared;
 
   const client = await checkout(pool, limits.deadlineAt);
   // Whole milliseconds, as the statement timeout is written into the SQL text.
@@ -488,7 +575,28 @@ export const openPostgresQuery = async (
   };
 
   try {
-    await client.query(sessionSetup(timeLeft));
+    if (plan.rowsLimited || prepared.ruled) {
+      const locks = prepared.ruled ? lockStatements(prepared.ruled.reads) : [];
+      let results: { rows: { n: number }[] }[];
+      try {
+        results = (await client.query(
+          [sessionSetup(timeLeft), ...locks, SERVER_VERSION].join("; ")
+        )) as unknown as { rows: { n: number }[] }[];
+      } catch (err) {
+        if (err instanceof DatabaseError && LOCK_REFUSED.has(err.code ?? "")) {
+          const tables = mergeRuledReads(prepared.ruled?.reads ?? []);
+          throw ruleRefused(
+            err,
+            tables.length === 1 ? tables[0]!.at : undefined
+          );
+        }
+        throw err;
+      }
+      checkRowRulesServer(Number(results.at(-1)?.rows[0]?.n));
+      ({ sql, parameters } = await checkRuledReads(client, prepared));
+    } else {
+      await client.query(sessionSetup(timeLeft));
+    }
     signal?.throwIfAborted();
     active = true;
     deadline = setTimeout(

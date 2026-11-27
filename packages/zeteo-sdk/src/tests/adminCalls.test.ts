@@ -1,5 +1,7 @@
 import { principalLimitsCalls } from "../calls/principalLimits.js";
 import { OPERATIONS, type OperationId } from "../operations.js";
+import { identityKeysCalls } from "../calls/identityKeys.js";
+import type { CreateGrantRequest } from "../types/grants.js";
 import { useStubbedClient } from "./support/callContext.js";
 import { sourcesCalls } from "../calls/sources.js";
 import type { RequestConfig } from "@dianemo/core";
@@ -45,6 +47,20 @@ const grant = {
   table_id: ID2,
   all_columns: false as const,
   column_ids: [ID],
+};
+
+const ruleGrant: CreateGrantRequest = {
+  ...grant,
+  row_access: "rule",
+  row_rule: {
+    and: [
+      { sales_rep: { in: { identity: "rep_id", below: true } } },
+      {
+        sale_date: { gte: { relative: { unit: "day", offset: -90 } } },
+      },
+    ],
+  },
+  row_rule_description: "Your own orders",
 };
 
 const rows: Row[] = [
@@ -178,16 +194,20 @@ const rows: Row[] = [
     name: "grants.create",
     op: "createGrant",
     retried: false,
-    call: (c) => grantsCalls(c).create(grant),
-    body: grant,
+    call: (c) => grantsCalls(c).create(ruleGrant),
+    body: ruleGrant,
   },
   {
     name: "grants.replace",
     op: "replaceGrant",
     retried: true,
     params: { grantId: ID },
-    call: (c) => grantsCalls(c).replace(ID, { all_columns: true }),
-    body: { all_columns: true },
+    call: (c) =>
+      grantsCalls(c).replace(ID, {
+        all_columns: true,
+        row_access: "unlimited_default",
+      }),
+    body: { all_columns: true, row_access: "unlimited_default" },
   },
   {
     name: "grants.delete",
@@ -196,6 +216,80 @@ const rows: Row[] = [
     params: { grantId: ID },
     call: (c) => grantsCalls(c).delete(ID),
     noContent: true,
+  },
+  {
+    name: "grants.effective",
+    op: "getEffectiveAccess",
+    retried: true,
+    call: (c) =>
+      grantsCalls(c).effective({
+        user_id: ID,
+        table_id: ID2,
+        organization_id: ID,
+      }),
+    query: { user_id: ID, table_id: ID2, organization_id: ID },
+  },
+  {
+    name: "identityKeys.list",
+    op: "listIdentityKeys",
+    retried: true,
+    call: (c) => identityKeysCalls(c).list(),
+  },
+  {
+    name: "identityKeys.create",
+    op: "createIdentityKey",
+    retried: false,
+    call: (c) => identityKeysCalls(c).create({ name: "rep_id", label: "Rep" }),
+    body: { name: "rep_id", label: "Rep" },
+  },
+  {
+    name: "identityKeys.update",
+    op: "updateIdentityKey",
+    retried: false,
+    params: { keyId: ID },
+    call: (c) => identityKeysCalls(c).update(ID, { description: null }),
+    body: { description: null },
+  },
+  {
+    name: "identityKeys.delete",
+    op: "deleteIdentityKey",
+    retried: true,
+    params: { keyId: ID },
+    call: (c) => identityKeysCalls(c).delete(ID),
+    noContent: true,
+  },
+  {
+    name: "identityKeys.values.list",
+    op: "listIdentityValues",
+    retried: true,
+    params: { keyId: ID },
+    call: (c) =>
+      identityKeysCalls(c).values.list(ID, { user_id: ID2, limit: 5 }),
+    query: { user_id: ID2, limit: "5" },
+  },
+  {
+    name: "identityKeys.values.add",
+    op: "addIdentityValues",
+    retried: false,
+    params: { keyId: ID },
+    call: (c) =>
+      identityKeysCalls(c).values.add(ID, [{ user_id: ID2, value: "42" }]),
+    body: { values: [{ user_id: ID2, value: "42" }] },
+  },
+  {
+    name: "identityKeys.values.delete",
+    op: "deleteIdentityValue",
+    retried: true,
+    params: { keyId: ID, valueId: ID2 },
+    call: (c) => identityKeysCalls(c).values.delete(ID, ID2),
+    noContent: true,
+  },
+  {
+    name: "identityKeys.missing",
+    op: "listMissingIdentityValues",
+    retried: true,
+    params: { keyId: ID },
+    call: (c) => identityKeysCalls(c).missing(ID),
   },
   {
     name: "principalLimits.list",
@@ -252,8 +346,8 @@ const expectedPath = (row: Row) =>
 describe("admin calls", () => {
   const t = useStubbedClient();
 
-  it("covers 23 distinct operations", () => {
-    expect(new Set(rows.map((r) => r.op)).size).toBe(23);
+  it("covers 32 distinct operations", () => {
+    expect(new Set(rows.map((r) => r.op)).size).toBe(32);
   });
 
   it.each(rows)("$name sends $op and returns the body", async (row) => {
@@ -298,7 +392,11 @@ describe("admin calls", () => {
     ],
     [
       "grants.replace",
-      (c: CallContext) => grantsCalls(c).replace(ID, { all_columns: true }),
+      (c: CallContext) =>
+        grantsCalls(c).replace(ID, {
+          all_columns: true,
+          row_access: "all",
+        }),
     ],
     [
       "principalLimits.update",
@@ -472,7 +570,11 @@ describe("admin calls", () => {
     ["grants.get", (c: CallContext) => grantsCalls(c).get(bad)],
     [
       "grants.replace",
-      (c: CallContext) => grantsCalls(c).replace(bad, { all_columns: true }),
+      (c: CallContext) =>
+        grantsCalls(c).replace(bad, {
+          all_columns: true,
+          row_access: "all",
+        }),
     ],
     ["grants.delete", (c: CallContext) => grantsCalls(c).delete(bad)],
     [

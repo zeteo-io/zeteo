@@ -1,7 +1,8 @@
-import type { GroupRef } from "../../grants/principals.js";
+import type { TestGroupRef } from "../../grants/principals.js";
 import { redis } from "../../utils/redis.js";
 import {
   TEST_DIRECTORY_KEY,
+  testGroupMembersKey,
   type Principal,
   type TestDirectoryEntry,
 } from "../../principals/directory.js";
@@ -12,12 +13,29 @@ import {
 } from "../../grants/principals.js";
 
 /** Makes `userId` a member of `groups` for every process sharing this Redis (test mode only). */
-export const setTestGroups = async (userId: string, groups: GroupRef[]) => {
+export const setTestGroups = async (userId: string, groups: TestGroupRef[]) => {
   await redis.set(testGroupsKey(userId), JSON.stringify(groups), "EX", 600);
 };
 
 export const clearTestGroups = async (userId: string) => {
   await redis.del(testGroupsKey(userId), groupsKey(userId));
+};
+
+/** Sets the members `groupMemberIds` gives for the group (test mode only). */
+export const setTestGroupMembers = async (
+  groupId: string,
+  userIds: string[]
+) => {
+  await redis.set(
+    testGroupMembersKey(groupId),
+    JSON.stringify(userIds),
+    "EX",
+    600
+  );
+};
+
+export const clearTestGroupMembers = async (groupId: string) => {
+  await redis.del(testGroupMembersKey(groupId));
 };
 
 /** Makes `principalStatus` answer `orphaned` for the id. */

@@ -475,7 +475,7 @@ QueryWarning:
 
 QueryResult:
   type: object
-  required: [columns, rows, truncated, warnings, run_id]
+  required: [columns, rows, truncated, warnings, rows_limited, run_id]
   properties:
     columns:
       type: array
@@ -507,16 +507,17 @@ QueryResult:
     warnings:
       type: array
       items: { $ref: '#/QueryWarning' }
+    rows_limited: { type: boolean, description: "A row rule of the caller's limited the rows of a table the query read: the figures are the caller's own, not totals" }
     run_id: { type: string, format: uuid, description: The run's id in the run log }
 
 QueryError:
   type: object
-  description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name.
+  description: A query that is well formed but cannot be run as written. `measure_has_no_date` is a metric query (or `POST /v1/sources/{sourceId}/metrics/preview`) with a `bucket` or `range` over a measure that has no date column the caller can read, at the measure's name. `row_rule_unavailable` (`409`) is a table the query reads whose row rule of the caller's cannot be applied right now (a column it reads is gone, or its resolved values are over the cap), so ask an admin; it is `503` when the rule uses `below` and Tereo cannot give the caller's reporting lines now, so try again shortly.
   required: [error, error_description, path, suggestions]
   properties:
     error:
       type: string
-      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex, measure_has_no_date]
+      enum: [not_found_or_not_accessible, missing_in_source, column_not_queryable, invalid_operator, invalid_value, invalid_grouping, invalid_order, invalid_having, duplicate_output_name, join_parent_missing, too_many_joins, too_many_parameters, measure_needs_single_rows, measure_reads_to_many, measure_cycle, measure_too_deep, measure_not_aggregate, too_complex, measure_has_no_date, row_rule_unavailable]
     error_description: { type: string }
     path:
       type: array
@@ -600,7 +601,7 @@ DiscoveredRelation:
 DiscoveredTable:
   type: object
   description: A table the caller may query
-  required: [name, schema_name, kind, description, missing, last_loaded_at, columns, relations, measures]
+  required: [name, schema_name, kind, description, missing, last_loaded_at, rows_limited, columns, relations, measures]
   properties:
     name: { type: string, description: 'As a query writes it in `from`: the bare name when no other table the caller can see in the source shares it, else `schema.table`' }
     schema_name: { type: string }
@@ -608,6 +609,8 @@ DiscoveredTable:
     description: { type: [string, 'null'] }
     missing: { type: boolean, description: The last refresh did not find the table }
     last_loaded_at: { type: [string, 'null'], format: date-time, description: 'When an upload source''s table was last loaded: its data is as of then. Null for a database table' }
+    rows_limited: { type: boolean, description: "The caller's grants show them only some of the table's rows" }
+    rows_limited_reason: { type: string, description: "Present when `rows_limited`: which rows, in words. Names only columns the caller is granted (a condition on another reads \"some rows only\") and identity keys by label, never the caller's values; a grant's `row_rule_description` replaces its generated sentence; \"no rows\" when no rule keeps any, \"no rows right now; ask an admin\" when the caller's rule cannot be applied as written, and \"no rows right now; try again shortly\" when it uses `below` and Tereo cannot give the reporting lines now (either way a query reading the table is refused with `row_rule_unavailable`)" }
     columns:
       type: array
       description: Only the granted columns, in the table's order

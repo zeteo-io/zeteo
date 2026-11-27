@@ -14,7 +14,7 @@ export const visibleSlugs = async (access: Access): Promise<string[]> =>
 export const listVisibleSources = async (access: Access) => {
   const catalogs = [];
   for (const slug of await visibleSlugs(access)) {
-    const catalog = await loadVisibleCatalog(slug, access);
+    const catalog = await loadVisibleCatalog(slug, access, { keyLabels: true });
     if (catalog) catalogs.push(catalog);
   }
   return visibleCatalogViews(catalogs, () => null, "mcp");

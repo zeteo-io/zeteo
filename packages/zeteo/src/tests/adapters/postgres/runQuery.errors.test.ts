@@ -224,6 +224,7 @@ const idsOf = (schemaName: string, name: string): TablePlan => ({
   warnings: [],
   limit: undefined,
   offset: 0,
+  rowsLimited: false,
 });
 
 const prepared = (plan: TablePlan, limit = 100_000) =>

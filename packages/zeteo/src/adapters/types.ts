@@ -172,6 +172,11 @@ export interface QueryPlan {
    * named none. Absent for a language that says nothing about order.
    */
   defaultOrder?: boolean;
+  /**
+   * Whether a row rule limits the rows of any table the query reads,
+   * fixed measures' and metric parts' tables included.
+   */
+  rowsLimited: boolean;
 }
 
 /** What a plan may depend on besides the query: the moment relative dates resolve against. */

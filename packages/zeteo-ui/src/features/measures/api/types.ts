@@ -79,6 +79,8 @@ export interface PreviewResult {
   columns: { name: string; type: string }[];
   rows: unknown[][];
   truncated: boolean;
+  /** A row rule of the caller's limits the rows of a table the preview reads. */
+  rows_limited?: boolean;
 }
 
 /** A metric the caller sees in full (the server's `metricView`). */

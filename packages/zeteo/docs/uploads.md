@@ -401,4 +401,9 @@ Error codes: `invalid_sheet_link`, `sheet_in_use`, `sheet_not_accessible`, `goog
 ## Not supported yet
 
 SharePoint Excel, syncing a file from anywhere, attaching a file to a query on another source,
-and locale-aware parsing. Row filters on grants do not exist either.
+and locale-aware parsing.
+
+Row rules apply to upload sources like any other: an owner may write them on grants of their own
+tables ([row-rules.md](row-rules.md)), without identity values, which only an admin with
+`zeteo.grants.write` may use. The owner's own grant never carries one, and a merged table
+is its own table: a member's rules do not flow into it.

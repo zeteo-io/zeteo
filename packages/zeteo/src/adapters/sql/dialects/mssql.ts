@@ -1,7 +1,12 @@
 import type { BucketUnit, PlanValue, ResolvedExpr } from "../types.js";
-import type { SqlDialect, ValueSubject } from "../dialect.js";
 import { fiscalShift, SECONDS_IN } from "../dialect.js";
 import { plainNumber } from "../values.js";
+import type {
+  EqualityValues,
+  RuleGuard,
+  SqlDialect,
+  ValueSubject,
+} from "../dialect.js";
 import {
   DummyDriver,
   Kysely,
@@ -19,7 +24,8 @@ import {
  * JS value.
  */
 export interface MssqlParameter {
-  type: "nvarchar" | "bigint" | "bit" | "float";
+  type:
+    "nvarchar" | "bigint" | "int" | "smallint" | "tinyint" | "bit" | "float";
   value: string | number | boolean;
 }
 
@@ -209,6 +215,261 @@ const value = (
   }
 };
 
+/** The range of each integer type. */
+const INTEGER_RANGES: Record<string, readonly [bigint, bigint]> = {
+  tinyint: [0n, 255n],
+  smallint: [-32_768n, 32_767n],
+  int: [-2_147_483_648n, 2_147_483_647n],
+  bigint: [-INT64_MAX - 1n, INT64_MAX],
+};
+const DECIMAL_SIZE = /\(\s*(\d+)\s*(?:,\s*(\d+)\s*)?\)/;
+
+/**
+ * The exact numbers a column holds: at most `integerDigits` digits before
+ * the point and `scale` after it, within `range` for an integer type.
+ * Undefined for a float, or when the type is not known (an aggregate).
+ */
+interface ExactColumn {
+  integerDigits: number;
+  scale: number;
+  range?: readonly [bigint, bigint];
+}
+
+const exactColumn = (
+  nativeType: string | undefined
+): ExactColumn | undefined => {
+  const base = baseType(nativeType);
+  const range = INTEGER_RANGES[base];
+  if (range) {
+    return { integerDigits: String(range[1]).length, scale: 0, range };
+  }
+  if (DECIMALS.has(base)) {
+    // SQL Server's default is decimal(18, 0).
+    const m = DECIMAL_SIZE.exec(nativeType ?? "");
+    const precision = m ? Number(m[1]) : 18;
+    const scale = m?.[2] === undefined ? 0 : Number(m[2]);
+    return { integerDigits: precision - scale, scale };
+  }
+  if (base === "money") return { integerDigits: 15, scale: 4 };
+  if (base === "smallmoney") return { integerDigits: 6, scale: 4 };
+  return undefined;
+};
+
+/**
+ * A number as exact decimal text, without an exponent, leading zeros or
+ * trailing fraction zeros, or undefined when it holds more digits than
+ * `column` can: no value of the column can equal it.
+ */
+const exactIn = (v: PlanValue, column: ExactColumn): string | undefined => {
+  const text = typeof v === "number" ? plainNumber(v) : String(v);
+  const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
+  if (!m) return undefined;
+  const whole = m[2]!.replace(/^0+/, "");
+  const fraction = (m[3] ?? "").replace(/0+$/, "");
+  if (whole.length > column.integerDigits || fraction.length > column.scale) {
+    return undefined;
+  }
+  const sign = whole === "" && fraction === "" ? "" : m[1]!;
+  const exact = `${sign}${whole || "0"}${fraction ? `.${fraction}` : ""}`;
+  if (column.range) {
+    const n = BigInt(exact);
+    if (n < column.range[0] || n > column.range[1]) return undefined;
+  }
+  return exact;
+};
+
+/** What any of SQL Server's exact numbers can hold: decimal(38, s). */
+const WIDEST: ExactColumn = {
+  integerDigits: DECIMAL_MAX_DIGITS,
+  scale: DECIMAL_MAX_DIGITS,
+};
+
+/**
+ * A number as exact text, as `exactIn` writes it, when some exact number
+ * type holds it: 38 digits at most in all. A column of any exact type, however
+ * widened, holds no other.
+ */
+const exactWide = (v: PlanValue): string | undefined => {
+  const exact = exactIn(v, WIDEST);
+  if (exact === undefined) return undefined;
+  const [whole, fraction = ""] = exact.replace(/^-/, "").split(".");
+  const digits = whole!.replace(/^0+/, "").length + fraction.length;
+  return digits <= DECIMAL_MAX_DIGITS ? exact : undefined;
+};
+
+/** An exact text's scale: its digits after the point. */
+const scaleOf = (exact: string) => exact.split(".")[1]?.length ?? 0;
+
+/**
+ * An equality's values (`eq`, `ne`, `in`, `notIn`) against an integer,
+ * decimal or money column: `held`, those the catalogue's type holds, as
+ * exact text; `wider`, those with more digits than it holds or past an
+ * integer type's range that some exact number still holds (bound as bigint
+ * or decimal(38, s) by `value`, so compared exactly with a widened column);
+ * `apart`, such values whose scale and the column's integer digits come to
+ * more than 38; and whether any has more than 38 digits, which none holds. A float column,
+ * or an aggregate, holds every value. No value is compared through a float.
+ */
+const equalityValues = (
+  values: readonly PlanValue[],
+  { type, nativeType }: ValueSubject
+): EqualityValues => {
+  const column = type === "number" ? exactColumn(nativeType) : undefined;
+  if (!column) {
+    return { held: [...values], wider: [], apart: [], unbound: false };
+  }
+  const held: PlanValue[] = [];
+  const wider: PlanValue[] = [];
+  const apart: PlanValue[] = [];
+  let unbound = false;
+  for (const v of values) {
+    const exact = exactIn(v, column);
+    if (exact !== undefined) {
+      held.push(exact);
+      continue;
+    }
+    const wide = exactWide(v);
+    if (wide === undefined) unbound = true;
+    // Bound as decimal(38, s), compared in a type of the column's integer
+    // digits and s: past 38 digits, not compared (`EqualityValues.apart`).
+    else if (column.integerDigits + scaleOf(wide) > DECIMAL_MAX_DIGITS) {
+      apart.push(wide);
+    } else wider.push(wide);
+  }
+  return { held, wider, apart, unbound };
+};
+
+/**
+ * What a list of numbers is read as from JSON text: bigint when each binds as
+ * bigint, else a decimal with the list's widest scale when one holds every
+ * value, else float, as `value` binds one number.
+ */
+const numberListType = (texts: readonly string[]): Expression<unknown> => {
+  let integerDigits = 0;
+  let scale = 0;
+  let decimal = true;
+  let bigint = true;
+  for (const text of texts) {
+    const binding = numberBinding(text);
+    if (binding.kind !== "bigint") bigint = false;
+    const m = DECIMAL_TEXT.exec(text);
+    if (!m) {
+      decimal = false;
+      continue;
+    }
+    integerDigits = Math.max(integerDigits, m[1]!.replace(/^0+/, "").length);
+    scale = Math.max(scale, m[2]?.length ?? 0);
+  }
+  if (bigint) return sql`bigint`;
+  return decimal && integerDigits + scale <= DECIMAL_MAX_DIGITS
+    ? sql`decimal(38, ${sql.lit(scale)})`
+    : sql`float`;
+};
+
+/**
+ * `value`'s rules for a whole list, bound as one nvarchar parameter holding a
+ * JSON array of text and read back with `openjson`, so a list of thousands
+ * takes one of the request's 2,100 parameters. `openjson`'s value keeps the
+ * parameter's collation (the database's default, as any bound nvarchar
+ * has), and the cast to nvarchar(max) keeps its input's, so text compares
+ * as a single bound value would. A subquery: never inside an aggregate or a
+ * GROUP BY expression, which SQL Server refuses.
+ */
+const inSet = (
+  expression: Expression<unknown>,
+  values: readonly PlanValue[],
+  { type, nativeType }: ValueSubject,
+  negate: boolean
+): Expression<SqlBool> => {
+  const item = sql.id("value");
+  let texts = values.map(String);
+  let read: Expression<unknown>;
+  switch (type) {
+    case "number": {
+      // An integer or decimal column reads the list in its own exact type,
+      // never as a float, where neighbouring integers past 2^53 are one.
+      const column = exactColumn(nativeType);
+      if (!column) {
+        read = sql`cast(${item} as ${numberListType(texts)})`;
+        break;
+      }
+      // Values the column's type holds are read in that type; others
+      // (`equalityValues`' wider ones) in a list per scale, as decimal(38, s),
+      // each exactly.
+      const held: string[] = [];
+      const wider = new Map<number, string[]>();
+      for (const v of values) {
+        const exact = exactIn(v, column);
+        if (exact !== undefined) {
+          held.push(exact);
+          continue;
+        }
+        const wide = exactWide(v);
+        if (wide === undefined) {
+          throw new Error("inSet takes no value that no exact number holds");
+        }
+        const scale = scaleOf(wide);
+        wider.set(scale, [...(wider.get(scale) ?? []), wide]);
+      }
+      const lists: [string[], Expression<unknown>][] = [];
+      if (held.length > 0) {
+        lists.push([
+          held,
+          column.scale === 0 && column.range
+            ? sql`cast(${item} as bigint)`
+            : sql`cast(${item} as decimal(38, ${sql.lit(column.scale)}))`,
+        ]);
+      }
+      for (const scale of [...wider.keys()].sort((a, b) => a - b)) {
+        lists.push([
+          wider.get(scale)!,
+          sql`cast(${item} as decimal(38, ${sql.lit(scale)}))`,
+        ]);
+      }
+      if (lists.length === 0) {
+        // No value: `in` holds for no row, `notIn` for every row whose value
+        // is not null, as the whole list would.
+        return negate
+          ? sql<SqlBool>`${expression} = ${expression}`
+          : sql<SqlBool>`${expression} <> ${expression}`;
+      }
+      const parts = lists.map(([list, as]) => {
+        const set = sql`(select ${as} from openjson(${param("nvarchar", JSON.stringify(list))}))`;
+        return negate
+          ? sql<SqlBool>`${expression} not in ${set}`
+          : sql<SqlBool>`${expression} in ${set}`;
+      });
+      return parts.length === 1
+        ? parts[0]!
+        : sql<SqlBool>`(${sql.join(parts, negate ? sql` and ` : sql` or `)})`;
+    }
+    case "boolean":
+      texts = values.map((v) => (v === true ? "1" : "0"));
+      read = sql`cast(${item} as bit)`;
+      break;
+    case "date":
+      read = sql`cast(${item} as date)`;
+      break;
+    case "timestamp": {
+      texts = texts.map((t) => t.replace(PAST_100_NS, "$1"));
+      const instant = sql`cast(${item} as datetimeoffset)`;
+      const base = baseType(nativeType);
+      read = !NAIVE_TIMESTAMPS.has(base)
+        ? instant
+        : base === "datetime"
+          ? sql`cast(switchoffset(${instant}, '+00:00') as datetime)`
+          : sql`cast(switchoffset(${instant}, '+00:00') as datetime2(7))`;
+      break;
+    }
+    default:
+      read = sql`cast(${item} as nvarchar(max))`;
+  }
+  const list = sql`(select ${read} from openjson(${param("nvarchar", JSON.stringify(texts))}))`;
+  return negate
+    ? sql<SqlBool>`${expression} not in ${list}`
+    : sql<SqlBool>`${expression} in ${list}`;
+};
+
 // A closed map: the unit is written into the SQL as a keyword, so the bucket
 // expression holds no parameter and can be repeated in GROUP BY and ORDER BY.
 // `iso_week` starts on Monday whatever the session's DATEFIRST.
@@ -356,6 +617,162 @@ const exactKind = (
 
 const ESCAPE = "\\";
 
+// LOWER on both sides makes the match case-insensitive whatever the column's
+// collation; `[` opens a character class in SQL Server's LIKE.
+const like = (
+  column: Expression<unknown>,
+  pattern: string
+): Expression<SqlBool> =>
+  sql<SqlBool>`lower(${column}) like lower(${param(
+    "nvarchar",
+    pattern.replaceAll("[", `${ESCAPE}[`)
+  )}) escape ${sql.lit(ESCAPE)}`;
+
+/** nvarchar of any length: what text binds as, so a value of it is the column's own type. */
+const OWN_TEXT = /^nvarchar\((\d+|max)\)$/;
+const OWN_FRACTIONAL = /^(datetime2|datetimeoffset)\((\d)\)$/;
+const PLAN_TIMESTAMP =
+  /^(\d{4})-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+/**
+ * `value` bound as exactly the column's own type, or undefined. Each binding
+ * is a typed parameter of that type, or a cast of a parameter to it whose
+ * value the cast holds exactly, so no column value is converted and the
+ * value cannot fail to convert:
+ * - an integer in the range of an integer column, as a parameter of that type;
+ * - a decimal (no exponent) whose digits a decimal or numeric column holds,
+ *   cast from its text to exactly that type: SQL Server compares decimals
+ *   exactly whatever their scale, so as `value`'s decimal(38, s) does;
+ * - text against nvarchar of any length: the value takes the column's
+ *   collation, an implicit one outranking a parameter's default;
+ * - a date; a timestamp within years 1754 to 9998 at an offset SQL Server
+ *   takes (±14:00), against datetimeoffset, datetime2 or datetime, with no
+ *   more fractional digits than the column keeps, so nothing rounds;
+ * - a boolean against bit.
+ * Left out: float and real (a decimal compared with them converts one of the
+ * two to a float), money, varchar, char and nchar (converted to nvarchar),
+ * uniqueidentifier (its text converted), smalldatetime, and large-object text.
+ */
+const ownValue = (
+  v: PlanValue,
+  { type, nativeType }: { type: ValueSubject["type"]; nativeType: string }
+): Expression<unknown> | undefined => {
+  const base = baseType(nativeType);
+  switch (type) {
+    case "number": {
+      if (typeof v === "boolean") return undefined;
+      const text = String(v);
+      const range = INTEGER_RANGES[base];
+      if (range) {
+        if (!INTEGER_TEXT.test(text)) return undefined;
+        const n = BigInt(text);
+        if (n < range[0] || n > range[1]) return undefined;
+        return base === "bigint"
+          ? param("bigint", text)
+          : param(base as "int" | "smallint" | "tinyint", Number(text));
+      }
+      if (!DECIMALS.has(base) || !DECIMAL_TEXT.test(text)) return undefined;
+      const column = exactColumn(nativeType);
+      const exact = column && exactIn(text, column);
+      if (exact === undefined) return undefined;
+      const size = DECIMAL_SIZE.exec(nativeType);
+      if (!size) return undefined;
+      return sql`cast(${param("nvarchar", exact)} as ${sql.raw(base)}(${sql.lit(Number(size[1]))}, ${sql.lit(Number(size[2] ?? 0))}))`;
+    }
+    case "text":
+      return typeof v === "string" && OWN_TEXT.test(nativeType)
+        ? param("nvarchar", v)
+        : undefined;
+    case "boolean":
+      return typeof v === "boolean" && base === "bit"
+        ? param("bit", v)
+        : undefined;
+    case "date":
+      return typeof v === "string" &&
+        base === "date" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(v)
+        ? value(v, { type, nativeType })
+        : undefined;
+    case "timestamp": {
+      const m = typeof v === "string" ? PLAN_TIMESTAMP.exec(v) : null;
+      if (!m) return undefined;
+      const year = Number(m[1]);
+      const fraction = (m[2] ?? "").replace(/0+$/, "").length;
+      if (year < 1754 || year > 9998) return undefined;
+      if (m[3] !== undefined && Number(m[3]) * 60 + Number(m[4]) > 14 * 60) {
+        return undefined;
+      }
+      if (base === "datetime") return value(v, { type, nativeType });
+      const own = OWN_FRACTIONAL.exec(nativeType);
+      if (!own || fraction > Number(own[2])) return undefined;
+      const precise = Number(own[2]) === 7;
+      // SQL Server refuses a text with more than 7 fractional digits, and
+      // here only once a row reached the condition: past the 7th, whatever
+      // `fraction` allowed, they are zeros, cut as `value` cuts them.
+      const text = (v as string).replace(PAST_100_NS, "$1");
+      if (own[1] === "datetimeoffset") {
+        return precise
+          ? value(text, { type, nativeType })
+          : sql`cast(${param("nvarchar", text)} as datetimeoffset(${sql.lit(Number(own[2]))}))`;
+      }
+      return precise
+        ? value(text, { type, nativeType })
+        : sql`cast(switchoffset(cast(${param("nvarchar", text)} as datetimeoffset), '+00:00') as datetime2(${sql.lit(Number(own[2]))}))`;
+    }
+    default:
+      return undefined;
+  }
+};
+
+/** The error number a failed `ruleGuard` throws; its state is the staged read's index plus one (at most 255). */
+export const RULE_GUARD_ERROR = 51000;
+
+/**
+ * A column's type as `azureSqlNativeType` writes it from `sys.columns`, in
+ * SQL: `tn` is its type name, as the schema read takes it.
+ */
+const NATIVE_TYPE = `case
+  when k.tn in (N'char', N'varchar', N'binary', N'varbinary', N'nchar', N'nvarchar')
+    then k.tn + N'(' + case when c.max_length = -1 then N'max'
+      when k.tn in (N'nchar', N'nvarchar') then cast(c.max_length / 2 as nvarchar(10))
+      else cast(c.max_length as nvarchar(10)) end + N')'
+  when k.tn in (N'decimal', N'numeric')
+    then k.tn + N'(' + cast(c.precision as nvarchar(10)) + N',' + cast(c.scale as nvarchar(10)) + N')'
+  when k.tn in (N'datetime2', N'datetimeoffset', N'time')
+    then k.tn + N'(' + cast(c.scale as nvarchar(10)) + N')'
+  else k.tn end`;
+
+/**
+ * A statement that throws `RULE_GUARD_ERROR` when a column `guard` names is
+ * not in its table with the type the catalogue last read (compared as the
+ * schema read writes it), before the ruled read evaluates a comparison
+ * chosen for that type: one converting a changed column per row could fail
+ * on a row the rule hides, on a row the caller's conditions picked. It reads
+ * `sys.columns` only, so whether it throws depends on no row. The names and
+ * types are plain bound values, a pair per column read as a VALUES list
+ * (no OPENJSON, which needs compatibility level 130), compared byte for
+ * byte; `object` names the table by bound schema and name.
+ */
+const ruleGuard = (
+  guard: RuleGuard,
+  object: Expression<unknown>,
+  index: number
+): Expression<unknown> => {
+  if (guard.columns.length === 0) return sql``;
+  const expected = sql.join(
+    guard.columns.map(
+      (c) =>
+        sql`(${param("nvarchar", c.name)}, ${param("nvarchar", c.nativeType)})`
+    )
+  );
+  const state = Math.min(index + 1, 255);
+  return sql`if exists (select 1 from (values ${expected}) as e (n, t) where not exists (select 1 from sys.columns as c left join sys.types as ty on ty.user_type_id = c.user_type_id cross apply (select coalesce(case when ty.is_assembly_type = 1 then ty.name else type_name(c.system_type_id) end, N'unknown') as tn) as k where c.object_id = ${object} and c.name collate Latin1_General_BIN2 = e.n collate Latin1_General_BIN2 and ${sql.raw(NATIVE_TYPE.replace(/\s+/g, " "))} collate Latin1_General_BIN2 = e.t collate Latin1_General_BIN2)) throw ${sql.lit(RULE_GUARD_ERROR)}, N'a row rule column differs from the catalogue', ${sql.lit(state)}; `;
+};
+
+/** The object id of `schemaName.name`, both bound, or null when there is none the caller can see. */
+const objectIdOf = (schemaName: string, name: string): Expression<unknown> =>
+  sql`object_id(quotename(${param("nvarchar", schemaName)}) + N'.' + quotename(${param("nvarchar", name)}))`;
+
 export const mssqlDialect: SqlDialect = {
   name: "mssql",
   // SQL Server takes 2,100 parameters per request; sp_executesql, which the
@@ -374,6 +791,8 @@ export const mssqlDialect: SqlDialect = {
     },
   }),
   value,
+  equalityValues,
+  inSet,
   bucket: (unit, date, fiscalStartMonth) => {
     const part = sql.raw(DATEPART[unit]);
     const shift = fiscalShift(unit, fiscalStartMonth);
@@ -384,13 +803,7 @@ export const mssqlDialect: SqlDialect = {
         : sql`dateadd(month, ${sql.lit(shift)}, datetrunc(${part}, dateadd(month, ${sql.lit(-shift)}, ${date})))`;
     return sql`cast(${truncated} as date)`;
   },
-  // LOWER on both sides makes the match case-insensitive whatever the
-  // column's collation; `[` opens a character class in SQL Server's LIKE.
-  like: (column, pattern): Expression<SqlBool> =>
-    sql<SqlBool>`lower(${column}) like lower(${param(
-      "nvarchar",
-      pattern.replaceAll("[", `${ESCAPE}[`)
-    )}) escape ${sql.lit(ESCAPE)}`,
+  like,
   // Expressions, not ordinals, which SQL Server has none of in GROUP BY.
   groupBy: (qb, items) => qb.groupBy(items.map(({ expression }) => expression)),
   // Nulls last ascending and first descending by a leading CASE: SQL Server
@@ -508,6 +921,55 @@ export const mssqlDialect: SqlDialect = {
   // taken on the UTC wall clock, or on the calendar zone's, read first.
   stepFence: "aggregate",
   subqueryInAggregate: false,
+  // SQL Server may evaluate any condition or expression of a statement on a
+  // row before another condition drops it, through a derived table, a CTE or
+  // a CASE alike; only the order of statements is kept. So the rule's rows
+  // are copied by a statement of their own into a temp table, which the
+  // query reads: no expression of the caller's is in that statement, and the
+  // query never reads the table itself. Any user may create temp tables, on a
+  // read-only replica too; one created inside the request's sp_executesql is
+  // dropped when it ends, and `drop table if exists` clears one a batch
+  // without parameters left on the connection.
+  //
+  // Only the columns the query reads are copied (a constant where it reads
+  // none, as for `count(*)`), each keeping its type and collation.
+  //
+  // The copy is preceded by `ruleGuard`, which refuses it when a column
+  // evaluated beside the rule no longer has the type the catalogue says.
+  // That check reads persisted metadata, which for a view not bound to its
+  // schema keeps the types the view was created with, and no type sees a
+  // computed column whose expression raises per row. So where the read has a
+  // narrowed form (the caller's conditions beside the rule, or `apart` values
+  // left out), the batch picks it only for a base table with no computed
+  // column, from live metadata, which reads no row; otherwise it copies the
+  // rule alone. The temp table is made empty first (`top (0)`, which reads
+  // no row; the `union all` keeps a column's identity property from being
+  // copied), as a batch may create it once. Both branches are compiled only
+  // when reached, as each names the temp table the batch creates.
+  ruled: ({ table, columns, rule, narrowed, guard }, staging) => {
+    const index = staging.statements.length;
+    const temp = sql.raw(`#r${index}`);
+    const list =
+      columns.length === 0
+        ? sql`0 as ${sql.id("_")}`
+        : sql.join(columns.map((c) => sql.id(c)));
+    const object = objectIdOf(guard.schemaName, guard.name);
+    const copy = narrowed
+      ? sql`select top (0) ${list} into ${temp} from ${table} union all select top (0) ${list} from ${table}; if objectproperty(${object}, N'IsUserTable') = 1 and not exists (select 1 from sys.computed_columns as cc where cc.object_id = ${object}) insert into ${temp} select ${list} from ${table} where ${narrowed}; else insert into ${temp} select ${list} from ${table} where ${rule};`
+      : sql`select ${list} into ${temp} from ${table} where ${rule};`;
+    staging.statements.push(
+      sql`${ruleGuard(guard, object, index)}drop table if exists ${temp}; ${copy}`
+    );
+    staging.at.push(guard.at);
+    return temp;
+  },
+  narrowedCheck: "live",
+  ruledOnce: true,
+  ownValue,
+  // The read's guard has checked the column's type (`ruleGuard`).
+  ruleValue: () => undefined,
+  ownMatch: (column, pattern, nativeType) =>
+    OWN_TEXT.test(nativeType) ? like(column, pattern) : undefined,
   anchorPlus: (days) => sql`dateadd(day, ${days}, cast('1900-01-01' as date))`,
   // Truncates a float, an integer or a decimal toward zero alike.
   truncate: (n) => sql`cast(round(${n}, 0, 1) as int)`,

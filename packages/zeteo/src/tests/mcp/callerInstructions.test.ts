@@ -74,6 +74,7 @@ describe("per-caller MCP instructions", () => {
     expect(text).toContain(`\`${granted.slug}\``);
     expect(text).toContain("Orders and customers of the web shop");
     expect(text).not.toContain(later.slug);
+    expect(text).not.toContain("Some tables show you only some rows");
     const ttl = await redis.ttl(cacheKey);
     expect(ttl).toBeGreaterThan(290);
     expect(ttl).toBeLessThanOrEqual(300);
@@ -107,6 +108,36 @@ describe("per-caller MCP instructions", () => {
     const text = await instructionsOf(mcpToken([MCP_USE, DATA_READ]));
     expect(text).toContain(
       "Nothing is granted to you yet; ask an admin for access."
+    );
+  });
+});
+
+describe("per-caller MCP instructions for a caller with limited rows", () => {
+  const userId = randomUUID();
+  const token = mcpToken([MCP_USE, DATA_READ], userId);
+  let source: Awaited<ReturnType<typeof seedQuerySource>>;
+
+  beforeAll(async () => {
+    source = await seedQuerySource(postgres, {}, "mcp-instr-rows");
+    await grantTo({ type: "user", id: userId }, source.tables.orders!, "all", {
+      access: "rule",
+      rule: { status: { eq: "paid" } },
+    });
+  });
+  afterAll(async () => {
+    await redis.del(`zeteo:mcp:instructions:${userId}`);
+    await removeSources([source.id]);
+  });
+
+  it("say some tables show only some rows, and to say 'your' figures", async () => {
+    const text = (await instructionsOf(token))!;
+    const section = text.slice(
+      text.indexOf("## What you can query"),
+      text.indexOf("\n\n## ", text.indexOf("## What you can query"))
+    );
+    expect(section).toContain(`\`${source.slug}\``);
+    expect(section.split("\n").at(-1)).toBe(
+      'Some tables show you only some rows; describe_table says which. Say "your" figures, not totals, for those.'
     );
   });
 });

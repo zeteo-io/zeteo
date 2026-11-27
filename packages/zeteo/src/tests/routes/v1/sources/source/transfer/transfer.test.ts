@@ -209,6 +209,46 @@ describe("POST /v1/sources/:sourceId/transfer", () => {
       type: "upload",
       owner_grant: { user_id: to.id, table_ids: [tableId] },
       grants_removed: [old!.id],
+      row_access_reset: [],
+    });
+  });
+
+  it("resets and records the recipient's own row access on the tables", async () => {
+    const from = await user();
+    const to = await user();
+    const source = await createUploadSource(app.url, from.token, from.id, CSV);
+    const tableId = source.tables[0]!.id;
+    const column = await prisma.sourceColumn.findFirstOrThrow({
+      where: { tableId },
+    });
+    const theirs = await prisma.grant.create({
+      data: {
+        principalType: "user",
+        principalId: to.id,
+        tableId,
+        allColumns: true,
+        rowAccess: "rule",
+        rowRule: { [column.id]: { eq: "1" } },
+        rowRuleDescription: "One row",
+        createdBy: from.id,
+      },
+    });
+    const res = await call("POST", `/${source.id}/transfer`, from.token, {
+      user_id: to.id,
+    });
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    expect(
+      await prisma.grant.findUniqueOrThrow({ where: { id: theirs.id } })
+    ).toMatchObject({
+      ownerGrant: true,
+      rowAccess: "unlimited_default",
+      rowRule: null,
+      rowRuleDescription: null,
+    });
+    const entry = (await auditRows(source.id)).at(-1)!.payload;
+    expect(entry.metadata).toMatchObject({
+      event: "zeteo.source.transferred",
+      row_access_reset: [theirs.id],
     });
   });
 

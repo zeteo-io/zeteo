@@ -47,6 +47,7 @@ describe("export", () => {
       }));
       const result = await exportCalls(t.ctx("p-1")).rows(query);
       expect(result.runId).toBe(RUN);
+      expect(result.rowsLimited).toBe(false);
       expect(result.columns).toEqual([{ name: "id", type: "number" }]);
       expect(result.warnings).toEqual([]);
       expect(await readAll(result.rows)).toEqual([[1], [2], [3]]);
@@ -61,6 +62,16 @@ describe("export", () => {
       });
       expect(sent.headers.authorization).toBe("Bearer p-1");
       expect(sent.headers["accept-encoding"]).toBe("gzip");
+    });
+
+    it("says the rows are limited from X-Zeteo-Rows-Limited", async () => {
+      t.stub.respond(() => ({
+        headers: { ...runHeader, "x-zeteo-rows-limited": "true" },
+        chunks: [head, "[1]\n", end("complete", 1)],
+      }));
+      const result = await exportCalls(t.ctx()).rows(query);
+      expect(result.rowsLimited).toBe(true);
+      expect(await readAll(result.rows)).toEqual([[1]]);
     });
 
     it("resolves done with a truncated end", async () => {
@@ -437,6 +448,7 @@ describe("export", () => {
         format: "csv",
       });
       expect(result.runId).toBe(RUN);
+      expect(result.rowsLimited).toBe(false);
       const parts: Buffer[] = [];
       for await (const part of result.stream) parts.push(part as Buffer);
       expect(Buffer.concat(parts).toString()).toBe(csv);
@@ -445,6 +457,18 @@ describe("export", () => {
         query: { format: "csv" },
       });
       expect(t.stub.requests[0].headers["accept-encoding"]).toBe("gzip");
+    });
+
+    it("says the rows are limited from X-Zeteo-Rows-Limited", async () => {
+      t.stub.respond(() => ({
+        headers: { ...runHeader, "x-zeteo-rows-limited": "true" },
+        chunks: ["id\r\n1\r\n"],
+      }));
+      const result = await exportCalls(t.ctx()).stream(query, {
+        format: "csv",
+      });
+      expect(result.rowsLimited).toBe(true);
+      result.stream.destroy();
     });
 
     it("yields a gzipped body decompressed", async () => {

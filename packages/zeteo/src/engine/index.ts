@@ -122,6 +122,8 @@ export interface RunQueryResult {
   /** Why rows were left out, when some were. */
   truncated_by?: "rows" | "bytes";
   warnings: QueryWarning[];
+  /** A row rule of the caller's limited the rows of a table the query read. */
+  rows_limited: boolean;
   run_id: string;
 }
 
@@ -522,6 +524,7 @@ export async function runQuery(
     truncated: result.truncated !== false,
     ...(result.truncated !== false && { truncated_by: result.truncated }),
     warnings: plan.warnings,
+    rows_limited: plan.rowsLimited,
     run_id: runId,
   };
 }
@@ -644,6 +647,8 @@ const runDashboardQuery = async (
   const result: DashboardRunResult = {
     ...rows,
     warnings: plan.warnings,
+    // The viewer's own plan says, not the cache: whoever filled it.
+    rows_limited: plan.rowsLimited,
     ...(cached && { cached_at: cachedAt }),
     // The rows were cut by the dashboard's or the source's cap, not by the
     // saved query's own `limit`.

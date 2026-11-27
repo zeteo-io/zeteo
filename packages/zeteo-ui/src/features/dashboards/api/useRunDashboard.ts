@@ -12,6 +12,8 @@ export interface PanelRun {
   message?: string;
   /** The last good result: kept when a later refresh fails. */
   result?: PanelResult;
+  /** The result is of the viewer's rows only (a row rule limits them). */
+  rowsLimited?: boolean;
   /** When `result` was current (the cache's time for a cached one). */
   updatedAt?: string;
   /** When a refresh first failed after `result`; cleared by the next good one. */
@@ -55,6 +57,7 @@ const applyLine = (prev: PanelRun | undefined, line: PanelLine): PanelRun => {
     return {
       state: "ok",
       result: line.result,
+      rowsLimited: line.rows_limited === true,
       updatedAt: line.cached_at ?? now,
       loading: false,
     };

@@ -1,5 +1,6 @@
 import { useAvailableSavedQueries } from "../api/useAvailableSavedQueries";
 import type { ChartSettings, ChartType, SavedPanel } from "../api/types";
+import { RowsLimitedPill } from "@/components/RowsLimitedPill";
 import { useCatalogColumns } from "../api/useCatalogColumns";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import { useSavedPanels } from "../api/useSavedPanels";
@@ -412,6 +413,7 @@ export const PanelEditor = ({
         <div className="z-pe-preview" aria-label="Preview">
           {preview.isFetching && <Spinner size="sm" />}
           <ErrorNotice error={preview.error} />
+          {preview.data?.rows_limited && <RowsLimitedPill />}
           {preview.data && shown && (
             <div className="z-pe-chart">
               <Chart chart={shown} result={preview.data} />

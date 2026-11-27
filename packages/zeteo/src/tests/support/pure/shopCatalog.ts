@@ -1,5 +1,6 @@
 import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import type { ColumnType } from "../../../adapters/types.js";
+import type { RowRule } from "../../../row-rules/resolve.js";
 import type { Access } from "../../../grants/access.js";
 import type {
   Relation,
@@ -155,6 +156,10 @@ export interface ShopOptions {
   measures?: MeasureRow[];
   /** The source's stored metrics; the catalogue holds those the caller may use. */
   metrics?: MetricRow[];
+  /** The caller's row rules, by table key; a table absent here gives every row. */
+  rowRules?: Record<string, RowRule>;
+  /** Table keys the catalogue holds as views; every other is a table. */
+  views?: string[];
 }
 
 /** The SQL Server type an Azure SQL source would report for each Postgres one above. */
@@ -207,7 +212,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
       sourceId: SOURCE.id,
       schemaName: spec.schemaName,
       name: spec.name,
-      kind: "table",
+      kind: options.views?.includes(key) ? "view" : "table",
       description: null,
       missingSince: since(key),
     } as SourceTable);
@@ -253,6 +258,7 @@ export const shopCatalog = (options: ShopOptions = {}): VisibleCatalog => {
     allows: (tableId, columnId) =>
       !hidden.has(tableId) && !hidden.has(columnId),
     tableAccess: () => "all",
+    rowRule: (tableId) => options.rowRules?.[tableId],
   };
   return buildVisibleCatalog(
     options.maxJoins === undefined

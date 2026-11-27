@@ -1,5 +1,6 @@
 import { sourceTypeName } from "@/features/sources/components/sourceLabels";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { RowsLimitedPill } from "@/components/RowsLimitedPill";
 import { ErrorNotice } from "@/components/ErrorNotice";
 import type { CatalogSource } from "../api/types";
 import { useCatalog } from "../api/useCatalog";
@@ -50,6 +51,12 @@ const SourceRow = ({ source }: { source: CatalogSource }) => {
           {source.tables.map((t) => (
             <li key={`${t.schema_name ?? ""}.${t.name}`}>
               <code>{t.name}</code>
+              {t.rows_limited && (
+                <>
+                  {" "}
+                  <RowsLimitedPill reason={t.rows_limited_reason} />
+                </>
+              )}
               {t.measures && t.measures.length > 0 && (
                 <ul
                   className="z-catalog-measures"

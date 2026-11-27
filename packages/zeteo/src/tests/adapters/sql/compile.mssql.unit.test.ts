@@ -586,34 +586,54 @@ describe("compileSql on SQL Server: filters", () => {
     });
   });
 
-  it("binds an integer as bigint and a decimal as text cast to a decimal of its own scale", () => {
+  it("binds an integer as bigint and a decimal as exact text cast to a decimal of its own scale", () => {
     expect(where({ total: { in: [1, "2.50", 0.1] } })).toEqual({
-      sql: `${base}[t0].[total] in (@1, cast(@2 as decimal(38, 2)), cast(@3 as decimal(38, 1)))${order(3)}`,
-      parameters: [bigint("1"), nvarchar("2.50"), nvarchar("0.1"), ...PAGE],
+      sql: `${base}[t0].[total] in (@1, cast(@2 as decimal(38, 1)), cast(@3 as decimal(38, 1)))${order(3)}`,
+      parameters: [bigint("1"), nvarchar("2.5"), nvarchar("0.1"), ...PAGE],
     });
   });
 
-  it("binds an integer past bigint as a decimal, and a number no decimal holds as a float", () => {
+  it("leaves out of an equality the numbers an integer or decimal column cannot hold, never comparing through a float", () => {
     expect(
       where({
-        id: { in: [2147483648, "9223372036854775807", "9223372036854775808"] },
+        id: {
+          in: [
+            2147483648,
+            "9223372036854775807",
+            "9223372036854775808",
+            "8.0",
+            "8.5",
+            1e21,
+          ],
+        },
       })
     ).toEqual({
-      sql: `${base}[t0].[id] in (@1, @2, cast(@3 as decimal(38, 0)))${order(3)}`,
+      sql: `${base}[t0].[id] in (@1, @2, @3)${order(3)}`,
       parameters: [
         bigint("2147483648"),
         bigint("9223372036854775807"),
-        nvarchar("9223372036854775808"),
+        bigint("8"),
         ...PAGE,
       ],
     });
-    expect(where({ total: { in: [1e300, 1e-7] } })).toEqual({
-      sql: `${base}[t0].[total] in (@1, @2)${order(2)}`,
-      parameters: [
-        { type: "float", value: 1e300 },
-        { type: "float", value: 1e-7 },
-        ...PAGE,
-      ],
+    // numeric(12,2): ten digits before the point, two after.
+    expect(
+      where({ total: { in: [1e300, 1e-7, "12345678901", "0.125"] } })
+    ).toEqual({
+      sql: `${base}[t0].[total] <> [t0].[total]${order(0)}`,
+      parameters: [...PAGE],
+    });
+    expect(where({ total: { notIn: [1e300] } })).toEqual({
+      sql: `${base}[t0].[total] = [t0].[total]${order(0)}`,
+      parameters: [...PAGE],
+    });
+    expect(where({ id: { eq: "1.5" } })).toEqual({
+      sql: `${base}[t0].[id] <> [t0].[id]${order(0)}`,
+      parameters: [...PAGE],
+    });
+    expect(where({ not: { id: { ne: 1e21 } } })).toEqual({
+      sql: `${base}not ([t0].[id] = [t0].[id])${order(0)}`,
+      parameters: [...PAGE],
     });
   });
 
@@ -632,25 +652,25 @@ describe("compileSql on SQL Server: filters", () => {
 });
 
 describe("compileSql on SQL Server: the parameter limit", () => {
-  const ids = (from: number) =>
-    Array.from({ length: 1000 }, (_, i) => from + i);
+  // Lists of 100, each value its own parameter: a longer list binds as one.
+  const ids = (from: number) => Array.from({ length: 100 }, (_, i) => from + i);
   const filters = (lists: number, extra: number) => ({
     or: [
       ...Array.from({ length: lists }, (_, j) => ({
-        id: { in: ids(j * 1000) },
+        id: { in: ids(j * 100) },
       })),
       ...(extra > 0 ? [{ id: { in: ids(100_000).slice(0, extra) } }] : []),
     ],
   });
 
   it("binds 2,098 parameters, paging included", () => {
-    expect(compile({ where: filters(2, 96) }).parameters).toHaveLength(2098);
+    expect(compile({ where: filters(20, 96) }).parameters).toHaveLength(2098);
   });
 
   it("refuses a query that binds more, before it runs, naming the limit", () => {
     let thrown: unknown;
     try {
-      compile({ where: filters(2, 97) });
+      compile({ where: filters(20, 97) });
     } catch (err) {
       thrown = err;
     }

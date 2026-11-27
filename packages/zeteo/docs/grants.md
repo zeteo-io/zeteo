@@ -11,6 +11,10 @@ grant is invisible to everyone.
 | `GET /v1/grants/:grantId` | `zeteo.grants.read` | the grant |
 | `PUT /v1/grants/:grantId` | `zeteo.grants.write` | the grant |
 | `DELETE /v1/grants/:grantId` | `zeteo.grants.write` | `204` |
+| `GET /v1/grants/effective` (`user_id`, `table_id`, `organization_id`) | `zeteo.grants.read` | one user's combined access to one table: columns, rows, the rule in words, the grants it comes from, warnings |
+
+Identity keys and their values, which rules compare columns with, are under `/v1/identity-keys`
+([row-rules.md](row-rules.md)).
 
 `write` includes `read`. A caller without the permission gets `403 forbidden` before the body is
 validated. Both permissions are for administrators and are never assignable through an
@@ -19,8 +23,9 @@ organization.
 ## The grant
 
 `{ id, principal_type, principal_id, principal_status, source: { id, slug }, table: { id,
-schema_name, name, missing }, all_columns, columns: [{ id, name, missing }], created_by,
-created_at, updated_at }`.
+schema_name, name, missing }, all_columns, columns: [{ id, name, missing }], owner_grant,
+row_access, row_rule, row_rule_description, row_rule_problems, created_by, created_at,
+updated_at }`. The row fields say which rows the grant reaches ([row-rules.md](row-rules.md)).
 
 - `principal_type` is `user` or `group`; `principal_id` is the Tereo id. A grant does not need its
   principal to exist when it is created, and a user's id and a group's id with the same value are
@@ -29,22 +34,36 @@ created_at, updated_at }`.
 - Create takes `{ principal_type, principal_id, table_id, all_columns: true }` or the same with
   `all_columns: false` and `column_ids`, 1 to 500 distinct ids of columns of that table
   (`422 invalid_grant` for any that is not, including an id that does not exist at all).
-- `PUT` takes only the columns half (`{ all_columns: true }` or `{ all_columns: false,
-  column_ids }`) and replaces it whole. The principal and the table never change.
+- Create may also take `row_access` (`unlimited_default`, the default; `all`; or `rule`, with
+  `row_rule` and optionally `row_rule_description`). A rule that is not valid is `400
+  invalid_row_rule`, with `path` into the body.
+- `PUT` takes the columns half (`{ all_columns: true }` or `{ all_columns: false, column_ids }`)
+  and the rows half (`row_access`, `row_rule`, `row_rule_description`) and replaces both whole.
+  `row_access` is **required** on a `PUT`, so a body of columns only (`400`) cannot drop a rule. The
+  principal and the table never change.
 - Unknown `table_id` is `404 not_found`. A table of an archived source takes no new grant and no
   change to a grant (`409 source_archived`); removing one still works.
 - `columns` lists the granted columns in table order, empty when `all_columns` is true.
 - Each create, replace and removal writes one audit entry (`zeteo.grant.created`,
   `zeteo.grant.updated`, `zeteo.grant.removed`) in the same transaction, with
-  `{ source_id, table_id, principal_type, principal_id, all_columns, column_ids }` as metadata. A
-  refused request writes none.
+  `{ source_id, table_id, principal_type, principal_id, all_columns, column_ids, row_access,
+  row_rule, row_rule_description }` as metadata. A refused request writes none.
 
 ## Rules
 
 - **Default deny.** A newly found table has no grants.
 - **Grants add up.** A user's access is the union of their own grants and those of every group they
   are in (global groups, and those of the organization the token was issued for). There are no deny
-  rules.
+  rules. Columns are the union; **rows** follow the row rules formula: any `all` grant gives every
+  row, else the rules of the `rule` grants are OR'd, else every row ([row-rules.md](row-rules.md)).
+  Only the grants active for the sign-in count, rules included: a rule on an organization's group
+  applies only when the user is signed in to that organization. So a grant that doesn't limit rows,
+  on a global group or on the user, gives **every row** whenever the user signs in outside that
+  organization (to another, or to none), and a user who belongs to no active organization (created
+  by an admin and never added to one, or whose organizations are all inactive) gets a token without
+  one, for whom every organization group's rule drops out. To limit someone everywhere, put the
+  rule on a user or global-group grant
+  ([row-rules.md](row-rules.md#organization-scoped-groups)).
 - **New columns stay hidden on explicit grants.** A grant with a column list does not include
   columns added later. An `all_columns` grant does.
 - **Drift is tracked, not destructive.** A table or column the last refresh did not find is shown
@@ -56,6 +75,8 @@ created_at, updated_at }`.
   on each of its tables, flagged `owner_grant`, which cannot be removed or narrowed. An owner may also
   list, create, change and remove grants on their own tables, with groups limited to global ones and
   those of their signed-in organization ([uploads.md](uploads.md#owning-granting-and-sharing)).
+  A row rule an owner writes may not use identity values (`400 invalid_row_rule`;
+  [row-rules.md](row-rules.md#the-rule)).
 
 ## Principal statuses
 

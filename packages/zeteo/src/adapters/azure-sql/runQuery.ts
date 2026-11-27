@@ -1,12 +1,16 @@
-import { mssqlDialect, type MssqlParameter } from "../sql/dialects/mssql.js";
-import { invalidValue } from "../../engine/errors.js";
+import { invalidValue, rowRuleUnavailable } from "../../engine/errors.js";
+import type { RowRuleAt, SqlPlan } from "../sql/types.js";
 import { approxRowBytes } from "../rowSize.js";
 import { logger } from "../../utils/logger.js";
-import type { SqlPlan } from "../sql/types.js";
 import { compileSql } from "../sql/compile.js";
 import { performance } from "node:perf_hooks";
 import type { ConnectionPool } from "mssql";
 import sql from "mssql";
+import {
+  mssqlDialect,
+  RULE_GUARD_ERROR,
+  type MssqlParameter,
+} from "../sql/dialects/mssql.js";
 import {
   AppError,
   QueryFailedError,
@@ -120,6 +124,12 @@ const parameterType = ({ type, value }: MssqlParameter) => {
         : sql.NVarChar(4000);
     case "bigint":
       return sql.BigInt;
+    case "int":
+      return sql.Int;
+    case "smallint":
+      return sql.SmallInt;
+    case "tinyint":
+      return sql.TinyInt;
     case "bit":
       return sql.Bit;
     case "float":
@@ -162,6 +172,7 @@ const SESSION_FATAL_SEVERITY = 20;
 interface DriverError {
   code?: string;
   number?: number;
+  state?: number;
   class?: number;
   originalError?: { code?: string };
 }
@@ -176,10 +187,27 @@ const isConnectionFailure = (err: unknown): boolean => {
   );
 };
 
-/** A driver error as the caller's; the driver's text goes only to the log. */
-const callerError = (err: unknown): AppError => {
+/**
+ * A driver error as the caller's; the driver's text goes only to the log.
+ * `ruledAt` says where each staged read's table is read, for a rule guard's
+ * refusal (`RULE_GUARD_ERROR`, its state the read's index plus one).
+ */
+const callerError = (
+  err: unknown,
+  ruledAt: readonly (RowRuleAt | undefined)[] = []
+): AppError => {
   if (err instanceof AppError) return err;
   const e = (err ?? {}) as DriverError;
+  // A column a row rule reads, or a condition beside it, no longer has the
+  // type the catalogue says: refused as a rule whose column has gone.
+  if (e.code === "EREQUEST" && e.number === RULE_GUARD_ERROR) {
+    logger.warn(
+      { err },
+      "a row rule's columns differ from the catalogue; refresh the source"
+    );
+    const at = ruledAt[(e.state ?? 0) - 1] ?? ruledAt.find(Boolean);
+    return rowRuleUnavailable(at?.table ?? "a table", at?.path ?? []);
+  }
   // The pool had no connection free in time: busy, not broken.
   if (isPoolExhausted(err)) {
     logger.warn({ err }, "no connection to the source for a query");
@@ -216,7 +244,9 @@ export class AzureSqlPreparedQuery implements PreparedQuery {
   constructor(
     readonly plan: SqlPlan,
     readonly sql: string,
-    readonly parameters: MssqlParameter[]
+    readonly parameters: MssqlParameter[],
+    /** Where each staged read's table is read (`CompiledQuery.ruledAt`). */
+    readonly ruledAt: readonly (RowRuleAt | undefined)[] = []
   ) {}
 }
 
@@ -227,11 +257,16 @@ export const prepareAzureSqlQuery = (
 ): AzureSqlPreparedQuery => {
   // The plan comes from this adapter's own language, so it is a SQL plan.
   const sqlPlan = plan as SqlPlan;
-  const { sql: text, parameters } = compileSql(sqlPlan, mssqlDialect, rows);
+  const {
+    sql: text,
+    parameters,
+    ruledAt,
+  } = compileSql(sqlPlan, mssqlDialect, rows);
   return new AzureSqlPreparedQuery(
     sqlPlan,
     text,
-    parameters as MssqlParameter[]
+    parameters as MssqlParameter[],
+    ruledAt
   );
 };
 
@@ -325,8 +360,10 @@ const closedError = () => new Error("the row stream is closed");
  * or by closing the connection when none comes within the driver's
  * `cancelTimeout` (the pool then discards it). Once the run is stopped, what
  * the driver reports changes nothing. SQL Server has no read-only
- * transaction: the compiled statement is a single SELECT, and the login is
- * checked for write rights when the source is registered.
+ * transaction: the compiled batch is one SELECT, after a `select … into #rN`
+ * per table with a row rule (`SqlDialect.ruled`), which writes only to the
+ * request's own temp tables, and the login is checked for write rights when
+ * the source is registered.
  */
 export const openAzureSqlQuery = async (
   pool: ConnectionPool,
@@ -496,8 +533,9 @@ export const openAzureSqlQuery = async (
       performance.now() >= limits.deadlineAt
     ) {
       endError = new QueryTimeoutError();
-    } else if (driverError !== undefined) endError = callerError(driverError);
-    else if (!readers) {
+    } else if (driverError !== undefined) {
+      endError = callerError(driverError, prepared.ruledAt);
+    } else if (!readers) {
       logger.error("the query returned no result");
       endError = new QueryFailedError();
     }

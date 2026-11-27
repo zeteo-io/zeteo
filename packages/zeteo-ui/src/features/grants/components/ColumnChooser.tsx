@@ -102,24 +102,26 @@ export const ColumnChooser = ({
               Select none
             </Button>
           </div>
-          <CheckboxGroup
-            name="grant-column-ids"
-            values={value.selected}
-            onChange={(selected) => {
-              // Keep the order of the table, whatever order they were ticked in.
-              const ticked = new Set(selected);
-              onChange({
-                ...value,
-                selected: columns
-                  .filter((c) => ticked.has(c.id))
-                  .map((c) => c.id),
-              });
-            }}
-            options={columns.map((c) => ({
-              value: c.id,
-              label: c.missing ? `${c.name} (missing)` : c.name,
-            }))}
-          />
+          <div className="z-grant-columns-scroll">
+            <CheckboxGroup
+              name="grant-column-ids"
+              values={value.selected}
+              onChange={(selected) => {
+                // Keep the order of the table, whatever order they were ticked in.
+                const ticked = new Set(selected);
+                onChange({
+                  ...value,
+                  selected: columns
+                    .filter((c) => ticked.has(c.id))
+                    .map((c) => c.id),
+                });
+              }}
+              options={columns.map((c) => ({
+                value: c.id,
+                label: c.missing ? `${c.name} (missing)` : c.name,
+              }))}
+            />
+          </div>
         </>
       )}
     </div>

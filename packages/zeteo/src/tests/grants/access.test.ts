@@ -176,6 +176,249 @@ describe("loadAccess", () => {
   });
 });
 
+describe("loadAccess row rules", () => {
+  const keyIds: string[] = [];
+  afterAll(async () => {
+    for (const u of userIds) await clearTestGroups(u);
+    await removeSources(sourceIds);
+    await prisma.identityValue.deleteMany({ where: { keyId: { in: keyIds } } });
+    await prisma.identityKey.deleteMany({ where: { id: { in: keyIds } } });
+  });
+
+  const newKey = async () => {
+    const key = await prisma.identityKey.create({
+      data: {
+        name: `access_${randomUUID().slice(0, 8)}`,
+        label: "Key",
+        createdBy: actor,
+      },
+    });
+    keyIds.push(key.id);
+    return key.id;
+  };
+
+  const ruleGrant = (
+    principalType: "user" | "group",
+    principalId: string,
+    tableId: string,
+    columnIds: string[] | "all",
+    rowAccess: "all" | "rule" | "unlimited_default",
+    rowRule?: Record<string, unknown>,
+    identityKeyIds: string[] = []
+  ) =>
+    prisma.grant.create({
+      data: {
+        principalType,
+        principalId,
+        tableId,
+        allColumns: columnIds === "all",
+        rowAccess,
+        ...(rowRule && { rowRule: rowRule as object }),
+        rowRuleDescription: rowRule ? "Paid only" : null,
+        identityKeyIds,
+        createdBy: actor,
+        ...(columnIds !== "all" && {
+          columns: { create: columnIds.map((columnId) => ({ columnId })) },
+        }),
+      },
+    });
+
+  it("unions columns and limits rows to the rule; an all grant lifts the limit", async () => {
+    const { table, columns } = await newSource("rule-union");
+    const caller = newCaller();
+    const groupId = randomUUID();
+    await setTestGroups(caller.userId, [{ id: groupId, organizationId: null }]);
+    const stored = { [columns[0].id]: { eq: "paid" } };
+    const userGrant = await ruleGrant(
+      "user",
+      caller.userId,
+      table.id,
+      [columns[0].id],
+      "rule",
+      stored
+    );
+    await ruleGrant(
+      "group",
+      groupId,
+      table.id,
+      [columns[1].id, columns[2].id],
+      "unlimited_default"
+    );
+
+    const access = await loadAccess(caller);
+    expect(access.tableAccess(table.id)).toEqual(
+      new Set(columns.map((c) => c.id))
+    );
+    expect(access.rowRule(table.id)).toEqual({
+      kind: "filter",
+      filter: stored,
+      columns: new Map([
+        [
+          columns[0].id,
+          { id: columns[0].id, name: "a", type: "text", nativeType: "text" },
+        ],
+      ]),
+      descriptions: [{ grantId: userGrant.id, custom: "Paid only", stored }],
+    });
+
+    const otherGroup = randomUUID();
+    await setTestGroups(caller.userId, [
+      { id: groupId, organizationId: null },
+      { id: otherGroup, organizationId: null },
+    ]);
+    await ruleGrant("group", otherGroup, table.id, [columns[0].id], "all");
+    expect((await loadAccess(caller)).rowRule(table.id)).toBeUndefined();
+  });
+
+  it("gives no limit when no grant has a rule", async () => {
+    const { table } = await newSource("rule-none");
+    const caller = newCaller();
+    await grant("user", caller.userId, table.id, "all");
+    expect((await loadAccess(caller)).rowRule(table.id)).toBeUndefined();
+  });
+
+  it("ORs the rules of several grants, with the caller's identity values", async () => {
+    const { table, columns } = await newSource("rule-or");
+    const caller = newCaller();
+    const groupId = randomUUID();
+    await setTestGroups(caller.userId, [{ id: groupId, organizationId: null }]);
+    const keyId = await newKey();
+    await prisma.identityValue.createMany({
+      data: ["Jane", "Joe"].map((value) => ({
+        keyId,
+        userId: caller.userId,
+        value,
+        createdBy: actor,
+      })),
+    });
+    await ruleGrant("user", caller.userId, table.id, "all", "rule", {
+      [columns[0].id]: { eq: "paid" },
+    });
+    await ruleGrant(
+      "group",
+      groupId,
+      table.id,
+      "all",
+      "rule",
+      { [columns[1].id]: { in: { identity: keyId } } },
+      [keyId]
+    );
+
+    const rule = (await loadAccess(caller)).rowRule(table.id);
+    expect(rule?.kind).toBe("filter");
+    if (rule?.kind !== "filter") return;
+    expect(rule.filter).toEqual({
+      or: [
+        { [columns[0].id]: { eq: "paid" } },
+        { [columns[1].id]: { in: ["Jane", "Joe"] } },
+      ],
+    });
+    expect([...rule.columns.keys()].sort()).toEqual(
+      [columns[0].id, columns[1].id].sort()
+    );
+    expect(rule.descriptions).toHaveLength(2);
+  });
+
+  it("matches no rows when the caller has no value under the rule's key", async () => {
+    const { table, columns } = await newSource("rule-empty");
+    const caller = newCaller();
+    const keyId = await newKey();
+    await ruleGrant(
+      "user",
+      caller.userId,
+      table.id,
+      "all",
+      "rule",
+      { not: { [columns[0].id]: { notIn: { identity: keyId } } } },
+      [keyId]
+    );
+    expect((await loadAccess(caller)).rowRule(table.id)).toEqual({
+      kind: "never",
+    });
+  });
+
+  it("drops a grant whose rule matches nothing from the OR", async () => {
+    const { table, columns } = await newSource("rule-drop");
+    const caller = newCaller();
+    const keyId = await newKey();
+    const groupId = randomUUID();
+    await setTestGroups(caller.userId, [{ id: groupId, organizationId: null }]);
+    await ruleGrant(
+      "user",
+      caller.userId,
+      table.id,
+      "all",
+      "rule",
+      { [columns[0].id]: { in: { identity: keyId } } },
+      [keyId]
+    );
+    const kept = await ruleGrant("group", groupId, table.id, "all", "rule", {
+      [columns[1].id]: { eq: "x" },
+    });
+    const rule = (await loadAccess(caller)).rowRule(table.id);
+    expect(rule).toMatchObject({
+      kind: "filter",
+      filter: { [columns[1].id]: { eq: "x" } },
+      descriptions: [{ grantId: kept.id }],
+    });
+  });
+
+  it("is unavailable when a rule's column has gone missing", async () => {
+    const { table, columns } = await newSource("rule-missing");
+    const caller = newCaller();
+    await ruleGrant("user", caller.userId, table.id, "all", "rule", {
+      [columns[2].id]: { eq: "x" },
+    });
+    await prisma.sourceColumn.update({
+      where: { id: columns[2].id },
+      data: { missingSince: new Date() },
+    });
+    expect((await loadAccess(caller)).rowRule(table.id)).toEqual({
+      kind: "unavailable",
+      reason: "column_missing",
+    });
+  });
+
+  it("is unavailable when a rule's column no longer exists", async () => {
+    const { table } = await newSource("rule-gone");
+    const caller = newCaller();
+    await ruleGrant("user", caller.userId, table.id, "all", "rule", {
+      [randomUUID()]: { eq: "x" },
+    });
+    expect((await loadAccess(caller)).rowRule(table.id)).toEqual({
+      kind: "unavailable",
+      reason: "column_missing",
+    });
+  });
+
+  it("is unavailable when the values put in exceed 50,000", async () => {
+    const { table, columns } = await newSource("rule-many");
+    const caller = newCaller();
+    const keyId = await newKey();
+    await prisma.identityValue.createMany({
+      data: Array.from({ length: 50_001 }, (_, i) => ({
+        keyId,
+        userId: caller.userId,
+        value: `v${i}`,
+        createdBy: actor,
+      })),
+    });
+    await ruleGrant(
+      "user",
+      caller.userId,
+      table.id,
+      "all",
+      "rule",
+      { [columns[0].id]: { in: { identity: keyId } } },
+      [keyId]
+    );
+    expect((await loadAccess(caller)).rowRule(table.id)).toEqual({
+      kind: "unavailable",
+      reason: "too_many_values",
+    });
+  });
+});
+
 describe("loadAccessAs", () => {
   afterAll(async () => {
     for (const u of userIds) await clearTestGroups(u);

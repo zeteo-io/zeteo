@@ -315,6 +315,8 @@ export interface QueryResult {
   /** Present when `truncated`. */
   truncated_by?: "rows" | "bytes";
   warnings: QueryWarning[];
+  /** A row rule of the caller's limited the rows of a table the query read: the figures are theirs, not totals. */
+  rows_limited: boolean;
   /** The run's id in the run log. */
   run_id: string;
 }

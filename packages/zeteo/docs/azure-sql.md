@@ -69,6 +69,11 @@ ALTER ROLE db_datareader ADD MEMBER zeteo_reader;
 
 The catalogue lists only the tables and views of the listed schemas the login can `SELECT` from.
 
+A query over a table the caller has a row rule on first copies the rule's rows, only the columns
+the query reads, into a temp table of the request (`#r0`, `#r1`…), dropped when the request ends
+([row-rules.md](row-rules.md), *Enforcement*). Any user may create temp tables in `tempdb`, so the login needs nothing more, but
+do not revoke its `CONNECT` on `tempdb`.
+
 A source's `size_bytes` is read from `sys.dm_db_partition_stats`, which needs `VIEW DATABASE
 STATE` (`GRANT VIEW DATABASE STATE TO zeteo_reader;`). Without it the size is `null` and everything
 else works; the login check does not count the right against the login. A table's `row_count` (an
@@ -152,6 +157,29 @@ they do not overflow where Postgres's would not; averages over exact columns div
 once. Timestamps are read as UTC and cut at the millisecond (a `datetime` rounded, see below); a
 `datetimeoffset` is converted to UTC, a `datetime2`, `datetime` or `smalldatetime` taken as UTC.
 `sum` of a `real` column is a `real`, as on Postgres.
+
+**Comparing numbers.** No value is compared with an integer, decimal or money column through a
+float. A value binds as `bigint`, or as `decimal(38, s)` at its own scale; a long `in` list is read
+in the column's own exact type, and a value the column's type (as the catalogue last read it) cannot
+hold goes into a list of its own per scale, read as `decimal(38, s)`. Such a value is left out of an
+equality only where that can only drop rows: an `eq` or `in` (no row of the column, as catalogued,
+can equal it). In a `ne` or `notIn`, or an `eq` or `in` under a `not`, it is compared exactly, so a
+column widened since the last refresh (`int` to `bigint`, a decimal given a scale) still has those
+rows excluded. A value of more than 38 digits, which no exact number type holds, is left out of a
+query's condition; a row rule's `ne` or `notIn` on one keeps no row (see
+[row-rules.md](row-rules.md#failing-closed)). A row rule's read is refused (`409
+row_rule_unavailable`) when a column it compares no longer has the catalogue's type, until the
+source is refreshed; in a rule on a base table, a value whose comparison with the column would need
+more than 38 digits is therefore not compared, as no row of the checked type equals it. A view's
+persisted column types can be stale, so on a view (or a table with a computed column) the rule's
+read compares every value exactly and applies none of the query's conditions beside the rule
+([row-rules.md](row-rules.md#enforcement)).
+
+**Compatibility level.** A condition's `in` or `notIn` of more than 100 values (the caller's or a
+row rule's) is bound as one JSON value read with `OPENJSON`, which needs the database's
+compatibility level to be 130 (SQL Server 2016) or higher; below that, such a query fails with
+`502 query_failed`. Nothing else Zeteo sends needs it: a row rule's type check binds its column
+names and types as plain parameters.
 
 **Stopping.** A query past the source's `timeout_ms`, or whose client goes away, is cancelled on the
 server with an attention on its own connection (no second connection is needed, so a cancel never

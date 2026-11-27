@@ -8,7 +8,7 @@ routes is `openapi/openapi.yaml`.
 | Route | Permission | Result |
 |-------|------------|--------|
 | `GET /v1/catalog` (`source`) | `zeteo.data.read` | `{ sources }`: what the caller may query, and the language schema |
-| `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, run_id }` |
+| `POST /v1/query` | `zeteo.data.read` | `{ columns, rows, truncated, truncated_by?, warnings, rows_limited, run_id }` |
 | `POST /v1/export` (`format`) | `zeteo.data.export` | a stream of NDJSON or CSV ([export.md](export.md)) |
 | `GET /v1/runs` (`user_id`, `source_id`, `outcome`, `limit`, `cursor`) | `zeteo.runs.read` | `{ data, next_cursor }`, newest first |
 
@@ -101,7 +101,9 @@ A filter is one of:
 Values are checked against the column: text takes a string; numbers a number or a decimal string
 (`"9007199254740993"`, so 64-bit integers and decimals lose nothing); booleans `true` or `false`;
 dates `YYYY-MM-DD`; timestamps ISO 8601 with `T`, seconds and an offset or `Z`
-(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep.
+(`2026-03-31T20:30:00-03:30`), compared as instants. Filters nest at most 5 deep. A path may name
+any column but one called `__proto__`, which is refused (`400`, at its place): parsing a JSON
+object cannot keep that key, so its condition would be lost.
 
 Every value is bound as a parameter, and an engine takes only so many in one statement: 2,098 on
 Azure SQL (SQL Server's 2,100, less two the driver uses), 65,535 on Postgres, paging's two
@@ -560,6 +562,19 @@ once.
 - When rows were left out the response has `truncated: true` and `truncated_by`: `rows` when
   more rows existed than the limit, `bytes` when the next row would have passed the size limit.
   A result that ends exactly at the limit is not truncated.
+- `rows_limited` is true when a row rule of the caller's limited the rows of any table the query
+  read (fixed measures' and metric parts' tables included): the figures are theirs, not totals.
+  A saved query's run, a saved panel's preview and a dashboard panel's line (`rows_limited` beside
+  `result`) say the same; an export says it in `X-Zeteo-Rows-Limited`. In `GET /v1/catalog` each
+  table has `rows_limited` and, when true, `rows_limited_reason`: the caller's rows in words,
+  naming only columns they are granted ("some rows only" for a condition on another) and identity
+  keys by label, never their values; a grant's `row_rule_description` replaces its sentence, and
+  "no rows" means no rule of theirs keeps any; "no rows right now; ask an admin" means their rule
+  cannot be applied as written (a column it reads is gone, or it resolves to too many values), and
+  a query reading the table is refused with `409 row_rule_unavailable`; "no rows right now; try
+  again shortly" means the rule uses `below` and Tereo cannot give the reporting lines now, and a
+  query reading the table is refused with `503 row_rule_unavailable`. How rules are written,
+  combined and enforced is in [row-rules.md](row-rules.md).
 - A query past its time limit is stopped on the source: `504 query_timeout`. The time limit is
   counted from just before the concurrency check, so time spent waiting for a connection to the
   source counts against it; a query with no time left once it has a connection is not sent.
@@ -615,6 +630,10 @@ root of the query) and `suggestions` (up to three close names, closest first).
   `502 source_unreachable`, `504 query_timeout`, `429 too_many_queries` / `source_busy`,
   `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable;
   for an export, also one started while the service shuts down, which is not recorded).
+- From the caller's row rules, before running: `409 row_rule_unavailable` (a rule's column is gone,
+  or it resolves to too many values; or, as the query starts on the source, a column the rule or a
+  condition beside it compares has gone or changed type since the last refresh) and `503 row_rule_unavailable` (a rule uses `below` and Tereo
+  cannot give the caller's reporting lines: try again shortly) ([row-rules.md](row-rules.md)).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
   fixed message and the request's `request_id`, which finds the log line.
 

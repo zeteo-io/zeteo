@@ -80,6 +80,7 @@ const accessFor = (grants: Record<string, "all" | string[]>): Access => {
   return {
     sourceIds: new Set(["s1"]),
     tableAccess: (t) => held.get(t),
+    rowRule: () => undefined,
     allows: (t, c) => {
       const g = held.get(t);
       return g === "all" || (g?.has(c) ?? false);

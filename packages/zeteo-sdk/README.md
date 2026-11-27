@@ -195,6 +195,9 @@ const end = await out.done; // { status: "complete" | "truncated", rows: number 
 - `rows` can be read once.
 - The connection is held until you iterate `rows` to its end, leave the loop early (`break`), or
   abort the `signal` you passed. Do not abandon an export you are not reading.
+- `rowsLimited` is `true` when a row rule of the caller's limits the rows of a table the query
+  reads: the export holds only the rows the caller may see (zeteo's `X-Zeteo-Rows-Limited`).
+  `export.stream` returns it too.
 - `done` tells a complete export from a truncated one: `status` is `"truncated"` when zeteo
   sent only the first rows because more existed than the source's export row cap allows.
 - If the connection is cut or the stream ends without zeteo's last line, the iterator throws
@@ -252,7 +255,9 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 | `sources` | `list`, `get`, `create`, `update`, `archive`, `test`, `refresh` |
 | `sources.tables` | `list(sourceId)`, `get(sourceId, tableId)`, `update(sourceId, tableId, body)` |
 | `sources.relations` | `list(sourceId)`, `declare(sourceId, body)`, `delete(sourceId, relationId)` |
-| `grants` | `list`, `get`, `create`, `replace`, `delete` |
+| `grants` | `list`, `get`, `create`, `replace`, `delete`, `effective({ user_id, table_id, organization_id? })` |
+| `identityKeys` | `list`, `create`, `update`, `delete`, `missing(keyId)` |
+| `identityKeys.values` | `list(keyId, { user_id?, limit?, cursor? })`, `add(keyId, [{ user_id, value }])`, `delete(keyId, valueId)` |
 | `principalLimits` | `list`, `get`, `create`, `update`, `delete` |
 | `me` | `get()` |
 | `principals` | `search({ type, q, limit? })`, `lookup(principals)` |
@@ -261,6 +266,25 @@ for await (const run of paginate(zeteo.runs.list, { outcome: "failed" })) {
 404; every other call, `catalog.get` included, throws on it. An id that is empty, is exactly `.`
 or `..`, or contains `/`, `\`, `?` or `#` throws `ZeteoError` with code `invalid_id` before any
 request is made.
+
+### Row rules
+
+A grant carries `row_access` (`unlimited_default`, `all` or `rule`) with, for `rule`, a `row_rule`
+in the query language's `where` syntax over the grant's own table, which may compare a column with
+the caller's identity values (`{ identity: "netsuite_employee_id" }`). `grants.replace` **requires**
+`row_access`. Results carry `rows_limited` (and a catalogue table `rows_limited_reason`). See the
+service's `docs/row-rules.md`.
+
+```ts
+await client.grants.create({
+  principal_type: "group",
+  principal_id: reps,
+  table_id: orders,
+  all_columns: true,
+  row_access: "rule",
+  row_rule: { sales_rep: { in: { identity: "netsuite_employee_id" } } },
+});
+```
 
 ### Who is calling, and finding principals
 
@@ -306,7 +330,7 @@ plain `Error` holding only the underlying message.
 
 | Case | Behaviour |
 |---|---|
-| 500, 503 (`temporarily_unavailable`), or a 502 or 504 without one of zeteo's codes below (from a proxy or load balancer in front of zeteo), on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
+| 500, 503 (`temporarily_unavailable`, or `row_rule_unavailable` while Tereo cannot give the caller's reporting lines), or a 502 or 504 without one of zeteo's codes below (from a proxy or load balancer in front of zeteo), on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated for that call only, up to three times with backoff (1 s, 4 s, 9 s), waiting at least as long as the response's `Retry-After` header asks, in seconds or as an HTTP date; other calls are not held back |
 | 502 whose body's `error` is `query_failed`, `source_unreachable` or `tereo_unreachable`, 504 whose body's `error` is `query_timeout` | Thrown; not repeated, and other calls are not held back |
 | Another 5xx, or a dropped connection, on a GET, `query.run`, `principals.lookup`, `replace` or `delete` | Repeated by the handler with backoff; meanwhile the client's other calls are held back |
 | `create`, `declare`, `update`, `archive`, `refresh`, `test`: 5xx or dropped connection | Not repeated; zeteo may have acted |

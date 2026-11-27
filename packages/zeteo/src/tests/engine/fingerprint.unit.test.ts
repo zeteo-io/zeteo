@@ -4,6 +4,7 @@ import { sqlQuerySchema } from "../../adapters/sql/language.js";
 import { DEFAULT_CALENDAR } from "../../calendar/calendar.js";
 import { shopCatalog } from "../support/pure/shopCatalog.js";
 import { fingerprintOf } from "../../engine/fingerprint.js";
+import type { RowRule } from "../../row-rules/resolve.js";
 import type { QueryPlan } from "../../adapters/types.js";
 import { planSql } from "../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
@@ -125,5 +126,38 @@ describe("fingerprintOf", () => {
     expect(of("ordered_on", "America/Los_Angeles")).toBe(
       of("ordered_on", "UTC")
     );
+  });
+  it("differs for two viewers whose resolved row rules differ, and not for equal ones", () => {
+    const ruled = (values: string[]): QueryPlan => {
+      const rule: RowRule = {
+        kind: "filter",
+        filter: { "orders.customer_id": { in: values } },
+        columns: new Map([
+          [
+            "orders.customer_id",
+            {
+              id: "orders.customer_id",
+              name: "customer_id",
+              type: "number",
+              nativeType: "integer",
+            },
+          ],
+        ]),
+        descriptions: [],
+      };
+      return planSql(
+        sqlQuerySchema.parse({
+          source: "shop",
+          from: "orders",
+          select: ["id", "status"],
+        }),
+        shopCatalog({ rowRules: { orders: rule } }),
+        { now }
+      );
+    };
+    const a = fingerprintOf(SOURCE, ruled(["1"]), rows);
+    expect(a).not.toBe(fingerprintOf(SOURCE, ruled(["2"]), rows));
+    expect(a).not.toBe(fingerprintOf(SOURCE, plan({}), rows));
+    expect(a).toBe(fingerprintOf(SOURCE, ruled(["1"]), rows));
   });
 });

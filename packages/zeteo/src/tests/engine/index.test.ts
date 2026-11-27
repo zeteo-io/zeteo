@@ -163,13 +163,14 @@ describeEachEngine(
       try {
         const values =
           MAX_PARAMETERS[engine.type as Exclude<SourceType, "upload">] + 1;
+        // Lists of 100, each value its own parameter: a longer list binds as one.
         const lists = Array.from(
-          { length: Math.ceil(values / 1000) },
+          { length: Math.ceil(values / 100) },
           (_, j) => ({
             id: {
               in: Array.from(
-                { length: Math.min(1000, values - j * 1000) },
-                (_, i) => j * 1000 + i
+                { length: Math.min(100, values - j * 100) },
+                (_, i) => j * 100 + i
               ),
             },
           })

@@ -14,7 +14,7 @@ PrincipalStatus:
 Grant:
   type: object
   description: What one user or group may query of one table
-  required: [id, principal_type, principal_id, principal_status, source, table, all_columns, columns, owner_grant, created_by, created_at, updated_at]
+  required: [id, principal_type, principal_id, principal_status, source, table, all_columns, columns, owner_grant, row_access, row_rule, row_rule_description, row_rule_problems, created_by, created_at, updated_at]
   properties:
     id: { type: string, format: uuid }
     principal_type: { $ref: '#/PrincipalType' }
@@ -50,9 +50,67 @@ Grant:
     owner_grant:
       type: boolean
       description: The owner's grant on a table of their upload source. It is an ordinary all-columns user grant that cannot be removed or narrowed (`409 owner_grant_locked`); transfer the upload source instead
+    row_access: { $ref: '#/RowAccess' }
+    row_rule:
+      oneOf:
+        - { $ref: '#/RowRule' }
+        - { type: 'null' }
+      description: The rule by column names and identity key names; null unless `row_access` is `rule`
+    row_rule_description:
+      type: [string, 'null']
+      description: The admin's own words for the rule, shown to callers in place of the generated sentence; null when none
+    row_rule_problems:
+      type: array
+      items: { type: string }
+      description: 'What keeps the rule from applying, for an admin: `column_missing:<name>` (a column the rule reads is gone from the table), `column_unknown:<id>`, `identity_key_unknown:<id>`. Empty when the rule can be applied or there is none'
     created_by: { type: string, format: uuid }
     created_at: { type: string, format: date-time }
     updated_at: { type: string, format: date-time }
+
+RowAccess:
+  type: string
+  enum: [unlimited_default, all, rule]
+  description: |
+    How the grant treats rows. `unlimited_default` adds its columns and never widens rows when
+    another grant limits them; `all` is explicitly every row and overrides every limit from the
+    caller's other grants; `rule` limits the rows to those matching `row_rule`. An owner grant is
+    always `unlimited_default`. See `docs/row-rules.md`.
+
+RowRule:
+  type: object
+  additionalProperties: true
+  description: |
+    A filter over the grant's own table, in the query language's `where` syntax (`Filter` in the
+    query schemas): `and`, `or`, `not`, and keys that are the table's column names (no relation
+    paths, and the column need not be granted), with every operator of the filter language and
+    relative dates. Two value forms are added, allowed only under `eq`, `in`, `ne` and `notIn`:
+    `{ "identity": "<key name>" }`, the caller's values under that identity key, and
+    `{ "identity": "<key name>", "below": true }`, the values of the caller and of everyone below
+    them in Tereo's reporting lines, at any depth, deactivated users included (a service account
+    gets only its own). When Tereo cannot give the reporting lines, a query reading the table is
+    refused with `503 row_rule_unavailable`; when they are too large, `409 row_rule_unavailable`.
+    An identity condition that resolves to no values makes the whole rule of
+    that grant match no rows, whatever operator or `not` surrounds it.
+    Identity values may be used only by a holder of `zeteo.grants.write`: in a rule an
+    upload source's owner writes they are `400 invalid_row_rule`. A JSON number that is not
+    the double it parses to, digit for digit (`9007199254740993`, `0.10000000000000001`), or that
+    the double writes with an exponent (`1e21`), is `400 invalid_row_rule`: write such numbers as
+    decimal strings. So is a `gt`, `gte`, `lt`,
+    `lte` or `between` bound on a number column with more than 38 digits.
+
+RowFields:
+  description: The rows a grant reaches
+  properties:
+    row_access: { $ref: '#/RowAccess' }
+    row_rule:
+      oneOf:
+        - { $ref: '#/RowRule' }
+        - { type: 'null' }
+      description: Required when `row_access` is `rule`, refused otherwise (`null` counts as not given)
+    row_rule_description:
+      type: [string, 'null']
+      maxLength: 200
+      description: Optional, only with `rule`; replaces the generated sentence callers read. Blank counts as not given
 
 ListGrantsResponse:
   type: object
@@ -72,7 +130,7 @@ GrantColumnIds:
   description: Columns of the grant's table
 
 CreateGrantRequest:
-  description: A grant of every column, or of a list of columns
+  description: A grant of every column, or of a list of columns, with the rows it reaches (`row_access`, default `unlimited_default`; with `rule`, `row_rule` too)
   oneOf:
     - type: object
       additionalProperties: false
@@ -82,6 +140,9 @@ CreateGrantRequest:
         principal_id: { type: string, format: uuid }
         table_id: { type: string, format: uuid }
         all_columns: { type: boolean, const: true }
+        row_access: { $ref: '#/RowAccess' }
+        row_rule: { $ref: '#/RowFields/properties/row_rule' }
+        row_rule_description: { $ref: '#/RowFields/properties/row_rule_description' }
     - type: object
       additionalProperties: false
       required: [principal_type, principal_id, table_id, all_columns, column_ids]
@@ -91,21 +152,32 @@ CreateGrantRequest:
         table_id: { type: string, format: uuid }
         all_columns: { type: boolean, const: false }
         column_ids: { $ref: '#/GrantColumnIds' }
+        row_access: { $ref: '#/RowAccess' }
+        row_rule: { $ref: '#/RowFields/properties/row_rule' }
+        row_rule_description: { $ref: '#/RowFields/properties/row_rule_description' }
 
 ReplaceGrantRequest:
-  description: The grant's new columns, replacing the old ones whole
+  description: |
+    The grant's new columns and rows, replacing the old ones whole. `row_access` is required, with
+    no default: a body of columns only is `400 invalid_request`, so it cannot silently drop a rule.
   oneOf:
     - type: object
       additionalProperties: false
-      required: [all_columns]
+      required: [all_columns, row_access]
       properties:
         all_columns: { type: boolean, const: true }
+        row_access: { $ref: '#/RowAccess' }
+        row_rule: { $ref: '#/RowFields/properties/row_rule' }
+        row_rule_description: { $ref: '#/RowFields/properties/row_rule_description' }
     - type: object
       additionalProperties: false
-      required: [all_columns, column_ids]
+      required: [all_columns, column_ids, row_access]
       properties:
         all_columns: { type: boolean, const: false }
         column_ids: { $ref: '#/GrantColumnIds' }
+        row_access: { $ref: '#/RowAccess' }
+        row_rule: { $ref: '#/RowFields/properties/row_rule' }
+        row_rule_description: { $ref: '#/RowFields/properties/row_rule_description' }
 
 PrincipalLimit:
   type: object
@@ -161,3 +233,205 @@ UpdatePrincipalLimitRequest:
   properties:
     query_concurrency: { type: [integer, 'null'], minimum: 1, maximum: 100 }
     export_concurrency: { type: [integer, 'null'], minimum: 1, maximum: 10 }
+
+IdentityKey:
+  type: object
+  description: A named key under which users hold identity values, for row rules
+  required: [id, name, label, description, value_count, created_by, created_at, updated_at]
+  properties:
+    id: { type: string, format: uuid }
+    name: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$', description: 'The slug a rule names (`netsuite_employee_id`); never changes' }
+    label: { type: string, minLength: 1, maxLength: 100, description: 'What callers read in place of the name (`your NetSuite employee ID`)' }
+    description: { type: [string, 'null'], maxLength: 500 }
+    value_count: { type: integer, description: "Values held under the key, all users together" }
+    created_by: { type: string, format: uuid }
+    created_at: { type: string, format: date-time }
+    updated_at: { type: string, format: date-time }
+
+IdentityKeyName:
+  type: object
+  description: What a holder of `zeteo.uploads.write` without `zeteo.grants.read` reads of a key, enough to name it in a rule
+  required: [name, label, description]
+  properties:
+    name: { type: string }
+    label: { type: string }
+    description: { type: [string, 'null'] }
+
+ListIdentityKeysResponse:
+  type: object
+  description: Every key, by name; never paged (`next_cursor` is null). Items are `IdentityKey` with `zeteo.grants.read`, `IdentityKeyName` with only `zeteo.uploads.write`
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items:
+        oneOf:
+          - { $ref: '#/IdentityKey' }
+          - { $ref: '#/IdentityKeyName' }
+    next_cursor: { type: 'null' }
+
+CreateIdentityKeyRequest:
+  type: object
+  additionalProperties: false
+  required: [name, label]
+  properties:
+    name: { type: string, pattern: '^[a-z][a-z0-9_]{0,63}$' }
+    label: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: string, maxLength: 500 }
+
+UpdateIdentityKeyRequest:
+  type: object
+  description: Label, description or both; `null` clears the description. The name never changes.
+  additionalProperties: false
+  minProperties: 1
+  properties:
+    label: { type: string, minLength: 1, maxLength: 100 }
+    description: { type: [string, 'null'], maxLength: 500 }
+
+IdentityValue:
+  type: object
+  required: [id, key_id, user_id, value, created_by, created_at]
+  properties:
+    id: { type: string, format: uuid }
+    key_id: { type: string, format: uuid }
+    user_id: { type: string, format: uuid, description: The user's tereo id }
+    value: { type: string, description: "Exact text, 1 to 500 characters; nothing is trimmed or case-folded" }
+    created_by: { type: string, format: uuid }
+    created_at: { type: string, format: date-time }
+
+ListIdentityValuesResponse:
+  type: object
+  required: [data, next_cursor]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/IdentityValue' }
+    next_cursor: { type: [string, 'null'] }
+
+AddIdentityValuesRequest:
+  type: object
+  additionalProperties: false
+  required: [values]
+  properties:
+    values:
+      type: array
+      minItems: 1
+      maxItems: 1000
+      items:
+        type: object
+        additionalProperties: false
+        required: [user_id, value]
+        properties:
+          user_id: { type: string, format: uuid }
+          value: { type: string, minLength: 1, maxLength: 500 }
+
+AddIdentityValuesResponse:
+  type: object
+  required: [data, warnings]
+  properties:
+    data:
+      type: array
+      items: { $ref: '#/IdentityValue' }
+    warnings:
+      type: array
+      description: Each new value another user holds a value close to, which a source may compare as equal; one per other user
+      items:
+        type: object
+        required: [code, value, user_id]
+        properties:
+          code: { type: string, const: near_duplicate }
+          value: { type: string, description: The new value }
+          user_id: { type: string, format: uuid, description: 'The other user, who holds a value equal to it after trimming and ignoring case, or as a number' }
+
+MissingIdentityValuesResponse:
+  type: object
+  required: [users]
+  properties:
+    users:
+      type: array
+      description: Users a grant whose rule uses the key reaches (directly, or through a group) who hold no value under it, by user id
+      items:
+        type: object
+        required: [user_id, via_grant_ids]
+        properties:
+          user_id: { type: string, format: uuid }
+          via_grant_ids: { type: array, items: { type: string, format: uuid }, description: The grants that reach them }
+
+EffectiveAccess:
+  type: object
+  description: What one user gets of one table, for an admin
+  required: [columns, rows, rule_summary, grants, warnings, organizations]
+  properties:
+    columns:
+      description: '`"all"`, or the names of the granted columns (empty when nothing is granted)'
+      oneOf:
+        - { type: string, const: all }
+        - { type: array, items: { type: string } }
+    rows:
+      type: string
+      enum: [all, limited, none]
+      description: '`none` when no grant reaches them or no rule of theirs keeps any row'
+    rule_summary: { type: [string, 'null'], description: 'The combined rule in words, naming every column (an admin sees them all); null when rows are not limited' }
+    grants:
+      type: array
+      description: The grants that reach the user on the table, their own and their groups'
+      items:
+        type: object
+        required: [grant_id, principal_type, principal_id, row_access]
+        properties:
+          grant_id: { type: string, format: uuid }
+          principal_type: { $ref: '#/PrincipalType' }
+          principal_id: { type: string, format: uuid }
+          row_access: { $ref: '#/RowAccess' }
+    warnings:
+      type: array
+      items:
+        oneOf:
+          - type: object
+            description: A grant of `all` rows overrides another grant's rule
+            required: [code, grant_id]
+            properties:
+              code: { type: string, const: all_rows_overrides }
+              grant_id: { type: string, format: uuid }
+          - type: object
+            description: The user holds no value under a key a rule names, so that rule matches no rows
+            required: [code, key]
+            properties:
+              code: { type: string, const: missing_identity_value }
+              key: { type: string }
+          - type: object
+            description: A rule cannot be applied; queries on the table are refused with `row_rule_unavailable`
+            required: [code, reason]
+            properties:
+              code: { type: string, const: row_rule_unavailable }
+              reason:
+                type: string
+                description: '`column_missing` (a column the rule reads is gone), `too_many_values` (over 50,000 values, or Tereo refused the reporting lines as too large) or `hierarchy_unavailable` (the rule uses `below` and Tereo cannot give the reporting lines now)'
+          - type: object
+            description: The table is a merged table the user reads rows of, and these members' rows are limited differently (by a rule while the merged table shows every row, or by a rule other than the merged table's, compared by column name); a member's rules do not flow into the merged table
+            required: [code, member_table_ids]
+            properties:
+              code: { type: string, const: merged_members_limited }
+              member_table_ids: { type: array, items: { type: string, format: uuid } }
+          - type: object
+            description: |
+              A grant with a rule on one of the user's groups that belongs to an organization other
+              than `organization_id` (or to any organization, when none is given): under this
+              sign-in the group does not count, so its rule limits nothing, and a grant that does
+              not limit rows (on the user or a global group) gives every row. One warning per group.
+            required: [code, group_id, group_name, organization_id, organization_name]
+            properties:
+              code: { type: string, const: org_scoped_rule_inactive }
+              group_id: { type: string, format: uuid }
+              group_name: { type: [string, 'null'] }
+              organization_id: { type: string, format: uuid }
+              organization_name: { type: [string, 'null'] }
+    organizations:
+      type: array
+      description: The organizations of the user's groups, to ask again with one as `organization_id`
+      items:
+        type: object
+        required: [id, name]
+        properties:
+          id: { type: string, format: uuid }
+          name: { type: [string, 'null'] }

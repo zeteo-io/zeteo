@@ -154,6 +154,24 @@ export const removeGroupMember = (
     { token }
   );
 
+/** Sets who `userId` reports to in Tereo's reporting lines (`users.reports.write`). */
+export const setReportsTo = (
+  token: string,
+  userId: string,
+  managerId: string
+) =>
+  expectJson(200, "PUT", url(`/v1/admin/users/${userId}/reports-to`), {
+    token,
+    body: { userId: managerId },
+  });
+
+/** Deactivates a user: they can no longer sign in, but stay in the reporting lines. */
+export const deactivateUser = (token: string, userId: string) =>
+  expectJson(200, "PATCH", url(`/v1/admin/users/${userId}`), {
+    token,
+    body: { isActive: false },
+  });
+
 /** The user's groups as Tereo answers zeteo's own lookup. */
 export const userGroups = (token: string, userId: string) =>
   requestJson("GET", url(`/v1/admin/users/${userId}/groups`), { token });

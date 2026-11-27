@@ -110,7 +110,16 @@ page and no sections.
   tables; **Share** grants a table (all columns or chosen ones) to a person or group.
 - **Grants** (`zeteo.grants.read`, changes with `.write`): who may query which table, filtered by
   source, table or person. A grant names a user or group (searched by name or email, or pasted as
-  an id) and a table, with all of its columns or a chosen few.
+  an id) and a table, with all of its columns or a chosen few, and the **Rows** it reaches: "Doesn't
+  limit rows" (the default), "All rows (overrides other limits)" or "Only rows where...", with a
+  condition builder (a column against values or relative dates, or "is one of my" an identity key,
+  with AND and OR groups) and an optional description callers read in place of the generated
+  sentence ([row-rules.md](row-rules.md)). A grant row's **Effective access** shows one person's
+  combined columns, rows and grants on that table, with warnings such as an "All rows" grant
+  overriding another's rule.
+- **Identities** (`zeteo.grants.read`, changes with `.write`): the identity keys; a key's page lists
+  who holds which values (a searchable person dropdown, bulk paste, and a "Show missing" filter for
+  people a rule reaches who hold none).
 - **Limits** (`zeteo.grants.read`, changes with `.write`): how many queries and exports a user or
   group may run at once, in place of the source's defaults.
 - **Runs** (`zeteo.runs.read`): the record of every query and export, newest first, filtered by

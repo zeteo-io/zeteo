@@ -101,3 +101,43 @@ export const invalidValue = (): QueryError =>
     "A value in the query could not be converted to its column's type",
     []
   );
+
+/**
+ * A table the caller's row rule cannot be applied to as written: the query
+ * is refused, never run unfiltered. A column it reads is gone, or it resolves
+ * to too many values: a conflict with the caller's access, not with the
+ * query, 409. Who reports to the caller could not be read from tereo
+ * (`hierarchy_unavailable`): a passing failure, 503.
+ */
+/**
+ * A rule-limited query on a Postgres source older than 12, which cannot read
+ * a table through its row rule (a MATERIALIZED WITH query): refused before it
+ * runs, never run without the rule.
+ */
+export const rowRulesNeedNewerPostgres = (): QueryError => {
+  const err = new QueryError(
+    "row_rule_unavailable",
+    "Your access to this source can't be applied: row rules need PostgreSQL 12 or later on the source; ask an admin",
+    []
+  );
+  err.statusCode = 409;
+  return err;
+};
+
+export const rowRuleUnavailable = (
+  table: string,
+  path: QueryPath,
+  reason?: string
+): QueryError => {
+  const name = truncate(table, MAX_NAME_CHARS);
+  const passing = reason === "hierarchy_unavailable";
+  const err = new QueryError(
+    "row_rule_unavailable",
+    passing
+      ? `Your access to ${name} can't be checked right now; try again shortly`
+      : `Your access to ${name} can't be applied right now; ask an admin`,
+    path
+  );
+  err.statusCode = passing ? 503 : 409;
+  return err;
+};

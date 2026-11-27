@@ -5,13 +5,16 @@ import { logger } from "../utils/logger.js";
 
 /**
  * Failures of 500 or above that normal operation produces: a slow, busy or
- * unreachable source, Redis or tereo briefly away. Where each arises it is
- * already logged with its cause, at warn or info, so it is not logged again.
+ * unreachable source, Redis or tereo briefly away (including the 503
+ * `row_rule_unavailable` when tereo cannot say who reports to the caller).
+ * Where each arises it is already logged with its cause, so it is not logged
+ * again.
  */
 const EXPECTED_FAILURES: ReadonlySet<string> = new Set([
   "query_timeout",
   "source_unreachable",
   "temporarily_unavailable",
+  "row_rule_unavailable",
 ]);
 
 /**

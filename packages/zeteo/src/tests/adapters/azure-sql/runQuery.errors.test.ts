@@ -251,18 +251,17 @@ describe("azure-sql runQuery: safety", () => {
 
   it("refuses a query with more parameters than SQL Server takes before sending anything", async () => {
     const query = vi.spyOn(sql.Request.prototype, "query");
+    // Lists of 100, each value its own parameter: a longer list binds as one.
     const list = (from: number) =>
-      Array.from({ length: 800 }, (_, i) => from + i);
+      Array.from({ length: 100 }, (_, i) => from + i);
     const err = await failureOf(
       run({
         from: "orders",
         select: ["id"],
         where: {
-          or: [
-            { id: { in: list(0) } },
-            { id: { in: list(1000) } },
-            { id: { in: list(2000) } },
-          ],
+          or: Array.from({ length: 22 }, (_, j) => ({
+            id: { in: list(j * 100) },
+          })),
         },
       })
     );

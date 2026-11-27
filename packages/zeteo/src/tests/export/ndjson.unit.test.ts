@@ -13,6 +13,7 @@ describe("ndjson lines", () => {
       warnings: [
         { code: "join_multiplies_rows", message: "m", path: ["join", 0] },
       ],
+      rowsLimited: false,
       runId: "run-1",
     });
     expect(line.endsWith("\n")).toBe(true);

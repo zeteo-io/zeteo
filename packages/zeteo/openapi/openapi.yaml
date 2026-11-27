@@ -109,6 +109,16 @@ info:
     `GET /v1/principals/all` lists them all (counted as a search), and `POST /v1/principals/lookup` names ones by id, for choosing and showing who a grant is for;
     both need `zeteo.grants.read`, and the lookup also takes `zeteo.runs.read`. See `docs/grants.md`.
 
+    **Row rules.** A grant also says which rows it reaches: `row_access` is `unlimited_default`,
+    `all` or `rule`, and a `rule` carries a `row_rule` in the query language's `where` syntax over
+    the grant's own table, which may compare a column with the caller's own values under a named
+    identity key (`/v1/identity-keys`: keys, the values users hold under them, and who holds none).
+    Over all the grants that reach a caller on a table, any `all` grant gives every row, else the
+    rules OR together, else every row. A rule is applied to every way of reading the table, and
+    callers are told their rows are limited (`rows_limited`, `rows_limited_reason`).
+    `GET /v1/grants/effective` shows an admin one user's combined access to one table. See
+    `docs/row-rules.md`.
+
     ## Queries
 
     `GET /v1/catalog` lists what the caller may query, with the language's JSON Schema, and
@@ -256,6 +266,18 @@ paths:
     $ref: './paths/grants/grants.yaml#/~1v1~1grants'
   /v1/grants/{grantId}:
     $ref: './paths/grants/grant.yaml#/~1v1~1grants~1{grantId}'
+  /v1/grants/effective:
+    $ref: './paths/grants/effective.yaml#/~1v1~1grants~1effective'
+  /v1/identity-keys:
+    $ref: './paths/grants/identity-keys.yaml#/~1v1~1identity-keys'
+  /v1/identity-keys/{keyId}:
+    $ref: './paths/grants/identity-key.yaml#/~1v1~1identity-keys~1{keyId}'
+  /v1/identity-keys/{keyId}/values:
+    $ref: './paths/grants/identity-values.yaml#/~1v1~1identity-keys~1{keyId}~1values'
+  /v1/identity-keys/{keyId}/values/{valueId}:
+    $ref: './paths/grants/identity-values.yaml#/~1v1~1identity-keys~1{keyId}~1values~1{valueId}'
+  /v1/identity-keys/{keyId}/missing:
+    $ref: './paths/grants/identity-values.yaml#/~1v1~1identity-keys~1{keyId}~1missing'
   /v1/principal-limits:
     $ref: './paths/grants/principal-limits.yaml#/~1v1~1principal-limits'
   /v1/principal-limits/{principalLimitId}:
@@ -441,6 +463,16 @@ components:
       $ref: './components/grants/schemas.yaml#/CreateGrantRequest'
     ReplaceGrantRequest:
       $ref: './components/grants/schemas.yaml#/ReplaceGrantRequest'
+    RowAccess:
+      $ref: './components/grants/schemas.yaml#/RowAccess'
+    RowRule:
+      $ref: './components/grants/schemas.yaml#/RowRule'
+    IdentityKey:
+      $ref: './components/grants/schemas.yaml#/IdentityKey'
+    IdentityValue:
+      $ref: './components/grants/schemas.yaml#/IdentityValue'
+    EffectiveAccess:
+      $ref: './components/grants/schemas.yaml#/EffectiveAccess'
     PrincipalLimit:
       $ref: './components/grants/schemas.yaml#/PrincipalLimit'
     ListPrincipalLimitsResponse:

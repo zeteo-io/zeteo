@@ -1,8 +1,12 @@
 import { visibleMeasures, visibleMetrics } from "../measures/visible.js";
 import type { CalcExpr, Filter } from "../adapters/sql/language.js";
 import type { ColumnType, SourceType } from "../adapters/types.js";
+import { rowsLimitedReason } from "../row-rules/describe.js";
 import type { Calendar } from "../calendar/calendar.js";
+import type { RowRule } from "../row-rules/resolve.js";
+import { identityKeysOf } from "../row-rules/store.js";
 import { loadCalendar } from "../calendar/service.js";
+import { keysById } from "../identity/service.js";
 import { typeOf } from "../sources/types.js";
 import { logger } from "../utils/logger.js";
 import { db } from "../utils/db/index.js";
@@ -34,6 +38,17 @@ export interface VisibleTable {
   /** When an upload source's table was last loaded; null for a database source. */
   lastSyncedAt: Date | null;
   columns: VisibleColumn[];
+  /**
+   * The caller's rows on the table when their grants limit them; absent when
+   * every row is theirs. The planner reads the table through it wherever the
+   * table is read. Its columns need not be granted, and are never shown.
+   */
+  rowRule?: RowRule;
+  /**
+   * When `rowRule` is set: the caller's rows in words, naming only columns
+   * they are granted and identity keys by label, never their values.
+   */
+  rowsLimitedReason?: string;
 }
 
 export interface VisibleRelation {
@@ -125,7 +140,13 @@ export const buildVisibleCatalog = (
   columns: SourceColumn[],
   relations: Relation[],
   access: Access,
-  extras: { calendar: Calendar; measures: MeasureRow[]; metrics?: MetricRow[] }
+  extras: {
+    calendar: Calendar;
+    measures: MeasureRow[];
+    metrics?: MetricRow[];
+    /** Identity key labels by id, for `rowsLimitedReason`; see `keyLabelsFor`. */
+    keyLabels?: Map<string, string>;
+  }
 ): VisibleCatalog => {
   const columnsByTable = new Map<string, SourceColumn[]>();
   for (const column of columns) {
@@ -147,6 +168,7 @@ export const buildVisibleCatalog = (
     const granted = rows.filter((c) => access.allows(table.id, c.id));
     if (granted.length === 0) continue;
     grantedNames.set(table.id, new Set(granted.map((c) => c.name)));
+    const rowRule = access.rowRule(table.id);
     visibleTables.push({
       id: table.id,
       schemaName: table.schemaName,
@@ -164,6 +186,14 @@ export const buildVisibleCatalog = (
         description: c.description,
         missing: c.missingSince !== null,
       })),
+      ...(rowRule && {
+        rowRule,
+        rowsLimitedReason: rowsLimitedReason(
+          rowRule,
+          new Set(granted.map((c) => c.id)),
+          extras.keyLabels ?? new Map()
+        ),
+      }),
     });
   }
 
@@ -229,6 +259,16 @@ export const buildVisibleCatalog = (
   };
 };
 
+/**
+ * `catalog` with no row rule: for deciding whether a caller may use a query
+ * (a saved query's \`accessible\`, a panel's state), which rules never change.
+ * A plan made from it is never run.
+ */
+export const withoutRowRules = (catalog: VisibleCatalog): VisibleCatalog => ({
+  ...catalog,
+  tables: catalog.tables.map(({ rowRule: _rows, ...table }) => table),
+});
+
 /** What a catalogue carries besides the source's own rows: the stored calendar and the source's measures and metrics. */
 const loadExtras = async (
   sourceId: string
@@ -245,10 +285,36 @@ const loadExtras = async (
   return { calendar, measures, metrics };
 };
 
+/**
+ * The labels of the identity keys the caller's rules on `tables` use, by id;
+ * read only when one does.
+ */
+const keyLabelsFor = async (
+  tables: SourceTable[],
+  access: Access
+): Promise<Map<string, string>> => {
+  const ids = identityKeysOf(
+    tables.flatMap((t) => {
+      const rule = access.rowRule(t.id);
+      return rule?.kind === "filter"
+        ? rule.descriptions.map((d) => d.stored)
+        : [];
+    })
+  );
+  if (ids.size === 0) return new Map();
+  const keys = await keysById([...ids]);
+  return new Map([...keys].map(([id, key]) => [id, key.label]));
+};
+
 /** Null when the source does not exist, is archived, or the caller has no grant on it. */
 export const loadVisibleCatalog = async (
   sourceSlug: string,
-  access: Access
+  access: Access,
+  /**
+   * Whether to read the identity key labels that `rowsLimitedReason` shows;
+   * only the discovery views show it, so planning leaves them out.
+   */
+  options: { keyLabels?: boolean } = {}
 ): Promise<VisibleCatalog | null> => {
   const source = await db.sources.findBySlug(sourceSlug);
   if (!source || source.archivedAt || !access.sourceIds.has(source.id)) {
@@ -257,14 +323,14 @@ export const loadVisibleCatalog = async (
   const { tables, columns, relations } = await db.catalog.loadSourceCatalog(
     source.id
   );
-  return buildVisibleCatalog(
-    source,
-    tables,
-    columns,
-    relations,
-    access,
-    await loadExtras(source.id)
-  );
+  const [extras, keyLabels] = await Promise.all([
+    loadExtras(source.id),
+    options.keyLabels ? keyLabelsFor(tables, access) : undefined,
+  ]);
+  return buildVisibleCatalog(source, tables, columns, relations, access, {
+    ...extras,
+    keyLabels,
+  });
 };
 
 /**
@@ -283,13 +349,14 @@ export const loadSourceVisibleCatalog = async (
   if (!source) throw new Error(`source ${sourceId} does not exist`);
   const { tables, columns, relations } =
     await db.catalog.loadSourceCatalog(sourceId);
+  const extras = await loadExtras(source.id);
   const catalog = buildVisibleCatalog(
     source,
     tables,
     columns,
     relations,
     access,
-    await loadExtras(source.id)
+    extras
   );
   const visible = !source.archivedAt && access.sourceIds.has(source.id);
   return visible

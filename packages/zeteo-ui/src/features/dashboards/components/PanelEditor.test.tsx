@@ -166,4 +166,26 @@ describe("PanelEditor", () => {
       "x"
     );
   });
+
+  it("shows the Rows limited pill beside a preview of limited rows, with its default tooltip", async () => {
+    post.mockImplementation(async (url: string) => {
+      if (url === `/v1/saved-queries/${SAVED_ID}/run`)
+        return {
+          data: { ...result, rows_limited: true },
+        };
+      throw new Error(`unexpected POST ${url}`);
+    });
+    await open();
+    const pill = await screen.findByText("Rows limited");
+    expect(pill.closest("[title]")).toHaveAttribute(
+      "title",
+      expect.stringMatching(/only some rows/)
+    );
+  });
+
+  it("shows no pill when the rows are not limited", async () => {
+    await open();
+    await screen.findByTestId("chart");
+    expect(screen.queryByText("Rows limited")).toBeNull();
+  });
 });

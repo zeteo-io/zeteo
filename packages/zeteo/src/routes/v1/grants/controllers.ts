@@ -5,12 +5,15 @@ import { encodeCursor, parseCursor } from "../../../utils/cursor.js";
 import { createGrant as create } from "../../../grants/service.js";
 import { GroupNotAllowedError } from "../../../utils/errors.js";
 import { hasPermission } from "../../../utils/permissions.js";
+import type { RuleFilter } from "../../../row-rules/types.js";
 import { groupsInReach } from "../../../sharing/shares.js";
+import { ruleNamesFor } from "../../../row-rules/store.js";
 import { callerOf } from "../../../middleware/auth.js";
 import { grantView } from "../../../views/grant.js";
 import type { Request, Response } from "express";
 import { db } from "../../../utils/db/index.js";
 import {
+  accessOf,
   CreateGrantSchema,
   GrantCursorSchema,
   ListGrantsQuerySchema,
@@ -30,11 +33,14 @@ export const listGrants = async (req: Request, res: Response) => {
     cursor,
     limit: query.limit,
   });
-  const statuses = await principalStatuses(page.rows);
+  const [statuses, names] = await Promise.all([
+    principalStatuses(page.rows),
+    ruleNamesFor(page.rows.map((row) => row.rowRule as RuleFilter | null)),
+  ]);
   const last = page.rows.at(-1);
   res.status(200).json({
     data: page.rows.map((row) =>
-      grantView(row, statuses.get(row.principalType, row.principalId))
+      grantView(row, statuses.get(row.principalType, row.principalId), names)
     ),
     next_cursor: page.hasMore && last ? encodeCursor([last.id]) : null,
   });
@@ -58,14 +64,17 @@ export const createGrant = async (req: Request, res: Response) => {
       principalType: body.principal_type,
       principalId: body.principal_id,
       tableId: body.table_id,
-      columns: body.all_columns
-        ? { allColumns: true }
-        : { allColumns: false, columnIds: body.column_ids },
+      ...accessOf(body),
     },
     { actorId: caller.userId, ...(asOwner && { owner: caller }) }
   );
-  const statuses = await principalStatuses([row]);
+  const [statuses, names] = await Promise.all([
+    principalStatuses([row]),
+    ruleNamesFor([row.rowRule as RuleFilter | null]),
+  ]);
   res
     .status(201)
-    .json(grantView(row, statuses.get(row.principalType, row.principalId)));
+    .json(
+      grantView(row, statuses.get(row.principalType, row.principalId), names)
+    );
 };

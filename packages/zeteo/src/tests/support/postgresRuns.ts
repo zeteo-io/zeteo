@@ -61,6 +61,7 @@ export const usePostgresRuns = () => {
         sourceIds: new Set([id]),
         allows: () => true,
         tableAccess: () => "all",
+        rowRule: () => undefined,
       },
       { calendar: DEFAULT_CALENDAR, measures: [] }
     );

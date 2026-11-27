@@ -18,4 +18,5 @@ export type SqlQueryErrorCode =
   | "measure_too_deep"
   | "measure_not_aggregate"
   | "too_complex"
-  | "measure_has_no_date";
+  | "measure_has_no_date"
+  | "row_rule_unavailable";

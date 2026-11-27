@@ -38,8 +38,48 @@ export interface TableName {
   name: string;
 }
 
+/**
+ * A column a row rule reads, by its bare name: a rule is compiled inside its
+ * table's own derived table, `(select * from <table> where <rule>)`, where no
+ * alias is in scope. It is never a reference of the plan.
+ */
+export interface RuleSubject {
+  name: string;
+  type: QueryableType;
+  nativeType: string;
+}
+
+/**
+ * A table the plan reads, with the caller's row rule on it when their rows
+ * are limited: the table is then read as `(select * from <table> where
+ * <rowFilter>)`, wherever it is read.
+ */
+export interface RowFiltered {
+  rowFilter?: ResolvedFilter<RuleSubject>;
+  /**
+   * The table as the query names it and where, beside `rowFilter`: what a
+   * rule that cannot be applied when the query runs (its columns changed
+   * since the catalogue was read) is refused with, as the planner refuses one
+   * whose column has gone (`row_rule_unavailable`).
+   */
+  rowRuleAt?: RowRuleAt;
+  /**
+   * Set when the catalogue holds the ruled table as a view (or materialized
+   * view), whose columns may be expressions that raise per row: a dialect
+   * that decides from the catalogue (`narrowedCheck`) applies no condition
+   * of the caller's beside its rule.
+   */
+  rowRuleOnView?: boolean;
+}
+
+/** Where a table with a row rule is read: its name as the query writes it, and the path. */
+export interface RowRuleAt {
+  table: string;
+  path: (string | number)[];
+}
+
 /** The `from` table, always alias `t0`. */
-export interface ResolvedTable extends TableName {
+export interface ResolvedTable extends TableName, RowFiltered {
   alias: "t0";
 }
 
@@ -53,7 +93,7 @@ export interface ColumnRef {
   nativeType: string;
 }
 
-export interface ResolvedJoin {
+export interface ResolvedJoin extends RowFiltered {
   /** `t1`… in the order the query gave its joins. */
   alias: string;
   /** The relation path as the query wrote it (`customer.account`), for messages only. */
@@ -72,7 +112,7 @@ export interface ResolvedJoin {
 export interface ScalarPlan {
   /** `f1`…: its alias when it is read per row, as a joined one-row table with column `v`. */
   alias: string;
-  from: TableName & { alias: string };
+  from: TableName & { alias: string } & RowFiltered;
   /** Left joins along to-one relations, each parent before its children. */
   joins: ResolvedJoin[];
   /** Group-level: the subquery has no GROUP BY, so it yields exactly one row. */
@@ -264,6 +304,8 @@ export type CompareOp = "eq" | "ne" | "gt" | "gte" | "lt" | "lte";
  */
 export type ResolvedFilter<S> =
   | { kind: "and" | "or"; filters: ResolvedFilter<S>[] }
+  /** No row: a row rule that keeps none. */
+  | { kind: "never" }
   | { kind: "not"; filter: ResolvedFilter<S> }
   | { kind: "compare"; op: CompareOp; subject: S; value: FilterValue }
   /** Inclusive at both ends. */
@@ -351,7 +393,7 @@ export interface TablePlan extends QueryPlan {
  * are its own: each part is a branch of a union.
  */
 export interface MetricPart {
-  from: TableName & { alias: "t0" };
+  from: TableName & { alias: "t0" } & RowFiltered;
   /** Left joins along to-one relations, each parent before its children. */
   joins: ResolvedJoin[];
   /** Group-level: the measure's expansion. */

@@ -56,6 +56,14 @@ export interface DiscoveredTable {
   missing: boolean;
   /** When an upload source's table was last loaded (its data is as of then); null for a database table. */
   last_loaded_at: string | null;
+  /** The caller's grants show them only some of the table's rows. */
+  rows_limited: boolean;
+  /**
+   * With `rows_limited`: which rows, in words. Names only columns the caller
+   * is granted and identity keys by label, never their values; a grant's
+   * `row_rule_description` replaces the generated sentence.
+   */
+  rows_limited_reason?: string;
   columns: DiscoveredColumn[];
   relations: DiscoveredRelation[];
   /** The table's measures the caller can use. */

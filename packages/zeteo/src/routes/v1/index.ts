@@ -1,5 +1,6 @@
 import principalLimitsRouter from "./principal-limits/index.js";
 import { dropCachedIntrospection } from "./me/middleware.js";
+import identityKeysRouter from "./identity-keys/index.js";
 import savedQueriesRouter from "./saved-queries/index.js";
 import savedPanelsRouter from "./saved-panels/index.js";
 import { authenticate } from "../../middleware/auth.js";
@@ -27,6 +28,7 @@ v1Router.use("/connections", connectionsRouter);
 v1Router.use("/dashboards", dashboardsRouter);
 v1Router.use("/export", exportRouter);
 v1Router.use("/grants", grantsRouter);
+v1Router.use("/identity-keys", identityKeysRouter);
 v1Router.use("/me", meRouter);
 v1Router.use("/principal-limits", principalLimitsRouter);
 v1Router.use("/principals", principalsRouter);

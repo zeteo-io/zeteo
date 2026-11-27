@@ -503,10 +503,11 @@ PanelLine:
         truncated: { type: boolean }
         truncated_by: { type: string, enum: [rows, bytes], description: Present when `truncated` }
         notice: { type: string, description: 'Present when rows were left out for the row cap: what the viewer is told' }
+    rows_limited: { type: boolean, description: "Present with `result`: a row rule of the viewer's limited the rows it read" }
     cached_at: { type: string, format: date-time, description: Present when the result came from the cache; when it was read from the source }
     error:
       type: object
-      description: A failure of the panel's run, as an error body of `POST /v1/query` carries it
+      description: A failure of the panel's run, as an error body of `POST /v1/query` carries it; `row_rule_unavailable` when the viewer's row rule cannot be applied, including when it uses `below` and Tereo cannot give the reporting lines now (retry shortly)
       required: [error, error_description]
       properties:
         error: { type: string }

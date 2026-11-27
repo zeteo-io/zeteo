@@ -110,10 +110,57 @@ describe("grants and query runs", () => {
     await newGrant("group", principal, tableA.id);
   });
 
-  it("refuses a row filter: the column is reserved", async () => {
+  it("refuses row_rule without row_access rule", async () => {
     await expect(
-      newGrant("user", randomUUID(), tableA.id, { rowFilter: { a: 1 } })
-    ).rejects.toThrow(/grants_row_filter_reserved_check/);
+      newGrant("user", randomUUID(), tableA.id, {
+        rowAccess: "all",
+        rowRule: { x: 1 },
+      })
+    ).rejects.toThrow(/grants_row_rule_check/);
+  });
+
+  it("refuses row_access rule without row_rule", async () => {
+    await expect(
+      newGrant("user", randomUUID(), tableA.id, { rowAccess: "rule" })
+    ).rejects.toThrow(/grants_row_rule_check/);
+  });
+
+  it("accepts a rule grant", async () => {
+    await expect(
+      newGrant("user", randomUUID(), tableA.id, {
+        rowAccess: "rule",
+        rowRule: { x: 1 },
+      })
+    ).resolves.toMatchObject({ rowAccess: "rule", identityKeyIds: [] });
+  });
+
+  it("refuses a duplicate identity value under one key", async () => {
+    const key = await prisma.identityKey.create({
+      data: { name: `k_${suffix}`, label: "Key", createdBy: actor },
+    });
+    try {
+      await prisma.identityValue.create({
+        data: {
+          keyId: key.id,
+          userId: randomUUID(),
+          value: "v",
+          createdBy: actor,
+        },
+      });
+      await expect(
+        prisma.identityValue.create({
+          data: {
+            keyId: key.id,
+            userId: randomUUID(),
+            value: "v",
+            createdBy: actor,
+          },
+        })
+      ).rejects.toThrow(/Unique constraint/);
+    } finally {
+      await prisma.identityValue.deleteMany({ where: { keyId: key.id } });
+      await prisma.identityKey.delete({ where: { id: key.id } });
+    }
   });
 
   it("lists a user's and a group's grants together with column ids and the source", async () => {

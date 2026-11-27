@@ -13,6 +13,8 @@ export interface ApiError {
   path?: (string | number)[];
   /** `measure_in_use`: the measures and metrics that use this one. */
   dependents?: { kind: "measure" | "metric"; name: string }[];
+  /** `identity_value_taken`: the value another person already holds. */
+  taken_value?: string;
   /** Seconds, from `Retry-After`. */
   retryAfter?: number;
   /** `cast_failed`: the column (and table) whose values do not fit its type, and the first 1-based rows at fault. */
@@ -121,6 +123,9 @@ export const toApiError = (err: unknown): ApiError => {
   if (findings) out.findings = findings;
   const problems = problemsOf(body.problems);
   if (problems) out.problems = problems;
+  if (out.code === "identity_value_taken" && typeof body.value === "string") {
+    out.taken_value = body.value;
+  }
   if (out.code === "cast_failed") {
     const cast = castOf(body);
     if (cast) out.cast = cast;

@@ -1,9 +1,9 @@
 // @module-tag unit
 // @module-tag platform
+import { QueryError, rowRuleUnavailable } from "../../engine/errors.js";
 import { getRequestId, withRequestId } from "../../utils/requestId.js";
 import { asToolError, inToolCall } from "../../mcp/errors.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { QueryError } from "../../engine/errors.js";
 import type { ToolContext } from "@tereo-io/mcp";
 import { logger } from "../../utils/logger.js";
 import { ToolError } from "@tereo-io/mcp";
@@ -49,6 +49,10 @@ describe("asToolError", () => {
     ["504 query_timeout", new QueryTimeoutError()],
     ["502 source_unreachable", new SourceUnreachableError()],
     ["503 temporarily_unavailable (a busy source)", sourceBusy()],
+    [
+      "503 row_rule_unavailable (tereo cannot give the reporting lines)",
+      rowRuleUnavailable("orders", ["from"], "hierarchy_unavailable"),
+    ],
     [
       "429 source_busy",
       new TooManyRequestsError(1, "The source is busy", "source_busy"),

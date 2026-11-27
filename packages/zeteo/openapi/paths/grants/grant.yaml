@@ -9,7 +9,9 @@
       owner's `group` grants must be to groups that are global or of their signed-in organization
       (`422 group_not_allowed`; saved-query shares answer `400 invalid_share` instead, a deliberate
       difference). The owner's own grant has `owner_grant: true` and cannot be removed or narrowed
-      (`409 owner_grant_locked`).
+      (`409 owner_grant_locked`). A row rule an owner writes may not use identity values
+      (`400 invalid_row_rule`, with `path` to the reference); only a holder of
+      `zeteo.grants.write` may.
 
       **Required permissions:** `zeteo.grants.read`, which `zeteo.grants.write` includes (`403 forbidden` without).
 
@@ -32,15 +34,18 @@
       '503': { $ref: '../../components/responses.yaml#/ServiceUnavailableResponse' }
   put:
     tags: [Grants]
-    summary: Replace a grant's columns
+    summary: Replace a grant's columns and rows
     description: |
-      Replaces the grant's columns whole: every column, or exactly the listed ones. The principal
-      and table of a grant never change; remove the grant and create another for that. An audit
-      entry `zeteo.grant.updated` is written.
+      Replaces the grant's columns and rows whole: every column, or exactly the listed ones, and
+      `row_access` with its `row_rule` and `row_rule_description`. `row_access` is required, with
+      no default, so a body of columns only is `400 invalid_request` and cannot drop a rule by
+      accident. The principal and table of a grant never change; remove the grant and create
+      another for that. An upload source's owner may not use identity values in the rule
+      (`400 invalid_row_rule`). An audit entry `zeteo.grant.updated` is written, carrying the rule.
 
       **Required permissions:** `zeteo.grants.write` (`403 forbidden` without).
 
-      **Errors:** `404 not_found`, `409 source_archived`, `422 invalid_grant`.
+      **Errors:** `400 invalid_row_rule` (`path` into the body, starting `row_rule`), `404 not_found`, `409 source_archived`, `422 invalid_grant`.
     operationId: replaceGrant
     parameters:
       - $ref: '../../components/parameters.yaml#/GrantIdParam'

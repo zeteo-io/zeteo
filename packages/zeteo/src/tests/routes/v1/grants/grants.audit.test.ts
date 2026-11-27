@@ -57,6 +57,9 @@ describe("grant audit entries", () => {
           ...base,
           all_columns: true,
           column_ids: [],
+          row_access: "unlimited_default",
+          row_rule: null,
+          row_rule_description: null,
           event: "zeteo.grant.created",
         },
       }),
@@ -64,6 +67,7 @@ describe("grant audit entries", () => {
 
     const ids = [columns[1]!.id, columns[0]!.id];
     const replaced = await call("PUT", `/${id}`, {
+      row_access: "unlimited_default",
       all_columns: false,
       column_ids: ids,
     });
@@ -136,6 +140,7 @@ describe("grant audit entries", () => {
     });
     expect(duplicate.status).toBe(409);
     const badReplace = await call("PUT", `/${made.body.id}`, {
+      row_access: "unlimited_default",
       all_columns: false,
       column_ids: [randomUUID()],
     });

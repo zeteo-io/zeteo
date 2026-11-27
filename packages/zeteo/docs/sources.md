@@ -107,6 +107,11 @@ zeteo sends the startup option `default_transaction_read_only=on` as a backstop,
 `options` and `statement_timeout` startup parameters zeteo sends (unless they are listed in its
 `ignore_startup_parameters`), and then fails as `source_unreachable`.
 
+Row rules ([row-rules.md](row-rules.md)) need PostgreSQL 12 or later on the source: a rule-limited
+query reads the server's `server_version_num` in its session setup and, on an older server, is
+refused with `409 row_rule_unavailable` before it runs. Queries of callers without a rule run on any
+version.
+
 A query that is stopped (past its time limit, or its client gone) is cancelled with Postgres's
 protocol cancel request, sent on a new connection to the same address, as libpq before version 17
 does. That request is never encrypted, whatever `tls` says: it carries only the backend's process

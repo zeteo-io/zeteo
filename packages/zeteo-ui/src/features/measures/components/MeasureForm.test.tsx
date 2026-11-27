@@ -105,6 +105,24 @@ describe("MeasureForm", () => {
     expect(
       await screen.findByTestId("measure-preview-value")
     ).toHaveTextContent("1,234.5");
+    expect(screen.queryByText("Rows limited")).toBeNull();
+  });
+
+  it("marks a preview whose rows a row rule limits", async () => {
+    post.mockResolvedValue({
+      data: {
+        columns: [{ name: "paid_revenue", type: "number" }],
+        rows: [[12]],
+        truncated: false,
+        rows_limited: true,
+      },
+    });
+    const user = userEvent.setup();
+    renderWithProviders(<MeasureForm sourceId={SOURCE_ID} onDone={vi.fn()} />);
+    await fill(user);
+    await user.click(screen.getByRole("button", { name: "Preview" }));
+    await screen.findByTestId("measure-preview-value");
+    expect(screen.getByText("Rows limited")).toBeInTheDocument();
   });
 
   it("clears the preview when the draft changes", async () => {
