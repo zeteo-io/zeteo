@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # A local Zeteo instance with a real Tereo to sign in to. From the repo root:
 #
-#   local-instance/start.sh          # build Zeteo's image, start, print the sign-in
+#   local-instance/start.sh          # pull the released images, start, print the sign-in
+#   local-instance/start.sh --build  # the same with Zeteo built from this checkout
 #   local-instance/start.sh stop     # stop the containers, keep the data
 #   local-instance/start.sh logs     # follow Zeteo's and Tereo's logs
 #   local-instance/start.sh status   # the containers and the URLs
 #   local-instance/start.sh reset    # DELETE the instance: containers, volumes, secrets
 #
 # The first run writes local-instance/.env (secrets, ports, the admin's
-# sign-in) and creates Tereo's first admin. Later runs reuse it and rebuild the
-# image from the checkout, so `git pull && local-instance/start.sh` updates the
-# instance in place. SKIP_BUILD=1 reuses the image already built.
+# sign-in) and creates Tereo's first admin. Later runs reuse it and pull
+# Zeteo's newest release (ghcr.io/zeteo-io/zeteo:latest, or ZETEO_IMAGE), so
+# `git pull && local-instance/start.sh` updates the instance in place.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,8 +52,10 @@ The sign-in is also in local-instance/.env.
 EOF
 }
 
+BUILD=0
 case "${1:-start}" in
   start) ;;
+  --build) BUILD=1 ;;
   stop)
     [[ -f "$ENV_FILE" ]] || die "no instance here ($ENV_FILE is missing)"
     "${COMPOSE[@]}" stop
@@ -96,7 +99,7 @@ case "${1:-start}" in
     log "Removed. local-instance/start.sh starts a new one."
     exit 0
     ;;
-  *) die "unknown command: $1 (start, stop, logs, status or reset)" ;;
+  *) die "unknown command: $1 (start, --build, stop, logs, status or reset)" ;;
 esac
 
 # --- First run: secrets and ports -------------------------------------------
@@ -151,9 +154,15 @@ node -e '
 ' "$DIR/provisioning/clients.json" "http://localhost:$ZETEO_PORT" >"$RUN_DIR/clients.json"
 
 # --- Image and stack --------------------------------------------------------
-if [[ "${SKIP_BUILD:-}" != "1" ]]; then
-  log "Building Zeteo's image from this checkout (a few minutes the first time)"
-  docker build -f "$ROOT/docker/Dockerfile" -t "${ZETEO_IMAGE:-zeteo:local-instance}" "$ROOT"
+if [[ $BUILD -eq 1 ]]; then
+  export ZETEO_IMAGE="${ZETEO_IMAGE:-zeteo:local-instance}"
+  log "Building $ZETEO_IMAGE from this checkout (a few minutes the first time)"
+  docker build -f "$ROOT/docker/Dockerfile" -t "$ZETEO_IMAGE" "$ROOT"
+  log "Pulling Tereo's image"
+  "${COMPOSE[@]}" pull --quiet tereo
+else
+  log "Pulling Zeteo's and Tereo's images (${ZETEO_IMAGE:-ghcr.io/zeteo-io/zeteo:latest})"
+  "${COMPOSE[@]}" pull --quiet zeteo tereo
 fi
 
 log "Starting Tereo on $TEREO_PORT and Zeteo on $ZETEO_PORT"

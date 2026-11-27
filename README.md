@@ -55,7 +55,7 @@ To run your own instance to sign in to and try, with Docker and Node installed:
 local-instance/start.sh       # prints the admin UI's URL and the admin's sign-in
 ```
 
-It starts Tereo and Zeteo (built from the checkout) in Docker, keeps their data between restarts,
+It pulls Tereo's and Zeteo's released images and starts them in Docker, keeps their data between restarts,
 and creates the first admin. Adding a database or a file, inviting people and connecting Claude are
 in [local-instance/README.md](local-instance/README.md).
 

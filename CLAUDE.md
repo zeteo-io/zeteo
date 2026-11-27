@@ -116,8 +116,9 @@ Tereo image (`TEREO_IMAGE`, default `ghcr.io/tereo-io/tereo:0.8.3`), zeteo's own
 the checkout, and a TLS source Postgres, with real sign-ins, then a Playwright test of the admin UI
 in Chromium (`e2e/run.sh --browser` runs only that); see [e2e/README.md](e2e/README.md).
 `local-instance/` is the instance a person runs to try Zeteo (`local-instance/start.sh`, compose
-project `zeteo-local`): the same released Tereo image and Zeteo's image built from the checkout,
-with persistent volumes, fixed ports (4001/4201), the admin UI, uploads and MCP on, and Tereo's
+project `zeteo-local`): the same released Tereo image and Zeteo's released image
+(`ghcr.io/zeteo-io/zeteo:latest`, which `publish.yml` moves with each release; `--build` builds
+from the checkout instead), with persistent volumes, fixed ports (4001/4201), the admin UI, uploads and MCP on, and Tereo's
 first admin created from the generated `local-instance/.env`; see
 [local-instance/README.md](local-instance/README.md). Never `reset` it or remove its volumes
 without the user's say-so: it holds their data.

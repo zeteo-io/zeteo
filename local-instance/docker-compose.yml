@@ -1,6 +1,6 @@
 # A local Zeteo instance with a real Tereo to sign in to: Tereo (with its
-# Postgres and Redis) and Zeteo from this checkout's image (with its own
-# Postgres and Redis), the admin UI and MCP on. Data lives in named volumes and
+# Postgres and Redis) and Zeteo's released image (with its own Postgres and
+# Redis; start.sh --build uses one built from the checkout instead), the admin UI and MCP on. Data lives in named volumes and
 # survives restarts.
 #
 # Started by local-instance/start.sh, which writes local-instance/.env (the
@@ -115,7 +115,7 @@ services:
         condition: service_healthy
 
   zeteo-migrate:
-    image: ${ZETEO_IMAGE:-zeteo:local-instance}
+    image: ${ZETEO_IMAGE:-ghcr.io/zeteo-io/zeteo:latest}
     command: ["./migrate.sh"]
     environment:
       DATABASE_URL: &zeteo-database-url postgresql://zeteo:zeteo-local-only@zeteo-postgres:5432/zeteo
@@ -124,7 +124,7 @@ services:
         condition: service_healthy
 
   zeteo:
-    image: ${ZETEO_IMAGE:-zeteo:local-instance}
+    image: ${ZETEO_IMAGE:-ghcr.io/zeteo-io/zeteo:latest}
     environment:
       NODE_ENV: production
       PORT: "4201"

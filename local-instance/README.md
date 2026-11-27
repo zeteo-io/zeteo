@@ -23,8 +23,8 @@ cd zeteo
 local-instance/start.sh
 ```
 
-The first run builds Zeteo's image from the checkout (a few minutes), pulls Tereo's released
-image, starts everything, creates the first admin and prints:
+The first run pulls the released images of Zeteo (`ghcr.io/zeteo-io/zeteo:latest`) and Tereo,
+starts everything, creates the first admin and prints:
 
 ```
   Admin UI   http://localhost:4201
@@ -45,11 +45,12 @@ exists).
 
 | Command | Does |
 |---------|------|
-| `local-instance/start.sh` | Start, or update after `git pull`: rebuilds the image and restarts on the same data (`SKIP_BUILD=1` skips the build) |
+| `local-instance/start.sh` | Start, or update: pulls Zeteo's newest release and restarts on the same data. `git pull` first, so the checkout's provisioning matches the release |
+| `local-instance/start.sh --build` | The same with Zeteo built from the checkout instead of pulled, for people changing Zeteo's code (a few minutes). The next plain `start.sh` goes back to the release |
 | `local-instance/start.sh status` | The containers, the URLs and the sign-in |
 | `local-instance/start.sh logs` | Follow Zeteo's and Tereo's logs |
 | `local-instance/start.sh stop` | Stop it; the data stays |
-| `local-instance/start.sh reset` | **Delete** the instance: sources, grants, users, uploads and `local-instance/.env`. It asks you to type `reset` (`reset --yes` skips the question, for scripts). Containers of yours connected to its network are disconnected, not removed. The image `zeteo:local-instance` stays for the next start. The next `start.sh` makes a new instance |
+| `local-instance/start.sh reset` | **Delete** the instance: sources, grants, users, uploads and `local-instance/.env`. It asks you to type `reset` (`reset --yes` skips the question, for scripts). Containers of yours connected to its network are disconnected, not removed. The images stay for the next start. The next `start.sh` makes a new instance |
 
 `local-instance/.env` holds the admin's password and the instance's secrets in plain text, which is
 fine for a local instance. Don't commit it (git ignores it) or reuse its values anywhere else.
@@ -65,8 +66,8 @@ see **My sources**: the admin can; the `Zeteo user` role can't.
 ### Connect a Postgres or Azure SQL database
 
 Zeteo connects only to hosts listed in `SOURCE_ALLOWED_HOSTS` in `local-instance/.env` (empty at
-first, so no database can be added). Add the host and run `SKIP_BUILD=1 local-instance/start.sh`
-(a restart without rebuilding the image). Then go to **Admin → Sources → New source**.
+first, so no database can be added). Add the host and run `local-instance/start.sh` again. Then go
+to **Admin → Sources → New source**.
 
 - **TLS:** the form defaults to **Required, certificate verified**. A database in a local container
   usually has no TLS: set **TLS** to **Off**, or creating the source fails with "The source could
@@ -160,6 +161,7 @@ in `local-instance/provisioning/clients.json`. More in [docs/mcp.md](../packages
 `TEREO_IMAGE`) with its Postgres and Redis, provisioned with Zeteo's
 `packages/zeteo/tereo-provisioning.json` and this folder's `provisioning/clients.json` (the admin
 UI's login client `zeteo-ui`, which `start.sh` points at your Zeteo port, and `zeteo-mcp`); Zeteo
-(image `zeteo:local-instance`, or `ZETEO_IMAGE`) in production mode with its Postgres, Redis and
+(`ghcr.io/zeteo-io/zeteo:latest`, which each release moves; `zeteo:local-instance` with `--build`;
+or `ZETEO_IMAGE`, such as a pinned `ghcr.io/zeteo-io/zeteo:0.2.0`) in production mode with its Postgres, Redis and
 the uploads reader role. Named volumes hold both databases and Tereo's files. `start.sh` writes
 `.env` (git-ignored) on the first run and `.run/clients.json` on every run.
