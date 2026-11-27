@@ -243,7 +243,7 @@
   gap: 0.35rem;
 }
 
-/* Once a table is chosen: who and table on the left, columns and rows on the right. */
+/* Who and table on the left, columns and rows on the right. */
 .z-grant-pane {
   display: flex;
   flex-direction: column;
@@ -270,4 +270,10 @@
   .z-grant-split {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Columns and rows before a table is chosen: shown, greyed out. */
+.z-grant-waiting {
+  opacity: 0.55;
+  user-select: none;
 }

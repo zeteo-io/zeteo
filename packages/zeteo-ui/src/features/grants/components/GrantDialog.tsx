@@ -368,12 +368,15 @@ const GrantDialogBody = ({
     </>
   );
 
-  const split = !!(grant || tableId);
+  const hasTable = !!(grant || tableId);
+  const chooseFirst = fixed
+    ? "Select a table first."
+    : "Select a source and table first.";
 
   return (
     <Modal
       show
-      size={split ? "full" : "lg"}
+      size="full"
       title={title}
       onClose={onClose}
       dismissible={!mutation.isPending}
@@ -398,7 +401,7 @@ const GrantDialogBody = ({
         </Button>,
       ]}
     >
-      <div className={split ? "z-grant-form z-grant-split" : "z-grant-form"}>
+      <div className="z-grant-form z-grant-split">
         <div className="z-grant-pane">
           <BorderedSection title="Who" as="h2">
             {who}
@@ -407,7 +410,7 @@ const GrantDialogBody = ({
             {tablePart}
           </BorderedSection>
         </div>
-        {split && (
+        {hasTable ? (
           <div className="z-grant-pane">
             <BorderedSection
               title="Columns"
@@ -500,6 +503,15 @@ const GrantDialogBody = ({
                   </Alert>
                 )}
               </div>
+            </BorderedSection>
+          </div>
+        ) : (
+          <div className="z-grant-pane z-grant-waiting" aria-disabled="true">
+            <BorderedSection title="Columns" as="h2">
+              <p className="z-muted z-grant-note">{chooseFirst}</p>
+            </BorderedSection>
+            <BorderedSection title="Rows" as="h2">
+              <p className="z-muted z-grant-note">{chooseFirst}</p>
             </BorderedSection>
           </div>
         )}

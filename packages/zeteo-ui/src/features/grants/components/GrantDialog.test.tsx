@@ -180,6 +180,18 @@ describe("GrantDialog", () => {
       );
   });
 
+  it("shows columns and rows greyed out until a table is chosen", async () => {
+    const user = userEvent.setup();
+    renderForm();
+    expect(
+      await screen.findAllByText("Select a source and table first.")
+    ).toHaveLength(2);
+    expect(screen.queryByLabelText("All columns")).toBeNull();
+    await chooseTable(user);
+    expect(screen.queryByText("Select a source and table first.")).toBeNull();
+    expect(allColumns()).toBeInTheDocument();
+  });
+
   it("offers non-archived sources by name and non-missing tables", async () => {
     const user = userEvent.setup();
     renderForm();
@@ -284,9 +296,10 @@ describe("GrantDialog", () => {
     await chooseTable(user);
     await pick(user, "Source", "Billing");
     expect(screen.getByLabelText("Table")).toHaveValue("");
+    expect(screen.queryByLabelText("All columns")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("heading", { name: "Columns" })
-    ).not.toBeInTheDocument();
+      screen.getAllByText("Select a source and table first.")
+    ).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Create grant" })).toBeDisabled();
   });
 
