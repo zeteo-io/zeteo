@@ -165,6 +165,14 @@ describe("IdentityValuesPage", () => {
     expect(list).toHaveTextContent("ghost@example.com, East");
   });
 
+  it("links back to all identity keys above the title", async () => {
+    renderPage();
+    await screen.findByText("Northwest");
+    expect(
+      screen.getByRole("link", { name: "← All identity keys" })
+    ).toHaveAttribute("href", "/identities");
+  });
+
   it("filters to people missing a value", async () => {
     const user = userEvent.setup();
     renderPage();

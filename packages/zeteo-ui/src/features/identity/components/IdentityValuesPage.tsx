@@ -8,6 +8,7 @@ import { AddValuesDialog } from "./AddValuesDialog";
 import { Link, useParams } from "react-router-dom";
 import type { IdentityValue } from "../api/types";
 import { NotFound } from "@/components/NotFound";
+import "@/features/tables/components/styles.css";
 import { useEffect, useState } from "react";
 import { useAuth } from "@tereo-io/react";
 import "./styles.css";
@@ -62,27 +63,32 @@ export const IdentityValuesPage = () => {
 
   return (
     <>
+      <Link className="z-muted-link z-back-link" to="/identities">
+        ← All identity keys
+      </Link>
       <PageHeader
         title={key.label}
-        subtitle={<Link to="/identities">All identity keys</Link>}
         divider={false}
         actions={
-          canWrite && (
-            <Button size="sm" fullWidth={false} onClick={() => setAdding(true)}>
-              Add values
-            </Button>
-          )
+          <span className="z-identity-actions">
+            <Switch
+              size="sm"
+              label="Show missing"
+              checked={missingOnly}
+              onChange={(e) => setMissingOnly(e.target.checked)}
+            />
+            {canWrite && (
+              <Button
+                size="sm"
+                fullWidth={false}
+                onClick={() => setAdding(true)}
+              >
+                Add values
+              </Button>
+            )}
+          </span>
         }
       />
-      <div className="z-list-toolbar z-list-toolbar-top">
-        <div className="z-list-toolbar-filters" />
-        <Switch
-          size="sm"
-          label="Show missing"
-          checked={missingOnly}
-          onChange={(e) => setMissingOnly(e.target.checked)}
-        />
-      </div>
       {missingOnly ? (
         <>
           <ErrorNotice error={missing.error} />
