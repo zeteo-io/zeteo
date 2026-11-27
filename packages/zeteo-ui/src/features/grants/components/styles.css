@@ -277,3 +277,14 @@
   opacity: 0.55;
   user-select: none;
 }
+
+/*
+ * The column list shows about 15 rows (two columns a row) and scrolls the
+ * rest; the switch, the select buttons and any warning stay above it.
+ */
+.z-grant-columns-scroll {
+  --z-column-row: 1.75rem;
+  max-height: calc(15 * var(--z-column-row) + 14 * 0.25rem);
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
