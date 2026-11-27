@@ -4,7 +4,9 @@ import { postgresDialect } from "../../../adapters/sql/dialects/postgres.js";
 import { sqlQuerySchema } from "../../../adapters/sql/language.js";
 import { DEFAULT_CALENDAR } from "../../../calendar/calendar.js";
 import { shopCatalog } from "../../support/pure/shopCatalog.js";
+import type { TableName } from "../../../adapters/sql/types.js";
 import { compileSql } from "../../../adapters/sql/compile.js";
+import type { RowRule } from "../../../row-rules/resolve.js";
 import { planSql } from "../../../adapters/sql/plan.js";
 import { describe, expect, it } from "vitest";
 
@@ -629,5 +631,81 @@ describe("compileSql on Postgres: without the default order", () => {
         { limit: 1001, offset: 0, defaultOrder: true }
       )
     ).toEqual(today);
+  });
+});
+
+// Postgres checks each ruled table's live metadata before the query runs and
+// compiles it again with `narrow` saying no for a table that is not a plain
+// base table now: that table's rule is then read alone, every condition of
+// the caller's outside it, and the result is the same.
+describe("compileSql on Postgres: the reads through a rule, for the live check", () => {
+  const paid = {
+    kind: "filter",
+    filter: { "orders.status": { eq: "paid" } },
+    columns: new Map([
+      [
+        "orders.status",
+        {
+          id: "orders.status",
+          name: "status",
+          type: "text",
+          nativeType: "text",
+        },
+      ],
+    ]),
+    descriptions: [],
+  } as unknown as RowRule;
+  const ruled = (narrow?: (t: TableName) => boolean) =>
+    compileSql(
+      planSql(
+        sqlQuerySchema.parse({
+          source: "shop",
+          from: "orders",
+          select: ["id"],
+          where: { id: { eq: 6 } },
+        }),
+        shopCatalog({ rowRules: { orders: paid } })
+      ),
+      postgresDialect,
+      { limit: 11, offset: 0 },
+      { narrow }
+    );
+
+  it("reports each read with the columns beside its rule, and whether it was narrowed", () => {
+    expect(ruled().ruledReads).toEqual([
+      {
+        schemaName: "shop",
+        name: "orders",
+        columns: [
+          { name: "id", nativeType: "bigint" },
+          { name: "status", nativeType: "text" },
+        ],
+        at: expect.anything(),
+        narrowed: true,
+        onView: false,
+      },
+    ]);
+    expect(ruled().sql).toContain(
+      'where ("status" = cast($1 as text)) and "id" = $2'
+    );
+  });
+
+  it("keeps every condition outside the read of a table `narrow` refuses, and binds the same values", () => {
+    const narrowed = ruled();
+    const alone = ruled((t) => t.name !== "orders");
+    expect(alone.ruledReads).toEqual([
+      expect.objectContaining({
+        columns: [{ name: "status", nativeType: "text" }],
+        narrowed: false,
+      }),
+    ]);
+    expect(alone.sql).toContain(
+      'from "shop"."orders" where "status" = cast($1 as text)) select * from "r") as "t0" where "t0"."id" = $2'
+    );
+    expect(alone.parameters).toEqual(narrowed.parameters);
+  });
+
+  it("reports no read for a query with no rule", () => {
+    expect(compile({}).ruledReads).toBeUndefined();
   });
 });

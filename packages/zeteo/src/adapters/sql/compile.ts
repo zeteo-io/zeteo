@@ -6,6 +6,7 @@ import { aggregatesRows } from "./aggregates.js";
 import { plainNumber } from "./values.js";
 import type {
   AnySelect,
+  RuleGuard,
   SqlDialect,
   Staging,
   ValueSubject,
@@ -46,6 +47,20 @@ export interface CompiledQuery {
   parameters: unknown[];
   /** Where each staged read's table is read, by staging statement (`Staging.at`): absent with none. */
   ruledAt?: (RowRuleAt | undefined)[];
+  /** Every read of a table through a row rule, in compile order: absent with none. */
+  ruledReads?: RuledReadInfo[];
+}
+
+/**
+ * A read of a table through its row rule: the columns evaluated beside the
+ * rule (`RuleGuard`), whether conditions of the caller's (or a narrowed rule)
+ * were applied beside it, and whether the catalogue holds the table as a
+ * view. What a dialect that checks live metadata (Postgres) checks before the
+ * query runs.
+ */
+export interface RuledReadInfo extends RuleGuard {
+  narrowed: boolean;
+  onView: boolean;
 }
 
 // Identifiers come only from the plan and only through `sql.id`, which quotes
@@ -135,6 +150,10 @@ export interface Compilation {
   made: Map<string, Expression<unknown>>;
   /** Whether conditions that cannot raise are applied beside the rule (`pushDown`). */
   pushDown: boolean;
+  /** Whether a table's rule may have conditions beside it at all (`compileSql`'s `narrow`); absent, every table's may. */
+  narrow?: (t: TableName) => boolean;
+  /** The reads through a rule made so far (`CompiledQuery.ruledReads`). */
+  ruledReads: RuledReadInfo[];
 }
 
 /** A condition of the caller's applied beside a table's rule. */
@@ -237,21 +256,27 @@ const tableSource = (
   comp.ruled.set(at, key);
   const made = comp.made.get(key);
   if (made) return sql`${made}`.as(t.alias);
+  const guard: RuleGuard = {
+    schemaName: t.schemaName,
+    name: t.name,
+    columns: guardedColumns(t.rowFilter, pushed),
+    at: t.rowRuleAt,
+  };
   const read = dialect.ruled(
     {
       table: name,
       columns: comp.provides?.get(key) ?? [],
       rule,
       narrowed,
-      guard: {
-        schemaName: t.schemaName,
-        name: t.name,
-        columns: guardedColumns(t.rowFilter, pushed),
-        at: t.rowRuleAt,
-      },
+      guard,
     },
     comp.staging
   );
+  comp.ruledReads.push({
+    ...guard,
+    narrowed: narrowed !== undefined,
+    onView: t.rowRuleOnView === true,
+  });
   if (dialect.ruledOnce) comp.made.set(key, read);
   return sql`${read}`.as(t.alias);
 };
@@ -898,13 +923,19 @@ const besideRule = (
 
 /**
  * Whether conditions of the caller's may be applied beside a table's rule:
- * it has one, and either the read decides when it runs (`narrowedCheck`
- * `live`) or the catalogue holds the table as a base table, whose columns
- * are stored values, not expressions that may raise per row.
+ * it has one, the compilation lets that table's (`narrow`: Postgres, from the
+ * table's live metadata), and either the read decides when it runs
+ * (`narrowedCheck` `live`) or the catalogue holds the table as a base table,
+ * whose columns are stored values, not expressions that may raise per row.
  */
-const mayNarrow = (t: RowFiltered, dialect: SqlDialect): boolean =>
+const mayNarrow = (
+  t: RowFiltered,
+  table: TableName,
+  comp: Compilation
+): boolean =>
   t.rowFilter !== undefined &&
-  (dialect.narrowedCheck === "live" || !t.rowRuleOnView);
+  (comp.narrow?.(table) ?? true) &&
+  (comp.dialect.narrowedCheck === "live" || !t.rowRuleOnView);
 
 /**
  * Splits `where` into the conditions applied beside the rule of a table of
@@ -969,8 +1000,16 @@ export const compileSql = (
   plan: SqlPlan,
   dialect: SqlDialect,
   fetch: { limit: number; offset: number; defaultOrder?: boolean },
-  /** `pushDown: false` keeps every condition of the caller's outside the rule's read: for tests that compare the two. */
-  options: { pushDown?: boolean } = {}
+  /**
+   * `pushDown: false` keeps every condition of the caller's outside the
+   * rule's read: for tests that compare the two. `narrow`, when it says no
+   * for a table, keeps them outside that table's read (Postgres: a table its
+   * live metadata shows is not a plain base table).
+   */
+  options: {
+    pushDown?: boolean;
+    narrow?: (t: TableName) => boolean;
+  } = {}
 ): CompiledQuery => {
   const compile = (provides?: ReadonlyMap<string, readonly string[]>) => {
     const comp: Compilation = {
@@ -982,6 +1021,8 @@ export const compileSql = (
       provides,
       made: new Map(),
       pushDown: options.pushDown ?? true,
+      narrow: options.narrow,
+      ruledReads: [],
     };
     const qb =
       plan.kind === "metrics"
@@ -1013,7 +1054,10 @@ export const compileSql = (
       }
     }
   }
-  return finish(second.qb, second.comp.staging, dialect);
+  return {
+    ...finish(second.qb, second.comp.staging, dialect),
+    ruledReads: second.comp.ruledReads,
+  };
 };
 
 /**
@@ -1090,7 +1134,7 @@ const partQuery = (
   // where it cannot raise.
   const { pushed, rest } = pushDown(
     bounds.length === 0 ? undefined : { kind: "and", filters: bounds },
-    mayNarrow(part.from, dialect) ? new Set(["t0"]) : new Set(),
+    mayNarrow(part.from, part.from, comp) ? new Set(["t0"]) : new Set(),
     comp
   );
   let qb = withJoins(
@@ -1228,11 +1272,12 @@ const compileTable = (
   // A condition on the from table or an inner-joined one filters it as well
   // before the join as after; on a left-joined one it would turn the outer
   // join's missing rows into rows, so it stays where it is.
-  const beside = new Set(
-    [plan.from, ...plan.joins.filter((j) => j.type === "inner")].flatMap((t) =>
-      mayNarrow(t, dialect) ? [t.alias] : []
-    )
-  );
+  const beside = new Set([
+    ...(mayNarrow(plan.from, plan.from, comp) ? [plan.from.alias] : []),
+    ...plan.joins
+      .filter((j) => j.type === "inner" && mayNarrow(j, j.table, comp))
+      .map((j) => j.alias),
+  ]);
   const { pushed, rest: where } = pushDown(plan.where, beside, comp);
   let qb: AnySelect = withJoins(
     dialect.kysely.selectFrom(

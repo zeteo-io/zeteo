@@ -290,8 +290,10 @@ export interface SqlDialect {
    * when it runs, from the object's own metadata (SQL Server: a base table
    * with no computed column), else applying the rule alone, so the caller's
    * conditions moved beside the rule stay in the query's where too;
-   * `catalogue`, from the table's kind as the catalogue last read it
-   * (Postgres), so they leave it.
+   * `catalogue`, at compile time, so they leave it: from the table's kind
+   * as the catalogue last read it, and from what `compileSql`'s `narrow`
+   * says (Postgres: the table's live metadata, checked before the query
+   * runs, `adapters/postgres/ruleCheck.ts`).
    */
   narrowedCheck: "live" | "catalogue";
   /**

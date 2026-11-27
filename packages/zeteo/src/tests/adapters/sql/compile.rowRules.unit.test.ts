@@ -78,6 +78,7 @@ describe("compileSql: row rules on Postgres", () => {
         'select "t0"."id" as "c0" from (with "r" as materialized (select "id" from "shop"."orders" where "status" in (cast($1 as text))) select * from "r") as "t0"' +
         ' order by "c0" asc nulls last limit $2 offset $3',
       parameters: ["paid", 101, 0],
+      ruledReads: [expect.objectContaining({ name: "orders" })],
     });
   });
 
