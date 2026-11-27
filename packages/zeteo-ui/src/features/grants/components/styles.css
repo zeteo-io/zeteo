@@ -243,7 +243,7 @@
   gap: 0.35rem;
 }
 
-/* Who and table on the left, columns and rows on the right. */
+/* Who, table and columns on the left, rows on the right. */
 .z-grant-pane {
   display: flex;
   flex-direction: column;
@@ -253,7 +253,7 @@
 
 .z-grant-split {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem 1.5rem;
   align-items: start;
 }

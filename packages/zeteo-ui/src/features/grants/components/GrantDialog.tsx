@@ -409,9 +409,7 @@ const GrantDialogBody = ({
           <BorderedSection title="Table" as="h2">
             {tablePart}
           </BorderedSection>
-        </div>
-        {hasTable ? (
-          <div className="z-grant-pane">
+          {hasTable ? (
             <BorderedSection
               title="Columns"
               as="h2"
@@ -447,6 +445,16 @@ const GrantDialogBody = ({
                 />
               )}
             </BorderedSection>
+          ) : (
+            <div className="z-grant-waiting" aria-disabled="true">
+              <BorderedSection title="Columns" as="h2">
+                <p className="z-muted z-grant-note">{chooseFirst}</p>
+              </BorderedSection>
+            </div>
+          )}
+        </div>
+        {hasTable ? (
+          <div className="z-grant-pane">
             <BorderedSection title="Rows" as="h2">
               <div className="z-rule-section">
                 <RadioGroup<RowAccess>
@@ -507,9 +515,6 @@ const GrantDialogBody = ({
           </div>
         ) : (
           <div className="z-grant-pane z-grant-waiting" aria-disabled="true">
-            <BorderedSection title="Columns" as="h2">
-              <p className="z-muted z-grant-note">{chooseFirst}</p>
-            </BorderedSection>
             <BorderedSection title="Rows" as="h2">
               <p className="z-muted z-grant-note">{chooseFirst}</p>
             </BorderedSection>
