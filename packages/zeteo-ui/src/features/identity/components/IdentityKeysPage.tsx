@@ -108,15 +108,21 @@ export const IdentityKeysPage = () => {
 
   return (
     <>
-      <PageHeader title="Identities" divider={false} />
-      <div className="z-list-toolbar z-list-toolbar-top">
-        <div className="z-list-toolbar-filters" />
-        {canWrite && (
-          <Button size="sm" fullWidth={false} onClick={() => setCreating(true)}>
-            New key
-          </Button>
-        )}
-      </div>
+      <PageHeader
+        title="Identities"
+        divider={false}
+        actions={
+          canWrite && (
+            <Button
+              size="sm"
+              fullWidth={false}
+              onClick={() => setCreating(true)}
+            >
+              New key
+            </Button>
+          )
+        }
+      />
       <ErrorNotice error={error} />
       {isLoading ? (
         <Spinner size="lg" />

@@ -66,14 +66,16 @@ export const IdentityValuesPage = () => {
         title={key.label}
         subtitle={<Link to="/identities">All identity keys</Link>}
         divider={false}
+        actions={
+          canWrite && (
+            <Button size="sm" fullWidth={false} onClick={() => setAdding(true)}>
+              Add values
+            </Button>
+          )
+        }
       />
       <div className="z-list-toolbar z-list-toolbar-top">
         <div className="z-list-toolbar-filters" />
-        {canWrite && (
-          <Button size="sm" fullWidth={false} onClick={() => setAdding(true)}>
-            Add values
-          </Button>
-        )}
         <Switch
           size="sm"
           label="Show missing"
