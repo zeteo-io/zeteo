@@ -631,7 +631,8 @@ root of the query) and `suggestions` (up to three close names, closest first).
   `503 temporarily_unavailable` (group membership, Redis or the source pool briefly unavailable;
   for an export, also one started while the service shuts down, which is not recorded).
 - From the caller's row rules, before running: `409 row_rule_unavailable` (a rule's column is gone,
-  or it resolves to too many values) and `503 row_rule_unavailable` (a rule uses `below` and Tereo
+  or it resolves to too many values; or, as the query starts on the source, a column the rule or a
+  condition beside it compares has gone or changed type since the last refresh) and `503 row_rule_unavailable` (a rule uses `below` and Tereo
   cannot give the caller's reporting lines: try again shortly) ([row-rules.md](row-rules.md)).
 - **A database's own error text never reaches a caller.** It is logged; the response carries a
   fixed message and the request's `request_id`, which finds the log line.

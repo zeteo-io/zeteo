@@ -517,10 +517,10 @@ describeEachEngine("row rules", (engine) => {
 
 // A column widened after the catalogue was read (an id past int, a decimal
 // given a scale), with no refresh since: the catalogue still says the old
-// type. A rule's ne, notIn or not around in must still hide the rows holding
-// a value the old type could not, never show them. SQL Server refuses the
-// query instead (409 row_rule_unavailable), its guard finding the rule's
-// column changed, until the source is refreshed.
+// type. A rule's ne, notIn or not around in must never show the rows holding
+// a value the old type could not: both engines refuse the query (409
+// row_rule_unavailable), SQL Server's guard and Postgres's live check
+// finding the rule's column changed, until the source is refreshed.
 const DRIFT_SCHEMA = "rr_drift";
 
 const asFixtureAdmin = async (
@@ -625,36 +625,29 @@ describeEachEngine(
     });
 
     it.each([
-      ["notIn", notIn, [1, 2, 5]],
-      ["not around in", notAroundIn, [1, 2]],
-      ["ne", ne, [1, 2, 4]],
-      ["notIn on a decimal given a scale", decimalNotIn, [1, 2, 5]],
-      ["a notIn of 121 values", longNotIn, [1, 2, 5]],
+      ["notIn", notIn],
+      ["not around in", notAroundIn],
+      ["ne", ne],
+      ["notIn on a decimal given a scale", decimalNotIn],
+      ["a notIn of 121 values", longNotIn],
     ] as const)(
-      "hides the rows holding a value the old type could not (%s)",
-      async (_, user, expected) => {
+      "refuses the query rather than compare in the old type (%s)",
+      async (_, user) => {
         const res = await postQuery(user.token, {
           source: source.slug,
           from: "accounts",
           select: ["id"],
         });
-        if (engine.type === "azure-sql") {
-          expect(res.status).toBe(409);
-          expect(res.body).toMatchObject({
-            error: "row_rule_unavailable",
-            error_description:
-              "Your access to accounts can't be applied right now; ask an admin",
-            path: ["from"],
-          });
-          expect(JSON.stringify(res.body)).not.toMatch(/sys\.columns|51000/);
-          return;
-        }
-        expect(res.status).toBe(200);
-        expect(
-          (res.body.rows as unknown[][])
-            .map((r) => Number(r[0]))
-            .sort((a, b) => a - b)
-        ).toEqual(expected);
+        expect(res.status).toBe(409);
+        expect(res.body).toMatchObject({
+          error: "row_rule_unavailable",
+          error_description:
+            "Your access to accounts can't be applied right now; ask an admin",
+          path: ["from"],
+        });
+        expect(JSON.stringify(res.body)).not.toMatch(
+          /sys\.columns|51000|pg_|bigint|numeric/
+        );
       }
     );
 

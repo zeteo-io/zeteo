@@ -460,17 +460,10 @@ describeEachEngine(
 
     it("a rule on a column changed since the catalogue was read tells a hidden row from a missing one by nothing", async () => {
       const { hidden, visible } = await probe(stale.token);
-      if (engine.type === "azure-sql") {
-        // The guard refuses before the copy, whatever the id.
-        expect(hidden).toEqual({ status: 409, error: "row_rule_unavailable" });
-        expect(visible).toEqual(hidden);
-      } else {
-        // The rule's value is bound as the catalogue's integer, which no
-        // operator compares with text: the statement fails when planned,
-        // whatever the id, never comparing the code as text.
-        expect(hidden).toEqual({ status: 502, error: "query_failed" });
-        expect(visible).toEqual(hidden);
-      }
+      // A check of the table's metadata (SQL Server's guard, Postgres's live
+      // check) refuses before any row is read, whatever the id.
+      expect(hidden).toEqual({ status: 409, error: "row_rule_unavailable" });
+      expect(visible).toEqual(hidden);
     });
 
     it("a rule on a column changed since the catalogue was read never keeps a row the rule hides", async () => {

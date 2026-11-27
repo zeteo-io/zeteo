@@ -191,6 +191,8 @@ Any input that cannot be resolved yields fewer rows or a refused query, never mo
 | A rule resolves to more than 50,000 values | Refused with `409 row_rule_unavailable`; never truncated. |
 | SQL Server: a column the rule compares, or a condition of the caller's applied beside it, has gone from the table or has another type than the catalogue last read (altered since the last refresh) | Refused with `409 row_rule_unavailable` ("ask an admin"), the same body as a rule column gone missing, until the source is refreshed. A check of `sys.columns` before the rule's read decides it, so the outcome depends on no row. |
 | SQL Server: the table is a view (whose persisted column types may be stale), or has a computed column | The rule alone is copied, every value compared exactly; the caller's conditions are applied to the copy's rows. Decided from live metadata, so the outcome depends on no row. |
+| Postgres: a column the rule compares, or a condition of the caller's applied beside it, has gone from the table or has another type than the catalogue last read (altered since the last refresh, a domain or `citext` column included), or the table has gone or is now a materialized or foreign table where the catalogue says table | Refused with `409 row_rule_unavailable` ("ask an admin"), the same body as a rule column gone missing, until the source is refreshed. A check of the table's live metadata, locked, in the query's own transaction, decides it, so the outcome depends on no row. |
+| Postgres: the table is now not a plain base table (a view, a materialized or foreign table), has a virtual generated column (PostgreSQL 18, any column of the table, named or not), or has a partition or inheritance child that is either | The rule alone is read, and the caller's conditions are applied to its rows. Decided by the same check. |
 | An identity key is deleted while rules use it | The delete is refused: `409 identity_key_in_use`. |
 | Tereo cannot say who reports to the caller (unreachable, erroring, or no such user) while a rule uses `below` | Queries reading the table are refused with `503 row_rule_unavailable` ("try again shortly"); never the caller's own rows only, never every row. |
 | Tereo refuses the reporting lines as too large (over 10,000 users or 64 levels) | Refused with `409 row_rule_unavailable`, reason `too_many_values`. |
@@ -210,14 +212,15 @@ out nothing, as the comparison would. That is done on a base table only: a view'
 compares the value exactly (see the SQL Server bullet under Enforcement). A value of more than 38 digits, which no SQL Server exact
 number holds, makes such a condition keep no row ([azure-sql.md](azure-sql.md)).
 
-Postgres needs no such check. A rule's value is bound cast to the column's type as the catalogue
-last read it (`cast($1 as integer)`, without a length, precision or scale, so nothing is rounded or
-cut), so a column changed since the last refresh (an `integer` now `text`) fails the statement when
-it is planned, before any row is read (`502 query_failed`), instead of comparing another way (as
-text, `'0150' < '100'`). A widened column (`integer` to `bigint` or `numeric`) still compares. A value
-the column's type cannot hold, and a value against a column read through a cast or another type
-(an enum, money, a domain), is bound as before, from the column's type when the statement is
-prepared.
+On Postgres the live check (under Enforcement) refuses a query whose rule column has another type
+than the catalogue last read, widened ones (`integer` to `bigint`) included, so a value is always
+compared in the catalogue's type. A rule's value is also bound cast to that type
+(`cast($1 as integer)`, without a length, precision or scale, so nothing is rounded or cut), as a
+second line: a column changed in a way the check could miss would fail the statement when it is
+planned, before any row is read (`502 query_failed`), instead of comparing another way (as text,
+`'0150' < '100'`). A value the column's type cannot hold, and a value against a column read through
+a cast or another type (an enum, money, a domain, `citext`), is bound uncast, from the column's type
+when the statement is prepared, which the check has just confirmed is the catalogue's.
 
 ## Enforcement
 
@@ -240,7 +243,24 @@ of its own:
 - **Postgres** reads it as `(with r as materialized (select <columns> from <table> where <rule>)
   select * from r)`. The documentation says `MATERIALIZED` forces separate calculation of the `WITH`
   query (PostgreSQL 12 and later), so the caller's conditions apply to its output only. A
-  rule-limited query on an older server is refused (`409 row_rule_unavailable`).
+  rule-limited query on an older server is refused (`409 row_rule_unavailable`). The catalogue
+  may be stale, so in the same read-only transaction, on the same connection and before the query,
+  each table the query reads through a rule (from, joins, fixed measures, metric parts) is locked
+  in `ACCESS SHARE` mode, the lock the query itself takes, held until the transaction ends so no
+  change to the table lands between the check and the query: `LOCK TABLE`, which a read-only
+  transaction allows in this mode and which also locks a table's partitions and children and a
+  view's tables, for a table the catalogue holds as a table (it refuses a materialized or foreign
+  table, so one now in its place refuses the query); `select from <view> where false`, which takes
+  the same lock and reads no row, for one it holds as a view. Then one query of `pg_class`,
+  `pg_inherits` and `pg_attribute` reads each table's kind, whether it or a descendant has a virtual
+  generated column or is not a table, and the type of each column the rule and the conditions beside
+  it compare, written as the catalogue refresh writes it. A column gone or of another type refuses
+  the query (`409 row_rule_unavailable`); a table that is not a plain base table (or partitioned
+  table of plain tables) is read with its rule alone (below). The check reads metadata only, so its
+  outcome depends on no row, and costs one round trip per rule-limited query (the locks go with the
+  session setup's); a query with no rule runs as before. A lock that waits behind a change to the
+  table waits within the query's statement timeout, and times out as the query would
+  (`504 query_timeout`).
   (`security_barrier`, Postgres's own mechanism for this, is an option of a view; user queries run
   in a read-only transaction, which may create nothing.)
 - **SQL Server** copies the rule's rows by a statement of their own, `select <columns> into #rN from
@@ -274,8 +294,10 @@ value or a business-day check) on a column of the from table or of an inner-join
 left-joined one, whose missing rows the condition decides), and a metric part's range on its own
 table's date column. Only on a base table: a view's column may be an expression that raises per row
 (`cast(raw as int)`), and Postgres merges a view into the query, so a condition beside its rule would
-pick the rows that expression runs on. Postgres goes by the table's kind in the catalogue (a view or
-materialized view gets none beside its rule); SQL Server decides when the query runs (above). The
+pick the rows that expression runs on, as it would a virtual generated column's (PostgreSQL 18). On
+Postgres a table the catalogue holds as a view gets none beside its rule, and neither does one the
+live check (above) finds is not a plain base table now; SQL Server decides when the query runs
+(above). The
 condition must be `isNull`, a comparison, `between` or an `in` of at most
 100 values against values bound as exactly the column's own type, so nothing is converted per row:
 
@@ -294,7 +316,9 @@ way.
 
 The cost: what the caller's conditions cannot narrow, the read reads in full, so such a query costs
 about as much as reading all the caller's rows of the table; on SQL Server the read is copied to
-`tempdb` once per query. On SQL Server a view or a table with a computed column
+`tempdb` once per query. On Postgres a view, a materialized or foreign table, and a table with a
+virtual generated column (or a descendant that is one) is always read in full under the rule; the
+query is then compiled again when it opens, with the rule alone for that table. On SQL Server a view or a table with a computed column
 is always read in full under the rule, as the caller's conditions are not applied beside it there;
 the request's batch, cached by the server like any, compiles only the branch it takes.
 
