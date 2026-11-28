@@ -1,0 +1,165 @@
+# A local Zeteo instance with a real Tereo to sign in to: Tereo (with its
+# Postgres and Redis) and Zeteo's released image (with its own Postgres and
+# Redis; start.sh --build uses one built from the checkout instead), the admin UI and MCP on. Data lives in named volumes and
+# survives restarts.
+#
+# Started by local-instance/start.sh, which writes local-instance/.env (the
+# secrets) on its first run and creates Tereo's first admin; see
+# local-instance/README.md. Not for a deployment: Tereo runs in development
+# mode over plain http.
+#
+# Only Tereo and Zeteo are published, on 127.0.0.1.
+name: zeteo-local
+
+x-healthcheck: &healthcheck
+  interval: 2s
+  timeout: 3s
+  retries: 60
+
+services:
+  tereo-postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: tereo
+      POSTGRES_PASSWORD: tereo-local-only
+      POSTGRES_DB: tereo
+    volumes:
+      - tereo-postgres:/var/lib/postgresql
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U tereo -d tereo"]
+
+  tereo-redis:
+    image: redis:7-alpine
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  tereo-migrate:
+    image: ${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.3}
+    command: ["./migrate-and-seed.sh"]
+    environment:
+      NODE_ENV: &tereo-node-env development
+      DATABASE_URL: &tereo-database-url postgresql://tereo:tereo-local-only@tereo-postgres:5432/tereo
+      REDIS_URL: &tereo-redis-url redis://tereo-redis:6379
+      UI_BASE_URL: &tereo-public-url http://localhost:${TEREO_PORT:-4001}
+    depends_on:
+      tereo-postgres:
+        condition: service_healthy
+
+  tereo:
+    image: ${TEREO_IMAGE:-ghcr.io/tereo-io/tereo:0.8.3}
+    environment:
+      # Development: production refuses an http PUBLIC_URL and a loopback
+      # issuer, which a local instance has to use.
+      NODE_ENV: *tereo-node-env
+      ROLE: all
+      PORT: "4001"
+      PUBLIC_URL: *tereo-public-url
+      UI_BASE_URL: *tereo-public-url
+      # Zeteo's admin UI exchanges codes and renews tokens from Zeteo's origin.
+      CORS_ALLOWED_ORIGINS: http://localhost:${ZETEO_PORT:-4201}
+      DATABASE_URL: *tereo-database-url
+      REDIS_URL: *tereo-redis-url
+      SETUP_TOKEN: ${SETUP_TOKEN:?run local-instance/start.sh}
+      PROVISIONING_PATH: /etc/tereo/provisioning
+      TEREO_CLIENT_SECRET: ${ZETEO_CLIENT_SECRET:?run local-instance/start.sh}
+    volumes:
+      - ../packages/zeteo/tereo-provisioning.json:/etc/tereo/provisioning/zeteo.json:ro
+      # Written by start.sh from provisioning/clients.json, with Zeteo's port.
+      - ./.run/clients.json:/etc/tereo/provisioning/clients.json:ro
+      - tereo-storage:/app/storage
+    ports:
+      - "127.0.0.1:${TEREO_PORT:-4001}:4001"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4001/health"]
+    depends_on:
+      tereo-migrate:
+        condition: service_completed_successfully
+      tereo-redis:
+        condition: service_healthy
+
+  zeteo-postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: zeteo
+      POSTGRES_PASSWORD: zeteo-local-only
+      POSTGRES_DB: zeteo
+    volumes:
+      - zeteo-postgres:/var/lib/postgresql
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U zeteo -d zeteo"]
+
+  zeteo-redis:
+    image: redis:7-alpine
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "redis-cli", "ping"]
+
+  # The uploads reader role (docker/postgres/uploads-reader.sql), once per
+  # `up`; safe to run again.
+  uploads-reader:
+    image: postgres:18-alpine
+    command: ["psql", "-v", "ON_ERROR_STOP=1", "-f", "/uploads-reader.sql"]
+    environment:
+      PGHOST: zeteo-postgres
+      PGUSER: zeteo
+      PGPASSWORD: zeteo-local-only
+      PGDATABASE: zeteo
+    volumes:
+      - ../docker/postgres/uploads-reader.sql:/uploads-reader.sql:ro
+    depends_on:
+      zeteo-postgres:
+        condition: service_healthy
+
+  zeteo-migrate:
+    image: ${ZETEO_IMAGE:-ghcr.io/zeteo-io/zeteo:latest}
+    command: ["./migrate.sh"]
+    environment:
+      DATABASE_URL: &zeteo-database-url postgresql://zeteo:zeteo-local-only@zeteo-postgres:5432/zeteo
+    depends_on:
+      zeteo-postgres:
+        condition: service_healthy
+
+  zeteo:
+    image: ${ZETEO_IMAGE:-ghcr.io/zeteo-io/zeteo:latest}
+    environment:
+      NODE_ENV: production
+      PORT: "4201"
+      PUBLIC_URL: http://localhost:${ZETEO_PORT:-4201}
+      DATABASE_URL: *zeteo-database-url
+      REDIS_URL: redis://zeteo-redis:6379
+      UPLOADS_READER_URL: postgresql://zeteo_uploads_reader:zeteo-uploads-reader-local-only@zeteo-postgres:5432/zeteo
+      ZETEO_MASTER_KEY: ${ZETEO_MASTER_KEY:?run local-instance/start.sh}
+      TEREO_URL: http://tereo:4001
+      TEREO_CLIENT_ID: zeteo
+      TEREO_CLIENT_SECRET: ${ZETEO_CLIENT_SECRET:?run local-instance/start.sh}
+      REQUEST_HANDLER_KEY: ${REQUEST_HANDLER_KEY:?run local-instance/start.sh}
+      # Where sources may connect (hosts, *.suffix, IPs, CIDRs). Edit it in
+      # local-instance/.env; see local-instance/README.md.
+      SOURCE_ALLOWED_HOSTS: ${SOURCE_ALLOWED_HOSTS:-}
+      MCP_ALLOWED_CLIENTS: zeteo-mcp
+      UI_CLIENT_ID: zeteo-ui
+      # Tereo as the browser reaches it (TEREO_URL is the internal address).
+      UI_TEREO_URL: *tereo-public-url
+    ports:
+      - "127.0.0.1:${ZETEO_PORT:-4201}:4201"
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:4201/health"]
+    depends_on:
+      zeteo-migrate:
+        condition: service_completed_successfully
+      uploads-reader:
+        condition: service_completed_successfully
+      zeteo-redis:
+        condition: service_healthy
+      tereo:
+        condition: service_healthy
+
+volumes:
+  tereo-postgres:
+  tereo-storage:
+  zeteo-postgres:

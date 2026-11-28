@@ -1,0 +1,32 @@
+{
+  "version": "1.0.0",
+  "clients": [
+    {
+      "clientId": "zeteo-ui",
+      "name": "Zeteo admin UI",
+      "description": "The admin UI zeteo serves at its own origin; start.sh adds that origin's /callback",
+      "clientType": "public",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": [],
+      "postLogoutRedirectUris": [],
+      "scopes": ["openid", "profile", "email", "offline_access"],
+      "audience": ["zeteo"],
+      "consentRequired": false,
+      "liveEvents": true
+    },
+    {
+      "clientId": "zeteo-mcp",
+      "name": "Zeteo MCP (local)",
+      "description": "A public login client for an AI connected over MCP: Claude Code on callback port 8765, mcp-remote on 8766",
+      "clientType": "public",
+      "grantTypes": ["authorization_code", "refresh_token"],
+      "redirectUris": [
+        "http://localhost:8765/callback",
+        "http://localhost:8766/oauth/callback"
+      ],
+      "scopes": ["openid", "profile", "email"],
+      "audience": ["zeteo"],
+      "consentRequired": true
+    }
+  ]
+}

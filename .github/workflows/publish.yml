@@ -137,6 +137,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}},value=${{ steps.version.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            # The newest release, which local-instance/ pulls by default.
+            type=raw,value=latest
           labels: |
             org.opencontainers.image.title=zeteo
             org.opencontainers.image.description=Zeteo: governed queries over your data sources, by REST and MCP, on Tereo

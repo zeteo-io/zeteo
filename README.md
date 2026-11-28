@@ -45,8 +45,26 @@ Conventions for contributors and for Claude Code are in [CONTRIBUTING.md](CONTRI
 | `packages/zeteo-sdk` | `@zeteo-io/sdk`: the TypeScript client for zeteo's API, published to npm ([README](packages/zeteo-sdk/README.md)) |
 | `packages/zeteo-ui` | The admin UI, a Vite + React app; its build ships in zeteo's image ([README](packages/zeteo-ui/README.md)) |
 | `e2e/` | Not a package: a local end-to-end run against a real tereo ([e2e/README.md](e2e/README.md)) |
+| `local-instance/` | Not a package: your own local Zeteo with a real Tereo, the admin UI and MCP ([local-instance/README.md](local-instance/README.md)) |
+
+## Try it
+
+To run your own instance to sign in to and try, with Docker and Node installed:
+
+```sh
+local-instance/start.sh       # prints the admin UI's URL and the admin's sign-in
+```
+
+It pulls Tereo's and Zeteo's released images and starts them in Docker, keeps their data between restarts,
+and creates the first admin. Adding a database or a file, inviting people and connecting Claude are
+in [local-instance/README.md](local-instance/README.md).
 
 ## Develop
+
+`npm run dev` and `docker compose up` run Zeteo in test mode, for working on its code: requests
+sign in with the SDK's `test-token-…` tokens and there is no admin UI (that needs a Tereo, as in
+[Try it](#try-it)).
+
 
 ```sh
 npm install
